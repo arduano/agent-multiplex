@@ -241,6 +241,7 @@ const requiredBrowserAssertions = Object.freeze([
   "codexTerminalRawDraftClearedWithoutSubmission",
   "codexTerminalSemanticPromptCompleted",
   "codexTerminalResizePropagated",
+  "codexTerminalRuntimeStylesNonceBound",
   "codexTerminalTerminatedThroughConfirmation",
   "codexStructuredChatWorkedAfterTerminalExit",
   "copilotTerminalDisabledByDefault",

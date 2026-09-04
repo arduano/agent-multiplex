@@ -74,6 +74,12 @@ mkdir -p \
   "$RECEIPT_DIR/screenshots"
 
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agent-multiplex-mock-scale.XXXXXXXX")
+CONTAINER_UID=$(id -u)
+CONTAINER_GID=$(id -g)
+if (( CONTAINER_UID == 0 )); then
+  echo "mock Docker scale: run as a non-root host user" >&2
+  exit 1
+fi
 NAME_SUFFIX=$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | tail -c 22)
 CONTROL_NODE_CONTAINER="agent-multiplex-scale-control-$NAME_SUFFIX"
 GATEWAY_CONTAINER="agent-multiplex-scale-gateway-$NAME_SUFFIX"
@@ -282,11 +288,11 @@ docker run --detach \
   --hostname multiplex-control-node \
   --network "$NETWORK_NAME" \
   --init \
-  --user 1000:100 \
+  --user "$CONTAINER_UID:$CONTAINER_GID" \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges \
-  --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+  --tmpfs "/state:rw,nosuid,nodev,mode=0700,uid=$CONTAINER_UID,gid=$CONTAINER_GID" \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_NAME=scale-authority \
@@ -340,11 +346,11 @@ docker run --detach \
   --hostname multiplex-access-gateway \
   --network "$NETWORK_NAME" \
   --init \
-  --user 1000:100 \
+  --user "$CONTAINER_UID:$CONTAINER_GID" \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges \
-  --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+  --tmpfs "/state:rw,nosuid,nodev,mode=0700,uid=$CONTAINER_UID,gid=$CONTAINER_GID" \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --mount type=bind,src="$RUNTIME_DIR/access-token",dst=/run/access-token,readonly \
   --publish 127.0.0.1::4318 \
@@ -403,11 +409,11 @@ for (( index = 0; index < RUNTIME_NODE_COUNT; index++ )); do
     --hostname "mock-runtime-$suffix" \
     --network "$NETWORK_NAME" \
     --init \
-    --user 1000:100 \
+    --user "$CONTAINER_UID:$CONTAINER_GID" \
     --read-only \
     --cap-drop ALL \
     --security-opt no-new-privileges \
-    --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+    --tmpfs "/state:rw,nosuid,nodev,mode=0700,uid=$CONTAINER_UID,gid=$CONTAINER_GID" \
     --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
     --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
     --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$CONTROL_NODE_ENDPOINT_ID" \

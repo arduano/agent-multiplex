@@ -7,11 +7,10 @@ import "@fontsource-variable/geist";
 import "@fontsource-variable/geist-mono";
 
 import { App } from "./app.js";
+import { styleNonceForDocument } from "./style-nonce.js";
 import "./styles.css";
 
-const styleNonce = document.querySelector<HTMLMetaElement>(
-  'meta[name="agent-multiplex-style-nonce"]',
-)?.content;
+const styleNonce = styleNonceForDocument(document);
 if (styleNonce) {
   // Radix's scroll-lock helper creates a runtime stylesheet and supports CSP
   // nonces through get-nonce. Set it before React mounts any dialogs/sheets.

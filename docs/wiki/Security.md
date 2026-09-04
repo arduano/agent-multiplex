@@ -88,6 +88,12 @@ experimental interfaces and exact pins. The Copilot CLI has its own non-MIT
 license and redistribution conditions. Review [third-party notices](../../THIRD_PARTY_NOTICES.md)
 and requalify exact versions before distribution or upgrade.
 
+The reference web UI keeps runtime stylesheet elements behind a per-response
+nonce. In particular, xterm creates styles while opening a native terminal;
+keep the nonce-only `style-src-elem` policy and rerun the real browser CSP proof
+when changing xterm or its initialization. Do not compensate for a library
+regression by adding `unsafe-inline`.
+
 Plugins, providers, and adapters execute in-process. Do not dynamically load
 network-supplied or tenant packages. Review their filesystem/network behavior,
 secret access, logs, cleanup idempotency, and crash recovery as part of the

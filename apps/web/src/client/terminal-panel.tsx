@@ -51,11 +51,14 @@ import {
   shouldQueryTerminal,
   type TerminalSideChannelCapability,
 } from "./terminal-state.js";
+import {
+  styleNonceForDocument,
+  withSynchronousStyleNonce,
+} from "./style-nonce.js";
 import { Badge, Button, Dialog, EmptyState, classes } from "./ui.js";
 import "@xterm/xterm/css/xterm.css";
 
 const initialDimensions: TerminalDimensions = { columns: 100, rows: 30 };
-const terminalStyleNonceMetaName = "agent-multiplex-style-nonce";
 
 type Confirmation =
   | {
@@ -517,46 +520,52 @@ function TerminalViewport({
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const emulator = new XtermTerminal({
-      cols: terminal.dimensions.columns,
-      rows: terminal.dimensions.rows,
-      cursorBlink: false,
-      cursorInactiveStyle: "outline",
-      disableStdin: true,
-      documentOverride: terminalDocumentOverride(),
-      fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
-      minimumContrastRatio: 4.5,
-      screenReaderMode: true,
-      scrollback: 5_000,
-      theme: {
-        background: "#080a0d",
-        foreground: "#dce1e7",
-        cursor: "#46b8ff",
-        cursorAccent: "#071018",
-        selectionBackground: "#2a7199",
-        black: "#14181e",
-        brightBlack: "#7f8996",
-        red: "#f06e78",
-        brightRed: "#ff8b94",
-        green: "#47c98b",
-        brightGreen: "#72dcaa",
-        yellow: "#e6ad52",
-        brightYellow: "#f1c475",
-        blue: "#46b8ff",
-        brightBlue: "#79cbff",
-        magenta: "#b89cff",
-        brightMagenta: "#cdb9ff",
-        cyan: "#51c7ce",
-        brightCyan: "#78dce2",
-        white: "#dce1e7",
-        brightWhite: "#f3f4f6",
-      },
+    const styleNonce = styleNonceForDocument(document);
+    // xterm 6.0 creates its viewport stylesheet through the ambient document,
+    // even when documentOverride is set. All of its styles are created during
+    // open(), so keep this compatibility boundary synchronous and short-lived.
+    const { emulator, fit } = withSynchronousStyleNonce(document, styleNonce, () => {
+      const emulator = new XtermTerminal({
+        cols: terminal.dimensions.columns,
+        rows: terminal.dimensions.rows,
+        cursorBlink: false,
+        cursorInactiveStyle: "outline",
+        disableStdin: true,
+        fontFamily: '"Geist Mono Variable", ui-monospace, monospace',
+        fontSize: 13,
+        lineHeight: 1.25,
+        minimumContrastRatio: 4.5,
+        screenReaderMode: true,
+        scrollback: 5_000,
+        theme: {
+          background: "#080a0d",
+          foreground: "#dce1e7",
+          cursor: "#46b8ff",
+          cursorAccent: "#071018",
+          selectionBackground: "#2a7199",
+          black: "#14181e",
+          brightBlack: "#7f8996",
+          red: "#f06e78",
+          brightRed: "#ff8b94",
+          green: "#47c98b",
+          brightGreen: "#72dcaa",
+          yellow: "#e6ad52",
+          brightYellow: "#f1c475",
+          blue: "#46b8ff",
+          brightBlue: "#79cbff",
+          magenta: "#b89cff",
+          brightMagenta: "#cdb9ff",
+          cyan: "#51c7ce",
+          brightCyan: "#78dce2",
+          white: "#dce1e7",
+          brightWhite: "#f3f4f6",
+        },
+      });
+      const fit = new FitAddon();
+      emulator.loadAddon(fit);
+      emulator.open(host);
+      return { emulator, fit };
     });
-    const fit = new FitAddon();
-    emulator.loadAddon(fit);
-    emulator.open(host);
     const textarea = host.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
     if (textarea) textarea.setAttribute("aria-label", "Native agent terminal input");
     xtermRef.current = emulator;
@@ -740,34 +749,6 @@ function resizeEmulator(
   ) {
     emulator.resize(dimensions.columns, dimensions.rows);
   }
-}
-
-/**
- * xterm creates its dimension and theme styles at runtime. Give only those
- * elements the server-issued CSP nonce while preserving real Document
- * identity, which xterm checks with `instanceof Document`.
- */
-function terminalDocumentOverride(): Document {
-  const nonce = document.querySelector<HTMLMetaElement>(
-    `meta[name="${terminalStyleNonceMetaName}"]`,
-  )?.content;
-  if (!nonce) return document;
-
-  const createElement = ((tagName: string, options?: ElementCreationOptions) => {
-    const element = document.createElement(tagName, options);
-    if (tagName.toLowerCase() === "style") element.setAttribute("nonce", nonce);
-    return element;
-  }) as Document["createElement"];
-
-  return new Proxy(document, {
-    get(target, property) {
-      if (property === "createElement") return createElement;
-      const value = Reflect.get(target, property, target) as unknown;
-      return typeof value === "function"
-        ? (value as (...args: readonly unknown[]) => unknown).bind(target)
-        : value;
-    },
-  });
 }
 
 function TerminalConfirmationDialog({ confirmation, harness, busy, onCancel, onConfirm }: {
