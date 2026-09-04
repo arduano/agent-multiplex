@@ -216,10 +216,11 @@ entries. Preserve each role's SQLite file and endpoint identity together.
 
 ## Recorded qualification and local rerun
 
-The clean maintained suite at this checkpoint passes 429 tests across 58 test
+The clean maintained suite at this checkpoint passes 432 tests across 59 test
 files, including v3-to-v4 migrations, crash recovery, lifecycle fencing,
 recursive collision rejection, archived metadata behavior, transport renewal,
-terminal replay/fencing, and bounded browser WebSocket ingress/egress.
+terminal replay/fencing, nonce-bound terminal styles, and bounded browser
+WebSocket ingress/egress.
 
 From the repository root, with authenticated read access to the `@arduano`
 GitHub Packages scope:

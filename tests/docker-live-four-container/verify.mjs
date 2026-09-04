@@ -414,6 +414,9 @@ try {
       browser.assertions?.codexTerminalRawDraftClearedWithoutSubmission === true &&
       browser.assertions?.codexTerminalSemanticPromptCompleted === true &&
       browser.assertions?.codexTerminalResizePropagated === true &&
+      browser.assertions?.codexTerminalRuntimeStylesNonceBound === true &&
+      terminalRuntimeStyleProofPassed(codexPlan.terminal.runtimeStyles?.operator) &&
+      terminalRuntimeStyleProofPassed(codexPlan.terminal.runtimeStyles?.observer) &&
       browser.assertions?.codexTerminalTerminatedThroughConfirmation === true,
     codexTerminalExitedWithoutStoppingStructuredChat:
       terminalCodex?.backend === "codex-remote" &&
@@ -1311,6 +1314,14 @@ function codexHistoryAgentMessageEquals(value, expected) {
   if (!value || typeof value !== "object") return false;
   if (value.type === "agentMessage" && value.text === expected) return true;
   return Object.values(value).some((item) => codexHistoryAgentMessageEquals(item, expected));
+}
+
+function terminalRuntimeStyleProofPassed(proof) {
+  return proof?.styleCount >= 3 &&
+    proof.nonceMetadataPresent === true &&
+    proof.allNonceMatched === true &&
+    proof.allStylesPopulated === true &&
+    proof.allStyleSheetsActive === true;
 }
 
 function allTrue(record) {

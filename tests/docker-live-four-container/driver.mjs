@@ -507,6 +507,9 @@ try {
       codexTerminalResizePropagated:
         codexTerminal.resize.operatorChanged === true &&
         codexTerminal.resize.observerConverged === true,
+      codexTerminalRuntimeStylesNonceBound:
+        terminalRuntimeStyleProofPassed(codexTerminal.runtimeStyles.operator) &&
+        terminalRuntimeStyleProofPassed(codexTerminal.runtimeStyles.observer),
       codexTerminalTerminatedThroughConfirmation:
         codexTerminal.termination.confirmed === true &&
         codexTerminal.termination.exited === true,
@@ -757,6 +760,8 @@ async function exerciseCodexTerminal(sessionId) {
     await waitFor("stock Codex TUI to render its first screen", 30_000, async () =>
       (await terminalScreenText(page)).replace(/\u00a0/g, " ").trim().length > 10
     );
+    const operatorRuntimeStyles = await terminalRuntimeStyleProof(page);
+    assertTerminalRuntimeStyleProof(operatorRuntimeStyles, "operator");
 
     observerPage = await context.newPage();
     registerPageDiagnostics(observerPage, "read-only-observer");
@@ -787,6 +792,8 @@ async function exerciseCodexTerminal(sessionId) {
       ]);
       return operatorScreen.length > 10 && observerScreen === operatorScreen;
     });
+    const observerRuntimeStyles = await terminalRuntimeStyleProof(observerPage);
+    assertTerminalRuntimeStyleProof(observerRuntimeStyles, "read-only observer");
 
     const leaseAccessCheckpoint = accessCalls.length;
     await page.getByTestId("terminal-take-keyboard").click();
@@ -963,6 +970,10 @@ async function exerciseCodexTerminal(sessionId) {
         replyVisible: true,
         sharedAppServerStillUsable: true,
       },
+      runtimeStyles: {
+        operator: operatorRuntimeStyles,
+        observer: observerRuntimeStyles,
+      },
     };
   });
 }
@@ -1021,6 +1032,44 @@ async function terminalScreenText(targetPage) {
   const tree = targetPage.getByTestId("terminal-viewport").locator(".xterm-accessibility-tree");
   if (await tree.count() === 0) return "";
   return await tree.first().textContent() ?? "";
+}
+
+async function terminalRuntimeStyleProof(targetPage) {
+  return targetPage.getByTestId("terminal-viewport").evaluate((viewport) => {
+    const nonce = document.querySelector(
+      'meta[name="agent-multiplex-style-nonce"]',
+    )?.content ?? "";
+    const styles = [...viewport.querySelectorAll("style")];
+    const hasActiveRules = (style) => {
+      try {
+        return (style.sheet?.cssRules.length ?? 0) > 0;
+      } catch {
+        return false;
+      }
+    };
+    return {
+      styleCount: styles.length,
+      nonceMetadataPresent: nonce.length >= 16,
+      allNonceMatched: nonce.length >= 16 && styles.every((style) => style.nonce === nonce),
+      allStylesPopulated: styles.every((style) => (style.textContent ?? "").length > 0),
+      allStyleSheetsActive: styles.every(hasActiveRules),
+    };
+  });
+}
+
+function terminalRuntimeStyleProofPassed(proof) {
+  return proof.styleCount >= 3 &&
+    proof.nonceMetadataPresent === true &&
+    proof.allNonceMatched === true &&
+    proof.allStylesPopulated === true &&
+    proof.allStyleSheetsActive === true;
+}
+
+function assertTerminalRuntimeStyleProof(proof, viewer) {
+  assert(
+    terminalRuntimeStyleProofPassed(proof),
+    `${viewer} terminal runtime styles were not nonce-bound and active: ${JSON.stringify(proof)}`,
+  );
 }
 
 async function waitForTerminalText(targetPage, text, present, limitMs) {
