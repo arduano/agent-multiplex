@@ -64,11 +64,13 @@ export function watchTerminal(
   options: TerminalWatchOptions,
 ): TerminalWatchHandle {
   let cursor = options.cursor ? { ...options.cursor } : undefined;
+  let replay: { highWater: number; lastSequence: number } | undefined;
   const {
     target,
     terminalId,
     cursor: _initialCursor,
     onItem,
+    onStateChange,
     ...resilience
   } = options;
   void _initialCursor;
@@ -80,6 +82,12 @@ export function watchTerminal(
   const handle: ResilientSubscriptionHandle = startResilientSubscription({
     ...resilience,
     procedure,
+    onStateChange: (state) => {
+      // A partial exact replay is intentionally uncommitted. Reconnect from
+      // the prior durable cursor so the emulator is reset and replayed whole.
+      if (state.state === "connecting") replay = undefined;
+      onStateChange?.(state);
+    },
     input: () => ({
       ...target,
       terminalId,
@@ -91,13 +99,54 @@ export function watchTerminal(
         throw new Error("terminal stream was replaced while attached");
       }
       if (
-        (item.kind === "reset" || item.kind === "changed") &&
+        (item.kind === "reset" || item.kind === "replayEnd" || item.kind === "changed") &&
         (
           item.terminal.terminalId !== terminalId ||
           item.terminal.sequence !== item.cursor.sequence
         )
       ) {
         throw new Error("terminal stream descriptor does not match its cursor");
+      }
+      if (
+        item.kind === "replayStart" &&
+        item.terminal.terminalId !== terminalId
+      ) {
+        throw new Error("terminal replay descriptor identifies another terminal");
+      }
+      if (item.kind === "replayStart") {
+        if (cursor !== undefined) {
+          throw new Error("terminal exact replay cannot replace a committed cursor");
+        }
+        replay = { highWater: item.terminal.sequence, lastSequence: 0 };
+        await onItem(item);
+        return;
+      }
+      if (replay !== undefined) {
+        if (item.kind === "replayEnd") {
+          if (
+            item.cursor.sequence !== replay.highWater ||
+            item.cursor.sequence < replay.lastSequence
+          ) {
+            throw new Error("terminal exact replay ended at another high-water cursor");
+          }
+          await onItem(item);
+          cursor = advanceTerminalCursor(item);
+          replay = undefined;
+          return;
+        }
+        if (
+          (item.kind !== "output" && item.kind !== "resize") ||
+          item.cursor.sequence <= replay.lastSequence ||
+          item.cursor.sequence > replay.highWater
+        ) {
+          throw new Error("terminal exact replay timeline is malformed");
+        }
+        await onItem(item);
+        replay.lastSequence = item.cursor.sequence;
+        return;
+      }
+      if (item.kind === "replayEnd") {
+        throw new Error("terminal exact replay ended without a start");
       }
       if (
         item.kind !== "reset" &&

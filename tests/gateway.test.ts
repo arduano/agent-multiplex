@@ -5,6 +5,11 @@ import { join } from "node:path";
 
 import { AccessGatewayProjection } from "@arduano/agent-multiplex-gateway-core";
 import { accessStreamItemSchema } from "@arduano/agent-multiplex-protocol";
+import {
+  TRPC_HTTP_BODY_LIMIT_BYTES,
+  WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES,
+  WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+} from "@arduano/agent-multiplex-web";
 import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 
@@ -196,6 +201,103 @@ describe("edge gateway", () => {
       await surface.close();
     }
   });
+
+  it("bounds HTTP and WebSocket ingress and WebSocket egress without harming peers", async () => {
+    const surface = createGatewayHttpSurface(new AccessGatewayProjection([]));
+    await listen(surface);
+
+    try {
+      const oversizedHttp = await fetch(`${httpUrl(surface)}/trpc/sessions.refresh`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: Buffer.alloc(TRPC_HTTP_BODY_LIMIT_BYTES + 1),
+      });
+      expect(oversizedHttp.status).toBe(413);
+
+      const healthyHttp = await fetch(`${httpUrl(surface)}/trpc/system.describe`);
+      expect(healthyHttp.status).toBe(200);
+      await expect(healthyHttp.json()).resolves.toMatchObject({
+        result: { data: { componentKind: "access-gateway" } },
+      });
+
+      const oversized = new WebSocket(webSocketUrl(surface));
+      await opened(oversized);
+      const oversizedServerSocket = onlyOpenServerSocket(surface);
+      const oversizedClosed = closed(oversized);
+      const sendError = new Promise<Error | undefined>((resolve) => {
+        oversizedServerSocket.send(
+          Buffer.alloc(WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES),
+          (error) => resolve(error),
+        );
+      });
+      expect((await sendError)?.message).toMatch(
+        /WebSocket egress buffer exceeded/,
+      );
+      await expect(oversizedClosed).resolves.toBe(1006);
+
+      const fragmented = new WebSocket(webSocketUrl(surface));
+      await opened(fragmented);
+      const fragmentedServerSocket = onlyOpenServerSocket(surface);
+      const fragmentedClosed = closed(fragmented);
+      const fragmentedError = new Promise<Error | undefined>((resolve) => {
+        fragmentedServerSocket.send(
+          [
+            Buffer.alloc(WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES / 2),
+            Buffer.alloc(WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES / 2),
+          ],
+          (error) => resolve(error),
+        );
+      });
+      expect((await fragmentedError)?.message).toMatch(
+        /WebSocket egress buffer exceeded/,
+      );
+      await expect(fragmentedClosed).resolves.toBe(1006);
+
+      const slow = new WebSocket(webSocketUrl(surface));
+      await opened(slow);
+      const slowServerSocket = onlyOpenServerSocket(surface);
+      Object.defineProperty(slowServerSocket, "bufferedAmount", {
+        configurable: true,
+        value: WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES,
+      });
+      const slowClosed = closed(slow);
+      slow.send(JSON.stringify({
+        id: 1,
+        method: "query",
+        params: { path: "system.describe" },
+      }));
+      await expect(slowClosed).resolves.toBe(1006);
+
+      const oversizedInbound = new WebSocket(webSocketUrl(surface));
+      await opened(oversizedInbound);
+      const oversizedInboundClosed = closed(oversizedInbound);
+      oversizedInbound.send(
+        Buffer.alloc(WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES + 1),
+      );
+      await expect(oversizedInboundClosed).resolves.toBe(1009);
+
+      const healthy = new WebSocket(webSocketUrl(surface));
+      try {
+        await opened(healthy);
+        const response = messageMatching(
+          healthy,
+          (frame) => frame.result?.type === "data",
+        );
+        healthy.send(JSON.stringify({
+          id: 2,
+          method: "query",
+          params: { path: "system.describe" },
+        }));
+        await expect(response).resolves.toMatchObject({
+          result: { data: { componentKind: "access-gateway" } },
+        });
+      } finally {
+        healthy.terminate();
+      }
+    } finally {
+      await surface.close();
+    }
+  });
 });
 
 interface WireFrame {
@@ -231,6 +333,23 @@ function opened(socket: WebSocket): Promise<void> {
     socket.once("open", resolve);
     socket.once("error", reject);
   });
+}
+
+function closed(socket: WebSocket): Promise<number> {
+  return new Promise((resolve, reject) => {
+    socket.once("close", resolve);
+    socket.once("error", reject);
+  });
+}
+
+function onlyOpenServerSocket(
+  surface: ReturnType<typeof createGatewayHttpSurface>,
+): WebSocket {
+  const sockets = [...surface.webSockets.clients].filter(
+    (socket) => socket.readyState === WebSocket.OPEN,
+  );
+  expect(sockets).toHaveLength(1);
+  return sockets[0]!;
 }
 
 function messageMatching(

@@ -16,7 +16,7 @@ const tokenFile = process.env.AGENT_MULTIPLEX_ACCEPTANCE_BEARER_TOKEN_FILE;
 if (!tokenFile) throw new Error("AGENT_MULTIPLEX_ACCEPTANCE_BEARER_TOKEN_FILE is required");
 const bearerToken = (await readFile(tokenFile, "utf8")).trim();
 const playwrightModule = process.env.AGENT_MULTIPLEX_PLAYWRIGHT_MODULE ??
-  "/home/arduano/.bun/install/global/node_modules/playwright/index.mjs";
+  "playwright-core";
 const chromeExecutable = process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ??
   "/home/arduano/.nix-profile/bin/google-chrome";
 const moduleSpecifier = playwrightModule.startsWith("/")

@@ -28,11 +28,22 @@ apps are reference composition roots.
 `apps/host` and `packages/host-core` are archived protocol-v2 evidence. They are
 not workspaces and are never valid dependencies for protocol v4.
 
+The published `@arduano/agent-multiplex-web` package contains the already-built
+browser assets in `dist/client` as well as its small Node asset-serving entry
+point. React, Vite, Tailwind, xterm, icons, fonts, and the rest of the browser
+build graph are development inputs and are not installed into a downstream
+runtime. The package ships the corresponding generated
+`THIRD_PARTY_LICENSES.txt` both at its package root and beside the served browser
+assets. Rebuild the web workspace only when producing a new package candidate;
+consumers should serve or compose the packaged output rather than rebuilding it.
+
 ## Supported and qualified environment
 
 | Surface | Current boundary |
 | --- | --- |
-| Node.js | 24 or newer |
+| Node.js runtime | 24 or newer |
+| Reproducible release toolchain | Node `24.19.0`, npm `11.17.0` |
+| Qualification container base | `node:24.19.0-bookworm-slim` at OCI index digest `sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df` |
 | Module system | TypeScript/JavaScript ESM |
 | Wire contract | Agent Multiplex protocol 4 |
 | Node transport | Exact `@arduano/p2prpc-core@0.2.1` package (p2prpc v1 API) |

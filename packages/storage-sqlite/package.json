@@ -17,5 +17,8 @@
   },
   "homepage": "https://github.com/arduano/agent-multiplex#readme",
   "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
-  "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" }
+  "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
+  "dependencies": {
+    "@types/node": "24.3.0"
+  }
 }

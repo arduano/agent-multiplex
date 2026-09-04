@@ -216,10 +216,10 @@ entries. Preserve each role's SQLite file and endpoint identity together.
 
 ## Recorded qualification and local rerun
 
-The clean maintained suite at this checkpoint passes 407 tests across 57 test
+The clean maintained suite at this checkpoint passes 429 tests across 58 test
 files, including v3-to-v4 migrations, crash recovery, lifecycle fencing,
 recursive collision rejection, archived metadata behavior, transport renewal,
-and terminal boundaries.
+terminal replay/fencing, and bounded browser WebSocket ingress/egress.
 
 From the repository root, with authenticated read access to the `@arduano`
 GitHub Packages scope:
@@ -240,16 +240,27 @@ four-container native target when spending Codex/Copilot credits is acceptable:
 ```bash
 npm run test:docker:v4:tree
 npm run test:docker:v4:mock:scale
-npm run test:docker:v4:live:four
+AGENT_MULTIPLEX_LIVE_SOAK_MS=930000 \
+  npm run test:docker:v4:live:four
+npm run release:native-status -- \
+  receipts/protocol-v4-live-four-container/<successful-run-id>
 ```
+
+The live runner requires a clean source tree and records its exact commit. Run
+it after merge from a clean `main` equal to `origin/main`. The final command
+snapshots, independently rehashes, and validates the complete passing receipt,
+requires a completed soak of at least 930 seconds, then records the
+repository-owner commit status that publication requires. Its description
+binds the run ID and SHA-256 of the receipt inventory. Use `--check-only` to
+perform the local validation without changing GitHub state.
 
 The latest successful protocol-v4 receipts are:
 
-- `receipts/protocol-v4-control-tree/20260904T144640Z-9c986260721b`: four
+- `receipts/protocol-v4-control-tree/20260904T173822Z-c7222b0a5c27`: four
   containers (two control nodes, one runtime, one gateway), two overlapping
   gateway sources, queued metadata during authority loss, warm-source failover,
   recovery, and three exact native-delta reassemblies;
-- `receipts/protocol-v4-mock-docker-scale/20260904T145242Z-888a878a22d5`: 12
+- `receipts/protocol-v4-mock-docker-scale/20260904T174423Z-849005dd923a`: 12
   containers, 10 runtimes, 100 sessions, 100 successful launches and sends,
   3,600 contiguous native events, zero gaps/duplicates, cursor recovery, runtime
   partition recovery, three fleet-wide CAS rounds, and a 15-second soak;
@@ -259,17 +270,24 @@ The latest successful protocol-v4 receipts are:
   terminal isolation, metadata CAS, browser reload, responsive/accessibility
   checks, and zero retained credential material.
 
-Each successful receipt includes a manifest and SHA-256 inventory. The live
-receipt records Codex CLI 0.152.0. Its sibling p2prpc checkout was dirty, so the
-manifest pins both the base revision and the exact package SHA-256; rerun it
-after either dependency changes. The live suite did not exercise stop, resume,
-or archive, and its optional 15-minute p2prpc credential-expiry soak was not
+Each successful receipt includes a manifest and SHA-256 inventory. The two
+deterministic receipts above cover this terminal/transport-hardened source tree.
+The older live receipt records Codex CLI 0.152.0. Its sibling p2prpc checkout
+was dirty, so the manifest pins both the base revision and the exact package
+SHA-256; it is prior native-behavior evidence, not qualification of subsequent
+terminal and WebSocket hardening. Release publication requires a fresh live run
+for the exact merged commit and its owner-recorded qualification status. The
+live suite did not exercise stop, resume, or
+archive, and its optional 15-minute p2prpc credential-expiry soak was not
 performed. Those are explicit limits of that receipt rather than inferred
 passes.
 
-The live qualification also covers recovery of a fresh terminal observer. On
-an authoritative reset, the React terminal applies restored scrollback and
-then moves that newly attached emulator to the live edge once. Existing viewers
-remain free to scroll back and are not repeatedly forced to the bottom. Failed
-attempt directories are kept as diagnostic evidence and are not qualification
-receipts.
+The terminal protocol now prefers exact opening-state replay for a fresh
+observer: retained raw ANSI output and resize events reconstruct cursor, modes,
+wrapping, and subsequent incremental output. The client commits only an explicit
+replay-end high-water barrier, so an interrupted partial replay restarts whole.
+A synthesized scrollback reset is an explicitly approximate fallback after
+bounded raw replay expires or PTY startup output was truncated. The
+React terminal moves a synthesized reset to the live edge once; existing
+viewers remain free to scroll back. Failed attempt directories are diagnostic
+evidence and are not qualification receipts.

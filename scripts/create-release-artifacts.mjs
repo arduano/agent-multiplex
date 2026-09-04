@@ -12,16 +12,37 @@ import { execFileSync } from "node:child_process";
 
 import {
   assert,
+  assertReleaseToolchain,
   packageManifest,
+  releaseNodeVersion,
+  releaseNpmVersion,
   releasePackages,
   releaseVersion,
+  requiredPackageNoticePaths,
   repositoryRoot,
 } from "./release-config.mjs";
 
 const arguments_ = process.argv.slice(2);
+assert(
+  arguments_.every((value) => value === "release-artifacts" || value === "--allow-dirty"),
+  "release:pack accepts only release-artifacts and --allow-dirty",
+);
+assert(
+  arguments_.filter((value) => value === "release-artifacts").length <= 1 &&
+    arguments_.filter((value) => value === "--allow-dirty").length <= 1,
+  "release:pack arguments may not be repeated",
+);
 const allowDirty = arguments_.includes("--allow-dirty");
 const outputArgument = arguments_.find((value) => !value.startsWith("--"));
 const outputDirectory = resolve(repositoryRoot, outputArgument ?? "release-artifacts");
+const fixedOutputDirectory = resolve(repositoryRoot, "release-artifacts");
+
+assert(
+  outputDirectory === fixedOutputDirectory,
+  "release artifacts may only be written to the repository release-artifacts directory",
+);
+
+assertReleaseToolchain();
 
 if (!allowDirty) {
   const status = execFileSync("git", ["status", "--porcelain=v1"], {
@@ -89,6 +110,10 @@ for (const entry of releasePackages) {
     path.includes(".identity"),
   );
   assert(forbidden.length === 0, `${entry.name}: forbidden package files: ${forbidden.map(({ path }) => path).join(", ")}`);
+  const packedPaths = new Set(metadata.files.map(({ path }) => path));
+  for (const requiredPath of requiredPackageNoticePaths(entry.workspace)) {
+    assert(packedPaths.has(requiredPath), `${entry.name}: package omits ${requiredPath}`);
+  }
   const contents = readFileSync(filename);
   artifacts.push({
     workspace: entry.workspace,
@@ -110,10 +135,14 @@ const unexpected = readdirSync(outputDirectory).filter((filename) =>
 assert(unexpected.length === 0, `unexpected tarballs: ${unexpected.join(", ")}`);
 
 const manifest = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   repository: "arduano/agent-multiplex",
   commit,
   version: releaseVersion,
+  toolchain: {
+    node: releaseNodeVersion,
+    npm: releaseNpmVersion,
+  },
   packages: artifacts,
 };
 writeFileSync(

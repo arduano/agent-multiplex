@@ -12,9 +12,11 @@ SESSIONS_PER_RUNTIME_NODE=10
 TOTAL_SESSIONS=$(( RUNTIME_NODE_COUNT * SESSIONS_PER_RUNTIME_NODE ))
 CHUNK_COUNT=${AGENT_MULTIPLEX_RUNTIME_NODE_MOCK_CHUNK_COUNT:-32}
 # Keep the deterministic native turn long enough for all 100 independently
-# routed sends to start even on a busy developer machine. The driver proves
-# overlap from source-emission timestamps, not observer delivery time.
-CHUNK_INTERVAL_MS=${AGENT_MULTIPLEX_SCALE_CHUNK_INTERVAL_MS:-100}
+# routed sends to start even while the first runtime streams through the same
+# control-plane fan-in. The driver proves overlap from source-emission
+# timestamps, not observer delivery time; the 32 x 200 ms default leaves a
+# useful margin on slower CI and busy developer machines.
+CHUNK_INTERVAL_MS=${AGENT_MULTIPLEX_SCALE_CHUNK_INTERVAL_MS:-200}
 TIMEOUT_MS=${AGENT_MULTIPLEX_SCALE_TIMEOUT_MS:-180000}
 SOAK_MS=${AGENT_MULTIPLEX_SCALE_SOAK_MS:-15000}
 DISCONNECT_MS=${AGENT_MULTIPLEX_SCALE_DISCONNECT_MS:-800}

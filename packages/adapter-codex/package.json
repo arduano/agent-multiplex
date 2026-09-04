@@ -7,7 +7,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist"],
+  "files": ["dist", "THIRD_PARTY_NOTICES.md", "licenses"],
   "engines": { "node": ">=24.0.0" },
   "license": "MIT",
   "repository": {
@@ -22,7 +22,8 @@
     "@arduano/agent-multiplex-protocol": "0.1.0",
     "@arduano/agent-multiplex-runtime-node-core": "0.1.0",
     "@openai/codex": "0.152.0",
-    "node-pty": "^1.1.0",
+    "@types/node": "24.3.0",
+    "node-pty": "1.1.0",
     "ws": "8.21.3"
   }
 }

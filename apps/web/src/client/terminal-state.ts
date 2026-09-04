@@ -2,7 +2,9 @@ import type {
   Harness,
   RuntimeNodeDescriptor,
   TerminalDescriptor,
+  TerminalDimensions,
   TerminalLeaseSummary,
+  TerminalStreamItem,
 } from "@arduano/agent-multiplex-protocol";
 
 export interface TerminalSideChannelCapability {
@@ -64,4 +66,46 @@ export function mergeTerminalLease(
   return descriptor?.terminalId === terminalId
     ? { ...descriptor, lease }
     : descriptor;
+}
+
+export interface TerminalReplayViewState {
+  readonly ready: boolean;
+  readonly dimensions: TerminalDimensions;
+  readonly terminal: TerminalDescriptor | null;
+}
+
+/**
+ * Tracks only the descriptor/dimension effects of terminal replay. The current
+ * descriptor carried by replayStart is deliberately withheld until replayEnd:
+ * applying its final dimensions before historical output would change wrapping.
+ */
+export function reduceTerminalReplayView(
+  state: TerminalReplayViewState,
+  item: TerminalStreamItem,
+): TerminalReplayViewState {
+  if (item.kind === "replayStart") {
+    return {
+      ready: false,
+      dimensions: { ...item.initialDimensions },
+      terminal: state.terminal,
+    };
+  }
+  if (item.kind === "replayEnd" || item.kind === "reset") {
+    return {
+      ready: true,
+      dimensions: { ...item.terminal.dimensions },
+      terminal: item.terminal,
+    };
+  }
+  if (item.kind === "resize") {
+    return { ...state, dimensions: { ...item.dimensions } };
+  }
+  if (item.kind === "changed") {
+    return {
+      ...state,
+      dimensions: { ...item.terminal.dimensions },
+      terminal: item.terminal,
+    };
+  }
+  return state;
 }

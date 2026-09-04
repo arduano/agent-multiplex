@@ -50,12 +50,21 @@ for value_name in INITIAL_CODEX_MODEL SECOND_CODEX_MODEL COPILOT_MODEL; do
     exit 1
   fi
 done
-for tool in docker jq node npm curl sha256sum awk sed perl rg timeout find sort xargs systemctl systemd-run; do
+for tool in docker git jq node npm curl sha256sum awk sed perl rg timeout find sort xargs systemctl systemd-run; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "live four-container acceptance: required tool '$tool' is unavailable" >&2
     exit 1
   fi
 done
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=all)" ]]; then
+  echo "live four-container acceptance: the source worktree must be clean" >&2
+  exit 1
+fi
+SOURCE_COMMIT=$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}')
+if [[ ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "live four-container acceptance: unable to resolve an exact source commit" >&2
+  exit 1
+fi
 if [[ -z "$DOCKER_NPMRC" ]]; then
   DOCKER_NPMRC=$(npm config get userconfig)
 fi
@@ -73,8 +82,8 @@ if [[ ! -r "$SOURCE_KEY" ]]; then
 fi
 
 RUN_ID=${AGENT_MULTIPLEX_LIVE_RUN_ID:-"$(date -u +%Y%m%dT%H%M%SZ)-$(random_hex)"}
-if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
-  echo "live four-container acceptance: run ID contains unsupported characters" >&2
+if [[ ! "$RUN_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,47}$ ]]; then
+  echo "live four-container acceptance: run ID must start alphanumeric and contain at most 48 supported characters" >&2
   exit 1
 fi
 RECEIPT_DIR="$RECEIPT_ROOT/$RUN_ID"
@@ -1256,6 +1265,8 @@ jq -n '
 NODE_VERSION=$(docker exec "$CONTROL_CONTAINER" node --version | tr -d '\r\n')
 CODEX_VERSION=$(docker exec "$CODEX_CONTAINER" \
   /opt/src/agent-multiplex/node_modules/.bin/codex --version | tr -d '\r\n')
+COPILOT_CLI_VERSION=$(docker exec "$COPILOT_CONTAINER" \
+  /opt/src/agent-multiplex/node_modules/.bin/copilot --version | sed -n '1p' | tr -d '\r\n')
 COPILOT_VERSION=$(jq -r '.[] | select(.harness == "copilot") | .runtimeVersion // "unavailable"' \
   "$RECEIPT_DIR/rpc/harness-catalog.json")
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}')
@@ -1267,8 +1278,6 @@ IFS=$'\t' read -r P2PRPC_VERSION P2PRPC_INTEGRITY < <(
     process.stdout.write(`${dependency.version}\t${dependency.integrity}\n`);
   ' "$REPO_ROOT/package-lock.json"
 )
-RUN_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
 capture_logs
 if rg --quiet '(UnhandledPromiseRejection|uncaught exception|SQLITE_CORRUPT|database disk image is malformed)' \
   "$RECEIPT_DIR/logs/control-node.log" \
@@ -1352,21 +1361,31 @@ else
   fi
 fi
 
+if [[ "$(git -C "$REPO_ROOT" rev-parse --verify 'HEAD^{commit}')" != "$SOURCE_COMMIT" || \
+      -n "$(git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=all)" ]]; then
+  fail "source commit or worktree changed during live qualification"
+fi
+RUN_COMPLETED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
 jq -n \
   --arg runId "$RUN_ID" --arg startedAt "$RUN_STARTED_AT" --arg completedAt "$RUN_COMPLETED_AT" \
+  --arg sourceCommit "$SOURCE_COMMIT" \
   --arg docker "$DOCKER_VERSION" --arg node "$NODE_VERSION" --arg codex "$CODEX_VERSION" \
-  --arg copilot "$COPILOT_VERSION" --arg p2prpcVersion "$P2PRPC_VERSION" \
+  --arg copilotCli "$COPILOT_CLI_VERSION" --arg copilot "$COPILOT_VERSION" \
+  --arg p2prpcVersion "$P2PRPC_VERSION" \
   --arg p2prpcIntegrity "$P2PRPC_INTEGRITY" \
   --arg initialCodexModel "$INITIAL_CODEX_MODEL" --arg secondCodexModel "$SECOND_CODEX_MODEL" \
   --arg copilotModel "$COPILOT_MODEL" --arg imageId "$IMAGE_ID" --argjson retained "$KEEP" \
   --argjson soakMs "$SOAK_MS" '
     {
-      runId:$runId,status:"passed",startedAt:$startedAt,completedAt:$completedAt,
+      runId:$runId,status:"passed",sourceCommit:$sourceCommit,
+      startedAt:$startedAt,completedAt:$completedAt,
       topology:{applicationContainers:4,canonicalAuthorities:1,runtimeNodes:2,accessGateways:1,onlyGatewayPublished:true},
       versions:{
         dockerServer:$docker,
         nodeInImage:$node,
         codexRuntime:$codex,
+        copilotCli:$copilotCli,
         copilotRuntime:$copilot,
         multiplexProtocol:4,
         p2prpcVersion:$p2prpcVersion,

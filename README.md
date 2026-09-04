@@ -267,10 +267,17 @@ or attaches to its runtime-owned PTY; it never opens automatically.
 
 The terminal is an operational escape hatch, not another history source.
 Several clients may watch the same bounded live stream, but only one renewable
-keyboard lease may write or resize at a time. A read-only client needs
+keyboard lease may write or resize at a time. A newly attached viewer replays
+the retained raw ANSI and resize timeline from the terminal's opening state;
+this preserves terminal modes, cursor position, and wrapping without treating
+ANSI serialization as an exact checkpoint. An explicit replay-end barrier
+commits the high-water cursor; an interrupted or overflowing partial replay is
+discarded and retried whole. Once the bounded raw timeline has expired—or PTY
+startup output was truncated before attachment—recovery uses an explicitly
+synthesized, potentially approximate screen reset. A read-only client needs
 `terminal-view`; opening, taking the keyboard, typing, resizing, or terminating
 a supported terminal needs `terminal-control`. Grant `read` as well if the
-client must discover sessions. Terminal bytes, screen snapshots, and lease
+client must discover sessions. Terminal bytes, synthesized screen snapshots, and lease
 secrets are memory-only and never enter SQLite, metadata, fleet snapshots,
 normalized chat history, or `readNativeHistory`.
 

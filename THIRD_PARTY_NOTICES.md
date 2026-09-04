@@ -11,8 +11,9 @@ embed that text itself.
 
 - **OpenAI Codex CLI and platform packages** — Apache License 2.0,
   <https://github.com/openai/codex>. The Codex adapter includes TypeScript
-  declarations generated from the pinned app-server schema. OpenAI and Codex
-  names and marks remain their owners' property.
+  declarations generated from the pinned app-server schema and ships the full
+  Apache-2.0 text and upstream NOTICE beside those declarations. OpenAI and
+  Codex names and marks remain their owners' property.
 - **GitHub Copilot CLI** — the GitHub Copilot CLI License, distributed as
   `LICENSE.md` in `@github/copilot`. It is not MIT. Its current redistribution
   grant is limited to unmodified copies distributed as part of an application
@@ -45,6 +46,10 @@ The built dashboard includes declared packages and assets including:
 The SIL Open Font License continues to govern the font software embedded in the
 web output. Neither the font software nor an individual component may be sold by
 itself, and reserved font-name and attribution conditions continue to apply.
+The web package ships `THIRD_PARTY_LICENSES.txt`, generated from the exact
+compiled JavaScript source maps plus the explicitly embedded CSS/Geist inputs. It
+contains every discovered component identity and the complete corresponding
+upstream license/copyright documents; the release gate rejects a stale copy.
 
 ## Build and test dependencies
 

@@ -26,6 +26,7 @@ import {
   type TerminalAttachInput,
   type TerminalDescriptor,
   type TerminalGetInput,
+  type TerminalStreamItem,
 } from "@arduano/agent-multiplex-protocol";
 
 import {
@@ -54,6 +55,7 @@ class FakeSource implements ControlNodeSourceClient {
   public omitUndefinedLaunchFields = false;
   public launchRecord: import("@arduano/agent-multiplex-protocol").LaunchRecord | null = null;
   public readonly terminalId = newTerminalId();
+  public terminalStreamItems: readonly TerminalStreamItem[] | undefined;
 
   public constructor(public snapshot: GatewaySourceSnapshot) {}
   public loadSnapshot(): Promise<GatewaySourceSnapshot> {
@@ -129,10 +131,10 @@ class FakeSource implements ControlNodeSourceClient {
   }
   public async *attachTerminal(input: TerminalAttachInput, signal?: AbortSignal) {
     this.terminalAttaches += 1;
-    yield {
+    yield* this.terminalStreamItems ?? [{
       kind: "heartbeat" as const,
       cursor: { terminalId: input.terminalId, sequence: 0 },
-    };
+    }];
     if (signal?.aborted) return;
     await new Promise<void>((resolve) =>
       signal?.addEventListener("abort", () => resolve(), { once: true }));
@@ -756,6 +758,43 @@ describe("AccessGatewayProjection routing and feed", () => {
 
     gateway.markUnavailable("ancestor" as SourceId);
     await expect(iterator.next()).rejects.toMatchObject({ code: "CONFLICT" });
+    await iterator.return?.();
+  });
+
+  it("rejects a terminal source replay ending at another high-water sequence", async () => {
+    const root = newControlNodeId();
+    const definition = source("only", snapshot(authority(root), [root], { withSession: true }));
+    const gateway = new AccessGatewayProjection([definition]);
+    await gateway.refreshAll();
+    const session = gateway.listSessions()[0]!;
+    const target = {
+      sessionId: session.sessionId,
+      runtimeNodeId: session.runtimeNodeId,
+      bindingRevision: session.bindingRevision,
+    };
+    const descriptor = await definition.client.getTerminal(target);
+    definition.client.terminalStreamItems = [{
+      kind: "replayStart",
+      cursor: { terminalId: descriptor.terminalId, sequence: 0 },
+      initialDimensions: descriptor.dimensions,
+      terminal: { ...descriptor, sequence: 2 },
+    }, {
+      kind: "replayEnd",
+      cursor: { terminalId: descriptor.terminalId, sequence: 1 },
+      terminal: { ...descriptor, sequence: 1 },
+    }];
+
+    const iterator = gateway.attachTerminal({
+      ...target,
+      terminalId: descriptor.terminalId,
+    })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "replayStart" },
+    });
+    await expect(iterator.next()).rejects.toThrow(
+      "terminal source replay ended outside its advertised high-water fence",
+    );
     await iterator.return?.();
   });
 

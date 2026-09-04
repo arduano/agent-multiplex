@@ -29,6 +29,10 @@ import {
  * values continue to come from this profile and p2prpc's own defaults.
  */
 export const DEFAULT_MULTIPLEX_P2P_LIMITS = Object.freeze({
+  // A maximum synthesized terminal reset carries 1 MiB of decoded screen
+  // bytes as base64 (~1.34 MiB) plus the tRPC/p2prpc envelope. Keep one
+  // bounded frame large enough for that protocol-valid item at every hop.
+  maxControlFrameBytes: 2 * 1_024 * 1_024,
   maxInboundStreams: 256,
   maxGlobalInboundStreams: 2_048,
   maxPrincipalInboundStreams: 512,

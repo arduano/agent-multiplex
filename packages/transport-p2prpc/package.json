@@ -38,6 +38,7 @@
     "@arduano/agent-multiplex-runtime-node-core": "0.1.0",
     "@arduano/p2prpc-core": "0.2.1",
     "@trpc/client": "11.18.0",
-    "@trpc/server": "11.18.0"
+    "@trpc/server": "11.18.0",
+    "@types/ws": "8.18.1"
   }
 }

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-bookworm-slim AS build
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df AS build
 
 ENV NODE_ENV=production
 WORKDIR /opt/src/agent-multiplex
@@ -9,7 +9,7 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates g++ make python3 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json tsconfig.base.json tsconfig.json .npmrc ./
+COPY package.json package-lock.json tsconfig.base.json tsconfig.json .npmrc .node-version ./
 COPY release-packages.json ./
 COPY packages/protocol/package.json packages/protocol/package.json
 COPY packages/storage-sqlite/package.json packages/storage-sqlite/package.json
@@ -43,7 +43,7 @@ RUN npm run build -- --force \
     && test -f apps/gateway/dist/main.js \
     && chmod -R a+rX /opt/src/agent-multiplex
 
-FROM node:24-bookworm-slim
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
 
 ENV NODE_ENV=production
 WORKDIR /opt/src/agent-multiplex

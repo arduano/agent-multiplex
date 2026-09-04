@@ -13,6 +13,7 @@ permissions:
   actions: read
   contents: write
   packages: write
+  statuses: read
   id-token: write
   attestations: write
 
@@ -32,6 +33,10 @@ jobs:
         run: |
           git fetch --no-tags origin main
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          test "$(git cat-file -t "$GITHUB_REF_NAME")" = tag
+          test "$(git rev-parse "$GITHUB_REF_NAME^{}")" = "$GITHUB_SHA"
+          git -c gpg.ssh.allowedSignersFile="$GITHUB_WORKSPACE/.github/release-signers" \
+            verify-tag "$GITHUB_REF_NAME"
           npm run check:tag
       - name: Require successful CI and qualification for this commit
         env:
@@ -80,16 +85,53 @@ jobs:
               ' <<< "$run" >/dev/null
           }
           require_successful_run ci.yml '["push"]' "main-branch CI"
+          require_successful_run codeql.yml '["push"]' "CodeQL analysis"
           require_successful_run qualification.yml \
             '["push", "workflow_dispatch"]' \
             "Docker qualification"
+          repository_owner_id="$(gh api \
+            "repos/${GITHUB_REPOSITORY}" --jq '.owner.id')"
+          [[ "$repository_owner_id" =~ ^[1-9][0-9]*$ ]]
+          native_statuses="$(gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/statuses?per_page=100")"
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --arg context "Agent Multiplex / Native four-container qualification" \
+            --arg owner "$GITHUB_REPOSITORY_OWNER" \
+            --argjson ownerId "$repository_owner_id" \
+            --arg target "https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" '
+              [
+                .[][] |
+                select(.sha == $sha and .context == $context)
+              ] |
+              sort_by(.created_at, .id) |
+              last |
+              .state == "success" and
+              .creator.login == $owner and
+              .creator.id == $ownerId and
+              .creator.type == "User" and
+              .target_url == $target and
+              (.description | type == "string" and
+                test("^PASS [A-Za-z0-9][A-Za-z0-9._-]{0,47} sha256:[0-9a-f]{64}$"))
+            ' <<< "$native_statuses" >/dev/null || {
+              echo "No latest owner-recorded successful native four-container qualification exists for $GITHUB_SHA" >&2
+              exit 1
+            }
       - name: Set up Node.js and GitHub Packages
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           registry-url: https://npm.pkg.github.com
           scope: "@arduano"
+      - name: Install exact npm and verify toolchain
+        shell: bash
+        run: |
+          expected_node="$(<.node-version)"
+          expected_npm="$(jq -r '.packageManager | ltrimstr("npm@")' package.json)"
+          npm install --global --ignore-scripts "npm@$expected_npm"
+          test "$(node --version)" = "v$expected_node"
+          test "$(npm --version)" = "$expected_npm"
       - name: Install locked dependencies
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
@@ -184,9 +226,39 @@ jobs:
                 .draft == false and
                 .prerelease == $prerelease
               ' <<< "$existing" >/dev/null
-            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
-              --clobber \
-              --repo "$GITHUB_REPOSITORY"
+            expected_assets="$(printf '%s\n' "${assets[@]}" |
+              while IFS= read -r asset; do basename "$asset"; done | jq -R . | jq -s 'sort')"
+            jq -e --argjson expected "$expected_assets" '
+              ([.assets[].name] | length) == ([.assets[].name] | unique | length) and
+              all(.assets[].name; . as $name | $expected | index($name) != null)
+            ' <<< "$existing" >/dev/null || {
+              echo "Existing release has duplicate or unexpected assets; refusing recovery" >&2
+              exit 1
+            }
+            existing_assets="$(jq '[.assets[].name]' <<< "$existing")"
+            existing_directory="$(mktemp -d "$RUNNER_TEMP/existing-release-assets.XXXXXXXX")"
+            if jq -e 'length > 0' <<< "$existing_assets" >/dev/null; then
+              gh release download "$GITHUB_REF_NAME" \
+                --dir "$existing_directory" \
+                --repo "$GITHUB_REPOSITORY"
+            fi
+            missing_assets=()
+            for asset in "${assets[@]}"; do
+              asset_name="$(basename "$asset")"
+              if jq -e --arg name "$asset_name" 'index($name) != null' \
+                <<< "$existing_assets" >/dev/null; then
+                cmp --silent "$asset" "$existing_directory/$asset_name" || {
+                  echo "Existing public release asset differs from verified source: $asset_name" >&2
+                  exit 1
+                }
+              else
+                missing_assets+=("$asset")
+              fi
+            done
+            if (( ${#missing_assets[@]} > 0 )); then
+              gh release upload "$GITHUB_REF_NAME" "${missing_assets[@]}" \
+                --repo "$GITHUB_REPOSITORY"
+            fi
           else
             args=(--verify-tag --title "$title" --generate-notes)
             if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
@@ -201,8 +273,7 @@ jobs:
             ([.assets[].name] | sort) == $expected and
             ([.assets[].name] | length) == ([.assets[].name] | unique | length)
           ' <<< "$release" >/dev/null
-          download_directory="$RUNNER_TEMP/github-release-assets"
-          mkdir -p "$download_directory"
+          download_directory="$(mktemp -d "$RUNNER_TEMP/github-release-assets.XXXXXXXX")"
           gh release download "$GITHUB_REF_NAME" \
             --dir "$download_directory" \
             --repo "$GITHUB_REPOSITORY"

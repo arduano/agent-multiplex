@@ -11,12 +11,11 @@ import { delimiter, resolve } from "node:path";
 
 import {
   assert,
-  packageManifest,
   releasePackages,
   releaseVersion,
   repositoryRoot,
-  rootManifest,
 } from "./release-config.mjs";
+import { validateReleaseArtifactSet } from "./release-artifact-validation.mjs";
 
 const outputDirectory = resolve(repositoryRoot, process.argv[2] ?? "release-artifacts");
 const verifyRegistry = process.env.AGENT_MULTIPLEX_VERIFY_REGISTRY === "1";
@@ -24,118 +23,113 @@ assert(
   typeof process.env.NODE_AUTH_TOKEN === "string" && process.env.NODE_AUTH_TOKEN.length > 0,
   "NODE_AUTH_TOKEN with GitHub Packages read access is required",
 );
-const manifest = JSON.parse(
-  readFileSync(resolve(outputDirectory, "pack-manifest.json"), "utf8"),
-);
-assert(manifest.version === releaseVersion, "artifact version differs from source");
-assert(manifest.packages.length === releasePackages.length, "artifact set is incomplete");
+const { artifacts } = validateReleaseArtifactSet(outputDirectory);
 
 const publint = resolve(repositoryRoot, "node_modules/.bin/publint");
 const attw = resolve(repositoryRoot, "node_modules/.bin/attw");
-for (const artifact of manifest.packages) {
-  const tarball = resolve(outputDirectory, artifact.filename);
-  run(publint, [tarball, "--strict"]);
-  const entry = releasePackages.find(({ name }) => name === artifact.name);
-  assert(entry !== undefined, `unknown artifact ${artifact.name}`);
-  const packageJson = packageManifest(entry);
-  if (packageJson.types || containsTypesExport(packageJson.exports)) {
-    run(attw, [tarball, "--profile", "esm-only", "--no-definitely-typed"]);
+for (const artifact of artifacts) {
+  run(publint, [artifact.path, "--strict"]);
+  if (artifact.packageJson.types || containsTypesExport(artifact.packageJson.exports)) {
+    run(attw, [artifact.path, "--profile", "esm-only", "--no-definitely-typed"]);
   }
 }
 
-const directory = mkdtempSync(resolve(tmpdir(), "agent-multiplex-packed-consumer-"));
-try {
-  const installTargets = manifest.packages.map((artifact) => verifyRegistry
-    ? `${artifact.name}@${artifact.version}`
-    : resolve(outputDirectory, artifact.filename));
-  writeFileSync(resolve(directory, "package.json"), `${JSON.stringify({
-    name: "agent-multiplex-packed-consumer",
-    version: "0.0.0",
-    private: true,
-    type: "module",
-    allowScripts: {
-      "esbuild@0.25.12": true,
-      "esbuild@0.28.2": true,
-      "fsevents@2.3.3": false,
-      "koffi@3.2.1": true,
-      "msgpackr-extract@3.0.4": true,
-      "node-pty@1.1.0": true,
-    },
-    devDependencies: {
-      "@types/node": rootManifest.devDependencies["@types/node"],
-      "@types/ws": rootManifest.devDependencies["@types/ws"],
-    },
-  }, null, 2)}\n`);
-  const npmrc = [
-    "@arduano:registry=https://npm.pkg.github.com",
-    "fund=false",
-    "audit=false",
-    "strict-allow-scripts=true",
-    ...(process.env.NODE_AUTH_TOKEN
-      ? ["//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}"]
-      : []),
-    "",
-  ].join("\n");
-  const npmrcPath = resolve(directory, ".npmrc");
-  writeFileSync(npmrcPath, npmrc, { mode: 0o600 });
+for (const artifact of artifacts) verifyIsolatedConsumer(artifact);
 
-  run("npm", ["install", "--strict-allow-scripts", ...installTargets], {
-    cwd: directory,
-    env: { ...process.env, NPM_CONFIG_USERCONFIG: npmrcPath },
-  });
+console.log(`Verified ${artifacts.length} packed packages in role-isolated consumers.`);
 
-  const libraries = releasePackages.filter(({ workspace }) =>
-    workspace.startsWith("packages/") || workspace === "apps/web");
-  writeFileSync(
-    resolve(directory, "imports.mjs"),
-    `${libraries.map(({ name }, index) => `import * as package${index} from ${JSON.stringify(name)};`).join("\n")}\n` +
-      `${libraries.map((_, index) => `if (!Object.isFrozen(package${index})) void package${index};`).join("\n")}\n` +
-      `console.log("Imported ${libraries.length} release packages.");\n`,
-  );
-  run("node", ["imports.mjs"], { cwd: directory });
+function verifyIsolatedConsumer(subject) {
+  const directory = mkdtempSync(resolve(tmpdir(), "agent-multiplex-packed-consumer-"));
+  try {
+    const dependencies = verifyRegistry
+      ? { [subject.name]: subject.version }
+      : Object.fromEntries(
+        internalDependencyClosure(subject).map((artifact) => [
+          artifact.name,
+          `file:${artifact.path}`,
+        ]),
+      );
+    writeFileSync(
+      resolve(directory, "package.json"),
+      `${JSON.stringify({
+        name: `agent-multiplex-consumer-${safeName(subject.name)}`,
+        version: "0.0.0",
+        private: true,
+        type: "module",
+        allowScripts: {
+          "esbuild@0.25.12": true,
+          "esbuild@0.28.2": true,
+          "fsevents@2.3.3": false,
+          "koffi@3.2.1": true,
+          "msgpackr-extract@3.0.4": true,
+          "node-pty@1.1.0": true,
+        },
+        dependencies,
+      }, null, 2)}\n`,
+    );
+    const npmrc = [
+      "@arduano:registry=https://npm.pkg.github.com",
+      "fund=false",
+      "audit=false",
+      "strict-allow-scripts=true",
+      ...(process.env.NODE_AUTH_TOKEN
+        ? ["//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}"]
+        : []),
+      "",
+    ].join("\n");
+    const npmrcPath = resolve(directory, ".npmrc");
+    writeFileSync(npmrcPath, npmrc, { mode: 0o600 });
 
-  writeFileSync(
-    resolve(directory, "consumer.ts"),
-    `${libraries.map(({ name }, index) => `import type * as Package${index} from ${JSON.stringify(name)};`).join("\n")}\n` +
-      `${libraries.map((_, index) => `type Used${index} = keyof typeof Package${index};`).join("\n")}\n` +
-      `export type AllExports = [${libraries.map((_, index) => `Used${index}`).join(", ")}];\n`,
-  );
-  writeFileSync(resolve(directory, "tsconfig.json"), `${JSON.stringify({
-    compilerOptions: {
-      target: "ES2023",
-      module: "NodeNext",
-      moduleResolution: "NodeNext",
-      strict: true,
-      noEmit: true,
-      skipLibCheck: true,
-    },
-    files: ["consumer.ts"],
-  }, null, 2)}\n`);
-  run(process.execPath, [resolve(repositoryRoot, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.json"], {
-    cwd: directory,
-  });
+    run("npm", [
+      "install",
+      "--strict-allow-scripts",
+    ], {
+      cwd: directory,
+      env: { ...process.env, NPM_CONFIG_USERCONFIG: npmrcPath },
+      timeout: 300_000,
+    });
 
-  writeFileSync(
-    resolve(directory, "browser.mjs"),
-    `import { createAccessClient, launchRequest, watchAccess } from "@arduano/agent-multiplex-client";\n` +
-      `globalThis.__agentMultiplexBrowserSmoke = { createAccessClient, launchRequest, watchAccess };\n`,
-  );
-  run(resolve(repositoryRoot, "node_modules/.bin/esbuild"), [
-    "browser.mjs",
-    "--bundle",
-    "--platform=browser",
-    "--format=esm",
-    "--outfile=browser-bundle.mjs",
-    "--log-level=warning",
-  ], { cwd: directory });
-  const bundle = readFileSync(resolve(directory, "browser-bundle.mjs"), "utf8");
-  for (const forbidden of ["node:crypto", "node-pty", "@momics/iroh", "@arduano/p2prpc-core"]) {
-    assert(!bundle.includes(forbidden), `browser bundle contains native dependency ${forbidden}`);
-  }
+    if (subject.workspace.startsWith("packages/") || subject.workspace === "apps/web") {
+      writeFileSync(
+        resolve(directory, "imports.mjs"),
+        `import * as subject from ${JSON.stringify(subject.name)};\n` +
+          `if (typeof subject !== "object") throw new Error("package namespace was not loaded");\n`,
+      );
+      run("node", ["imports.mjs"], { cwd: directory });
+    }
 
-  for (const entry of releasePackages) {
-    const bins = packageManifest(entry).bin ?? {};
-    for (const name of Object.keys(bins)) {
+    if (subject.packageJson.types || containsTypesExport(subject.packageJson.exports)) {
+      writeFileSync(
+        resolve(directory, "consumer.ts"),
+        `import type * as Subject from ${JSON.stringify(subject.name)};\n` +
+          `export type PublicKeys = keyof typeof Subject;\n` +
+          declarationDependencyProbe(subject),
+      );
+      writeFileSync(resolve(directory, "tsconfig.json"), `${JSON.stringify({
+        compilerOptions: {
+          target: "ES2023",
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+          strict: true,
+          noEmit: true,
+          // @trpc/server@11.18.0's published ws adapter declaration is not
+          // internally strict-clean against @types/ws's ESM condition. ATTW
+          // validates our ESM surface; explicit probes below still ensure
+          // declaration-only Node/ws dependencies resolve in the consumer.
+          skipLibCheck: true,
+        },
+        files: ["consumer.ts"],
+      }, null, 2)}\n`);
+      run(process.execPath, [resolve(repositoryRoot, "node_modules/typescript/bin/tsc"), "-p", "tsconfig.json"], {
+        cwd: directory,
+      });
+    }
+
+    if (subject.name === "@arduano/agent-multiplex-client") {
+      verifyBrowserBundle(directory);
+    }
+
+    for (const name of Object.keys(subject.packageJson.bin ?? {})) {
       const executable = resolve(directory, "node_modules/.bin", name);
       chmodSync(executable, 0o755);
       run(executable, ["--help"], {
@@ -152,12 +146,68 @@ try {
         `${name} --version returned ${JSON.stringify(reportedVersion)} instead of ${releaseVersion}`,
       );
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
-} finally {
-  rmSync(directory, { recursive: true, force: true });
 }
 
-console.log(`Verified ${manifest.packages.length} packed packages in isolated consumers.`);
+function verifyBrowserBundle(directory) {
+  writeFileSync(
+    resolve(directory, "browser.mjs"),
+    `import { createAccessClient, launchRequest, watchAccess } from "@arduano/agent-multiplex-client/browser";\n` +
+      `globalThis.__agentMultiplexBrowserSmoke = { createAccessClient, launchRequest, watchAccess };\n`,
+  );
+  run(resolve(repositoryRoot, "node_modules/.bin/esbuild"), [
+    "browser.mjs",
+    "--bundle",
+    "--platform=browser",
+    "--format=esm",
+    "--outfile=browser-bundle.mjs",
+    "--log-level=warning",
+  ], { cwd: directory });
+  const bundle = readFileSync(resolve(directory, "browser-bundle.mjs"), "utf8");
+  for (const forbidden of ["node:crypto", "node-pty", "@momics/iroh", "@arduano/p2prpc-core"]) {
+    assert(!bundle.includes(forbidden), `browser bundle contains native dependency ${forbidden}`);
+  }
+}
+
+function internalDependencyClosure(subject) {
+  const byName = new Map(artifacts.map((artifact) => [artifact.name, artifact]));
+  const selected = new Set();
+  const pending = [subject.name];
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (selected.has(name)) continue;
+    const artifact = byName.get(name);
+    assert(artifact !== undefined, `${subject.name}: missing internal dependency artifact ${name}`);
+    selected.add(name);
+    for (const field of ["dependencies", "optionalDependencies", "peerDependencies"]) {
+      for (const dependency of Object.keys(artifact.packageJson[field] ?? {})) {
+        if (byName.has(dependency)) pending.push(dependency);
+      }
+    }
+  }
+  return releasePackages
+    .map(({ name }) => byName.get(name))
+    .filter((artifact) => artifact !== undefined && selected.has(artifact.name));
+}
+
+function safeName(name) {
+  return name.replace(/^@/, "").replaceAll(/[^a-z0-9-]+/g, "-");
+}
+
+function declarationDependencyProbe(subject) {
+  let source = "";
+  if (subject.packageJson.dependencies?.["@types/node"]) {
+    source += `import type { DatabaseSync } from "node:sqlite";\n` +
+      `type NodeDeclarationProbe = [DatabaseSync, NodeJS.ProcessEnv];\n`;
+  }
+  if (subject.packageJson.dependencies?.["@types/ws"]) {
+    source += `import type { WebSocket, WebSocketServer } from "ws";\n` +
+      `type WsDeclarationProbe = [WebSocket, WebSocketServer];\n`;
+  }
+  return source;
+}
 
 function containsTypesExport(value) {
   if (typeof value === "string" || value === null || value === undefined) return false;
@@ -171,6 +221,6 @@ function run(command, arguments_, options = {}) {
     cwd: options.cwd ?? repositoryRoot,
     env: options.env ?? process.env,
     stdio: "inherit",
-    timeout: 120_000,
+    timeout: options.timeout ?? 120_000,
   });
 }

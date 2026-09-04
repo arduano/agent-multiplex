@@ -17,6 +17,8 @@ import {
 import { describe, expect, it } from "vitest";
 
 class ScaleProcess implements TerminalProcess {
+  // Scale processes do not emit until after broker attachment.
+  readonly startupOutputComplete = true;
   readonly dataListeners = new Set<(data: string) => void>();
   readonly exitListeners = new Set<(exit: TerminalProcessExit) => void>();
   readonly writes: string[] = [];
@@ -112,7 +114,13 @@ describe("managed terminal scale", () => {
       })[Symbol.asyncIterator](),
     ));
     const resets = await Promise.all(viewers.map((viewer) => viewer.next()));
-    expect(resets.every((item) => item.done === false && item.value.kind === "reset")).toBe(true);
+    expect(resets.every((item) =>
+      item.done === false && item.value.kind === "replayStart"
+    )).toBe(true);
+    const replayEnds = await Promise.all(viewers.map((viewer) => viewer.next()));
+    expect(replayEnds.every((item) =>
+      item.done === false && item.value.kind === "replayEnd"
+    )).toBe(true);
 
     terminals.forEach((terminal) => {
       terminal.worker.provider.processes[terminal.terminalIndex]!

@@ -79,7 +79,14 @@ A bespoke gateway has four layers:
 3. `createAccessGatewayRouter` exposes the core access surface with action-scope
    middleware.
 4. The application mounts that router, optional domain routers, and its own
-   authentication in a tRPC HTTP/WebSocket server.
+   authentication in a tRPC HTTP/WebSocket server. Install
+   `installBoundedWebSocketEgress` from `@arduano/agent-multiplex-web` on the
+   `ws` server before tRPC's `applyWSSHandler`; stock tRPC does not impose an
+   egress byte ceiling for slow subscription clients. Construct the `ws`
+   server with `maxPayload: WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES` from the
+   same package so one inbound message is bounded too, and pass
+   `TRPC_HTTP_BODY_LIMIT_BYTES` as the tRPC HTTP handler's `maxBodySize` so
+   POST bodies are bounded at the same edge.
 
 The reference `apps/gateway` performs this composition for the stock web UI.
 Domain launch routers are application composition, not a dynamic extension

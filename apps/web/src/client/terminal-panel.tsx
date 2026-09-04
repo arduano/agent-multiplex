@@ -33,6 +33,7 @@ import {
 } from "@arduano/agent-multiplex-client/browser";
 import {
   newTerminalClientId,
+  TERMINAL_STREAM_BUFFER_ITEMS,
   type SessionRecord,
   type TerminalDescriptor,
   type TerminalDimensions,
@@ -46,6 +47,7 @@ import { errorMessage, useApi } from "./api.js";
 import {
   mergeTerminalLease,
   reconcileTerminalDescriptor,
+  reduceTerminalReplayView,
   shouldQueryTerminal,
   type TerminalSideChannelCapability,
 } from "./terminal-state.js";
@@ -508,7 +510,9 @@ function TerminalViewport({
   const fitRef = useRef<FitAddon | null>(null);
   const lastDimensions = useRef<TerminalDimensions>(terminal.dimensions);
   const resizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamReadyRef = useRef(false);
   const [streamState, setStreamState] = useState("connecting");
+  const [streamReady, setStreamReady] = useState(false);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -559,6 +563,7 @@ function TerminalViewport({
     fitRef.current = fit;
 
     const input = emulator.onData((data) => {
+      if (!streamReadyRef.current) return;
       const keyboard = keyboardRef.current;
       if (!keyboard || (keyboard.state.state !== "active" && keyboard.state.state !== "renewing")) return;
       void keyboard.write(data).catch((error: unknown) => {
@@ -570,6 +575,7 @@ function TerminalViewport({
       if (resizeTimer.current !== null) clearTimeout(resizeTimer.current);
       resizeTimer.current = setTimeout(() => {
         resizeTimer.current = null;
+        if (!streamReadyRef.current) return;
         const keyboard = keyboardRef.current;
         if (!keyboard || (keyboard.state.state !== "active" && keyboard.state.state !== "renewing")) return;
         void keyboard.resize(lastDimensions.current).catch((error: unknown) => {
@@ -592,8 +598,9 @@ function TerminalViewport({
   useEffect(() => {
     const emulator = xtermRef.current;
     if (!emulator) return;
-    emulator.options.disableStdin = !keyboardActive;
-    emulator.options.cursorBlink = keyboardActive;
+    emulator.options.disableStdin = !keyboardActive || !streamReady;
+    emulator.options.cursorBlink = keyboardActive && streamReady;
+    if (!streamReady) return;
     if (!keyboardActive) {
       if (
         emulator.cols !== terminal.dimensions.columns ||
@@ -617,12 +624,19 @@ function TerminalViewport({
       cancelAnimationFrame(frame);
       observer.disconnect();
     };
-  }, [keyboardActive, terminal.dimensions.columns, terminal.dimensions.rows]);
+  }, [keyboardActive, streamReady, terminal.dimensions.columns, terminal.dimensions.rows]);
 
   useEffect(() => {
     const emulator = xtermRef.current;
     if (!emulator) return;
     let active = true;
+    streamReadyRef.current = false;
+    setStreamReady(false);
+    const markReady = (): void => {
+      if (!active) return;
+      streamReadyRef.current = true;
+      setStreamReady(true);
+    };
     const write = (bytes: Uint8Array): Promise<void> => new Promise((resolve) => {
       if (!active) { resolve(); return; }
       emulator.write(bytes, resolve);
@@ -630,7 +644,9 @@ function TerminalViewport({
     const watcher = watchTerminal(client.terminals.attach, {
       target,
       terminalId: terminal.terminalId,
-      maxPendingItems: 2_048,
+      // One complete bounded replay plus equal live headroom. Intermediate
+      // p2prpc queues use the same protocol constant.
+      maxPendingItems: TERMINAL_STREAM_BUFFER_ITEMS,
       onStateChange: (state) => {
         if (!active) return;
         setStreamState(state.state);
@@ -639,9 +655,35 @@ function TerminalViewport({
       },
       onItem: async (item) => {
         if (!active) return;
+        if (item.kind === "replayStart") {
+          const replay = reduceTerminalReplayView({
+            ready: streamReadyRef.current,
+            dimensions: { columns: emulator.cols, rows: emulator.rows },
+            terminal: null,
+          }, item);
+          streamReadyRef.current = replay.ready;
+          setStreamReady(replay.ready);
+          emulator.reset();
+          resizeEmulator(emulator, replay.dimensions);
+          return;
+        }
+        if (item.kind === "replayEnd") {
+          const replay = reduceTerminalReplayView({
+            ready: streamReadyRef.current,
+            dimensions: { columns: emulator.cols, rows: emulator.rows },
+            terminal: null,
+          }, item);
+          resizeEmulator(emulator, replay.dimensions);
+          if (replay.terminal) onTerminal(replay.terminal);
+          markReady();
+          return;
+        }
         if (item.kind === "reset") {
+          streamReadyRef.current = false;
+          setStreamReady(false);
           emulator.reset();
           emulator.clear();
+          resizeEmulator(emulator, item.terminal.dimensions);
           onTerminal(item.terminal);
           await write(terminalBase64ToBytes(item.screenBase64));
           // A reset is the authoritative current screen for a newly attached
@@ -651,17 +693,31 @@ function TerminalViewport({
           // live edge once; subsequent user scrolling keeps normal xterm
           // follow semantics and is never forced back to the bottom here.
           if (active) emulator.scrollToBottom();
+          markReady();
           return;
         }
         if (item.kind === "output") {
           await write(terminalBase64ToBytes(item.dataBase64));
           return;
         }
-        if (item.kind === "changed") onTerminal(item.terminal);
+        if (item.kind === "resize") {
+          const replay = reduceTerminalReplayView({
+            ready: streamReadyRef.current,
+            dimensions: { columns: emulator.cols, rows: emulator.rows },
+            terminal: null,
+          }, item);
+          resizeEmulator(emulator, replay.dimensions);
+          return;
+        }
+        if (item.kind === "changed") {
+          resizeEmulator(emulator, item.terminal.dimensions);
+          onTerminal(item.terminal);
+        }
       },
     });
     return () => {
       active = false;
+      streamReadyRef.current = false;
       watcher.stop();
     };
   }, [client.terminals.attach, onError, onStreamState, onTerminal, target, terminal.terminalId]);
@@ -672,6 +728,18 @@ function TerminalViewport({
       <span className="sr-only" aria-live="polite">Terminal stream {streamState}</span>
     </div>
   );
+}
+
+function resizeEmulator(
+  emulator: XtermTerminal,
+  dimensions: TerminalDimensions,
+): void {
+  if (
+    emulator.cols !== dimensions.columns ||
+    emulator.rows !== dimensions.rows
+  ) {
+    emulator.resize(dimensions.columns, dimensions.rows);
+  }
 }
 
 /**

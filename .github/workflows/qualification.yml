@@ -26,15 +26,27 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           registry-url: https://npm.pkg.github.com
           scope: "@arduano"
+      - name: Install exact npm and verify toolchain
+        shell: bash
+        run: |
+          expected_node="$(<.node-version)"
+          expected_npm="$(jq -r '.packageManager | ltrimstr("npm@")' package.json)"
+          npm install --global --ignore-scripts "npm@$expected_npm"
+          test "$(node --version)" = "v$expected_node"
+          test "$(npm --version)" = "$expected_npm"
       - name: Install qualification prerequisites
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends ripgrep
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$chrome"
+          echo "AGENT_MULTIPLEX_CHROME_EXECUTABLE=$chrome" >> "$GITHUB_ENV"
+          echo "AGENT_MULTIPLEX_PLAYWRIGHT_MODULE=playwright-core" >> "$GITHUB_ENV"
       - name: Install and build
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}

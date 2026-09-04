@@ -213,8 +213,17 @@ independently valid UTF-8 text; clients must not split a code point across RPC
 frames, and runtimes reject malformed UTF-8 rather than silently substituting
 characters.
 
-The runtime retains only bounded replay frames and an in-memory synthesized
-screen. Terminal bytes, screens, cursors, subscriber buffers, and lease
+The runtime retains only a bounded raw output/resize timeline and an in-memory
+synthesized screen. A fresh viewer reconstructs exact terminal state from the
+raw opening-state timeline while it remains complete. If that timeline has
+expired or output was dropped before broker attachment, the runtime marks its
+serialized screen reset as synthesized. Exact replay has explicit start/end
+barriers; clients commit no intermediate cursor and restart the replay after
+disconnect or bounded-queue overflow. ANSI
+serialization is a best-effort visual recovery, not an exact cursor/mode
+checkpoint. Every descriptor-bearing stream frame binds its descriptor to the
+cursor's terminal identity and, except for the opening replay barrier, its exact
+sequence. Terminal bytes, screens, cursors, subscriber buffers, and lease
 credentials never enter any role's SQLite store, the control feed, source
 manifest/snapshot, metadata, normalized native events, chat history, or
 `readNativeHistory`. Restart therefore destroys terminal replay and leases.
@@ -279,6 +288,15 @@ positions and retained events. Session selection and `includeNative` are
 applied before the bounded subscriber mailbox, so an observer of one session is
 not backpressured by unrelated agent output. This journal is delivery state,
 not authoritative history; the harness app server remains the history owner.
+
+The maintained gateway and trusted-local control HTTP/WebSocket surfaces cap
+each complete HTTP request body, complete inbound WebSocket message, and
+socket's queued WebSocket egress at 8 MiB. An inbound peer or outbound response
+which crosses its bound is rejected or terminates only that connection; data is
+not silently dropped or retained in another unbounded application queue.
+Cursor-aware subscriptions reconnect and recover through the ordinary
+replay/gap rules. Bespoke HTTP edges must provide equivalent byte-bounded
+policies around both their tRPC HTTP and WebSocket adapters.
 
 ## Mutation routing
 

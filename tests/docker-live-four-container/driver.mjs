@@ -491,7 +491,8 @@ try {
       codexTerminalOpenedThroughUi: codexTerminal.openedThroughUi,
       codexTerminalUsedStockRemoteTui: codexTerminal.backend === "codex-remote",
       codexTerminalHadTwoReadOnlyViewers:
-        codexTerminal.secondObserver.attachedReadOnly === true,
+        codexTerminal.secondObserver.attachedReadOnly === true &&
+        codexTerminal.secondObserver.initialStateConverged === true,
       codexTerminalKeyboardLeaseAcquired:
         codexTerminal.keyboard.singleWriterObserved === true &&
         codexTerminal.keyboard.renewalObserved === true,
@@ -779,6 +780,13 @@ async function exerciseCodexTerminal(sessionId) {
       (await observerPage.getByTestId("terminal-stream-status").textContent())?.includes("Read only"),
       "second terminal viewer was not read-only before lease acquisition",
     );
+    await waitFor("late terminal viewer to reconstruct the exact initial state", 30_000, async () => {
+      const [operatorScreen, observerScreen] = await Promise.all([
+        terminalScreenText(page),
+        terminalScreenText(observerPage),
+      ]);
+      return operatorScreen.length > 10 && observerScreen === operatorScreen;
+    });
 
     const leaseAccessCheckpoint = accessCalls.length;
     await page.getByTestId("terminal-take-keyboard").click();
@@ -910,6 +918,7 @@ async function exerciseCodexTerminal(sessionId) {
       secondObserver: {
         client: "independent gateway web client",
         attachedReadOnly: true,
+        initialStateConverged: true,
         observedLeaseHeldElsewhere: true,
         observedExit: true,
       },
