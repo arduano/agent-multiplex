@@ -30,6 +30,11 @@ jobs:
           cache: npm
           registry-url: https://npm.pkg.github.com
           scope: "@arduano"
+      - name: Install qualification prerequisites
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ripgrep
       - name: Install and build
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
