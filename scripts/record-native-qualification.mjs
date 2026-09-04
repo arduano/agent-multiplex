@@ -17,6 +17,7 @@ import {
   releaseNodeVersion,
   repositoryRoot,
 } from "./release-config.mjs";
+import { isCanonicalUtcTimestamp } from "./canonical-utc-timestamp.mjs";
 
 const repository = "arduano/agent-multiplex";
 const repositoryOwner = "arduano";
@@ -1232,18 +1233,8 @@ function assertExactObject(actual, expected, label) {
 }
 
 function assertValidTimestamp(value, label) {
-  const pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}|\.\d{9})?Z$/;
-  const milliseconds = typeof value === "string" ? Date.parse(value) : Number.NaN;
-  const normalized = typeof value !== "string"
-    ? value
-    : !value.includes(".")
-      ? value.replace(/Z$/, ".000Z")
-      : value.replace(/\.(\d{3})\d{6}Z$/, ".$1Z");
   assert(
-    typeof value === "string" &&
-      pattern.test(value) &&
-      Number.isFinite(milliseconds) &&
-      new Date(milliseconds).toISOString() === normalized,
+    isCanonicalUtcTimestamp(value),
     `${label} is not a canonical UTC timestamp`,
   );
 }
