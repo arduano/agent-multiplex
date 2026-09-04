@@ -1,0 +1,140 @@
+name: Recover exact release dist-tags
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Signed stable release tag to promote (vMAJOR.MINOR.PATCH)"
+        required: true
+        type: string
+      evidence_artifact_id:
+        description: "Actions artifact ID containing the exact release package manifest"
+        required: true
+        type: string
+
+run-name: Recover dist-tags for ${{ inputs.release_tag }}
+
+concurrency:
+  # Share one repository-wide lock with every package publication.
+  group: agent-multiplex-registry-mutation
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+  packages: write
+
+jobs:
+  promote:
+    name: Verify exact bytes and promote latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out recovery policy from main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable signed tag on main
+        id: release
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          git fetch --no-tags origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          test "$(git cat-file -t "refs/tags/${RELEASE_TAG}")" = tag
+          git -c gpg.ssh.allowedSignersFile="$GITHUB_WORKSPACE/.github/release-signers" \
+            verify-tag "refs/tags/${RELEASE_TAG}"
+          release_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{}")"
+          [[ "$release_commit" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$release_commit" origin/main
+          tagged_source="$RUNNER_TEMP/tagged-source"
+          git worktree add --detach "$tagged_source" "$release_commit"
+          node_version="$(<"$tagged_source/.node-version")"
+          [[ "$node_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          printf 'commit=%s\n' "$release_commit" >> "$GITHUB_OUTPUT"
+          printf 'node=%s\n' "$node_version" >> "$GITHUB_OUTPUT"
+      - name: Download exact tagged publication evidence
+        env:
+          ARTIFACT_ID: ${{ inputs.evidence_artifact_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          [[ "$ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]
+          repository_id="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.id')"
+          [[ "$repository_id" =~ ^[1-9][0-9]*$ ]]
+          artifact="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}")"
+          run_id="$(jq -er \
+            --arg name "release-${RELEASE_TAG}" \
+            --arg sha "$RELEASE_COMMIT" \
+            --argjson repositoryId "$repository_id" '
+              select(
+                .name == $name and
+                .expired == false and
+                .workflow_run.head_sha == $sha and
+                .workflow_run.head_repository_id == $repositoryId
+              ) |
+              .workflow_run.id |
+              select(type == "number" and . > 0)
+            ' <<< "$artifact")"
+          run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+          jq -e \
+            --arg sha "$RELEASE_COMMIT" \
+            --arg tag "$RELEASE_TAG" '
+              .head_sha == $sha and
+              .head_branch == $tag and
+              .path == ".github/workflows/publish.yml" and
+              .event == "push" and
+              .status == "completed"
+            ' <<< "$run" >/dev/null
+          evidence_zip="$RUNNER_TEMP/release-evidence.zip"
+          evidence_directory="$RUNNER_TEMP/release-artifacts"
+          mkdir "$evidence_directory"
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" \
+            > "$evidence_zip"
+          while IFS= read -r entry; do
+            [[ "$entry" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]
+          done < <(unzip -Z1 "$evidence_zip")
+          unzip -q "$evidence_zip" -d "$evidence_directory"
+      - name: Set up the tagged release toolchain
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.release.outputs.node }}
+          registry-url: https://npm.pkg.github.com
+          scope: "@arduano"
+      - name: Verify tag manifests
+        env:
+          GITHUB_REF_NAME: ${{ inputs.release_tag }}
+        working-directory: ${{ runner.temp }}/tagged-source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected_node="$(<.node-version)"
+          expected_npm="$(jq -r '.packageManager | ltrimstr("npm@")' package.json)"
+          [[ "$expected_npm" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          npm install --global --ignore-scripts "npm@$expected_npm"
+          test "$(node --version)" = "v$expected_node"
+          test "$(npm --version)" = "$expected_npm"
+          node scripts/check-tag-version.mjs
+          node scripts/check-release.mjs
+      - name: Verify every registry byte and promote latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_COMMIT: ${{ steps.release.outputs.commit }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          node scripts/promote-exact-release.mjs
+          "$RUNNER_TEMP/tagged-source"
+          "$RUNNER_TEMP/release-artifacts"

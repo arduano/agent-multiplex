@@ -79,6 +79,10 @@ const publishWorkflow = readFileSync(
   resolve(repositoryRoot, ".github/workflows/publish.yml"),
   "utf8",
 );
+const promotionRecoveryWorkflow = readFileSync(
+  resolve(repositoryRoot, ".github/workflows/promote-exact-release.yml"),
+  "utf8",
+);
 const ciWorkflow = readFileSync(
   resolve(repositoryRoot, ".github/workflows/ci.yml"),
   "utf8",
@@ -114,6 +118,34 @@ assert(
     "all(.assets[].name; . as $name | $expected | index($name) != null)",
   ),
   "release recovery must reject unexpected assets before uploading missing ones",
+);
+assert(
+  /^\s+contents:\s+read\s*$/m.test(promotionRecoveryWorkflow) &&
+    /^\s+packages:\s+write\s*$/m.test(promotionRecoveryWorkflow) &&
+    !/^\s+(?:actions|attestations|id-token|statuses):\s+write\s*$/m.test(
+      promotionRecoveryWorkflow,
+    ),
+  "dist-tag recovery must retain least-privilege workflow permissions",
+);
+assert(
+  promotionRecoveryWorkflow.includes('test "$GITHUB_REF" = "refs/heads/main"') &&
+    promotionRecoveryWorkflow.includes('verify-tag "refs/tags/${RELEASE_TAG}"') &&
+    promotionRecoveryWorkflow.includes('git merge-base --is-ancestor "$release_commit" origin/main'),
+  "dist-tag recovery must require a signed stable tag on main",
+);
+assert(
+  promotionRecoveryWorkflow.includes("evidence_artifact_id:") &&
+    promotionRecoveryWorkflow.includes(".workflow_run.head_sha == $sha") &&
+    promotionRecoveryWorkflow.includes('.path == ".github/workflows/publish.yml"') &&
+    promotionRecoveryWorkflow.includes("actions/artifacts/${ARTIFACT_ID}/zip"),
+  "dist-tag recovery must bind exact evidence to the tagged publication run",
+);
+assert(
+  promotionRecoveryWorkflow.includes("scripts/promote-exact-release.mjs") &&
+    publishWorkflow.includes("group: agent-multiplex-registry-mutation") &&
+    promotionRecoveryWorkflow.includes("group: agent-multiplex-registry-mutation") &&
+    !/npm\s+(?:publish|unpublish|deprecate)\b/.test(promotionRecoveryWorkflow),
+  "dist-tag recovery must share the publish lock and contain no package publication path",
 );
 const registryPublisher = readFileSync(
   resolve(repositoryRoot, "scripts/publish-release.mjs"),

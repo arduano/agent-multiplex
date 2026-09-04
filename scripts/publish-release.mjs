@@ -13,6 +13,7 @@ import {
   validateArtifactBytes,
   validateReleaseArtifactSet,
 } from "./release-artifact-validation.mjs";
+import { readRegistryDistTags } from "./npm-registry-dist-tags.mjs";
 
 const outputDirectory = resolve(repositoryRoot, process.argv[2] ?? "release-artifacts");
 const token = process.env.NODE_AUTH_TOKEN;
@@ -57,8 +58,9 @@ for (const artifact of artifacts) {
 }
 
 // Do not move a stable tag until every package exists with the exact candidate
-// integrity. This keeps an interrupted release recoverable without exposing a
-// mixed-version latest graph.
+// integrity. This keeps an interrupted release recoverable and prevents any
+// latest movement before the complete artifact set is staged. Registry
+// dist-tags are still updated one package at a time.
 for (const artifact of staged) {
   validateArtifactBytes(outputDirectory, artifact);
   waitForIntegrity(artifact);
@@ -69,7 +71,7 @@ if (releaseVersion.includes("-")) {
 } else {
   const currentLatest = staged.map((artifact) => ({
     name: artifact.name,
-    version: registryDistTags(artifact.name).latest ?? null,
+    version: registryDistTags(artifact.name, artifact.version).latest ?? null,
   }));
   const newer = currentLatest.filter(({ version }) =>
     version !== null && compareSemver(version, releaseVersion) > 0
@@ -129,17 +131,12 @@ function registryIntegrity(name, version) {
   throw new Error(`npm view failed for ${name}@${version}: ${result.stderr.trim()}`);
 }
 
-function registryDistTags(name) {
-  const result = spawnSync(
-    "npm",
-    ["view", name, "dist-tags", "--json", "--registry", githubRegistry],
-    { cwd: repositoryRoot, encoding: "utf8", env: environment },
-  );
-  if (result.status !== 0) {
-    throw new Error(`npm view failed for ${name} dist-tags: ${result.stderr.trim()}`);
-  }
-  const value = JSON.parse(result.stdout);
-  assert(value !== null && typeof value === "object" && !Array.isArray(value), `${name}: registry returned invalid dist-tags`);
+function registryDistTags(name, version) {
+  const value = readRegistryDistTags(name, version, {
+    registry: githubRegistry,
+    cwd: repositoryRoot,
+    environment,
+  });
   for (const [tag, version] of Object.entries(value)) {
     assert(typeof version === "string", `${name}: registry returned invalid ${tag} tag`);
     parseSemver(version);

@@ -6,7 +6,8 @@ on:
       - "v*.*.*"
 
 concurrency:
-  group: publish-${{ github.ref }}
+  # npm dist-tags are repository-global mutable state, so releases serialize.
+  group: agent-multiplex-registry-mutation
   cancel-in-progress: false
 
 permissions:

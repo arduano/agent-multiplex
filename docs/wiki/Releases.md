@@ -160,7 +160,10 @@ and promotion boundaries. It publishes all packages under `next`, verifies
 their registry integrities, and only then promotes the whole set to `latest`.
 Prereleases remain on `next`. Rerunning an older stable tag verifies its bytes
 without moving `latest` backward; a mixed newer/older `latest` state fails
-closed instead of guessing how to repair it.
+closed instead of guessing how to repair it. npm applies dist-tag changes one
+package at a time, so consumers should pin exact versions during a promotion;
+an interruption can temporarily leave mixed `latest` selectors until the
+idempotent recovery pass completes.
 It then verifies each registry package in the same separate role-scoped
 consumer, reruns JavaScript, TypeScript, browser, and executable smoke tests,
 and requires public visibility for every package before creating the GitHub
@@ -172,6 +175,21 @@ settings on their first publication. If the visibility gate stops the run,
 change every package listed by the error to public and rerun the workflow for
 the same tag. Recovery verifies each immutable registry integrity instead of
 attempting to publish that version again.
+
+If a defect in an already-tagged publication workflow leaves every stable
+package intact under `next` but prevents the complete `latest` promotion, run the
+default-branch **Recover exact release dist-tags** workflow with the existing
+signed `vMAJOR.MINOR.PATCH` tag and the numeric ID of its retained release
+evidence artifact. The artifact ID avoids ambiguity between rerun artifacts
+with the same display name. This is a deliberately narrower escape hatch: it
+requires the artifact to belong to the completed tag-push publication run,
+matches its manifest and every tarball to the signed source, then requires every
+exact registry SHA-512 and `next` selector to match before changing any package.
+It refuses prerelease tags and refuses to move `latest` backward. An interrupted
+per-package promotion may be temporarily mixed but is idempotently recoverable;
+the final pass requires both `next` and `latest` to select the exact version for
+the complete manifest. The workflow never moves or recreates a tag and contains
+no package publication path.
 
 The GitHub Release keeps the tarballs, checksums, package manifest, SBOM, and
 publication receipt together. A rerun validates an existing release before
