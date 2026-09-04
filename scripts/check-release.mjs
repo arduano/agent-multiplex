@@ -130,7 +130,10 @@ assert(
 assert(
   promotionRecoveryWorkflow.includes('test "$GITHUB_REF" = "refs/heads/main"') &&
     promotionRecoveryWorkflow.includes('verify-tag "refs/tags/${RELEASE_TAG}"') &&
-    promotionRecoveryWorkflow.includes('git merge-base --is-ancestor "$release_commit" origin/main'),
+    promotionRecoveryWorkflow.includes('git merge-base --is-ancestor "$release_commit" origin/main') &&
+    promotionRecoveryWorkflow.includes(
+      'env -u GITHUB_REF_NAME node scripts/check-tag-version.mjs "$RELEASE_TAG"',
+    ),
   "dist-tag recovery must require a signed stable tag on main",
 );
 assert(

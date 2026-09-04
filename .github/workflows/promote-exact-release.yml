@@ -115,7 +115,7 @@ jobs:
           scope: "@arduano"
       - name: Verify tag manifests
         env:
-          GITHUB_REF_NAME: ${{ inputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         working-directory: ${{ runner.temp }}/tagged-source
         shell: bash
         run: |
@@ -126,7 +126,8 @@ jobs:
           npm install --global --ignore-scripts "npm@$expected_npm"
           test "$(node --version)" = "v$expected_node"
           test "$(npm --version)" = "$expected_npm"
-          node scripts/check-tag-version.mjs
+          # GitHub reserves GITHUB_REF_NAME as "main" for workflow_dispatch.
+          env -u GITHUB_REF_NAME node scripts/check-tag-version.mjs "$RELEASE_TAG"
           node scripts/check-release.mjs
       - name: Verify every registry byte and promote latest
         env:
