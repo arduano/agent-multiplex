@@ -7,6 +7,12 @@ import { ControlNodeCatalog } from "@arduano/agent-multiplex-control-node-core";
 import {
   newControlNodeId,
 } from "@arduano/agent-multiplex-protocol";
+import {
+  TRPC_HTTP_BODY_LIMIT_BYTES,
+  WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES,
+  WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+} from "@arduano/agent-multiplex-web";
+import WebSocket from "ws";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -220,6 +226,78 @@ describe("protocol-v4 control-node application configuration", () => {
       const asset = await fetch(`http://127.0.0.1:${port}${assetPath}`);
       expect(asset.status).toBe(200);
       expect(asset.headers.get("cache-control")).toContain("immutable");
+
+      const oversizedHttp = await fetch(
+        `http://127.0.0.1:${port}/trpc/sessions.refresh`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: Buffer.alloc(TRPC_HTTP_BODY_LIMIT_BYTES + 1),
+        },
+      );
+      expect(oversizedHttp.status).toBe(413);
+
+      const healthyHttp = await fetch(
+        `http://127.0.0.1:${port}/trpc/system.describe`,
+      );
+      expect(healthyHttp.status).toBe(200);
+      await expect(healthyHttp.json()).resolves.toMatchObject({
+        result: { data: { componentKind: "control-node" } },
+      });
+
+      const websocketUrl = `ws://127.0.0.1:${port}/trpc`;
+      const healthy = new WebSocket(websocketUrl);
+      await opened(healthy);
+      const healthyResponse = nextFrame(healthy);
+      healthy.send(JSON.stringify({
+        id: 1,
+        method: "query",
+        params: { path: "system.describe" },
+      }));
+      await expect(healthyResponse).resolves.toMatchObject({
+        result: { data: { componentKind: "control-node" } },
+      });
+      const healthyClosed = closed(healthy);
+      healthy.terminate();
+      await healthyClosed;
+
+      const slow = new WebSocket(websocketUrl);
+      await opened(slow);
+      const slowServerSocket = onlyOpenServerSocket(surface);
+      Object.defineProperty(slowServerSocket, "bufferedAmount", {
+        configurable: true,
+        value: WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES,
+      });
+      const slowClosed = closed(slow);
+      slow.send(JSON.stringify({
+        id: 2,
+        method: "query",
+        params: { path: "system.describe" },
+      }));
+      await expect(slowClosed).resolves.toBe(1006);
+
+      const oversizedInbound = new WebSocket(websocketUrl);
+      await opened(oversizedInbound);
+      const oversizedInboundClosed = closed(oversizedInbound);
+      oversizedInbound.send(
+        Buffer.alloc(WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES + 1),
+      );
+      await expect(oversizedInboundClosed).resolves.toBe(1009);
+
+      const healthyAfterOverflow = new WebSocket(websocketUrl);
+      await opened(healthyAfterOverflow);
+      const healthyAfterOverflowResponse = nextFrame(healthyAfterOverflow);
+      healthyAfterOverflow.send(JSON.stringify({
+        id: 3,
+        method: "query",
+        params: { path: "system.describe" },
+      }));
+      await expect(healthyAfterOverflowResponse).resolves.toMatchObject({
+        result: { data: { componentKind: "control-node" } },
+      });
+      const healthyAfterOverflowClosed = closed(healthyAfterOverflow);
+      healthyAfterOverflow.terminate();
+      await healthyAfterOverflowClosed;
     } finally {
       await surface.close();
       service.close();
@@ -228,3 +306,59 @@ describe("protocol-v4 control-node application configuration", () => {
     }
   });
 });
+
+interface WireFrame {
+  readonly result?: { readonly data?: unknown };
+  readonly error?: unknown;
+}
+
+function opened(socket: WebSocket): Promise<void> {
+  return new Promise((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+}
+
+function closed(socket: WebSocket): Promise<number> {
+  return new Promise((resolve, reject) => {
+    socket.once("close", resolve);
+    socket.once("error", reject);
+  });
+}
+
+function nextFrame(socket: WebSocket): Promise<WireFrame> {
+  return new Promise((resolve, reject) => {
+    const onMessage = (data: WebSocket.RawData): void => {
+      if (data.toString() === "PING") {
+        socket.send("PONG");
+        return;
+      }
+      cleanup();
+      try {
+        resolve(JSON.parse(data.toString()) as WireFrame);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(error);
+    };
+    const cleanup = (): void => {
+      socket.off("message", onMessage);
+      socket.off("error", onError);
+    };
+    socket.on("message", onMessage);
+    socket.on("error", onError);
+  });
+}
+
+function onlyOpenServerSocket(
+  surface: ReturnType<typeof createControlNodeHttpSurface>,
+): WebSocket {
+  const sockets = [...surface.webSockets.clients].filter(
+    (socket) => socket.readyState === WebSocket.OPEN,
+  );
+  expect(sockets).toHaveLength(1);
+  return sockets[0]!;
+}

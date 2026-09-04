@@ -80,13 +80,23 @@ Every terminal operation is fenced by session, runtime, binding revision, and
 runtime boot. The runtime holds:
 
 - the PTY process;
-- a bounded output mailbox and synthesized screen for reconnect;
+- a bounded raw output/resize timeline and synthesized fallback screen;
 - current viewers;
 - one short renewable keyboard/resize lease.
 
-Several observers may attach. Only the lease holder may send sequenced input or
-resize. Takeover is explicit and compares the currently visible lease. Slow
-viewers are disconnected instead of backpressuring the PTY.
+Several observers may attach. While the raw timeline is complete, a new viewer
+reconstructs the terminal from its opening dimensions and the exact ordered
+output/resize events. An explicit end barrier commits the replay high-water;
+partial replay is discarded and retried after disconnect or bounded-buffer
+overflow. Descriptor-bearing frames are self-fenced to their cursor's terminal
+identity and relevant sequence. A serialized screen reset is used when the
+bounded timeline expires or startup bytes were dropped, and is explicitly
+approximate. Copilot's experimental adapter-scoped PTY also uses a synthesized
+reset after a foreground-session switch: transition output is buffered for the
+new owner, but the hidden UI server cannot prove an exact native redraw
+boundary. Only the lease holder may send sequenced input or resize. Takeover
+is explicit and compares the currently visible lease. Slow viewers are
+disconnected instead of backpressuring the PTY.
 
 Terminal bytes, screen snapshots, and lease secrets are memory-only. They never
 enter SQLite, metadata, fleet snapshots, normalized native events, or native

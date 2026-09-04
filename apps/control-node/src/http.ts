@@ -11,7 +11,12 @@ import {
   type AccessRouter,
   type ControlNodeService,
 } from "@arduano/agent-multiplex-control-node-core";
-import { webAsset } from "@arduano/agent-multiplex-web";
+import {
+  installBoundedWebSocketEgress,
+  TRPC_HTTP_BODY_LIMIT_BYTES,
+  WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+  webAsset,
+} from "@arduano/agent-multiplex-web";
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
 import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
@@ -34,6 +39,7 @@ export function createControlNodeHttpSurface(
   const trpcHandler = createHTTPHandler({
     router,
     basePath: "/trpc/",
+    maxBodySize: TRPC_HTTP_BODY_LIMIT_BYTES,
     createContext: () => ({ trustedLocalAccess: true as const }),
   });
   const server = createServer((request, response) => {
@@ -45,7 +51,12 @@ export function createControlNodeHttpSurface(
     }
     serveWeb(request, response, styleNonce);
   });
-  const webSockets = new WebSocketServer({ server, path: "/trpc" });
+  const webSockets = new WebSocketServer({
+    server,
+    path: "/trpc",
+    maxPayload: WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+  });
+  installBoundedWebSocketEgress(webSockets);
   applyWSSHandler({
     wss: webSockets,
     router,

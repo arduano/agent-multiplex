@@ -1,7 +1,7 @@
 import { adapterScopeIdSchema, newRuntimeNodeBootId, newRuntimeNodeId,
   newCommandId, newLaunchId, newRuntimeEpoch, newSessionId, newTerminalClientId,
   newTerminalLeaseId, newTerminalLeaseRequestId,
-  type AdapterScopeId, type Harness, type SessionId } from "@arduano/agent-multiplex-protocol";
+  type AdapterScopeId, type Harness, type SessionId, type TerminalStreamItem } from "@arduano/agent-multiplex-protocol";
 import {
   RuntimeNodeService,
   RuntimeNodeStore,
@@ -18,9 +18,13 @@ import {
   type TerminalProviderOpenRequest,
 } from "@arduano/agent-multiplex-runtime-node-core";
 import type { IDisposable, IPty } from "node-pty";
+import { Terminal as HeadlessTerminal } from "@xterm/headless";
 import { describe, expect, it } from "vitest";
 
 class FakeProcess implements TerminalProcess {
+  // This fake installs no native source before the broker's listener, so it
+  // can explicitly prove that there is no missing startup output.
+  readonly startupOutputComplete = true;
   readonly writes: string[] = [];
   readonly resizes: Array<{ columns: number; rows: number }> = [];
   readonly dataListeners = new Set<(data: string) => void>();
@@ -50,6 +54,24 @@ class FakeProcess implements TerminalProcess {
   }
 }
 
+class HandoffFakeProcess extends FakeProcess {
+  readonly #pending: string[] = [];
+
+  public override onData(listener: (data: string) => void): () => void {
+    const dispose = super.onData(listener);
+    for (const data of this.#pending.splice(0)) listener(data);
+    return dispose;
+  }
+
+  public override emit(data: string): void {
+    if (this.dataListeners.size === 0) {
+      this.#pending.push(data);
+      return;
+    }
+    super.emit(data);
+  }
+}
+
 class FakeProvider implements TerminalProvider {
   readonly harness = "codex" as const;
   readonly backend = "mock" as const;
@@ -75,7 +97,7 @@ class FakeProvider implements TerminalProvider {
 }
 
 function fixture(options: { subscriberItemLimit?: number; leaseTtlMs?: number;
-  maxRunningTerminals?: number; replayByteLimit?: number } = {}) {
+  maxRunningTerminals?: number; replayByteLimit?: number; replayItemLimit?: number } = {}) {
   const adapterScopeId = adapterScopeIdSchema.parse("codex:test");
   const provider = new FakeProvider(adapterScopeId);
   const runtimeNodeId = newRuntimeNodeId();
@@ -111,6 +133,88 @@ function bindingForHarness(
   };
 }
 
+async function applyTerminalItem(
+  terminal: HeadlessTerminal,
+  item: TerminalStreamItem,
+): Promise<void> {
+  if (item.kind === "replayStart") {
+    terminal.reset();
+    terminal.resize(item.initialDimensions.columns, item.initialDimensions.rows);
+    return;
+  }
+  if (item.kind === "reset") {
+    terminal.reset();
+    terminal.resize(item.terminal.dimensions.columns, item.terminal.dimensions.rows);
+    await writeTerminal(terminal, Buffer.from(item.screenBase64, "base64"));
+    return;
+  }
+  if (item.kind === "output") {
+    await writeTerminal(terminal, Buffer.from(item.dataBase64, "base64"));
+    return;
+  }
+  if (item.kind === "resize") {
+    terminal.resize(item.dimensions.columns, item.dimensions.rows);
+    return;
+  }
+  if (item.kind === "changed") {
+    terminal.resize(item.terminal.dimensions.columns, item.terminal.dimensions.rows);
+  }
+}
+
+function writeTerminal(terminal: HeadlessTerminal, bytes: Uint8Array): Promise<void> {
+  return new Promise((resolve) => terminal.write(bytes, resolve));
+}
+
+function terminalState(terminal: HeadlessTerminal) {
+  const snapshotBuffer = (buffer: typeof terminal.buffer.active) => ({
+    type: buffer.type,
+    cursor: { x: buffer.cursorX, y: buffer.cursorY },
+    baseY: buffer.baseY,
+    viewportY: buffer.viewportY,
+    length: buffer.length,
+    lines: Array.from({ length: buffer.length }, (_, lineIndex) => {
+      const line = buffer.getLine(lineIndex);
+      return line === undefined ? null : {
+        isWrapped: line.isWrapped,
+        length: line.length,
+        cells: Array.from({ length: line.length }, (_, cellIndex) => {
+          const cell = line.getCell(cellIndex);
+          return cell === undefined ? null : {
+            chars: cell.getChars(),
+            width: cell.getWidth(),
+            code: cell.getCode(),
+            foreground: [cell.getFgColorMode(), cell.getFgColor()],
+            background: [cell.getBgColorMode(), cell.getBgColor()],
+            styles: [
+              cell.isBold(), cell.isItalic(), cell.isDim(), cell.isUnderline(),
+              cell.isBlink(), cell.isInverse(), cell.isInvisible(),
+              cell.isStrikethrough(), cell.isOverline(),
+            ],
+          };
+        }),
+      };
+    }),
+  });
+  return {
+    dimensions: { columns: terminal.cols, rows: terminal.rows },
+    activeBuffer: terminal.buffer.active.type,
+    normal: snapshotBuffer(terminal.buffer.normal),
+    alternate: snapshotBuffer(terminal.buffer.alternate),
+    modes: {
+      applicationCursorKeysMode: terminal.modes.applicationCursorKeysMode,
+      applicationKeypadMode: terminal.modes.applicationKeypadMode,
+      bracketedPasteMode: terminal.modes.bracketedPasteMode,
+      insertMode: terminal.modes.insertMode,
+      mouseTrackingMode: terminal.modes.mouseTrackingMode,
+      originMode: terminal.modes.originMode,
+      reverseWraparoundMode: terminal.modes.reverseWraparoundMode,
+      sendFocusMode: terminal.modes.sendFocusMode,
+      synchronizedOutputMode: terminal.modes.synchronizedOutputMode,
+      wraparoundMode: terminal.modes.wraparoundMode,
+    },
+  };
+}
+
 describe("TerminalBroker", () => {
   it("supports many viewers and one retry-safe keyboard lease", async () => {
     const { broker, provider, binding } = fixture();
@@ -122,8 +226,10 @@ describe("TerminalBroker", () => {
     const terminalId = opened.terminal.terminalId;
     const first = broker.attach({ ...binding.target, terminalId })[Symbol.asyncIterator]();
     const second = broker.attach({ ...binding.target, terminalId })[Symbol.asyncIterator]();
-    expect((await first.next()).value?.kind).toBe("reset");
-    expect((await second.next()).value?.kind).toBe("reset");
+    expect((await first.next()).value?.kind).toBe("replayStart");
+    expect((await second.next()).value?.kind).toBe("replayStart");
+    expect((await first.next()).value?.kind).toBe("replayEnd");
+    expect((await second.next()).value?.kind).toBe("replayEnd");
 
     provider.opened[0]!.emit("hello\r\n");
     expect(await first.next()).toMatchObject({ value: { kind: "output" }, done: false });
@@ -192,6 +298,146 @@ describe("TerminalBroker", () => {
     await broker.close();
   });
 
+  it("reconstructs a late viewer from exact raw output before incremental fanout", async () => {
+    const { broker, provider, binding } = fixture();
+    const dimensions = { columns: 10, rows: 5 };
+    const opened = await broker.open(binding, {
+      ...binding.target,
+      terminalClientId: newTerminalClientId(),
+      dimensions,
+    });
+    if (opened.status !== "opened") throw new Error("expected terminal to open");
+    const terminalId = opened.terminal.terminalId;
+    const earlyTerminal = new HeadlessTerminal({
+      cols: dimensions.columns,
+      rows: dimensions.rows,
+      scrollback: 100,
+      allowProposedApi: true,
+    });
+    const lateTerminal = new HeadlessTerminal({
+      cols: dimensions.columns,
+      rows: dimensions.rows,
+      scrollback: 100,
+      allowProposedApi: true,
+    });
+    const early = broker.attach({
+      ...binding.target,
+      terminalId,
+    })[Symbol.asyncIterator]();
+    await applyTerminalItem(earlyTerminal, (await early.next()).value!);
+    expect(await early.next()).toMatchObject({
+      value: { kind: "replayEnd", cursor: { sequence: 0 } },
+      done: false,
+    });
+
+    // This cursor-positioning sequence is not reproduced faithfully by
+    // SerializeAddon. A raw opening-state replay must preserve it exactly.
+    provider.opened[0]!.emit("abcdefghij\x1b[5;9H");
+    await applyTerminalItem(earlyTerminal, (await early.next()).value!);
+    expect(earlyTerminal.buffer.active.cursorX).toBe(8);
+
+    const late = broker.attach({
+      ...binding.target,
+      terminalId,
+    })[Symbol.asyncIterator]();
+    const replayStart = await late.next();
+    expect(replayStart).toMatchObject({
+      done: false,
+      value: {
+        kind: "replayStart",
+        cursor: { terminalId, sequence: 0 },
+        initialDimensions: dimensions,
+        terminal: { terminalId, sequence: 1, dimensions },
+      },
+    });
+    await applyTerminalItem(lateTerminal, replayStart.value!);
+    await applyTerminalItem(lateTerminal, (await late.next()).value!);
+    expect(await late.next()).toMatchObject({
+      value: { kind: "replayEnd", cursor: { sequence: 1 } },
+      done: false,
+    });
+    expect(lateTerminal.buffer.active.cursorX).toBe(8);
+    expect(terminalState(lateTerminal)).toEqual(terminalState(earlyTerminal));
+
+    provider.opened[0]!.emit("Z");
+    await applyTerminalItem(earlyTerminal, (await early.next()).value!);
+    await applyTerminalItem(lateTerminal, (await late.next()).value!);
+    expect(terminalState(lateTerminal)).toEqual(terminalState(earlyTerminal));
+
+    // Exercise modes, styled cells, the alternate buffer, and an ordered
+    // resize, then reconstruct those independently in a third emulator.
+    const terminalClientId = newTerminalClientId();
+    const lease = broker.acquire({
+      ...binding.target,
+      terminalId,
+      terminalClientId,
+      requestId: newTerminalLeaseRequestId(),
+    });
+    await applyTerminalItem(earlyTerminal, (await early.next()).value!);
+    await applyTerminalItem(lateTerminal, (await late.next()).value!);
+    const resized = { columns: 12, rows: 6 };
+    broker.input({
+      ...binding.target,
+      terminalId,
+      terminalClientId,
+      credential: lease.credential,
+      inputSequence: 0,
+      kind: "resize",
+      dimensions: resized,
+    });
+    await applyTerminalItem(earlyTerminal, (await early.next()).value!);
+    await applyTerminalItem(lateTerminal, (await late.next()).value!);
+    provider.opened[0]!.emit(
+      "\x1b[?1049h\x1b[2J\x1b[H\x1b[1;38;2;12;34;56mwide界\x1b[?2004h",
+    );
+    await applyTerminalItem(earlyTerminal, (await early.next()).value!);
+    await applyTerminalItem(lateTerminal, (await late.next()).value!);
+
+    const replayedTerminal = new HeadlessTerminal({
+      cols: dimensions.columns,
+      rows: dimensions.rows,
+      scrollback: 100,
+      allowProposedApi: true,
+    });
+    const replayed = broker.attach({
+      ...binding.target,
+      terminalId,
+    })[Symbol.asyncIterator]();
+    const resizedReplayStart = await replayed.next();
+    expect(resizedReplayStart).toMatchObject({
+      done: false,
+      value: {
+        kind: "replayStart",
+        cursor: { terminalId, sequence: 0 },
+        initialDimensions: dimensions,
+        terminal: { terminalId, sequence: 5, dimensions: resized },
+      },
+    });
+    await applyTerminalItem(replayedTerminal, resizedReplayStart.value!);
+    await applyTerminalItem(replayedTerminal, (await replayed.next()).value!);
+    const replayResize = await replayed.next();
+    expect(replayResize).toMatchObject({
+      value: { kind: "resize", cursor: { sequence: 4 }, dimensions: resized },
+      done: false,
+    });
+    await applyTerminalItem(replayedTerminal, replayResize.value!);
+    await applyTerminalItem(replayedTerminal, (await replayed.next()).value!);
+    expect(await replayed.next()).toMatchObject({
+      value: { kind: "replayEnd", cursor: { sequence: 5 } },
+      done: false,
+    });
+    expect(terminalState(replayedTerminal)).toEqual(terminalState(earlyTerminal));
+    expect(terminalState(lateTerminal)).toEqual(terminalState(earlyTerminal));
+
+    await early.return?.();
+    await late.return?.();
+    await replayed.return?.();
+    earlyTerminal.dispose();
+    lateTerminal.dispose();
+    replayedTerminal.dispose();
+    await broker.close();
+  });
+
   it("requires an exact lease CAS for takeover and expires leases", async () => {
     const { broker, binding } = fixture({ leaseTtlMs: 20 });
     const opened = await broker.open(binding, {
@@ -253,13 +499,58 @@ describe("TerminalBroker", () => {
     expect(await replay.next()).toMatchObject({ value: { kind: "output", cursor: { sequence: 2 } } });
 
     const slow = broker.attach({ ...binding.target, terminalId })[Symbol.asyncIterator]();
-    expect((await slow.next()).value?.kind).toBe("reset");
+    expect((await slow.next()).value?.kind).toBe("replayStart");
+    expect(await slow.next()).toMatchObject({
+      value: { kind: "output", cursor: { sequence: 2 } },
+      done: false,
+    });
+    expect(await slow.next()).toMatchObject({
+      value: { kind: "replayEnd", cursor: { sequence: 2 } },
+      done: false,
+    });
     provider.opened[0]!.emit("fills buffer");
     provider.opened[0]!.emit("overflow");
     expect((await slow.next()).value?.kind).toBe("output");
     await expect(slow.next()).rejects.toBeInstanceOf(TerminalSubscriberOverflowError);
 
     await replay.return?.();
+    await broker.close();
+  });
+
+  it("delivers retained cursor catch-up without consuming the live subscriber mailbox", async () => {
+    const { broker, provider, binding } = fixture({
+      subscriberItemLimit: 1,
+      replayItemLimit: 16,
+    });
+    const opened = await broker.open(binding, {
+      ...binding.target,
+      terminalClientId: newTerminalClientId(),
+    });
+    if (opened.status !== "opened") throw new Error("expected terminal to open");
+    const terminalId = opened.terminal.terminalId;
+    for (let sequence = 1; sequence <= 12; sequence += 1) {
+      provider.opened[0]!.emit(String(sequence % 10));
+    }
+
+    const catchUp = broker.attach({
+      ...binding.target,
+      terminalId,
+      cursor: { terminalId, sequence: 0 },
+    })[Symbol.asyncIterator]();
+    const sequences: number[] = [];
+    for (let count = 0; count < 12; count += 1) {
+      const item = await catchUp.next();
+      expect(item.done).toBe(false);
+      sequences.push(item.value!.cursor.sequence);
+    }
+    expect(sequences).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+
+    provider.opened[0]!.emit("live");
+    await expect(catchUp.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "output", cursor: { sequence: 13 } },
+    });
+    await catchUp.return?.();
     await broker.close();
   });
 
@@ -291,7 +582,113 @@ describe("TerminalBroker", () => {
     await broker.close();
   });
 
-  it("includes control-only state in a reset without waiting for an xterm callback", async () => {
+  it("fails closed to synthesized recovery when a process omits startup proof", async () => {
+    const adapterScopeId = adapterScopeIdSchema.parse("codex:unproven-startup");
+    const runtimeNodeId = newRuntimeNodeId();
+    const binding = bindingFor(newSessionId(), runtimeNodeId, adapterScopeId);
+    const process = new FakeProcess();
+    // Exercise the runtime boundary against an outdated/untyped provider. The
+    // TypeScript contract requires an explicit boolean, but runtime fidelity
+    // still fails closed if a JavaScript implementation omits the proof.
+    const unprovenProcess = process as FakeProcess & {
+      startupOutputComplete?: boolean;
+    };
+    delete unprovenProcess.startupOutputComplete;
+    const provider: TerminalProvider = {
+      harness: "codex",
+      adapterScopeId,
+      backend: "mock",
+      sharing: "session",
+      capabilities: {
+        write: true,
+        resize: true,
+        terminate: true,
+        restart: true,
+        foregroundSwitch: false,
+      },
+      open: async () => unprovenProcess as TerminalProcess,
+      close: async () => undefined,
+    };
+    const broker = new TerminalBroker({
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      providers: [provider],
+    });
+    const opened = await broker.open(binding, {
+      ...binding.target,
+      terminalClientId: newTerminalClientId(),
+    });
+    if (opened.status !== "opened") throw new Error("expected terminal to open");
+
+    const stream = broker.attach({
+      ...binding.target,
+      terminalId: opened.terminal.terminalId,
+    })[Symbol.asyncIterator]();
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: {
+        kind: "reset",
+        reason: "initial",
+        fidelity: "synthesized",
+      },
+    });
+
+    await stream.return?.();
+    await broker.close();
+  });
+
+  it("uses synthesized recovery when the PTY startup buffer dropped opening bytes", async () => {
+    const adapterScopeId = adapterScopeIdSchema.parse("codex:truncated-startup");
+    const runtimeNodeId = newRuntimeNodeId();
+    const binding = bindingFor(newSessionId(), runtimeNodeId, adapterScopeId);
+    const pty = new FakePty();
+    const process = terminalProcessFromPty(pty as unknown as IPty);
+    const startupChunk = "x".repeat(600 * 1_024);
+    pty.emitData(startupChunk);
+    pty.emitData(startupChunk);
+    expect(process.startupOutputComplete).toBe(false);
+    const provider: TerminalProvider = {
+      harness: "codex",
+      adapterScopeId,
+      backend: "mock",
+      sharing: "session",
+      capabilities: {
+        write: true,
+        resize: true,
+        terminate: true,
+        restart: true,
+        foregroundSwitch: false,
+      },
+      open: async () => process,
+      close: async () => undefined,
+    };
+    const broker = new TerminalBroker({
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      providers: [provider],
+    });
+    const opened = await broker.open(binding, {
+      ...binding.target,
+      terminalClientId: newTerminalClientId(),
+    });
+    if (opened.status !== "opened") throw new Error("expected terminal to open");
+
+    const stream = broker.attach({
+      ...binding.target,
+      terminalId: opened.terminal.terminalId,
+    })[Symbol.asyncIterator]();
+    await expect(stream.next()).resolves.toMatchObject({
+      done: false,
+      value: {
+        kind: "reset",
+        reason: "initial",
+        fidelity: "synthesized",
+      },
+    });
+
+    await stream.return?.();
+    await broker.close();
+  });
+
+  it("includes current control-only state in an exact replay preamble", async () => {
     const { broker, binding } = fixture();
     const opened = await broker.open(binding, {
       ...binding.target,
@@ -309,7 +706,15 @@ describe("TerminalBroker", () => {
     const stream = broker.attach({ ...binding.target, terminalId })[Symbol.asyncIterator]();
     await expect(stream.next()).resolves.toMatchObject({
       value: {
-        kind: "reset",
+        kind: "replayStart",
+        cursor: { sequence: 0 },
+        terminal: { sequence: 1, lease: { terminalClientId: expect.any(String) } },
+      },
+      done: false,
+    });
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        kind: "replayEnd",
         cursor: { sequence: 1 },
         terminal: { sequence: 1, lease: { terminalClientId: expect.any(String) } },
       },
@@ -343,7 +748,15 @@ describe("TerminalBroker", () => {
       await expect(stream.next()).resolves.toMatchObject({
         done: false,
         value: {
-          kind: "reset",
+          kind: "replayStart",
+          cursor: { sequence: 0 },
+          terminal: { sequence: 2, lease: null },
+        },
+      });
+      await expect(stream.next()).resolves.toMatchObject({
+        done: false,
+        value: {
+          kind: "replayEnd",
           cursor: { sequence: 2 },
           terminal: { sequence: 2, lease: null },
         },
@@ -375,7 +788,8 @@ describe("TerminalBroker", () => {
     })).rejects.toMatchObject({ code: "RESOURCE_EXHAUSTED" });
 
     const stream = broker.attach({ ...binding.target, terminalId })[Symbol.asyncIterator]();
-    expect((await stream.next()).value?.kind).toBe("reset");
+    expect((await stream.next()).value?.kind).toBe("replayStart");
+    expect((await stream.next()).value?.kind).toBe("replayEnd");
     broker.invalidateSession(binding.target.sessionId, "binding retired");
     expect(await stream.next()).toMatchObject({ value: { kind: "changed", terminal: {
       state: "exited", exit: { message: "binding retired" },
@@ -468,7 +882,8 @@ describe("TerminalBroker", () => {
       ...firstBinding.target,
       terminalId: first.terminal.terminalId,
     })[Symbol.asyncIterator]();
-    expect((await firstStream.next()).value?.kind).toBe("reset");
+    expect((await firstStream.next()).value?.kind).toBe("replayStart");
+    expect((await firstStream.next()).value?.kind).toBe("replayEnd");
 
     await expect(broker.open(secondBinding, {
       ...secondBinding.target,
@@ -488,6 +903,7 @@ describe("TerminalBroker", () => {
     expect(second.terminal.terminalId).not.toBe(first.terminal.terminalId);
     expect(provider.opens).toHaveLength(2);
     expect(provider.opens[1]).toMatchObject({ foregroundSwitch: true });
+    expect(provider.foregroundSwitchListenerCounts).toEqual([0]);
     expect(await firstStream.next()).toMatchObject({
       value: {
         kind: "changed",
@@ -505,7 +921,14 @@ describe("TerminalBroker", () => {
       ...secondBinding.target,
       terminalId: second.terminal.terminalId,
     })[Symbol.asyncIterator]();
-    expect((await secondStream.next()).value?.kind).toBe("reset");
+    const handoff = await secondStream.next();
+    expect(handoff).toMatchObject({
+      value: { kind: "reset", reason: "initial", fidelity: "synthesized" },
+      done: false,
+    });
+    if (handoff.value?.kind !== "reset") throw new Error("expected synthesized handoff reset");
+    expect(Buffer.from(handoff.value.screenBase64, "base64").toString("utf8"))
+      .toContain("foreground transition redraw");
     provider.process.emit("shared process remains attached");
     expect(await secondStream.next()).toMatchObject({
       value: { kind: "output" },
@@ -516,6 +939,132 @@ describe("TerminalBroker", () => {
     await broker.close();
     expect(provider.process.kills).toBe(0);
     expect(provider.closes).toBe(1);
+  });
+
+  it("rejects an adapter-scoped foreground switch that replaces its native process", async () => {
+    const adapterScopeId = adapterScopeIdSchema.parse("copilot:replacement-foreground");
+    const provider = new ReplacingSharedFakeProvider(adapterScopeId);
+    const runtimeNodeId = newRuntimeNodeId();
+    const broker = new TerminalBroker({
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      providers: [provider],
+      maxRunningTerminals: 1,
+    });
+    const firstBinding = bindingForHarness(
+      "copilot",
+      newSessionId(),
+      runtimeNodeId,
+      adapterScopeId,
+    );
+    const secondBinding = bindingForHarness(
+      "copilot",
+      newSessionId(),
+      runtimeNodeId,
+      adapterScopeId,
+    );
+    const first = await broker.open(firstBinding, {
+      ...firstBinding.target,
+      terminalClientId: newTerminalClientId(),
+    });
+    if (first.status !== "opened") throw new Error("expected first foreground to open");
+
+    await expect(broker.open(secondBinding, {
+      ...secondBinding.target,
+      terminalClientId: newTerminalClientId(),
+      confirmForegroundSwitch: true,
+      expectedTerminalId: first.terminal.terminalId,
+    })).rejects.toThrow("returned another native process");
+    expect(provider.process.dataListeners.size).toBe(1);
+    expect(provider.replacement.kills).toBe(0);
+    expect(broker.get(firstBinding.target)?.terminalId).toBe(first.terminal.terminalId);
+    expect(broker.get(secondBinding.target)).toBeNull();
+
+    await broker.close();
+  });
+
+  it("invalidates exact replay when a failed foreground switch truncates PTY handoff", async () => {
+    const adapterScopeId = adapterScopeIdSchema.parse("copilot:failed-truncated-handoff");
+    const runtimeNodeId = newRuntimeNodeId();
+    const pty = new FakePty();
+    const process = terminalProcessFromPty(pty as unknown as IPty);
+    const transitionChunk = "x".repeat(600 * 1_024);
+    const provider: TerminalProvider = {
+      harness: "copilot",
+      adapterScopeId,
+      backend: "mock",
+      sharing: "adapterScope",
+      capabilities: {
+        write: true,
+        resize: true,
+        terminate: false,
+        restart: false,
+        foregroundSwitch: true,
+      },
+      open: async (request) => {
+        if (!request.foregroundSwitch) return process;
+        // The current logical owner is paused while the provider switches. The
+        // real PTY wrapper retains a bounded tail and marks the opening state
+        // incomplete when this transition exceeds it.
+        pty.emitData(transitionChunk);
+        pty.emitData(transitionChunk);
+        throw new Error("native foreground switch failed");
+      },
+      close: async () => undefined,
+    };
+    const broker = new TerminalBroker({
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      providers: [provider],
+      maxRunningTerminals: 1,
+    });
+    const firstBinding = bindingForHarness(
+      "copilot",
+      newSessionId(),
+      runtimeNodeId,
+      adapterScopeId,
+    );
+    const secondBinding = bindingForHarness(
+      "copilot",
+      newSessionId(),
+      runtimeNodeId,
+      adapterScopeId,
+    );
+    const first = await broker.open(firstBinding, {
+      ...firstBinding.target,
+      terminalClientId: newTerminalClientId(),
+    });
+    if (first.status !== "opened") throw new Error("expected first foreground to open");
+
+    const before = broker.attach({
+      ...firstBinding.target,
+      terminalId: first.terminal.terminalId,
+    })[Symbol.asyncIterator]();
+    expect((await before.next()).value?.kind).toBe("replayStart");
+    expect((await before.next()).value?.kind).toBe("replayEnd");
+    await before.return?.();
+
+    await expect(broker.open(secondBinding, {
+      ...secondBinding.target,
+      terminalClientId: newTerminalClientId(),
+      confirmForegroundSwitch: true,
+      expectedTerminalId: first.terminal.terminalId,
+    })).rejects.toThrow("native foreground switch failed");
+    expect(process.startupOutputComplete).toBe(false);
+    expect(broker.get(firstBinding.target)?.terminalId).toBe(first.terminal.terminalId);
+
+    const after = broker.attach({
+      ...firstBinding.target,
+      terminalId: first.terminal.terminalId,
+    })[Symbol.asyncIterator]();
+    await expect(after.next()).resolves.toMatchObject({
+      done: false,
+      value: {
+        kind: "reset",
+        reason: "initial",
+        fidelity: "synthesized",
+      },
+    });
+    await after.return?.();
+    await broker.close();
   });
 });
 
@@ -572,7 +1121,8 @@ describe("RuntimeNodeService terminal lifecycle", () => {
         ...target,
         terminalId: opened.terminal.terminalId,
       })[Symbol.asyncIterator]();
-      expect((await stream.next()).value?.kind).toBe("reset");
+      expect((await stream.next()).value?.kind).toBe("replayStart");
+      expect((await stream.next()).value?.kind).toBe("replayEnd");
 
       await expect(service.stop({
         operation: "stop",
@@ -711,18 +1261,33 @@ class SharedFakeProvider implements TerminalProvider {
     restart: false,
     foregroundSwitch: true,
   } as const;
-  public readonly process = new FakeProcess();
+  public readonly process = new HandoffFakeProcess();
   public readonly opens: TerminalProviderOpenRequest[] = [];
+  public readonly foregroundSwitchListenerCounts: number[] = [];
   public closes = 0;
 
   public constructor(public readonly adapterScopeId: AdapterScopeId) {}
 
   public async open(request: TerminalProviderOpenRequest): Promise<TerminalProcess> {
     this.opens.push(request);
+    if (request.foregroundSwitch) {
+      this.foregroundSwitchListenerCounts.push(this.process.dataListeners.size);
+      this.process.emit("foreground transition redraw");
+    }
     return this.process;
   }
 
   public async close(): Promise<void> { this.closes += 1; }
+}
+
+class ReplacingSharedFakeProvider extends SharedFakeProvider {
+  public readonly replacement = new FakeProcess();
+
+  public override async open(request: TerminalProviderOpenRequest): Promise<TerminalProcess> {
+    if (!request.foregroundSwitch) return super.open(request);
+    this.opens.push(request);
+    return this.replacement;
+  }
 }
 
 class GateProvider extends FakeProvider {

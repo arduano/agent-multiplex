@@ -33,6 +33,7 @@
     "@arduano/agent-multiplex-control-node-core": "0.1.0",
     "@arduano/agent-multiplex-protocol": "0.1.0",
     "@arduano/agent-multiplex-runtime-node-core": "0.1.0",
-    "@arduano/agent-multiplex-transport-p2prpc": "0.1.0"
+    "@arduano/agent-multiplex-transport-p2prpc": "0.1.0",
+    "@types/node": "24.3.0"
   }
 }

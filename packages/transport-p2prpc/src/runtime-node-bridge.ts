@@ -1,5 +1,6 @@
 import { P2PError, type Peer } from "@arduano/p2prpc-core";
 import type { RuntimeNodeConnection } from "@arduano/agent-multiplex-control-node-core";
+import { TERMINAL_STREAM_BUFFER_ITEMS } from "@arduano/agent-multiplex-protocol";
 import type {
   ArchiveOperationId,
   ArchiveRecord,
@@ -325,7 +326,7 @@ function terminalSubscriptionAsAsyncIterable(
   request: TerminalAttachInput,
   signal?: AbortSignal,
 ): AsyncIterable<TerminalStreamItem> {
-  const capacity = 4_096;
+  const capacity = TERMINAL_STREAM_BUFFER_ITEMS;
   return {
     [Symbol.asyncIterator](): AsyncIterator<TerminalStreamItem> {
       const values: TerminalStreamItem[] = [];

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   TERMINAL_MAX_FRAME_BYTES,
+  newRuntimeNodeBootId,
   newRuntimeNodeId,
   newSessionId,
   newTerminalClientId,
@@ -10,6 +11,7 @@ import {
   terminalAttachInputSchema,
   terminalInputSchema,
   terminalLeaseAcquireInputSchema,
+  terminalStreamItemSchema,
   terminalTerminateInputSchema,
 } from "../src/index.js";
 
@@ -35,6 +37,153 @@ describe("managed terminal protocol", () => {
       cursor: { terminalId: newTerminalId(), sequence: 12 },
     }).success).toBe(false);
   });
+
+  it("distinguishes exact opening-state replay from synthesized resets", () => {
+    const terminalId = newTerminalId();
+    const terminalTarget = target();
+    const openedAt = "2026-09-04T00:00:00.000Z";
+    const terminal = {
+      ...terminalTarget,
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      terminalId,
+      backend: "codex-remote" as const,
+      sharing: "session" as const,
+      foregroundSessionId: null,
+      state: "running" as const,
+      dimensions: { columns: 120, rows: 40 },
+      sequence: 7,
+      lease: null,
+      capabilities: {
+        write: true,
+        resize: true,
+        terminate: true,
+        restart: true,
+        foregroundSwitch: false,
+      },
+      openedAt,
+      updatedAt: openedAt,
+      exit: null,
+    };
+
+    expect(terminalStreamItemSchema.safeParse({
+      kind: "replayStart",
+      cursor: { terminalId, sequence: 0 },
+      initialDimensions: { columns: 80, rows: 24 },
+      terminal,
+    }).success).toBe(true);
+    expect(terminalStreamItemSchema.safeParse({
+      kind: "replayStart",
+      cursor: { terminalId, sequence: 1 },
+      initialDimensions: { columns: 80, rows: 24 },
+      terminal,
+    }).success).toBe(false);
+    expect(terminalStreamItemSchema.safeParse({
+      kind: "replayEnd",
+      cursor: { terminalId, sequence: 7 },
+      terminal,
+    }).success).toBe(true);
+    expect(terminalStreamItemSchema.safeParse({
+      kind: "reset",
+      reason: "cursorExpired",
+      fidelity: "synthesized",
+      cursor: { terminalId, sequence: 7 },
+      screenBase64: "",
+      terminal,
+    }).success).toBe(true);
+  });
+
+  it.each(["replayStart", "replayEnd", "reset", "changed"] as const)(
+    "couples a %s descriptor to its cursor terminal",
+    (kind) => {
+      const terminalId = newTerminalId();
+      const otherTerminalId = newTerminalId();
+      const openedAt = "2026-09-04T00:00:00.000Z";
+      const terminal = {
+        ...target(),
+        runtimeNodeBootId: newRuntimeNodeBootId(),
+        terminalId: otherTerminalId,
+        backend: "mock" as const,
+        sharing: "session" as const,
+        foregroundSessionId: null,
+        state: "running" as const,
+        dimensions: { columns: 80, rows: 24 },
+        sequence: 7,
+        lease: null,
+        capabilities: {
+          write: true,
+          resize: true,
+          terminate: true,
+          restart: true,
+          foregroundSwitch: false,
+        },
+        openedAt,
+        updatedAt: openedAt,
+        exit: null,
+      };
+      const common = {
+        kind,
+        cursor: { terminalId, sequence: kind === "replayStart" ? 0 : 7 },
+        terminal,
+      };
+      const value = kind === "replayStart"
+        ? { ...common, initialDimensions: { columns: 80, rows: 24 } }
+        : kind === "reset"
+          ? {
+              ...common,
+              reason: "initial" as const,
+              fidelity: "synthesized" as const,
+              screenBase64: "",
+            }
+          : common;
+
+      expect(terminalStreamItemSchema.safeParse(value).success).toBe(false);
+    },
+  );
+
+  it.each(["replayEnd", "reset", "changed"] as const)(
+    "couples a %s descriptor sequence to its cursor",
+    (kind) => {
+      const terminalId = newTerminalId();
+      const openedAt = "2026-09-04T00:00:00.000Z";
+      const terminal = {
+        ...target(),
+        runtimeNodeBootId: newRuntimeNodeBootId(),
+        terminalId,
+        backend: "mock" as const,
+        sharing: "session" as const,
+        foregroundSessionId: null,
+        state: "running" as const,
+        dimensions: { columns: 80, rows: 24 },
+        sequence: 8,
+        lease: null,
+        capabilities: {
+          write: true,
+          resize: true,
+          terminate: true,
+          restart: true,
+          foregroundSwitch: false,
+        },
+        openedAt,
+        updatedAt: openedAt,
+        exit: null,
+      };
+      const common = {
+        kind,
+        cursor: { terminalId, sequence: 7 },
+        terminal,
+      };
+      const value = kind === "reset"
+        ? {
+            ...common,
+            reason: "cursorExpired" as const,
+            fidelity: "synthesized" as const,
+            screenBase64: "",
+          }
+        : common;
+
+      expect(terminalStreamItemSchema.safeParse(value).success).toBe(false);
+    },
+  );
 
   it("requires canonical, bounded UTF-8 terminal writes", () => {
     const base = {

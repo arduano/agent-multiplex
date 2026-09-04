@@ -1,6 +1,7 @@
 import {
   accessSnapshotSchema,
   accessStreamItemSchema,
+  TERMINAL_STREAM_BUFFER_ITEMS,
   type AccessStreamItem,
   type ArchiveOperationId,
   type ArchiveRequest,
@@ -229,7 +230,7 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
     signal?: AbortSignal,
   ) {
     const access = await this.#access();
-    const queue = new SubscriptionQueue<TerminalStreamItem>(4_096);
+    const queue = new SubscriptionQueue<TerminalStreamItem>(TERMINAL_STREAM_BUFFER_ITEMS);
     const subscription = access.terminals.attach.subscribe(input, {
       onData: (value) => {
         try {

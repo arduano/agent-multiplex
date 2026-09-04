@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 
 import {
   TERMINAL_MAX_FRAME_BYTES,
+  TERMINAL_MAX_REPLAY_ITEMS,
   TERMINAL_MAX_SCREEN_BYTES,
   newTerminalId,
   newTerminalLeaseId,
@@ -43,7 +44,7 @@ const { SerializeAddon } = require("@xterm/addon-serialize") as {
 };
 
 const DEFAULT_DIMENSIONS = { columns: 100, rows: 30 } as const;
-const DEFAULT_REPLAY_ITEMS = 4_096;
+const DEFAULT_REPLAY_ITEMS = TERMINAL_MAX_REPLAY_ITEMS;
 const DEFAULT_REPLAY_BYTES = 1_024 * 1_024;
 const DEFAULT_SUBSCRIBER_ITEMS = 512;
 const DEFAULT_HEARTBEAT_MS = 15_000;
@@ -80,6 +81,13 @@ export interface TerminalProcessExit {
 
 /** Opaque native PTY. The broker never interprets output as agent history. */
 export interface TerminalProcess {
+  /** True only when every byte emitted before broker attachment was retained. */
+  readonly startupOutputComplete: boolean;
+  /**
+   * Adapter-scoped processes must support sequential listeners. After the
+   * disposer runs, buffer a bounded handoff tail until the next listener;
+   * report startupOutputComplete=false if any of that tail was discarded.
+   */
   onData(listener: (data: string) => void): () => void;
   onExit(listener: (exit: TerminalProcessExit) => void): () => void;
   write(data: string): void;
@@ -159,8 +167,10 @@ class ManagedTerminal {
   readonly subscribers = new Set<Subscriber>();
   readonly emulator: HeadlessTerminal;
   readonly serializer: { serialize(options?: { scrollback?: number }): string; dispose(): void };
-  readonly disposeData: () => void;
+  readonly initialDimensions: TerminalDimensions;
+  readonly forceSynthesizedInitial: boolean;
   readonly disposeExit: () => void;
+  processDataDisposer: (() => void) | undefined;
   state: TerminalDescriptor["state"] = "running";
   updatedAt = this.openedAt;
   dimensions: TerminalDimensions;
@@ -186,8 +196,11 @@ class ManagedTerminal {
       leaseTtlMs: number;
     },
     readonly runtimeNodeBootId: RuntimeNodeBootId,
+    forceSynthesizedInitial = false,
   ) {
     this.dimensions = { ...dimensions };
+    this.initialDimensions = { ...dimensions };
+    this.forceSynthesizedInitial = forceSynthesizedInitial;
     this.emulator = new HeadlessTerminalConstructor({
       cols: dimensions.columns,
       rows: dimensions.rows,
@@ -200,8 +213,22 @@ class ManagedTerminal {
     // published declaration names the browser Terminal class, which is a
     // packaging-only type mismatch between the two official xterm packages.
     this.emulator.loadAddon(this.serializer as never);
-    this.disposeData = process.onData((data) => this.acceptOutput(data));
+    this.resumeProcessOutput();
+    // A reused adapter-scoped PTY may redraw while its native foreground is
+    // changing. We buffer that handoff, but still describe the replacement as
+    // synthesized because the native UI owns transition semantics and cannot
+    // prove that its redraw began at a terminal-reset boundary.
     this.disposeExit = process.onExit((exit) => this.didExit(exit));
+  }
+
+  /**
+   * Exact replay remains eligible only while the process can prove that every
+   * unobserved output byte was retained. Adapter-scoped handoff buffering can
+   * invalidate that proof after construction, so this must not be cached.
+   */
+  public get openingOutputComplete(): boolean {
+    return !this.forceSynthesizedInitial &&
+      this.process.startupOutputComplete === true;
   }
 
   public descriptor(): TerminalDescriptor {
@@ -270,6 +297,7 @@ class ManagedTerminal {
     return {
       kind: "reset",
       reason,
+      fidelity: "synthesized",
       cursor: { terminalId: this.terminalId, sequence },
       screenBase64: screen.toString("base64"),
       terminal: { ...this.descriptor(), sequence },
@@ -291,7 +319,7 @@ class ManagedTerminal {
     this.exit = exit;
     this.clearLease(false);
     this.changed();
-    this.disposeData();
+    this.pauseProcessOutput();
     this.disposeExit();
     for (const subscriber of [...this.subscribers]) subscriber.close();
     // Dispose the exit callback before signalling the child. Some PTY
@@ -334,7 +362,7 @@ class ManagedTerminal {
     if (this.disposed) return;
     this.disposed = true;
     this.clearLease(false);
-    this.disposeData();
+    this.pauseProcessOutput();
     this.disposeExit();
     this.serializer.dispose();
     this.emulator.dispose();
@@ -350,6 +378,21 @@ class ManagedTerminal {
       this.emulatorWaiters.splice(index, 1);
       waiter.resolve();
     }
+  }
+
+  /**
+   * Leave an adapter-scoped process temporarily unobserved so its process
+   * wrapper buffers foreground-transition output for the replacement owner.
+   */
+  public pauseProcessOutput(): void {
+    this.processDataDisposer?.();
+    this.processDataDisposer = undefined;
+  }
+
+  /** Restore the current logical owner after a failed foreground transition. */
+  public resumeProcessOutput(): void {
+    if (this.processDataDisposer || this.disposed) return;
+    this.processDataDisposer = this.process.onData((data) => this.acceptOutput(data));
   }
 }
 
@@ -373,7 +416,11 @@ export class TerminalBroker {
       "maxRunningTerminals",
     );
     this.#limits = {
-      replayItems: positiveInteger(options.replayItemLimit ?? DEFAULT_REPLAY_ITEMS, "replayItemLimit"),
+      replayItems: boundedPositiveInteger(
+        options.replayItemLimit ?? DEFAULT_REPLAY_ITEMS,
+        TERMINAL_MAX_REPLAY_ITEMS,
+        "replayItemLimit",
+      ),
       replayBytes: positiveInteger(options.replayByteLimit ?? DEFAULT_REPLAY_BYTES, "replayByteLimit"),
       subscriberItems: positiveInteger(
         options.subscriberItemLimit ?? DEFAULT_SUBSCRIBER_ITEMS,
@@ -470,12 +517,20 @@ export class TerminalBroker {
       const dimensions = input.dimensions ?? current?.dimensions ?? foreground?.dimensions ?? DEFAULT_DIMENSIONS;
       if (reservesProcess) this.#pendingProcessOpens += 1;
       let process: TerminalProcess;
+      // Adapter-scoped providers reuse one PTY. Detach the old logical owner
+      // before asking the provider to switch foreground so terminalProcessFromPty
+      // buffers the transition redraw and hands it to the new owner. If the
+      // native switch fails, restore the old listener and flush that buffer.
+      foreground?.pauseProcessOutput();
       try {
         process = await provider.open({
           ...binding,
           dimensions,
           foregroundSwitch: foreground !== undefined,
         });
+      } catch (error) {
+        foreground?.resumeProcessOutput();
+        throw error;
       } finally {
         if (reservesProcess) this.#pendingProcessOpens -= 1;
       }
@@ -484,6 +539,14 @@ export class TerminalBroker {
         throw new TerminalBrokerError(
           "CONFLICT",
           "terminal broker closed while the native terminal was opening",
+        );
+      }
+      if (foreground && process !== foreground.process) {
+        foreground.resumeProcessOutput();
+        if (provider.capabilities.terminate) process.kill();
+        throw new TerminalBrokerError(
+          "CONFLICT",
+          "adapter-scoped foreground switch returned another native process",
         );
       }
       if (foreground) {
@@ -507,6 +570,7 @@ export class TerminalBroker {
         dimensions,
         this.#limits,
         this.#runtimeNodeBootId,
+        foreground !== undefined,
       );
       this.#bySession.set(binding.target.sessionId, terminal);
       if (provider.sharing === "adapterScope") this.#byScope.set(scopeKey, terminal);
@@ -559,6 +623,24 @@ export class TerminalBroker {
     };
     const wanted = input.cursor?.sequence;
     const first = terminal.replay[0]?.item.cursor.sequence;
+    const completeInitialReplay = wanted === undefined &&
+      terminal.openingOutputComplete &&
+      (terminal.sequence === 0 || first === 1);
+    if (completeInitialReplay) {
+      const descriptor = terminal.descriptor();
+      const prefix: TerminalStreamItem[] = [{
+        kind: "replayStart",
+        cursor: { terminalId: terminal.terminalId, sequence: 0 },
+        initialDimensions: { ...terminal.initialDimensions },
+        terminal: descriptor,
+      }, ...exactReplayItems(terminal), {
+        kind: "replayEnd",
+        cursor: { terminalId: terminal.terminalId, sequence: descriptor.sequence },
+        terminal: descriptor,
+      }];
+      subscribe();
+      return queueIterable(queue, close, prefix);
+    }
     const resetReason = wanted === undefined
       ? "initial" as const
       : wanted > terminal.sequence
@@ -588,10 +670,15 @@ export class TerminalBroker {
       };
       void reset().catch(close);
     } else {
-      for (const entry of terminal.replay) {
-        if (wanted !== undefined && entry.item.cursor.sequence > wanted) queue.push(entry.item);
-      }
+      // Retained catch-up is immutable at this synchronous barrier. Deliver it
+      // as a prefix so the small live-subscriber mailbox is reserved for output
+      // emitted after subscription; otherwise a valid cursor can overflow that
+      // mailbox before its iterator has had a chance to consume one item.
+      const prefix = terminal.replay
+        .filter((entry) => wanted !== undefined && entry.item.cursor.sequence > wanted)
+        .map((entry) => entry.item);
       subscribe();
+      return queueIterable(queue, close, prefix);
     }
     return queueIterable(queue, close);
   }
@@ -876,6 +963,7 @@ export function terminalProcessFromPty(pty: IPty): TerminalProcess {
   let exitListener: ((exit: TerminalProcessExit) => void) | undefined;
   const startupData: string[] = [];
   let startupBytes = 0;
+  let startupOutputComplete = true;
   let startupExit: TerminalProcessExit | undefined;
   const dataSubscription = pty.onData((data) => {
     if (dataListener) {
@@ -886,7 +974,10 @@ export function terminalProcessFromPty(pty: IPty): TerminalProcess {
     startupBytes += Buffer.byteLength(data, "utf8");
     while (startupBytes > STARTUP_OUTPUT_LIMIT && startupData.length > 1) {
       const removed = startupData.shift();
-      if (removed !== undefined) startupBytes -= Buffer.byteLength(removed, "utf8");
+      if (removed !== undefined) {
+        startupBytes -= Buffer.byteLength(removed, "utf8");
+        startupOutputComplete = false;
+      }
     }
   });
   const exitSubscription = pty.onExit(({ exitCode, signal }) => {
@@ -897,6 +988,7 @@ export function terminalProcessFromPty(pty: IPty): TerminalProcess {
     exitSubscription.dispose();
   });
   return {
+    get startupOutputComplete() { return startupOutputComplete; },
     onData(listener) {
       if (dataListener) throw new Error("terminal PTY data listener is already attached");
       dataListener = listener;
@@ -994,11 +1086,28 @@ class AsyncQueue<T> {
   }
 }
 
-function queueIterable<T>(queue: AsyncQueue<T>, close: () => void = () => undefined): AsyncIterable<T> {
+function queueIterable<T>(
+  queue: AsyncQueue<T>,
+  close: () => void = () => undefined,
+  prefix: readonly T[] = [],
+): AsyncIterable<T> {
+  // The prefix may contain a full terminal replay. Transfer it to the first
+  // iterator and drop both references as soon as it is consumed.
+  let availablePrefix: readonly T[] | undefined = prefix.length > 0 ? prefix : undefined;
   return {
     [Symbol.asyncIterator](): AsyncIterator<T> {
+      let prefixItems = availablePrefix;
+      availablePrefix = undefined;
+      let prefixIndex = 0;
       return {
-        next: () => queue.next(),
+        next: () => {
+          if (prefixItems !== undefined && prefixIndex < prefixItems.length) {
+            const value = prefixItems[prefixIndex++]!;
+            if (prefixIndex === prefixItems.length) prefixItems = undefined;
+            return Promise.resolve({ value, done: false });
+          }
+          return queue.next();
+        },
         return: async () => {
           close();
           return { value: undefined, done: true };
@@ -1006,6 +1115,55 @@ function queueIterable<T>(queue: AsyncQueue<T>, close: () => void = () => undefi
       };
     },
   };
+}
+
+/** Reconstruct an exact terminal from its opening state without ANSI serialization. */
+function exactReplayItems(terminal: ManagedTerminal): TerminalStreamItem[] {
+  const items: TerminalStreamItem[] = [];
+  let dimensions = terminal.initialDimensions;
+  let pendingBytes: Buffer[] = [];
+  let pendingLength = 0;
+  let pendingCursor: Extract<TerminalStreamItem, { kind: "output" }>["cursor"] | undefined;
+  const flush = (): void => {
+    if (pendingCursor === undefined) return;
+    items.push({
+      kind: "output",
+      cursor: pendingCursor,
+      dataBase64: Buffer.concat(pendingBytes, pendingLength).toString("base64"),
+    });
+    pendingBytes = [];
+    pendingLength = 0;
+    pendingCursor = undefined;
+  };
+  for (const { item } of terminal.replay) {
+    if (item.kind === "output") {
+      const bytes = Buffer.from(item.dataBase64, "base64");
+      if (pendingLength > 0 && pendingLength + bytes.byteLength > TERMINAL_MAX_FRAME_BYTES) {
+        flush();
+      }
+      pendingBytes.push(bytes);
+      pendingLength += bytes.byteLength;
+      pendingCursor = item.cursor;
+      continue;
+    }
+    if (
+      item.kind === "changed" &&
+      (
+        item.terminal.dimensions.columns !== dimensions.columns ||
+        item.terminal.dimensions.rows !== dimensions.rows
+      )
+    ) {
+      flush();
+      dimensions = item.terminal.dimensions;
+      items.push({
+        kind: "resize",
+        cursor: item.cursor,
+        dimensions: { ...dimensions },
+      });
+    }
+  }
+  flush();
+  return items;
 }
 
 function providerKey(harness: Harness, adapterScopeId: AdapterScopeId): string {
@@ -1062,4 +1220,10 @@ function inputHash(input: TerminalInput): string {
 function positiveInteger(value: number, name: string): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new RangeError(`${name} must be a positive integer`);
   return value;
+}
+
+function boundedPositiveInteger(value: number, maximum: number, name: string): number {
+  const parsed = positiveInteger(value, name);
+  if (parsed > maximum) throw new RangeError(`${name} must be at most ${maximum}`);
+  return parsed;
 }

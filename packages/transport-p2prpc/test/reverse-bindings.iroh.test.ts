@@ -1,4 +1,5 @@
 import {
+  TERMINAL_MAX_SCREEN_BYTES,
   controlNodeLinkContract,
   newAttachmentId,
   newControlNodeBootId,
@@ -32,6 +33,57 @@ import {
 const t = initTRPC.context<PeerContext>().create();
 
 describe("real-Iroh dynamic reverse bindings", () => {
+  it("carries a maximum synthesized terminal reset through a real p2prpc frame", {
+    timeout: 30_000,
+  }, async () => {
+    const screenBase64 = Buffer.alloc(TERMINAL_MAX_SCREEN_BYTES, 0x78)
+      .toString("base64");
+    const sourceRouter = t.router({
+      maximumReset: t.procedure.query(() => ({
+        kind: "reset" as const,
+        fidelity: "synthesized" as const,
+        screenBase64,
+      })),
+    });
+    const observerRouter = t.router({});
+    type SourceRouter = typeof sourceRouter;
+    type ObserverRouter = typeof observerRouter;
+    let source: MultiplexP2PNode<SourceRouter, ObserverRouter> | undefined;
+    let observer: MultiplexP2PNode<ObserverRouter, SourceRouter> | undefined;
+
+    try {
+      const sharedSecret = "maximum-terminal-reset-frame-test".padEnd(64, "x");
+      const iroh = {
+        relay: { mode: "disabled" as const },
+        allowAdvertisedAddress: () => true,
+        allowDirectAddress: () => true,
+      };
+      source = await createMultiplexP2PNode({
+        router: sourceRouter,
+        sharedSecret: { secret: sharedSecret },
+        createContext: (context) => context,
+        iroh,
+      });
+      observer = await createMultiplexP2PNode({
+        router: observerRouter,
+        sharedSecret: { secret: sharedSecret },
+        createContext: (context) => context,
+        iroh,
+      });
+      const peer = await observer.connect({
+        endpointId: source.id,
+        locator: { kind: "ticket", ticket: source.ticket() },
+      });
+
+      const reset = await peer.rpc.maximumReset.query();
+      expect(reset.kind).toBe("reset");
+      expect(reset.fidelity).toBe("synthesized");
+      expect(reset.screenBase64).toBe(screenBase64);
+    } finally {
+      await Promise.allSettled([observer?.close(), source?.close()]);
+    }
+  });
+
   it("uses the replacement child-control Peer for unary RPC and subscription restart after session expiry", {
     timeout: 30_000,
   }, async () => {

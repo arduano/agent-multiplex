@@ -79,8 +79,12 @@ terminal requires a current active structured-session binding, and every call
 is fenced by the session ID, runtime-node ID, binding revision, and runtime boot
 ID. A replaced binding or runtime invalidates the old route and stream.
 
-Terminal state is deliberately ephemeral. The runtime keeps only bounded
-in-memory output replay and a synthesized xterm screen for reconnect; it keeps
+Terminal state is deliberately ephemeral. The runtime keeps only a bounded
+in-memory raw output/resize timeline and a synthesized xterm fallback screen.
+New viewers replay the exact opening-state timeline while it remains complete;
+an explicit end barrier commits its high-water cursor, so partial replay is safe
+to discard and retry. After the timeline expires or startup output is truncated,
+serialized screen recovery is explicitly approximate. It keeps
 no terminal bytes, screen snapshots, or keyboard credentials in SQLite, the
 metadata outbox, control/gateway projections, normalized chat history, or
 `readNativeHistory`. Runtime restart drops all PTYs, replay, and leases. Use the

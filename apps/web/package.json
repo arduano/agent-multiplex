@@ -9,11 +9,11 @@
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
   },
-  "files": ["dist"],
+  "files": ["dist", "THIRD_PARTY_LICENSES.txt"],
   "scripts": {
     "build": "npm run build:server && npm run build:client",
     "build:server": "tsc -b --pretty false",
-    "build:client": "vite build",
+    "build:client": "vite build && node ../../scripts/web-third-party-licenses.mjs --write",
     "clean:client": "node -e \"require('node:fs').rmSync('dist/client',{recursive:true,force:true})\"",
     "dev": "vite"
   },
@@ -31,6 +31,9 @@
     "access": "public"
   },
   "dependencies": {
+    "@types/node": "24.3.0"
+  },
+  "devDependencies": {
     "@arduano/agent-multiplex-client": "0.1.0",
     "@arduano/agent-multiplex-protocol": "0.1.0",
     "@fontsource-variable/geist": "^5.3.0",
@@ -40,8 +43,8 @@
     "@radix-ui/react-tabs": "^1.1.21",
     "@radix-ui/react-tooltip": "^1.2.16",
     "@tanstack/react-query": "^5.102.8",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "clsx": "^2.1.1",
     "get-nonce": "1.0.1",
     "lucide-react": "^1.39.0",
@@ -50,9 +53,7 @@
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.12.3",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^3.6.0"
-  },
-  "devDependencies": {
+    "tailwind-merge": "^3.6.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",

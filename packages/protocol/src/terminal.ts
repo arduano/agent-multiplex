@@ -14,6 +14,9 @@ const isoDateSchema = z.iso.datetime({ offset: true });
 
 export const TERMINAL_MAX_FRAME_BYTES = 16 * 1_024;
 export const TERMINAL_MAX_SCREEN_BYTES = 1_024 * 1_024;
+/** Maximum retained runtime timeline; transport queues reserve equal live headroom. */
+export const TERMINAL_MAX_REPLAY_ITEMS = 4_096;
+export const TERMINAL_STREAM_BUFFER_ITEMS = TERMINAL_MAX_REPLAY_ITEMS * 2;
 
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -267,10 +270,23 @@ export const terminalTerminateInputSchema = terminalOperationBaseSchema.extend({
 });
 export type TerminalTerminateInput = z.infer<typeof terminalTerminateInputSchema>;
 
-export const terminalStreamItemSchema = z.discriminatedUnion("kind", [
+const terminalStreamItemShapeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("replayStart"),
+    cursor: terminalCursorSchema.extend({ sequence: z.literal(0) }),
+    initialDimensions: terminalDimensionsSchema,
+    /** Current authority snapshot; replay events reconstruct its exact screen state. */
+    terminal: terminalDescriptorSchema,
+  }),
+  z.object({
+    kind: z.literal("replayEnd"),
+    cursor: terminalCursorSchema,
+    terminal: terminalDescriptorSchema,
+  }),
   z.object({
     kind: z.literal("reset"),
     reason: z.enum(["initial", "cursorExpired", "cursorAhead"]),
+    fidelity: z.literal("synthesized"),
     cursor: terminalCursorSchema,
     screenBase64: base64Schema(TERMINAL_MAX_SCREEN_BYTES),
     terminal: terminalDescriptorSchema,
@@ -284,6 +300,11 @@ export const terminalStreamItemSchema = z.discriminatedUnion("kind", [
     ),
   }),
   z.object({
+    kind: z.literal("resize"),
+    cursor: terminalCursorSchema,
+    dimensions: terminalDimensionsSchema,
+  }),
+  z.object({
     kind: z.literal("changed"),
     cursor: terminalCursorSchema,
     terminal: terminalDescriptorSchema,
@@ -293,4 +314,37 @@ export const terminalStreamItemSchema = z.discriminatedUnion("kind", [
     cursor: terminalCursorSchema,
   }),
 ]);
+
+/**
+ * Descriptor-bearing frames are self-fenced. A route may additionally compare
+ * the cursor with the terminal requested by its caller, but it must never need
+ * to infer whether the descriptor belongs to that cursor.
+ *
+ * `replayStart` is the one deliberate sequence exception: its cursor marks the
+ * opening state (sequence zero), while the descriptor sequence declares the
+ * replay's high-water barrier. The matching `replayEnd` carries that barrier
+ * as both its cursor and descriptor sequence.
+ */
+export const terminalStreamItemSchema = terminalStreamItemShapeSchema.superRefine(
+  (item, context) => {
+    if (!("terminal" in item)) return;
+    if (item.terminal.terminalId !== item.cursor.terminalId) {
+      context.addIssue({
+        code: "custom",
+        path: ["terminal", "terminalId"],
+        message: "terminal stream descriptor must identify its cursor terminal",
+      });
+    }
+    if (
+      item.kind !== "replayStart" &&
+      item.terminal.sequence !== item.cursor.sequence
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["terminal", "sequence"],
+        message: "terminal stream descriptor sequence must match its cursor",
+      });
+    }
+  },
+);
 export type TerminalStreamItem = z.infer<typeof terminalStreamItemSchema>;

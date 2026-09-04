@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { builtinModules } from "node:module";
 import {
   existsSync,
   readFileSync,
@@ -14,6 +16,10 @@ import {
   packageManifest,
   readJson,
   releaseConfig,
+  releaseDockerBaseImage,
+  releaseNativeMinimumSoakMs,
+  releaseNodeVersion,
+  releaseNpmVersion,
   releasePackages,
   releaseVersion,
   repositoryRoot,
@@ -39,6 +45,126 @@ assert(releaseConfig.schemaVersion === 1, "unknown release-packages schema");
 assert(rootManifest.private === true, "the monorepo root must stay private");
 assert(rootManifest.version === releaseVersion, "invalid root release version");
 assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(releaseVersion), "root version is not semver");
+assert(/^\d+\.\d+\.\d+$/.test(releaseNodeVersion), ".node-version must be an exact Node version");
+assert(rootManifest.packageManager === `npm@${releaseNpmVersion}`, "packageManager must pin npm exactly");
+assert(
+  rootManifest.scripts?.["release:native-status"] ===
+    "node scripts/record-native-qualification.mjs",
+  "release:native-status must use the reviewed native qualification recorder",
+);
+assert(
+  new RegExp(`^node:${releaseNodeVersion.replaceAll(".", "\\.")}-[^@]+@sha256:[0-9a-f]{64}$`)
+    .test(releaseDockerBaseImage),
+  "release Docker base must pin the exact Node version and OCI digest",
+);
+assert(
+  releaseNativeMinimumSoakMs === 930_000,
+  "native release qualification must cross the 15-minute authenticated-session boundary",
+);
+
+const qualificationDockerfiles = [
+  "tests/docker-v3-tree/Dockerfile",
+  "tests/docker-mock-scale/Dockerfile",
+  "tests/docker-live-four-container/Dockerfile",
+  "tests/docker-nested-hosts/Dockerfile",
+  "tests/docker-copilot-scale-e2e/Dockerfile",
+  "tests/docker-copilot-interactive-e2e/Dockerfile",
+  "tests/docker-codex-interactive-e2e/Dockerfile",
+  "tests/docker-codex-e2e/Dockerfile",
+];
+
+const nativeStatusContext =
+  "Agent Multiplex / Native four-container qualification";
+const publishWorkflow = readFileSync(
+  resolve(repositoryRoot, ".github/workflows/publish.yml"),
+  "utf8",
+);
+const ciWorkflow = readFileSync(
+  resolve(repositoryRoot, ".github/workflows/ci.yml"),
+  "utf8",
+);
+assert(
+  ciWorkflow.includes("npm audit --audit-level=high") &&
+    !ciWorkflow.includes("npm audit --omit=dev"),
+  "CI must audit the complete release-build dependency graph",
+);
+assert(
+  /^\s+statuses:\s+read\s*$/m.test(publishWorkflow),
+  "publish workflow must be able to read commit statuses",
+);
+assert(
+  publishWorkflow.includes(nativeStatusContext),
+  "publish workflow omits the native four-container status gate",
+);
+assert(
+  publishWorkflow.includes('.creator.login == $owner') &&
+    publishWorkflow.includes('.creator.id == $ownerId') &&
+    publishWorkflow.includes(
+      'test("^PASS [A-Za-z0-9][A-Za-z0-9._-]{0,47} sha256:[0-9a-f]{64}$")',
+    ),
+  "publish workflow must bind native status to the owner and receipt inventory",
+);
+assert(
+  !publishWorkflow.includes("--clobber"),
+  "publish workflow must never overwrite established GitHub Release assets",
+);
+assert(
+  publishWorkflow.includes(
+    "all(.assets[].name; . as $name | $expected | index($name) != null)",
+  ),
+  "release recovery must reject unexpected assets before uploading missing ones",
+);
+const registryPublisher = readFileSync(
+  resolve(repositoryRoot, "scripts/publish-release.mjs"),
+  "utf8",
+);
+const artifactCreator = readFileSync(
+  resolve(repositoryRoot, "scripts/create-release-artifacts.mjs"),
+  "utf8",
+);
+const nativeQualificationRecorder = readFileSync(
+  resolve(repositoryRoot, "scripts/record-native-qualification.mjs"),
+  "utf8",
+);
+assert(
+  artifactCreator.includes("outputDirectory === fixedOutputDirectory") &&
+    artifactCreator.indexOf("outputDirectory === fixedOutputDirectory") <
+      artifactCreator.indexOf("rmSync(outputDirectory"),
+  "release artifact deletion must be fenced to the fixed output directory",
+);
+assert(
+  !registryPublisher.includes("new Date") &&
+    registryPublisher.includes("sourceCommit: manifest.commit"),
+  "publication receipt must be deterministic for the source commit",
+);
+assert(
+  nativeQualificationRecorder.includes(
+    "manifest.livenessSoak.requestedMs >= releaseNativeMinimumSoakMs",
+  ) &&
+    nativeQualificationRecorder.includes(
+      "manifest.livenessSoak.performed === true",
+    ),
+  "native status recorder must require the release liveness soak",
+);
+const nativeRunner = readFileSync(
+  resolve(repositoryRoot, "tests/docker-live-four-container/run.sh"),
+  "utf8",
+);
+assert(
+  nativeRunner.includes('sourceCommit:$sourceCommit') &&
+    nativeRunner.match(/status --porcelain=v1 --untracked-files=all/g)?.length >= 2 &&
+    nativeRunner.includes("COPILOT_CLI_VERSION"),
+  "native four-container runner must bind receipts to a clean source commit",
+);
+for (const path of qualificationDockerfiles) {
+  const source = readFileSync(resolve(repositoryRoot, path), "utf8");
+  const baseImages = [...source.matchAll(/^FROM\s+(\S+)/gm)].map((match) => match[1]);
+  assert(baseImages.length > 0, `${path}: no Docker base image found`);
+  assert(
+    baseImages.every((image) => image === releaseDockerBaseImage),
+    `${path}: every stage must use the exact release Docker base ${releaseDockerBaseImage}`,
+  );
+}
 
 const configuredPaths = releasePackages.map((entry) => entry.workspace);
 assertSameSet(rootManifest.workspaces, configuredPaths, "release and workspace sets");
@@ -82,6 +208,12 @@ for (const entry of releasePackages) {
       if (publicNames.has(dependency)) {
         assert(specification === releaseVersion, `${label}: internal ${dependency} must use exact ${releaseVersion}`);
       }
+      if (dependencyField !== "peerDependencies") {
+        assert(
+          /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(specification),
+          `${label}: runtime dependency ${dependency} must use an exact version`,
+        );
+      }
       if (dependency === "@arduano/p2prpc-core") {
         assert(specification === "0.2.1", `${label}: p2prpc must use exact 0.2.1`);
       }
@@ -102,6 +234,7 @@ for (const entry of releasePackages) {
         assert(source.startsWith("#!/usr/bin/env node\n"), `${label}: executable ${target} needs a Node shebang`);
       }
     }
+    assertDeclarationDependencies(entry, manifest, label);
   }
 }
 
@@ -136,6 +269,53 @@ for (const source of walk(generatedRoot)) {
   }
 }
 
+const webEntry = releasePackages.find(({ workspace }) => workspace === "apps/web");
+assert(webEntry !== undefined, "apps/web is missing from the release package set");
+const webManifest = packageManifest(webEntry);
+const webLicenseFilename = "THIRD_PARTY_LICENSES.txt";
+assert(
+  webManifest.files.includes(webLicenseFilename),
+  `apps/web must package ${webLicenseFilename}`,
+);
+assert(
+  existsSync(resolve(repositoryRoot, "apps/web", webLicenseFilename)),
+  `apps/web/${webLicenseFilename} is missing`,
+);
+const codexEntry = releasePackages.find(
+  ({ workspace }) => workspace === "packages/adapter-codex",
+);
+assert(
+  codexEntry !== undefined,
+  "packages/adapter-codex is missing from the release package set",
+);
+const codexManifest = packageManifest(codexEntry);
+for (const filename of ["THIRD_PARTY_NOTICES.md", "licenses"]) {
+  assert(codexManifest.files.includes(filename), `packages/adapter-codex must package ${filename}`);
+  assert(
+    existsSync(resolve(repositoryRoot, "packages/adapter-codex", filename)),
+    `packages/adapter-codex/${filename} is missing`,
+  );
+}
+for (const [filename, sha256] of Object.entries({
+  "OpenAI-Codex-Apache-2.0.txt": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+  "OpenAI-Codex-NOTICE.txt": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+})) {
+  const path = resolve(repositoryRoot, "packages/adapter-codex/licenses", filename);
+  assert(
+    existsSync(path),
+    `packages/adapter-codex/licenses/${filename} is missing`,
+  );
+  assert(
+    createHash("sha256").update(readFileSync(path)).digest("hex") === sha256,
+    `packages/adapter-codex/licenses/${filename} differs from OpenAI Codex 0.152.0`,
+  );
+}
+
+if (requireArtifacts) {
+  const { assertWebThirdPartyLicensesCurrent } = await import("./web-third-party-licenses.mjs");
+  assertWebThirdPartyLicensesCurrent();
+}
+
 const lockfile = readJson("package-lock.json");
 assert(lockfile.lockfileVersion === 3, "package-lock.json must use format 3");
 const serializedLock = JSON.stringify(lockfile);
@@ -157,6 +337,40 @@ function collectExportTargets(value, output) {
   if (typeof value === "string") output.add(value);
   else if (value && typeof value === "object") {
     for (const child of Object.values(value)) collectExportTargets(child, output);
+  }
+}
+
+function assertDeclarationDependencies(entry, manifest, label) {
+  const declared = new Set([
+    ...Object.keys(manifest.dependencies ?? {}),
+    ...Object.keys(manifest.optionalDependencies ?? {}),
+    ...Object.keys(manifest.peerDependencies ?? {}),
+  ]);
+  const declarationRoot = resolve(repositoryRoot, entry.workspace, "dist");
+  for (const source of walk(declarationRoot)) {
+    if (!source.endsWith(".d.ts")) continue;
+    const contents = readFileSync(source, "utf8");
+    const specifiers = [
+      ...contents.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*)["']([^"']+)["']/g),
+      ...contents.matchAll(/^\s*import\s*["']([^"']+)["']/gm),
+    ].map((match) => match[1]);
+    for (const specifier of specifiers) {
+      if (
+        specifier.startsWith(".") ||
+        specifier.startsWith("#") ||
+        specifier.startsWith("node:") ||
+        builtinModules.includes(specifier)
+      ) continue;
+      const segments = specifier.split("/");
+      const dependency = specifier.startsWith("@")
+        ? segments.slice(0, 2).join("/")
+        : segments[0];
+      if (dependency === manifest.name) continue;
+      assert(
+        declared.has(dependency),
+        `${label}: ${relative(repositoryRoot, source)} references undeclared declaration dependency ${dependency}`,
+      );
+    }
   }
 }
 

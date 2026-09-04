@@ -33,6 +33,8 @@ import {
   type InventorySnapshot,
   type RuntimeNodeRegistration,
   type SessionRecord,
+  type TerminalDescriptor,
+  type TerminalStreamItem,
 } from "@arduano/agent-multiplex-protocol";
 import { describe, expect, it, vi } from "vitest";
 
@@ -144,6 +146,22 @@ function runtimeConnection(
     readNativeHistory: () => Promise.reject(new Error("unused")),
     resolveInteraction: () => Promise.reject(new Error("unused")),
     ...overrides,
+  };
+}
+
+function terminalConnectionOverrides(
+  items: () => Iterable<TerminalStreamItem>,
+): Partial<RuntimeNodeConnection> {
+  const unused = () => Promise.reject(new Error("unused"));
+  return {
+    getTerminal: () => Promise.resolve(null),
+    openTerminal: unused,
+    attachTerminal: async function* () { yield* items(); },
+    acquireTerminalLease: unused,
+    renewTerminalLease: unused,
+    releaseTerminalLease: unused,
+    sendTerminalInput: unused,
+    terminateTerminal: unused,
   };
 }
 
@@ -1096,6 +1114,64 @@ describe("control-node protocol-v4 hardening invariants", () => {
       code: "NOT_FOUND",
       message: "terminal session is unknown",
     });
+
+    fixture.service.close();
+    fixture.catalog.close();
+  });
+
+  it("rejects a runtime terminal replay ending at another high-water sequence", async () => {
+    let streamItems!: TerminalStreamItem[];
+    const fixture = runtimeFixture(terminalConnectionOverrides(() => streamItems));
+    const terminalId = newTerminalId();
+    const descriptor: TerminalDescriptor = {
+      sessionId: fixture.session.sessionId,
+      runtimeNodeId: fixture.runtime.runtimeNodeId,
+      bindingRevision: fixture.session.bindingRevision,
+      runtimeNodeBootId: fixture.runtime.runtimeNodeBootId,
+      terminalId,
+      backend: "mock",
+      sharing: "session",
+      foregroundSessionId: null,
+      state: "running",
+      dimensions: { columns: 80, rows: 24 },
+      sequence: 2,
+      lease: null,
+      capabilities: {
+        write: true,
+        resize: true,
+        terminate: true,
+        restart: true,
+        foregroundSwitch: false,
+      },
+      openedAt: now,
+      updatedAt: now,
+      exit: null,
+    };
+    streamItems = [{
+      kind: "replayStart",
+      cursor: { terminalId, sequence: 0 },
+      initialDimensions: descriptor.dimensions,
+      terminal: descriptor,
+    }, {
+      kind: "replayEnd",
+      cursor: { terminalId, sequence: 1 },
+      terminal: { ...descriptor, sequence: 1 },
+    }];
+
+    const iterator = fixture.service.attachTerminal({
+      sessionId: fixture.session.sessionId,
+      runtimeNodeId: fixture.runtime.runtimeNodeId,
+      bindingRevision: fixture.session.bindingRevision,
+      terminalId,
+    })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({
+      done: false,
+      value: { kind: "replayStart" },
+    });
+    await expect(iterator.next()).rejects.toThrow(
+      "runtime terminal replay ended outside its advertised high-water fence",
+    );
+    await iterator.return?.();
 
     fixture.service.close();
     fixture.catalog.close();

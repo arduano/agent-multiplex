@@ -2,6 +2,13 @@ import { readFileSync, statSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+export {
+  TRPC_HTTP_BODY_LIMIT_BYTES,
+  WEBSOCKET_EGRESS_BUFFER_LIMIT_BYTES,
+  WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+  installBoundedWebSocketEgress,
+} from "./websocket-egress.js";
+
 export interface WebAsset {
   readonly body: Buffer;
   readonly contentType: string;
@@ -30,6 +37,7 @@ const contentTypes: Readonly<Record<string, string>> = Object.freeze({
   ".map": "application/json; charset=utf-8",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".txt": "text/plain; charset=utf-8",
   ".webp": "image/webp",
   ".woff2": "font/woff2",
 });

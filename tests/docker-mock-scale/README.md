@@ -55,7 +55,7 @@ The bearer token, shared transport secret, and exact reachability locator are
 excluded from the receipt tree and checked by a final content scan. The defaults
 are the acceptance target. `AGENT_MULTIPLEX_SCALE_TIMEOUT_MS`,
 `AGENT_MULTIPLEX_SCALE_SOAK_MS`, `AGENT_MULTIPLEX_RUNTIME_NODE_MOCK_CHUNK_COUNT`, and
-`AGENT_MULTIPLEX_SCALE_CHUNK_INTERVAL_MS` tune timing without changing the
+`AGENT_MULTIPLEX_SCALE_CHUNK_INTERVAL_MS` (default `200`) tunes timing without changing the
 10-by-10 topology.
 
 This is a deterministic capacity/integration receipt, not a production load

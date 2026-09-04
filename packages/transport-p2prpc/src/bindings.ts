@@ -54,6 +54,7 @@ import type {
   TerminalTerminateInput,
   TopologyDetachmentReceipt,
 } from "@arduano/agent-multiplex-protocol";
+import { TERMINAL_STREAM_BUFFER_ITEMS } from "@arduano/agent-multiplex-protocol";
 import type { RuntimeNodeRouter } from "@arduano/agent-multiplex-runtime-node-core";
 import { P2PError, type Peer, type PeerContext } from "@arduano/p2prpc-core";
 import type { AnyTRPCRouter } from "@trpc/server";
@@ -392,7 +393,7 @@ export function childControlNodeConnectionFromPeerResolver(
         (input, callbacks) => rpc().terminals.attach.subscribe(input, callbacks),
         { ...fence(), request },
         signal,
-        DEFAULT_SUBSCRIPTION_BUFFER_CAPACITY,
+        TERMINAL_STREAM_BUFFER_ITEMS,
         (input) => ({
           ...input,
           request: {

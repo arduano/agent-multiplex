@@ -77,6 +77,96 @@ describe("terminal client", () => {
     expect(watcher.cursor).toBeUndefined();
   });
 
+  it("restarts a partial exact replay and commits only its end barrier", async () => {
+    const terminalId = newTerminalId();
+    const procedure = new FakeTerminalSubscription();
+    const received: TerminalStreamItem[] = [];
+    const watcher = watchTerminal(procedure, {
+      target,
+      terminalId,
+      onItem: (item) => received.push(item),
+      initialRetryDelayMs: 0,
+      maxRetryDelayMs: 0,
+      retryJitter: 0,
+    });
+    const terminal = terminalDescriptor(terminalId, 2);
+    const start = terminalStreamItemSchema.parse({
+      kind: "replayStart",
+      cursor: { terminalId, sequence: 0 },
+      initialDimensions: terminal.dimensions,
+      terminal,
+    });
+    const output = terminalStreamItemSchema.parse({
+      kind: "output",
+      cursor: { terminalId, sequence: 1 },
+      dataBase64: Buffer.from("partial").toString("base64"),
+    });
+    const end = terminalStreamItemSchema.parse({
+      kind: "replayEnd",
+      cursor: { terminalId, sequence: 2 },
+      terminal,
+    });
+
+    procedure.emit(start);
+    procedure.emit(output);
+    await tick();
+    expect(watcher.cursor).toBeUndefined();
+    procedure.fail(new Error("lost during replay"));
+    await tick();
+    await tick();
+    expect(procedure.inputs[1]?.cursor).toBeUndefined();
+
+    procedure.emit(start);
+    procedure.emit(output);
+    procedure.emit(end);
+    await tick();
+    expect(watcher.cursor).toEqual(end.cursor);
+    procedure.fail(new Error("lost after replay"));
+    await tick();
+    await tick();
+    expect(procedure.inputs[2]?.cursor).toEqual(end.cursor);
+    expect(received.map((item) => item.kind)).toEqual([
+      "replayStart", "output", "replayStart", "output", "replayEnd",
+    ]);
+    watcher.stop();
+    await watcher.done;
+  });
+
+  it("rejects an exact replay end that does not commit its advertised high-water", async () => {
+    const terminalId = newTerminalId();
+    const procedure = new FakeTerminalSubscription();
+    const watcher = watchTerminal(procedure, {
+      target,
+      terminalId,
+      onItem: () => undefined,
+      shouldRetry: () => false,
+    });
+    const advertised = terminalDescriptor(terminalId, 2);
+    const stale = terminalDescriptor(terminalId, 1);
+
+    procedure.emit(terminalStreamItemSchema.parse({
+      kind: "replayStart",
+      cursor: { terminalId, sequence: 0 },
+      initialDimensions: advertised.dimensions,
+      terminal: advertised,
+    }));
+    procedure.emit(terminalStreamItemSchema.parse({
+      kind: "output",
+      cursor: { terminalId, sequence: 1 },
+      dataBase64: Buffer.from("partial").toString("base64"),
+    }));
+    procedure.emit(terminalStreamItemSchema.parse({
+      kind: "replayEnd",
+      cursor: { terminalId, sequence: 1 },
+      terminal: stale,
+    }));
+
+    await expect(watcher.done).rejects.toThrow(
+      "terminal exact replay ended at another high-water cursor",
+    );
+    expect(watcher.cursor).toBeUndefined();
+  });
+
   it("accepts a cursor-ahead reset even when it moves the local cursor backward", async () => {
     const terminalId = newTerminalId();
     const procedure = new FakeTerminalSubscription();
@@ -92,6 +182,7 @@ describe("terminal client", () => {
     const reset = terminalStreamItemSchema.parse({
       kind: "reset",
       reason: "cursorAhead",
+      fidelity: "synthesized",
       cursor: { terminalId, sequence: 3 },
       screenBase64: "",
       terminal: {
@@ -327,6 +418,42 @@ function heartbeat(
     kind: "heartbeat",
     cursor: { terminalId, sequence },
   });
+}
+
+function terminalDescriptor(
+  terminalId: ReturnType<typeof newTerminalId>,
+  sequence: number,
+) {
+  const timestamp = new Date().toISOString();
+  return terminalStreamItemSchema.parse({
+    kind: "reset",
+    reason: "initial",
+    fidelity: "synthesized",
+    cursor: { terminalId, sequence },
+    screenBase64: "",
+    terminal: {
+      ...target,
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      terminalId,
+      backend: "mock",
+      sharing: "session",
+      foregroundSessionId: null,
+      state: "running",
+      dimensions: { columns: 100, rows: 30 },
+      sequence,
+      lease: null,
+      capabilities: {
+        write: true,
+        resize: true,
+        terminate: true,
+        restart: true,
+        foregroundSwitch: false,
+      },
+      openedAt: timestamp,
+      updatedAt: timestamp,
+      exit: null,
+    },
+  }).terminal;
 }
 
 function futureDate(): string {

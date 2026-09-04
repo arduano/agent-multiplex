@@ -15,6 +15,7 @@ import {
 import {
   mergeTerminalLease,
   reconcileTerminalDescriptor,
+  reduceTerminalReplayView,
   shouldQueryTerminal,
   terminalSideChannelCapability,
 } from "../apps/web/src/client/terminal-state.js";
@@ -69,6 +70,59 @@ describe("web terminal state", () => {
     expect(terminalSideChannelCapability(runtime([
       { name: "terminal.side-channel", version: "v1", experimental: true },
     ]), "codex")).toEqual({ experimental: true });
+  });
+
+  it("keeps opening dimensions until an exact replay applies ordered resizes", () => {
+    const terminalId = newTerminalId();
+    const current = descriptor({
+      terminalId,
+      sequence: 3,
+      dimensions: { columns: 120, rows: 40 },
+    });
+    const opening = { columns: 80, rows: 24 };
+    let view = {
+      ready: true,
+      dimensions: current.dimensions,
+      terminal: null as TerminalDescriptor | null,
+    };
+
+    view = reduceTerminalReplayView(view, {
+      kind: "replayStart",
+      cursor: { terminalId, sequence: 0 },
+      initialDimensions: opening,
+      terminal: current,
+    });
+    expect(view).toEqual({ ready: false, dimensions: opening, terminal: null });
+
+    view = reduceTerminalReplayView(view, {
+      kind: "output",
+      cursor: { terminalId, sequence: 1 },
+      dataBase64: "eA==",
+    });
+    expect(view.dimensions).toEqual(opening);
+    expect(view.terminal).toBeNull();
+
+    view = reduceTerminalReplayView(view, {
+      kind: "resize",
+      cursor: { terminalId, sequence: 2 },
+      dimensions: { columns: 100, rows: 30 },
+    });
+    expect(view).toMatchObject({
+      ready: false,
+      dimensions: { columns: 100, rows: 30 },
+      terminal: null,
+    });
+
+    view = reduceTerminalReplayView(view, {
+      kind: "replayEnd",
+      cursor: { terminalId, sequence: 3 },
+      terminal: current,
+    });
+    expect(view).toEqual({
+      ready: true,
+      dimensions: current.dimensions,
+      terminal: current,
+    });
   });
 });
 

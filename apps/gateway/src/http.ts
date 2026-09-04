@@ -15,7 +15,12 @@ import { applyWSSHandler } from "@trpc/server/adapters/ws";
 import { WebSocketServer } from "ws";
 
 import type { AccessGatewayProjection } from "@arduano/agent-multiplex-gateway-core";
-import { webAsset } from "@arduano/agent-multiplex-web";
+import {
+  installBoundedWebSocketEgress,
+  TRPC_HTTP_BODY_LIMIT_BYTES,
+  WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+  webAsset,
+} from "@arduano/agent-multiplex-web";
 
 import {
   createAccessGatewayRouter,
@@ -64,6 +69,7 @@ export function createGatewayHttpSurface(
   const trpcHandler = createHTTPHandler({
     router,
     basePath: "/trpc/",
+    maxBodySize: TRPC_HTTP_BODY_LIMIT_BYTES,
     createContext: ({ req, res }: CreateHTTPContextOptions) => {
       try {
         return authenticator.authenticateHttp(readAuthorizationHeaders(req));
@@ -87,7 +93,12 @@ export function createGatewayHttpSurface(
     }
     serveDashboard(request, response, styleNonce);
   });
-  const webSockets = new WebSocketServer({ server, path: "/trpc" });
+  const webSockets = new WebSocketServer({
+    server,
+    path: "/trpc",
+    maxPayload: WEBSOCKET_INGRESS_MESSAGE_LIMIT_BYTES,
+  });
+  installBoundedWebSocketEgress(webSockets);
   applyWSSHandler({
     wss: webSockets,
     router,

@@ -27,10 +27,18 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           registry-url: https://npm.pkg.github.com
           scope: "@arduano"
+      - name: Install exact npm and verify toolchain
+        shell: bash
+        run: |
+          expected_node="$(<.node-version)"
+          expected_npm="$(jq -r '.packageManager | ltrimstr("npm@")' package.json)"
+          npm install --global --ignore-scripts "npm@$expected_npm"
+          test "$(node --version)" = "v$expected_node"
+          test "$(npm --version)" = "$expected_npm"
       - name: Install locked dependencies
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
@@ -45,10 +53,10 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm test
-      - name: Audit production dependencies
+      - name: Audit the complete release-build dependency graph
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --audit-level=high
       - name: Build exact package candidates
         run: npm run build && npm run release:pack -- --allow-dirty
       - name: Validate packed consumers

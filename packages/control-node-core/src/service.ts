@@ -1216,7 +1216,7 @@ export class ControlNodeService {
     const descriptor = await this.#dispatchTerminalMutation(input, (connection) =>
       connection.terminateTerminal(input));
     const parsed = terminalDescriptorSchema.parse(descriptor);
-    this.#assertTerminalDescriptor(input, parsed);
+    this.#assertTerminalDescriptor(input, parsed, { terminalId: input.terminalId });
     return parsed;
   }
 
@@ -1973,6 +1973,8 @@ export class ControlNodeService {
     if (signal?.aborted) return;
     const controller = new AbortController();
     let routeInvalid = false;
+    let replay: { highWater: number; lastSequence: number } | undefined;
+    let sawItem = false;
     const abort = (): void => controller.abort();
     const checkRoute = (): void => {
       try {
@@ -1998,9 +2000,58 @@ export class ControlNodeService {
             "terminal stream returned another terminal identity",
           );
         }
-        if (item.kind === "reset" || item.kind === "changed") {
-          this.#assertTerminalDescriptor(input, item.terminal);
+        if (
+          item.kind === "reset" ||
+          item.kind === "replayStart" ||
+          item.kind === "replayEnd" ||
+          item.kind === "changed"
+        ) {
+          this.#assertTerminalDescriptor(input, item.terminal, {
+            terminalId: input.terminalId,
+            ...(item.kind === "replayStart"
+              ? {}
+              : { sequence: item.cursor.sequence }),
+          });
         }
+        if (item.kind === "replayStart") {
+          if (input.cursor !== undefined || replay !== undefined || sawItem) {
+            throw new ControlNodeCoreError(
+              "PAYLOAD_MISMATCH",
+              "runtime returned an unexpected terminal replay start",
+            );
+          }
+          replay = { highWater: item.terminal.sequence, lastSequence: 0 };
+        } else if (replay !== undefined) {
+          if (item.kind === "replayEnd") {
+            if (
+              item.cursor.sequence !== replay.highWater ||
+              item.cursor.sequence < replay.lastSequence
+            ) {
+              throw new ControlNodeCoreError(
+                "PAYLOAD_MISMATCH",
+                "runtime terminal replay ended outside its advertised high-water fence",
+              );
+            }
+            replay = undefined;
+          } else if (
+            (item.kind !== "output" && item.kind !== "resize") ||
+            item.cursor.sequence <= replay.lastSequence ||
+            item.cursor.sequence > replay.highWater
+          ) {
+            throw new ControlNodeCoreError(
+              "PAYLOAD_MISMATCH",
+              "runtime returned a malformed terminal replay timeline",
+            );
+          } else {
+            replay.lastSequence = item.cursor.sequence;
+          }
+        } else if (item.kind === "replayEnd") {
+          throw new ControlNodeCoreError(
+            "PAYLOAD_MISMATCH",
+            "runtime returned a terminal replay end without a start",
+          );
+        }
+        sawItem = true;
         yield item;
       }
     } finally {
@@ -2050,6 +2101,10 @@ export class ControlNodeService {
   #assertTerminalDescriptor(
     target: TerminalTarget,
     descriptor: TerminalDescriptor,
+    streamFence?: {
+      terminalId: TerminalDescriptor["terminalId"];
+      sequence?: number;
+    },
   ): void {
     if (
       descriptor.sessionId !== target.sessionId ||
@@ -2059,6 +2114,19 @@ export class ControlNodeService {
       throw new ControlNodeCoreError(
         "PAYLOAD_MISMATCH",
         "runtime returned a terminal descriptor for another session binding",
+      );
+    }
+    if (
+      streamFence !== undefined &&
+      (
+        descriptor.terminalId !== streamFence.terminalId ||
+        (streamFence.sequence !== undefined &&
+          descriptor.sequence !== streamFence.sequence)
+      )
+    ) {
+      throw new ControlNodeCoreError(
+        "PAYLOAD_MISMATCH",
+        "runtime returned a terminal descriptor outside its stream fence",
       );
     }
     const runtime = this.catalog.getRuntimeNode(target.runtimeNodeId);

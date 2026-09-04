@@ -901,7 +901,9 @@ export class AccessGatewayProjection {
       () => route.client.terminateTerminal(input),
     ));
     this.#assertTerminalRouteFence(route.fence);
-    this.#assertTerminalDescriptor(route.fence, descriptor);
+    this.#assertTerminalDescriptor(route.fence, descriptor, {
+      terminalId: input.terminalId,
+    });
     return descriptor;
   }
 
@@ -1864,6 +1866,10 @@ export class AccessGatewayProjection {
   #assertTerminalDescriptor(
     fence: TerminalRouteFence,
     descriptor: TerminalDescriptor,
+    streamFence?: {
+      terminalId: TerminalDescriptor["terminalId"];
+      sequence?: number;
+    },
   ): void {
     if (
       descriptor.sessionId !== fence.sessionId ||
@@ -1874,6 +1880,19 @@ export class AccessGatewayProjection {
       throw new GatewayRoutingError(
         "CONFLICT",
         "terminal source returned a descriptor for another session binding",
+      );
+    }
+    if (
+      streamFence !== undefined &&
+      (
+        descriptor.terminalId !== streamFence.terminalId ||
+        (streamFence.sequence !== undefined &&
+          descriptor.sequence !== streamFence.sequence)
+      )
+    ) {
+      throw new GatewayRoutingError(
+        "CONFLICT",
+        "terminal source returned a descriptor outside its stream fence",
       );
     }
   }
@@ -1908,6 +1927,8 @@ export class AccessGatewayProjection {
       fence: route.fence,
       controller,
     };
+    let replay: { highWater: number; lastSequence: number } | undefined;
+    let sawItem = false;
     const abort = (): void => controller.abort();
     this.#terminalRouteSubscriptions.add(subscription);
     if (signal?.aborted) controller.abort();
@@ -1923,9 +1944,58 @@ export class AccessGatewayProjection {
             "terminal source stream returned another terminal identity",
           );
         }
-        if (item.kind === "reset" || item.kind === "changed") {
-          this.#assertTerminalDescriptor(route.fence, item.terminal);
+        if (
+          item.kind === "reset" ||
+          item.kind === "replayStart" ||
+          item.kind === "replayEnd" ||
+          item.kind === "changed"
+        ) {
+          this.#assertTerminalDescriptor(route.fence, item.terminal, {
+            terminalId: input.terminalId,
+            ...(item.kind === "replayStart"
+              ? {}
+              : { sequence: item.cursor.sequence }),
+          });
         }
+        if (item.kind === "replayStart") {
+          if (input.cursor !== undefined || replay !== undefined || sawItem) {
+            throw new GatewayRoutingError(
+              "CONFLICT",
+              "terminal source returned an unexpected replay start",
+            );
+          }
+          replay = { highWater: item.terminal.sequence, lastSequence: 0 };
+        } else if (replay !== undefined) {
+          if (item.kind === "replayEnd") {
+            if (
+              item.cursor.sequence !== replay.highWater ||
+              item.cursor.sequence < replay.lastSequence
+            ) {
+              throw new GatewayRoutingError(
+                "CONFLICT",
+                "terminal source replay ended outside its advertised high-water fence",
+              );
+            }
+            replay = undefined;
+          } else if (
+            (item.kind !== "output" && item.kind !== "resize") ||
+            item.cursor.sequence <= replay.lastSequence ||
+            item.cursor.sequence > replay.highWater
+          ) {
+            throw new GatewayRoutingError(
+              "CONFLICT",
+              "terminal source returned a malformed replay timeline",
+            );
+          } else {
+            replay.lastSequence = item.cursor.sequence;
+          }
+        } else if (item.kind === "replayEnd") {
+          throw new GatewayRoutingError(
+            "CONFLICT",
+            "terminal source returned a replay end without a start",
+          );
+        }
+        sawItem = true;
         yield item;
       }
       if (controller.signal.aborted && !signal?.aborted) {

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "npm@11.17.0",
   "description": "A distributed, tRPC-compatible multiplexer for native coding-agent sessions.",
   "license": "MIT",
   "repository": {
@@ -65,7 +66,8 @@
     "start:gateway": "node apps/gateway/dist/main.js",
     "release:pack": "node scripts/create-release-artifacts.mjs release-artifacts",
     "release:verify": "node scripts/verify-release-artifacts.mjs release-artifacts",
-    "release:sbom": "cyclonedx-npm --output-file release-artifacts/sbom.cdx.json --output-format JSON --spec-version 1.6 --omit dev",
+    "release:sbom": "node scripts/create-release-sbom.mjs release-artifacts",
+    "release:native-status": "node scripts/record-native-qualification.mjs",
     "release:publish": "node scripts/publish-release.mjs release-artifacts"
   },
   "dependencies": {
