@@ -33,7 +33,7 @@
   "dependencies": {
     "@arduano/agent-multiplex-control-node-core": "0.1.0",
     "@arduano/agent-multiplex-protocol": "0.1.0",
-    "@noble/hashes": "2.0.1",
+    "@noble/hashes": "2.4.0",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0"
   }
