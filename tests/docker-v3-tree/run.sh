@@ -50,6 +50,12 @@ mkdir -p "$RECEIPT_DIR/logs" "$RECEIPT_DIR/rpc" "$RECEIPT_DIR/phases" \
 
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agent-multiplex-v4-tree.XXXXXXXX")
 mkdir -p "$RUNTIME_DIR/authority-state" "$RUNTIME_DIR/branch-state"
+CONTAINER_UID=$(id -u)
+CONTAINER_GID=$(id -g)
+if (( CONTAINER_UID == 0 )); then
+  echo "protocol-v4 tree acceptance: run as a non-root host user" >&2
+  exit 1
+fi
 NAME_SUFFIX=$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | tail -c 22)
 AUTHORITY_CONTAINER="multiplex-v4-authority-$NAME_SUFFIX"
 BRANCH_CONTAINER="multiplex-v4-branch-$NAME_SUFFIX"
@@ -219,7 +225,7 @@ NETWORK_CREATED=1
 note "starting durable authority control node"
 docker run --detach \
   --name "$AUTHORITY_CONTAINER" --hostname authority-control --network "$NETWORK_NAME" \
-  --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --init --user "$CONTAINER_UID:$CONTAINER_GID" --read-only --cap-drop ALL --security-opt no-new-privileges \
   --mount type=bind,src="$RUNTIME_DIR/authority-state",dst=/state \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
@@ -246,7 +252,7 @@ fi
 note "starting attached branch control node"
 docker run --detach \
   --name "$BRANCH_CONTAINER" --hostname branch-control --network "$NETWORK_NAME" \
-  --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --init --user "$CONTAINER_UID:$CONTAINER_GID" --read-only --cap-drop ALL --security-opt no-new-privileges \
   --mount type=bind,src="$RUNTIME_DIR/branch-state",dst=/state \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
