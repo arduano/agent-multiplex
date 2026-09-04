@@ -95,14 +95,14 @@ jobs:
           native_statuses="$(gh api --paginate --slurp \
             "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/statuses?per_page=100")"
           jq -e \
-            --arg sha "$GITHUB_SHA" \
             --arg context "Agent Multiplex / Native four-container qualification" \
             --arg owner "$GITHUB_REPOSITORY_OWNER" \
             --argjson ownerId "$repository_owner_id" \
+            --arg statusUrl "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
             --arg target "https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" '
               [
                 .[][] |
-                select(.sha == $sha and .context == $context)
+                select(.context == $context)
               ] |
               sort_by(.created_at, .id) |
               last |
@@ -110,6 +110,7 @@ jobs:
               .creator.login == $owner and
               .creator.id == $ownerId and
               .creator.type == "User" and
+              .url == $statusUrl and
               .target_url == $target and
               (.description | type == "string" and
                 test("^PASS [A-Za-z0-9][A-Za-z0-9._-]{0,47} sha256:[0-9a-f]{64}$"))

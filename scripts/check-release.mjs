@@ -99,6 +99,7 @@ assert(
 assert(
   publishWorkflow.includes('.creator.login == $owner') &&
     publishWorkflow.includes('.creator.id == $ownerId') &&
+    publishWorkflow.includes('.url == $statusUrl') &&
     publishWorkflow.includes(
       'test("^PASS [A-Za-z0-9][A-Za-z0-9._-]{0,47} sha256:[0-9a-f]{64}$")',
     ),
