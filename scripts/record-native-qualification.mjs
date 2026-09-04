@@ -18,6 +18,7 @@ import {
   repositoryRoot,
 } from "./release-config.mjs";
 import { isCanonicalUtcTimestamp } from "./canonical-utc-timestamp.mjs";
+import { browserErrorSummaryPassed } from "./native-browser-evidence.mjs";
 
 const repository = "arduano/agent-multiplex";
 const repositoryOwner = "arduano";
@@ -948,11 +949,9 @@ function validatePhaseEvidence(snapshot, checks, summary, manifest) {
     assert(browser.assertions?.[key] === true, `browser assertion ${key} did not pass`);
   }
   assert(
-    Number.isSafeInteger(browser.assertions.postReloadNativeHistoryCalls) &&
+      Number.isSafeInteger(browser.assertions.postReloadNativeHistoryCalls) &&
       browser.assertions.postReloadNativeHistoryCalls >= 2 &&
-      browser.assertions.browserConsoleErrors === 0 &&
-      browser.assertions.unexpectedBrowserErrors === 0 &&
-      browser.assertions.unrecoveredTransientNativeHistoryCalls === 0 &&
+      browserErrorSummaryPassed(browser.assertions) &&
       browser.assertions.failedSameOriginRequests === 0 &&
       browser.assertions.responsiveViewportsChecked === 6 &&
       browser.assertions.responsiveDocumentOverflows === 0 &&
