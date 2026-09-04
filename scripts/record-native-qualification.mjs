@@ -19,6 +19,9 @@ import {
 } from "./release-config.mjs";
 import { isCanonicalUtcTimestamp } from "./canonical-utc-timestamp.mjs";
 import { browserErrorSummaryPassed } from "./native-browser-evidence.mjs";
+import {
+  githubCommitStatusResponseMatchesRequest,
+} from "./github-commit-status.mjs";
 import { nativeStreamSummaryPassed } from "./native-stream-evidence.mjs";
 
 const repository = "arduano/agent-multiplex";
@@ -317,13 +320,15 @@ const recordedStatus = parseGhObject(ghApi(
   ],
 ), "recorded GitHub commit status");
 assert(
-  recordedStatus.sha === sourceCommit &&
-    recordedStatus.state === "success" &&
-    recordedStatus.context === statusContext &&
-    recordedStatus.description === statusDescription &&
-    recordedStatus.target_url ===
-      `https://github.com/${repository}/commit/${sourceCommit}` &&
-    recordedStatus.creator?.id === viewer.id,
+  githubCommitStatusResponseMatchesRequest(recordedStatus, {
+    repository,
+    sourceCommit,
+    state: "success",
+    context: statusContext,
+    description: statusDescription,
+    targetUrl: `https://github.com/${repository}/commit/${sourceCommit}`,
+    creatorId: viewer.id,
+  }),
   "GitHub returned a different native qualification status than requested",
 );
 
