@@ -283,8 +283,8 @@ fi
 note "starting branch-owned mock runtime node"
 docker run --detach \
   --name "$RUNTIME_CONTAINER" --hostname tree-runtime --network "$NETWORK_NAME" \
-  --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+  --init --user "$CONTAINER_UID:$CONTAINER_GID" --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs "/state:rw,nosuid,nodev,mode=0700,uid=$CONTAINER_UID,gid=$CONTAINER_GID" \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$BRANCH_ENDPOINT" \
@@ -330,8 +330,8 @@ GATEWAY_SOURCES=$(jq -cn \
 note "starting zero-authority gateway with overlapping sources"
 docker run --detach \
   --name "$GATEWAY_CONTAINER" --hostname tree-gateway --network "$NETWORK_NAME" \
-  --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+  --init --user "$CONTAINER_UID:$CONTAINER_GID" --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs "/state:rw,nosuid,nodev,mode=0700,uid=$CONTAINER_UID,gid=$CONTAINER_GID" \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --mount type=bind,src="$RUNTIME_DIR/access-token",dst=/run/access-token,readonly \
   --publish 127.0.0.1::4318 \
