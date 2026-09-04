@@ -19,6 +19,7 @@ import {
 } from "./release-config.mjs";
 import { isCanonicalUtcTimestamp } from "./canonical-utc-timestamp.mjs";
 import { browserErrorSummaryPassed } from "./native-browser-evidence.mjs";
+import { nativeStreamSummaryPassed } from "./native-stream-evidence.mjs";
 
 const repository = "arduano/agent-multiplex";
 const repositoryOwner = "arduano";
@@ -949,7 +950,7 @@ function validatePhaseEvidence(snapshot, checks, summary, manifest) {
     assert(browser.assertions?.[key] === true, `browser assertion ${key} did not pass`);
   }
   assert(
-      Number.isSafeInteger(browser.assertions.postReloadNativeHistoryCalls) &&
+    Number.isSafeInteger(browser.assertions.postReloadNativeHistoryCalls) &&
       browser.assertions.postReloadNativeHistoryCalls >= 2 &&
       browserErrorSummaryPassed(browser.assertions) &&
       browser.assertions.failedSameOriginRequests === 0 &&
@@ -965,11 +966,7 @@ function validatePhaseEvidence(snapshot, checks, summary, manifest) {
   assertExactObject(controls.assertions, checks.codexControls, "Codex control assertions");
   assertExactObject(streams.assertions, checks.streams, "native stream assertions");
   assert(
-    streams.rawNativeEventCount === checks.counts.nativeEvents &&
-      streams.uniqueNativeEventCount === streams.rawNativeEventCount &&
-      streams.withinSegmentDuplicateKeys?.length === 0 &&
-      streams.conflictingReplays?.length === 0 &&
-      streams.noncontiguousGroups?.length === 0,
+    nativeStreamSummaryPassed(streams, checks.counts.nativeEvents),
     "native stream phase is incomplete or inconsistent",
   );
   assert(
