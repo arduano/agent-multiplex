@@ -1,0 +1,69 @@
+name: Docker qualification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deterministic:
+    name: Tree and 100-agent mock scale
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@arduano"
+      - name: Install and build
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm ci --strict-allow-scripts && npm run build
+      - name: Create ephemeral Docker npm configuration
+        id: npmrc
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: |
+          path="$RUNNER_TEMP/agent-multiplex-docker.npmrc"
+          umask 077
+          printf '%s\n' \
+            '@arduano:registry=https://npm.pkg.github.com' \
+            "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" \
+            'strict-allow-scripts=true' > "$path"
+          echo "path=$path" >> "$GITHUB_OUTPUT"
+      - name: Run control-tree qualification
+        env:
+          AGENT_MULTIPLEX_DOCKER_NPMRC: ${{ steps.npmrc.outputs.path }}
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm run test:docker:v4:tree
+      - name: Run 10-host / 100-agent qualification
+        env:
+          AGENT_MULTIPLEX_DOCKER_NPMRC: ${{ steps.npmrc.outputs.path }}
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm run test:docker:v4:mock:scale
+      - name: Upload sanitized qualification receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qualification-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            receipts/protocol-v4-control-tree/
+            receipts/protocol-v4-mock-docker-scale/
+          if-no-files-found: error
+          retention-days: 30

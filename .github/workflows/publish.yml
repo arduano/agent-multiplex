@@ -1,0 +1,222 @@
+name: Publish GitHub Packages
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  publish:
+    name: Verify and publish immutable release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require tag on main and matching manifests
+        shell: bash
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          npm run check:tag
+      - name: Require successful CI and qualification for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          require_successful_run() {
+            local workflow="$1"
+            local allowed_events="$2"
+            local label="$3"
+            local runs run_id run
+            runs="$(gh api --method GET \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs" \
+              -f branch=main \
+              -f status=success \
+              -f head_sha="$GITHUB_SHA" \
+              -f per_page=100)"
+            run_id="$(jq -er \
+              --arg sha "$GITHUB_SHA" \
+              --arg path ".github/workflows/${workflow}" \
+              --argjson events "$allowed_events" '
+                [.workflow_runs[] |
+                  select(
+                    .head_sha == $sha and
+                    .head_branch == "main" and
+                    .path == $path and
+                    .status == "completed" and
+                    .conclusion == "success" and
+                    (.event as $event | $events | index($event) != null)
+                  )][0].id
+              ' <<< "$runs")" || {
+                echo "No successful ${label} run exists for tag commit $GITHUB_SHA" >&2
+                exit 1
+              }
+            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+            jq -e \
+              --arg sha "$GITHUB_SHA" \
+              --arg path ".github/workflows/${workflow}" \
+              --argjson events "$allowed_events" '
+                .head_sha == $sha and
+                .head_branch == "main" and
+                .path == $path and
+                .status == "completed" and
+                .conclusion == "success" and
+                (.event as $event | $events | index($event) != null)
+              ' <<< "$run" >/dev/null
+          }
+          require_successful_run ci.yml '["push"]' "main-branch CI"
+          require_successful_run qualification.yml \
+            '["push", "workflow_dispatch"]' \
+            "Docker qualification"
+      - name: Set up Node.js and GitHub Packages
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@arduano"
+      - name: Install locked dependencies
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm ci --strict-allow-scripts
+      - name: Rebuild and validate source
+        run: |
+          npm run check:release
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Build immutable package artifacts
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: npm run release:pack
+      - name: Verify exact packed consumers
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm run release:verify
+      - name: Generate CycloneDX SBOM
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm run release:sbom
+      - name: Scan tracked source for credentials
+        run: npm run check:secrets
+      - name: Attest package artifacts
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: release-artifacts/*.tgz
+      - name: Publish exact artifacts and promote latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:publish
+      - name: Verify clean registry consumers
+        env:
+          AGENT_MULTIPLEX_VERIFY_REGISTRY: "1"
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm run release:verify
+      - name: Require public package visibility
+        env:
+          GH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        shell: bash
+        run: |
+          non_public=()
+          while IFS= read -r name; do
+            package="${name#@arduano/}"
+            visibility="$(gh api "/users/${GITHUB_REPOSITORY_OWNER}/packages/npm/${package}" --jq '.visibility')"
+            if [[ "$visibility" != "public" ]]; then
+              non_public+=("${name} (${visibility})")
+            fi
+          done < <(jq -r '.packages[].name' release-artifacts/pack-manifest.json)
+          if (( ${#non_public[@]} > 0 )); then
+            echo "::error::Set every package listed below to public in GitHub package settings, then rerun this tag workflow."
+            printf '  %s\n' "${non_public[@]}" >&2
+            exit 1
+          fi
+      - name: Record first-release visibility instructions
+        shell: bash
+        run: |
+          cat > release-artifacts/PACKAGE_VISIBILITY.md <<'EOF'
+          # One-time GitHub Packages visibility step
+
+          Every package in `pack-manifest.json` was published with public
+          visibility and verified through a clean registry-backed consumer.
+          GitHub Packages still requires authenticated npm clients. Grant a
+          downstream Actions repository package access, or provide it a
+          least-privilege classic PAT with `read:packages`.
+          EOF
+      - name: Create or recover exact GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          title="Agent Multiplex $GITHUB_REF_NAME"
+          assets=(
+            release-artifacts/*.tgz
+            release-artifacts/SHA256SUMS
+            release-artifacts/pack-manifest.json
+            release-artifacts/publication.json
+            release-artifacts/PACKAGE_VISIBILITY.md
+            release-artifacts/sbom.cdx.json
+          )
+          if existing="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null)"; then
+            expected_prerelease=false
+            if [[ "$version" == *-* ]]; then expected_prerelease=true; fi
+            jq -e \
+              --arg tag "$GITHUB_REF_NAME" \
+              --arg title "$title" \
+              --argjson prerelease "$expected_prerelease" '
+                .tag_name == $tag and
+                .name == $title and
+                .draft == false and
+                .prerelease == $prerelease
+              ' <<< "$existing" >/dev/null
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            args=(--verify-tag --title "$title" --generate-notes)
+            if [[ "$version" == *-* ]]; then args+=(--prerelease); fi
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              "${args[@]}" \
+              --repo "$GITHUB_REPOSITORY"
+          fi
+          expected_assets="$(printf '%s\n' "${assets[@]}" |
+            while IFS= read -r asset; do basename "$asset"; done | jq -R . | jq -s 'sort')"
+          release="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          jq -e --argjson expected "$expected_assets" '
+            ([.assets[].name] | sort) == $expected and
+            ([.assets[].name] | length) == ([.assets[].name] | unique | length)
+          ' <<< "$release" >/dev/null
+          download_directory="$RUNNER_TEMP/github-release-assets"
+          mkdir -p "$download_directory"
+          gh release download "$GITHUB_REF_NAME" \
+            --dir "$download_directory" \
+            --repo "$GITHUB_REPOSITORY"
+          for asset in "${assets[@]}"; do
+            cmp --silent "$asset" "$download_directory/$(basename "$asset")" || {
+              echo "GitHub release asset differs from verified source: $(basename "$asset")" >&2
+              exit 1
+            }
+          done
+      - name: Upload release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ github.ref_name }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 90

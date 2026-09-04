@@ -1,0 +1,21 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/storage-sqlite" },
+    { "path": "packages/control-node-core" },
+    { "path": "packages/gateway-core" },
+    { "path": "packages/runtime-node-core" },
+    { "path": "packages/transport-p2prpc" },
+    { "path": "packages/client" },
+    { "path": "packages/client-p2prpc" },
+    { "path": "packages/adapter-codex" },
+    { "path": "packages/adapter-copilot" },
+    { "path": "packages/adapter-mock" },
+    { "path": "apps/control-node" },
+    { "path": "apps/runtime-node" },
+    { "path": "apps/cli" },
+    { "path": "apps/web" },
+    { "path": "apps/gateway" }
+  ]
+}

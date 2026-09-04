@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": ".tsbuildinfo"
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../client" },
+    { "path": "../protocol" },
+    { "path": "../control-node-core" },
+    { "path": "../gateway-core" },
+    { "path": "../transport-p2prpc" }
+  ]
+}

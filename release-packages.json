@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    { "workspace": "packages/protocol", "name": "@arduano/agent-multiplex-protocol" },
+    { "workspace": "packages/storage-sqlite", "name": "@arduano/agent-multiplex-storage-sqlite" },
+    { "workspace": "packages/control-node-core", "name": "@arduano/agent-multiplex-control-node-core" },
+    { "workspace": "packages/gateway-core", "name": "@arduano/agent-multiplex-gateway-core" },
+    { "workspace": "packages/runtime-node-core", "name": "@arduano/agent-multiplex-runtime-node-core" },
+    { "workspace": "packages/transport-p2prpc", "name": "@arduano/agent-multiplex-transport-p2prpc" },
+    { "workspace": "packages/client", "name": "@arduano/agent-multiplex-client" },
+    { "workspace": "packages/client-p2prpc", "name": "@arduano/agent-multiplex-client-p2prpc" },
+    { "workspace": "packages/adapter-codex", "name": "@arduano/agent-multiplex-adapter-codex" },
+    { "workspace": "packages/adapter-copilot", "name": "@arduano/agent-multiplex-adapter-copilot" },
+    { "workspace": "packages/adapter-mock", "name": "@arduano/agent-multiplex-adapter-mock" },
+    { "workspace": "apps/web", "name": "@arduano/agent-multiplex-web" },
+    { "workspace": "apps/control-node", "name": "@arduano/agent-multiplex-control-node" },
+    { "workspace": "apps/runtime-node", "name": "@arduano/agent-multiplex-runtime-node" },
+    { "workspace": "apps/gateway", "name": "@arduano/agent-multiplex-gateway" },
+    { "workspace": "apps/cli", "name": "@arduano/agent-multiplex-cli" }
+  ]
+}

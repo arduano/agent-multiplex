@@ -1,0 +1,32 @@
+{
+  "name": "@arduano/agent-multiplex-protocol",
+  "version": "0.1.0",
+  "description": "Protocol-v4 wire schemas, identifiers, and tRPC-compatible contracts for Agent Multiplex.",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./metadata.schema.json": "./src/metadata.schema.json"
+  },
+  "files": ["dist", "src/metadata.schema.json"],
+  "engines": { "node": ">=24.0.0" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git",
+    "directory": "packages/protocol"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
+  "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
+  "dependencies": {
+    "@trpc/server": "11.18.0",
+    "uuid": "11.1.1",
+    "zod": "4.1.5"
+  }
+}

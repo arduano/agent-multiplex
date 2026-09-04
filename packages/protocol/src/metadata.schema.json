@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-multiplex.internal/schemas/session-metadata.json",
+  "title": "Agent Multiplex Session Metadata",
+  "description": "A flat, namespaced key/value document. Values may be any JSON value; nested objects are values, not additional metadata structure.",
+  "type": "object",
+  "required": ["revision", "values", "keyRevisions"],
+  "additionalProperties": false,
+  "properties": {
+    "revision": { "type": "integer", "minimum": 0 },
+    "values": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]*(?:\\.[A-Za-z0-9][A-Za-z0-9._-]*)+$",
+        "maxLength": 256
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/jsonValue"
+      }
+    },
+    "keyRevisions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_-]*(?:\\.[A-Za-z0-9][A-Za-z0-9._-]*)+$",
+        "maxLength": 256
+      },
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    }
+  },
+  "$defs": {
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        { "type": "array", "items": { "$ref": "#/$defs/jsonValue" } },
+        { "type": "object", "additionalProperties": { "$ref": "#/$defs/jsonValue" } }
+      ]
+    }
+  }
+}

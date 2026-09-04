@@ -1,0 +1,38 @@
+{
+  "name": "@arduano/agent-multiplex-gateway",
+  "version": "0.1.0",
+  "description": "Reference zero-authority HTTP and WebSocket access gateway for Agent Multiplex.",
+  "private": false,
+  "type": "module",
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "exports": {
+    ".": { "types": "./dist/main.d.ts", "import": "./dist/main.js" }
+  },
+  "bin": {
+    "agent-multiplex-gateway": "./dist/main.js"
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=24.0.0" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git",
+    "directory": "apps/gateway"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "dependencies": {
+    "@arduano/agent-multiplex-client-p2prpc": "0.1.0",
+    "@arduano/agent-multiplex-gateway-core": "0.1.0",
+    "@arduano/agent-multiplex-protocol": "0.1.0",
+    "@arduano/agent-multiplex-transport-p2prpc": "0.1.0",
+    "@arduano/agent-multiplex-web": "0.1.0",
+    "@trpc/server": "11.18.0",
+    "ws": "8.21.3"
+  }
+}

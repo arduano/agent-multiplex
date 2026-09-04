@@ -1,0 +1,31 @@
+{
+  "name": "@arduano/agent-multiplex-client-p2prpc",
+  "version": "0.1.0",
+  "description": "Node-only p2prpc control-source client bindings for Agent Multiplex access gateways.",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=24.0.0" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git",
+    "directory": "packages/client-p2prpc"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
+  "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
+  "dependencies": {
+    "@arduano/agent-multiplex-client": "0.1.0",
+    "@arduano/agent-multiplex-control-node-core": "0.1.0",
+    "@arduano/agent-multiplex-gateway-core": "0.1.0",
+    "@arduano/agent-multiplex-protocol": "0.1.0",
+    "@arduano/agent-multiplex-transport-p2prpc": "0.1.0",
+    "@trpc/server": "11.18.0"
+  }
+}

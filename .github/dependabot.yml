@@ -1,0 +1,37 @@
+version: 2
+registries:
+  github-packages:
+    type: npm-registry
+    url: https://npm.pkg.github.com
+    token: ${{secrets.PACKAGES_READ_TOKEN}}
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:00"
+      timezone: Australia/Sydney
+    open-pull-requests-limit: 10
+    registries:
+      - github-packages
+    groups:
+      runtime-dependencies:
+        dependency-type: production
+      development-tooling:
+        dependency-type: development
+    ignore:
+      - dependency-name: "@openai/codex"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@github/copilot"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "@github/copilot-sdk"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "08:30"
+      timezone: Australia/Sydney
+    open-pull-requests-limit: 10

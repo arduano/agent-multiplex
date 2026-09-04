@@ -1,0 +1,37 @@
+{
+  "name": "@arduano/agent-multiplex-runtime-node-core",
+  "version": "0.1.0",
+  "description": "Transport-neutral bindings, launch providers, runtime journals, and terminals for Agent Multiplex.",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": { "node": ">=24.0.0" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git",
+    "directory": "packages/runtime-node-core"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
+  "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
+  "dependencies": {
+    "@arduano/agent-multiplex-protocol": "0.1.0",
+    "@arduano/agent-multiplex-storage-sqlite": "0.1.0",
+    "@trpc/server": "11.18.0",
+    "@xterm/addon-serialize": "^0.14.0",
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.1.0",
+    "zod": "4.1.5"
+  }
+}

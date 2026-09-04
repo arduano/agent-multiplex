@@ -1,0 +1,30 @@
+{
+  "name": "@arduano/agent-multiplex-cli",
+  "version": "0.1.0",
+  "description": "Reference command-line client for the Agent Multiplex protocol-v4 access surface.",
+  "private": false,
+  "type": "module",
+  "main": "./dist/main.js",
+  "bin": {
+    "agent-multiplex": "./dist/main.js"
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=24.0.0" },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "dependencies": {
+    "@arduano/agent-multiplex-client": "0.1.0",
+    "@arduano/agent-multiplex-protocol": "0.1.0",
+    "@trpc/client": "11.18.0"
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "name": "agent-multiplex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A distributed, tRPC-compatible multiplexer for native coding-agent sessions.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": {
+    "url": "https://github.com/arduano/agent-multiplex/issues"
+  },
+  "workspaces": [
+    "packages/protocol",
+    "packages/storage-sqlite",
+    "packages/control-node-core",
+    "packages/runtime-node-core",
+    "packages/gateway-core",
+    "packages/transport-p2prpc",
+    "packages/client",
+    "packages/client-p2prpc",
+    "packages/adapter-codex",
+    "packages/adapter-copilot",
+    "packages/adapter-mock",
+    "apps/control-node",
+    "apps/runtime-node",
+    "apps/gateway",
+    "apps/cli",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "prebuild": "npm run clean",
+    "build": "tsc -b",
+    "postbuild": "node scripts/prepare-package-output.mjs && npm run build:client --workspace @arduano/agent-multiplex-web",
+    "clean": "node scripts/clean.mjs",
+    "pretypecheck": "npm run clean",
+    "typecheck": "tsc -b --pretty false",
+    "check:checkpoint": "node scripts/check-checkpoint.mjs",
+    "check:docs": "node scripts/check-docs.mjs",
+    "check:release": "node scripts/check-release.mjs",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:tag": "node scripts/check-tag-version.mjs",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "posttest": "npm run check:checkpoint",
+    "test:docker:v4:mock:scale": "bash tests/docker-mock-scale/run.sh",
+    "test:docker:v4:tree": "bash tests/docker-v3-tree/run.sh",
+    "test:docker:v4:live": "bash tests/docker-live-four-container/run.sh",
+    "test:docker:v4:live:four": "bash tests/docker-live-four-container/run.sh",
+    "test:docker:mock:scale": "npm run test:docker:v4:mock:scale",
+    "test:watch": "vitest",
+    "dev:control-node": "tsx apps/control-node/src/main.ts",
+    "dev:runtime-node": "tsx apps/runtime-node/src/main.ts",
+    "dev:cli": "tsx apps/cli/src/main.ts",
+    "dev:gateway": "tsx apps/gateway/src/main.ts",
+    "start:control-node": "node apps/control-node/dist/main.js",
+    "start:runtime-node": "node apps/runtime-node/dist/main.js",
+    "start:cli": "node apps/cli/dist/main.js",
+    "start:gateway": "node apps/gateway/dist/main.js",
+    "release:pack": "node scripts/create-release-artifacts.mjs release-artifacts",
+    "release:verify": "node scripts/verify-release-artifacts.mjs release-artifacts",
+    "release:sbom": "cyclonedx-npm --output-file release-artifacts/sbom.cdx.json --output-format JSON --spec-version 1.6 --omit dev",
+    "release:publish": "node scripts/publish-release.mjs release-artifacts"
+  },
+  "dependencies": {
+    "@trpc/client": "11.18.0",
+    "@trpc/server": "11.18.0",
+    "superjson": "2.2.2",
+    "uuid": "11.1.1",
+    "zod": "4.1.5"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.5",
+    "@axe-core/playwright": "^4.13.0",
+    "@cyclonedx/cyclonedx-npm": "6.0.1",
+    "@types/node": "24.3.0",
+    "@types/ws": "8.18.1",
+    "playwright-core": "^1.62.1",
+    "publint": "0.3.24",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.7",
+    "ws": "8.21.3"
+  },
+  "overrides": {
+    "@github/copilot": "1.0.81",
+    "@trpc/client": "11.18.0",
+    "@trpc/server": "11.18.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": false,
+    "koffi@3.2.1": true,
+    "libxmljs2@0.37.0": false,
+    "msgpackr-extract@3.0.4": true,
+    "node-pty@1.1.0": true
+  }
+}

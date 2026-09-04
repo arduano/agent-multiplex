@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "tsBuildInfoFile": ".tsbuildinfo" },
+  "include": ["src/**/*.ts"],
+  "references": [
+    { "path": "../../packages/protocol" },
+    { "path": "../../packages/control-node-core" },
+    { "path": "../../packages/transport-p2prpc" },
+    { "path": "../../packages/runtime-node-core" },
+    { "path": "../web" }
+  ]
+}

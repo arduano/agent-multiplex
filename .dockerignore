@@ -1,0 +1,29 @@
+node_modules
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+# Protocol-v2 historical source is retained in the checkout only. It is not a
+# build input and must not be shipped in protocol-v3 images.
+apps/host
+packages/host-core
+.agent-multiplex
+**/.agent-multiplex
+receipts
+release-artifacts
+.git
+.git
+.env
+.env.*
+**/.env
+**/.env.*
+**/.npmrc
+!.npmrc
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+coverage
+.DS_Store

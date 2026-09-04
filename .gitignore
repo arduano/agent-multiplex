@@ -1,0 +1,15 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.agent-multiplex/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage/
+receipts/
+release-artifacts/
+*.tgz

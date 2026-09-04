@@ -1,0 +1,61 @@
+name: Design proposal
+description: Propose a protocol, role, extension, deployment, or API change
+title: "design: "
+labels: [design]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Describe the workflow before the mechanism. Do not include credentials,
+        endpoint tickets, private source, transcripts, or unredacted logs.
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: Who needs this, and what end-to-end outcome is missing?
+    validations:
+      required: true
+  - type: dropdown
+    id: roles
+    attributes:
+      label: Primary data role
+      options:
+        - Client or UI
+        - Access gateway
+        - Control node
+        - Runtime node
+        - Harness adapter
+        - Paired launch extension
+        - Protocol or transport
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Proposed boundary
+      description: Explain authority, persistence, routing, and trust effects.
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and recovery
+      description: Cover wire/profile/schema versions, migration, retries, and outcomeUnknown.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Could this be client code or a paired gateway/runtime extension?
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed secrets, tickets, transcripts, private source, and sensitive logs.
+          required: true
+        - label: This is not a privately reportable vulnerability.
+          required: true
