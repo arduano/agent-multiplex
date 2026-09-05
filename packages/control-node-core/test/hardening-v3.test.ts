@@ -1,3 +1,4 @@
+import { packNativePayload } from "@arduano/agent-multiplex-protocol";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -74,7 +75,7 @@ function registration(
       available: true,
       capabilities: [{ name: "interactive", experimental: false }],
     }],
-    protocolVersion: 4,
+    protocolVersion: 5,
   };
 }
 
@@ -107,7 +108,7 @@ function childRequest(catalog: ControlNodeCatalog): ControlNodeAttachmentRequest
     controlNodeBootId: newControlNodeBootId(),
     feedId: newFeedId(),
     name: "child-v3-test",
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: ["catalog.sqlite-v3"],
     expectedParentControlNodeId: catalog.localControlNode().controlNodeId,
     childProof: {
@@ -208,7 +209,7 @@ function pendingInteraction(session: SessionRecord): InteractionRecord {
     runtimeEpoch: session.runtimeEpoch,
     nativeRequestId: "native-approval-v3",
     requestType: "approval",
-    payload: { command: "echo invariant" },
+    payload: packNativePayload({ command: "echo invariant" }),
     ephemeral: false,
     state: "pending",
     createdAt: now,
@@ -242,7 +243,7 @@ function recordFor(
     runtimeNodeId: command.runtimeNodeId,
     state,
     request: jsonValueSchema.parse(command),
-    ...(state === "succeeded" ? { result: { accepted: true } } : {}),
+    ...(state === "succeeded" ? { result: packNativePayload({ accepted: true }) } : {}),
     // Runtime timestamps are not authoritative for the command's identity.
     // The control node must retain the timestamp from its accepted request.
     createdAt: remoteCommandTime,
@@ -261,7 +262,7 @@ function attachmentRequest(
     feedId: local.feedId,
     name: local.name,
     ...(local.endpointId ? { endpointId: local.endpointId } : {}),
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),
@@ -1514,7 +1515,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
       runtimeEpoch: fixture.session.runtimeEpoch!,
       sequence: 0,
       nativeType: "turn/started",
-      payload: {},
+      payload: packNativePayload({}),
       ephemeral: false,
     };
     expect(() => fixture.service.publishRuntimeEvent({
@@ -1554,7 +1555,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
       runtimeEpoch,
       sequence: 0,
       nativeType: "thread/started",
-      payload: {},
+      payload: packNativePayload({}),
       ephemeral: false,
     };
     const interaction = {
@@ -1567,7 +1568,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
           harness: "codex" as const,
           runtimeEpoch,
           requestType: "userInput",
-          payload: { question: "early" },
+          payload: packNativePayload({ question: "early" }),
           ephemeral: false,
           state: "pending" as const,
           createdAt: now,
@@ -1703,7 +1704,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
     const resolved: InteractionRecord = {
       ...pending,
       state: "resolved",
-      resolution: { approved: true },
+      resolution: packNativePayload({ approved: true }),
       resolvedAt: now,
     };
     fixture.service.publishInteraction({ ...fence, interaction: resolved }, fixture.context);
@@ -1717,7 +1718,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
       ...fence,
       interaction: {
         ...resolved,
-        resolution: { approved: false },
+        resolution: packNativePayload({ approved: false }),
       },
     }, fixture.context)).toThrowError(expect.objectContaining({ code: "CONFLICT" }));
     expect(fixture.catalog.getInteraction(pending.interactionId)).toEqual(resolved);
@@ -1745,7 +1746,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
     nativeResult = {
       ...pending,
       state: "resolved",
-      resolution: { approved: true, detail: { first: 1, second: 2 } },
+      resolution: packNativePayload({ approved: true, detail: { first: 1, second: 2 } }),
       resolvedAt: now,
     };
     const resolution = {
@@ -1818,7 +1819,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
     nativeResult = {
       ...pending,
       state: "resolved",
-      resolution: { approved: false },
+      resolution: packNativePayload({ approved: false }),
       resolvedAt: now,
     };
 
@@ -1950,7 +1951,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
     await expect(fixture.service.recoverCommand(command.commandId)).resolves.toMatchObject({
       commandId: command.commandId,
       state: "succeeded",
-      result: { accepted: true },
+      result: packNativePayload({ accepted: true }),
       createdAt: now,
       updatedAt: remoteCommandTime,
     });

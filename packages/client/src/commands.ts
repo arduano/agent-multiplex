@@ -9,6 +9,7 @@ import {
   newSessionId,
   toJsonValue,
   type ArchiveRequest,
+  type CommandEnvelope,
   type HarnessCommand,
   type Harness,
   type JsonObject,
@@ -83,13 +84,14 @@ export function archiveRequest(session: SessionRecord): ArchiveRequest {
   return { payloadHash: payloadHash(body), ...body };
 }
 
-export function sessionCommand(session: SessionRecord, request: HarnessCommand) {
+export function sessionCommand(session: SessionRecord, request: HarnessCommand, images?: CommandEnvelope["images"]) {
   const commandId = newCommandId();
   const body = {
     sessionId: session.sessionId,
     runtimeNodeId: session.runtimeNodeId,
     bindingRevision: session.bindingRevision,
     request,
+    ...(images?.length ? { images } : {}),
   };
   return { commandId, payloadHash: payloadHash(body), ...body };
 }

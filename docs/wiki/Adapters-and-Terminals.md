@@ -27,8 +27,8 @@ The runtime supervises one worker-local `codex app-server` on an owner-only
 Unix-socket directory. Structured adapter connections and managed stock TUIs
 address the same server and vendor session. The adapter supports native model,
 collaboration mode, reasoning effort, turn settings, prompts/steering,
-interrupts, approvals and `request_user_input`, events, and `thread/read`
-history according to the pinned Codex version.
+interrupts, approvals and `request_user_input`, events, bounded `thread/items/list` history pages,
+and metadata-only `thread/read` reads according to the pinned Codex version.
 
 A managed TUI runs conceptually as:
 
@@ -38,6 +38,11 @@ codex resume --remote unix://<private-runtime-socket> <vendor-session-id>
 
 Closing the TUI closes only its PTY. It does not close the structured session or
 shared app server. The socket is never published through p2prpc.
+
+Structured requests wait for the complete initialization handshake. Closing
+the RPC client fences delayed startup and settles outstanding requests;
+dispatched requests without a response report an unknown outcome and must be
+reconciled through their durable operation IDs.
 
 The maintained adapter is pinned to Codex CLI `0.152.0`. OpenAI classifies the
 app-server command and WebSocket transport as experimental; re-run adapter and
@@ -114,3 +119,14 @@ treated as a harmless extension of fleet `read`.
 Keep `AGENT_MULTIPLEX_RUNTIME_NODE_MAX_RUNNING_TERMINALS` conservative. Leave
 Copilot terminal support off unless the loopback trust and exact-version risks
 are accepted. Never persist or log a terminal lease secret.
+
+
+## Native images
+
+Adapters identify native image fields without rewriting arbitrary tool arguments
+or user strings. Runtime image storage externalizes those leaves and returns
+native envelopes to clients. Codex image inputs and Copilot blob attachments
+retain their native forms when reconstructed immediately before dispatch; model
+vision capabilities remain harness-specific. Path outputs become immutable
+runtime snapshots, and missing/omitted bytes remain explicit unavailable slots.
+See [images and native payloads](Images-and-Native-Payloads.md).

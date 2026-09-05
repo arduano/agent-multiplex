@@ -35,6 +35,18 @@ The initial response may be non-terminal. Use `launches.get`, bounded
 one runtime transaction. An interrupted `nativeStarting` operation is not
 replayed blindly because the native session may already exist.
 
+A launch reserves its `sessionId` even if it later fails. Retry an unchanged
+request with the same IDs; a replacement request needs new launch and session
+IDs. Each forwarding control rejects another launch for a session already
+reserved in its catalog. Independently addressed branches do not perform a
+global reservation handshake; conflicting projections fail closed when they
+meet.
+
+A definite admission rejection becomes `failed` only after the owning route
+confirms that it has no record for that launch ID under the same dispatch fence.
+An uncertain transport or lookup failure retains the durable recovery marker;
+continue reconciling the original launch ID.
+
 ## Archive lifecycle
 
 Archive requires a stopped session and the current binding and authority fences:
@@ -117,3 +129,9 @@ Pending approvals and user questions are interaction records. Respond with the
 harness-native response shape and current session/binding route. Stop retires
 pending interactions for the old runtime handle so a late response cannot reach
 a replacement binding.
+
+
+Committed runtime images survive stop, resume, and restart. Archive releases
+both uploaded images and output snapshots before reporting successful durable
+resource release; image reads are fenced once archive begins. See
+[image retention](Images-and-Native-Payloads.md).

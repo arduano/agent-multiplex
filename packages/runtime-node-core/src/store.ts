@@ -18,6 +18,7 @@ import {
   launchRequestSchema,
   metadataOperationRecordSchema,
   metadataPatchSchema,
+  nativePayloadSchema,
   toJsonValue,
   runtimeNodeSessionRecordSchema,
   sessionLaunchProvenanceSchema,
@@ -74,6 +75,19 @@ export interface RuntimeArchivedNativeBindingTombstone {
   readonly archivedAt: string;
 }
 
+export interface RuntimeImageEntry {
+  imageId: string;
+  sessionId: SessionId;
+  bindingRevision: number;
+  sha256: string;
+  byteLength: number;
+  mediaType: string;
+  receivedBytes: number;
+  committed: boolean;
+  updatedAt: number;
+  sourceKey: string | null;
+}
+
 export class RuntimeNodeStore {
   readonly #sqlite: HardenedSqliteDatabase;
   readonly #db: DatabaseSync;
@@ -91,6 +105,10 @@ export class RuntimeNodeStore {
         version: 4,
         name: "runtime-node-store-v4-launch-and-archive",
         apply: migrateRuntimeNodeSchemaV4,
+      }, {
+        version: 5,
+        name: "runtime-node-store-v5-images",
+        apply: migrateRuntimeNodeSchemaV5,
       }],
     });
     this.#db = this.#sqlite.database;
@@ -104,6 +122,29 @@ export class RuntimeNodeStore {
 
   public close(): void {
     this.#sqlite.close();
+  }
+
+  public getImage(imageId: string): RuntimeImageEntry | undefined {
+    const row = this.#db.prepare("SELECT record_json FROM images WHERE image_id = ?")
+      .get(imageId) as Row | undefined;
+    return row ? JSON.parse(String(row.record_json)) as RuntimeImageEntry : undefined;
+  }
+
+  public listImages(sessionId?: SessionId): RuntimeImageEntry[] {
+    const rows = (sessionId === undefined
+      ? this.#db.prepare("SELECT record_json FROM images").all()
+      : this.#db.prepare("SELECT record_json FROM images WHERE session_id = ?").all(sessionId)) as Row[];
+    return rows.map((row) => JSON.parse(String(row.record_json)) as RuntimeImageEntry);
+  }
+
+  public putImage(entry: RuntimeImageEntry): void {
+    this.#db.prepare(`INSERT INTO images(image_id, session_id, source_key, record_json)
+      VALUES (?, ?, ?, ?) ON CONFLICT(image_id) DO UPDATE SET record_json = excluded.record_json`)
+      .run(entry.imageId, entry.sessionId, entry.sourceKey, encode(entry));
+  }
+
+  public deleteImage(imageId: string): void {
+    this.#db.prepare("DELETE FROM images WHERE image_id = ?").run(imageId);
   }
 
   public diagnostics(): SqliteDiagnostics {
@@ -996,6 +1037,31 @@ function migrateRuntimeNodeSchemaV4(database: DatabaseSync): void {
     ) STRICT;
     CREATE UNIQUE INDEX archived_native_bindings_session
       ON archived_native_bindings(session_id);
+  `);
+}
+
+function migrateRuntimeNodeSchemaV5(database: DatabaseSync): void {
+  const update = database.prepare("UPDATE command_journal SET record_json=? WHERE command_id=?");
+  for (const row of database.prepare("SELECT command_id, record_json FROM command_journal").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (value.result === undefined) continue;
+    const wrapped = nativePayloadSchema.safeParse({ encoding: "native-json-images-v1", json: value.result, images: [] });
+    if (!wrapped.success) {
+      throw new Error("protocol-v5 migration refused: a stored v4 native payload exceeds the bounded envelope or is invalid; the original database has been preserved");
+    }
+    value.result = wrapped.data;
+    update.run(encode(value), String(row.command_id));
+  }
+  database.exec(`
+    CREATE TABLE images (
+      image_id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      source_key TEXT,
+      record_json TEXT NOT NULL CHECK(json_valid(record_json))
+    ) STRICT;
+    CREATE INDEX images_session ON images(session_id);
+    CREATE UNIQUE INDEX images_source ON images(session_id, source_key)
+      WHERE source_key IS NOT NULL;
   `);
 }
 

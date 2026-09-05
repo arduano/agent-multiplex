@@ -1,5 +1,13 @@
 # Paired launch extensions
 
+Embedded runtime applications can pass `createComponents` as the third argument
+to the published `runRuntimeNode` function. The factory receives canonical
+allowed roots and returns adapters, terminal providers, optional backends and
+launch providers, and `includeDirectWorkspaceProvider`. The daemon continues to
+own reconnect, inventory reconciliation, journals, and shutdown. Return all
+constructed components only after successful preparation; the factory owns
+cleanup if it throws before returning.
+
 Use a paired extension when session creation needs domain policy: for example a
 PR URL, repository authorization, worktree creation, container placement, quota,
 or cleanup. The gateway half presents and validates the workflow; the runtime

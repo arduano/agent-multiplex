@@ -1,4 +1,4 @@
-# Protocol-v4 personal deployment runbook
+# Protocol-v5 personal deployment runbook
 
 This runbook deploys the smallest supported data-role topology: one durable
 authority control node, any number of runtime nodes, and one zero-authority
@@ -28,7 +28,7 @@ in logs or backups intended for sharing.
 
 ## Build boundary
 
-Protocol v4 pins the independently released `@arduano/p2prpc-core` package.
+Protocol v5 pins the independently released `@arduano/p2prpc-core` package.
 Configure authenticated read access to the `@arduano` GitHub Packages scope,
 then install and verify this tree:
 
@@ -42,17 +42,17 @@ npm test
 
 Never copy npm credentials into an image layer. The qualification runners pass
 an owner-only npm configuration into BuildKit and remove it after dependency
-installation. The protocol-v4 mock acceptance Dockerfile is the reference for
+installation. The protocol-v5 mock acceptance Dockerfile is the reference for
 synthetic scale runs; `tests/docker-live-four-container/Dockerfile` is the
 reference for the real Codex/Copilot deployment boundary.
 
 Develop transport changes in the sibling `../p2prpc` checkout. Run that
 repository's full package and integration qualification, build one immutable
 artifact, and release it before updating Multiplex's exact dependency. The
-retained live receipt predates registry publication and therefore records both
-the sibling source revision and the SHA-256 of its staged package; that remains
-valid provenance for that historical run, not permission to restore a `file:`
-dependency.
+`v0.1.0` release and its authorizing live receipt both use public
+`@arduano/p2prpc-core@0.2.1` and record its exact SHA-512 integrity. Some older
+historical receipts record a sibling revision and staged-package digest; that
+is historical provenance, not permission to restore a `file:` dependency.
 
 Before upgrading a retained deployment, exercise the real transport beyond
 both its former six-minute native-handle boundary and p2prpc's default
@@ -134,7 +134,7 @@ endpoint key or the fleet shared secret is compromised.
 The reference runtime statically enables `core.direct/workspace`, which launches
 into an existing directory and advertises `isolation.none`. Treat any additional
 gateway plugin, runtime launch provider, or backend as part of the deployed
-application artifact. Protocol v4 has no dynamic plugin loader or sandbox. Pin
+application artifact. Protocol v5 has no dynamic plugin loader or sandbox. Pin
 the artifact, verify each profile's contract version/schema hash, and keep
 provider credentials in runtime-local files or secret injection rather than
 launch input or metadata.
@@ -232,7 +232,7 @@ written. Keep control-node
 transport authentication inside one trusted administrative domain because the
 coverage is an authenticated child claim, not a consensus proof.
 
-Protocol v4 intentionally does not claim an online graceful-detach protocol:
+Protocol v5 intentionally does not claim an online graceful-detach protocol:
 `topology.detach` fails before mutation. Use branch-local `topology.forceDetach`
 only after treating the parent link as unavailable; it requires an audit record
 and acknowledgement that in-flight metadata outcomes may be unknown. Promotion

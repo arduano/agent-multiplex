@@ -75,7 +75,7 @@ class TestSession implements AdapterSession {
     return Promise.resolve({
       harness: "codex",
       vendorSessionId: this.vendorSessionId,
-      payload: {},
+      payload: { encoding: "native-json-images-v1", json: {}, images: [] },
       complete: true,
     });
   }
@@ -278,7 +278,7 @@ function attach(
     feedId: descriptor.feedId,
     name: descriptor.name,
     endpointId,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: descriptor.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

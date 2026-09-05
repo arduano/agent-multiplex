@@ -1,3 +1,4 @@
+import { copilotImageCodec } from "./images.js";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 
@@ -8,6 +9,7 @@ import {
   type ElicitationHandler,
   type ExitPlanModeHandler,
   type ModelInfo,
+  type ModelCapabilities,
   type PermissionHandler,
   type ProviderConfig,
   type ResumeSessionConfig,
@@ -75,6 +77,8 @@ export interface CopilotAdapterOptions {
   defaultModel?: string;
   /** Models exposed by listModels while using the runtime-node-local provider. */
   providerModels?: readonly string[];
+  /** Non-secret capability declarations for configured BYOK models. Unknown models stay conservative in the SDK. */
+  providerModelCapabilities?: Readonly<Record<string, ModelCapabilities>>;
   /** Test/embedding seam; production callers normally leave this unset. */
   clientFactory?: (options: CopilotClientOptions) => CopilotAdapterClient;
   /** Test seam for deterministic runtime epochs. */
@@ -82,6 +86,7 @@ export interface CopilotAdapterOptions {
 }
 
 export class CopilotAgentAdapter implements AgentAdapter {
+  public readonly imageCodec = copilotImageCodec;
   public readonly harness = "copilot" as const;
   public readonly adapterScopeId: AdapterScopeId;
   readonly #client: CopilotAdapterClient;
@@ -89,6 +94,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #provider: ProviderConfig | undefined;
   readonly #defaultModel: string | undefined;
   readonly #providerModels: readonly string[];
+  readonly #providerModelCapabilities: Readonly<Record<string, ModelCapabilities>>;
   readonly #active = new Map<string, CopilotAdapterSession>();
   #startPromise: Promise<void> | undefined;
   #started = false;
@@ -102,6 +108,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError("Copilot BYOK provider requires a defaultModel");
     }
     this.#providerModels = providerModels(options.providerModels, this.#defaultModel);
+    this.#providerModelCapabilities = structuredClone(options.providerModelCapabilities ?? {});
     const configuredExecutable =
       options.clientOptions?.env?.COPILOT_CLI_PATH ??
       process.env.COPILOT_CLI_PATH;
@@ -119,7 +126,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         : {}),
       ...(this.#provider ? { useLoggedInUser: false } : {}),
       ...(this.#provider
-        ? { onListModels: () => this.#providerModels.map(providerModelInfo) }
+        ? { onListModels: () => this.#providerModels.map((id) => providerModelInfo(id, this.#providerModelCapabilities[id])) }
         : {}),
       ...options.clientOptions,
     };
@@ -160,7 +167,10 @@ export class CopilotAgentAdapter implements AgentAdapter {
         id,
         name: id,
         native: copilotJson({
-          ...providerModelInfo(id),
+          ...providerModelInfo(id, this.#providerModelCapabilities[id]),
+          imageSupport: this.#providerModelCapabilities[id]
+            ? this.#providerModelCapabilities[id].supports.vision ? "supported" : "unsupported"
+            : COPILOT_CODEX_LB_MODELS[id] ? "supported" : "unknown",
           byok: true,
           providerType: this.#provider?.type ?? "openai",
           wireApi: this.#provider?.wireApi ?? "completions",
@@ -581,7 +591,8 @@ function providerModels(
   return result;
 }
 
-function providerModelInfo(id: string): ModelInfo {
+function providerModelInfo(id: string, configured?: ModelCapabilities): ModelInfo {
+  if (configured) return { id, name: id, capabilities: configured };
   const codexLbModel = codexLbModelInfo(id);
   if (codexLbModel) return codexLbModel;
   return {

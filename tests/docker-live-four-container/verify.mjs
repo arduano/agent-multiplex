@@ -205,7 +205,7 @@ try {
   const authority = controlNodes[0];
   const topologyChecks = {
     gatewayHasZeroAuthority:
-      system.protocolVersion === 4 &&
+      system.protocolVersion === 5 &&
       system.componentKind === "access-gateway" &&
       system.dataAuthority === "none",
     exactlyOneSelectedControlSource:
@@ -216,7 +216,7 @@ try {
       controlNodes.length === 1 &&
       authority?.presence === "online" &&
       authority?.dataRole.role === "authority" &&
-      authority?.protocolVersion === 4,
+      authority?.protocolVersion === 5,
     exactlyTwoOnlineRuntimeNodes:
       runtimeNodes.length === 2 &&
       runtimeNodes.every((node) =>
@@ -329,29 +329,29 @@ try {
       historyCodex.harness === "codex" &&
       historyCodex.vendorSessionId === codexSession.vendorSessionId &&
       historyCodex.complete === true &&
-      deepContainsExact(historyCodex.payload, codexPlan.marker) &&
-      deepContainsExact(historyCodex.payload, codexPlan.controls.plan.finalMarker) &&
+      deepContainsExact(historyCodex.payload.json, codexPlan.marker) &&
+      deepContainsExact(historyCodex.payload.json, codexPlan.controls.plan.finalMarker) &&
       (
         !browser.soak?.performed ||
-        deepContainsExact(historyCodex.payload, browser.soak.replies?.codex?.marker)
+        deepContainsExact(historyCodex.payload.json, browser.soak.replies?.codex?.marker)
       ) &&
-      codexHistoryCommandContains(historyCodex.payload, codexPlan.controls.interrupt.visibleTick) &&
-      deepContainsExact(historyCodex.payload, codexPlan.terminal.semanticPrompt.reply) &&
+      codexHistoryCommandContains(historyCodex.payload.json, codexPlan.controls.interrupt.visibleTick) &&
+      deepContainsExact(historyCodex.payload.json, codexPlan.terminal.semanticPrompt.reply) &&
       deepContainsExact(
-        historyCodex.payload,
+        historyCodex.payload.json,
         codexPlan.terminal.structuredAfterTermination.marker,
       ) &&
       !codexHistoryAgentMessageEquals(
-        historyCodex.payload,
+        historyCodex.payload.json,
         codexPlan.controls.interrupt.forbiddenMarker,
       ),
     copilotHistoryReadNatively:
       historyCopilot.harness === "copilot" &&
       historyCopilot.vendorSessionId === copilotSession.vendorSessionId &&
-      deepContainsExact(historyCopilot.payload, copilotPlan.marker) &&
+      deepContainsExact(historyCopilot.payload.json, copilotPlan.marker) &&
       (
         !browser.soak?.performed ||
-        deepContainsExact(historyCopilot.payload, browser.soak.replies?.copilot?.marker)
+        deepContainsExact(historyCopilot.payload.json, browser.soak.replies?.copilot?.marker)
       ),
     noPendingInteractions: interactions.length === 0,
   };
@@ -575,8 +575,8 @@ function verifyPostSoak(
       event.kind === "native" &&
       event.sessionId === codexSession.sessionId &&
       event.nativeType === "item/completed" &&
-      event.payload?.item?.type === "agentMessage" &&
-      event.payload?.item?.text === soak.replies?.codex?.marker,
+      event.payload.json?.item?.type === "agentMessage" &&
+      event.payload.json?.item?.text === soak.replies?.codex?.marker,
     )
     : undefined;
   const codexDeltas = codexComplete
@@ -585,8 +585,8 @@ function verifyPostSoak(
       event.sessionId === codexSession.sessionId &&
       event.runtimeEpoch === codexComplete.runtimeEpoch &&
       event.nativeType === "item/agentMessage/delta" &&
-      event.payload?.turnId === codexComplete.payload?.turnId &&
-      event.payload?.itemId === codexComplete.payload?.item?.id,
+      event.payload.json?.turnId === codexComplete.payload.json?.turnId &&
+      event.payload.json?.itemId === codexComplete.payload.json?.item?.id,
     )
     : [];
   const copilotComplete = requested
@@ -594,7 +594,7 @@ function verifyPostSoak(
       event.kind === "native" &&
       event.sessionId === copilotSession.sessionId &&
       event.nativeType === "assistant.message" &&
-      event.payload?.data?.content === soak.replies?.copilot?.marker,
+      event.payload.json?.data?.content === soak.replies?.copilot?.marker,
     )
     : undefined;
   const copilotDeltas = copilotComplete
@@ -603,7 +603,7 @@ function verifyPostSoak(
       event.sessionId === copilotSession.sessionId &&
       event.runtimeEpoch === copilotComplete.runtimeEpoch &&
       event.nativeType === "assistant.message_delta" &&
-      event.payload?.data?.messageId === copilotComplete.payload?.data?.messageId,
+      event.payload.json?.data?.messageId === copilotComplete.payload.json?.data?.messageId,
     )
     : [];
 
@@ -672,7 +672,7 @@ function verifyPostSoak(
       (
         codexDeltas.length >= 1 &&
         codexDeltas.every((event) => event.sequence < codexComplete.sequence) &&
-        codexDeltas.map((event) => event.payload.delta).join("") ===
+        codexDeltas.map((event) => event.payload.json.delta).join("") ===
           soak.replies?.codex?.marker
       ),
     freshCopilotReplyDeltasReassembledExactly:
@@ -680,7 +680,7 @@ function verifyPostSoak(
       (
         copilotDeltas.length >= 1 &&
         copilotDeltas.every((event) => event.sequence < copilotComplete.sequence) &&
-        copilotDeltas.map((event) => event.payload?.data?.deltaContent).join("") ===
+        copilotDeltas.map((event) => event.payload.json?.data?.deltaContent).join("") ===
           soak.replies?.copilot?.marker
       ),
   };
@@ -754,23 +754,23 @@ function verifyStreams(events, codexPlan, copilotPlan) {
   const codexEvents = native.filter((event) => event.sessionId === codexPlan.sessionId);
   const codexComplete = [...codexEvents].reverse().find((event) =>
     event.nativeType === "item/completed" &&
-    event.payload?.item?.type === "agentMessage" &&
-    event.payload?.item?.text === codexPlan.marker,
+    event.payload.json?.item?.type === "agentMessage" &&
+    event.payload.json?.item?.text === codexPlan.marker,
   );
   const codexDeltas = codexComplete
     ? codexEvents.filter((event) =>
       event.nativeType === "item/agentMessage/delta" &&
       event.runtimeEpoch === codexComplete.runtimeEpoch &&
-      event.payload?.turnId === codexComplete.payload?.turnId &&
-      event.payload?.itemId === codexComplete.payload?.item?.id,
+      event.payload.json?.turnId === codexComplete.payload.json?.turnId &&
+      event.payload.json?.itemId === codexComplete.payload.json?.item?.id,
     )
     : [];
   const codexTurnCompleted = codexComplete
     ? codexEvents.some((event) =>
       event.nativeType === "turn/completed" &&
       event.runtimeEpoch === codexComplete.runtimeEpoch &&
-      event.payload?.turn?.id === codexComplete.payload?.turnId &&
-      event.payload?.turn?.status === "completed" &&
+      event.payload.json?.turn?.id === codexComplete.payload.json?.turnId &&
+      event.payload.json?.turn?.status === "completed" &&
       event.sequence > codexComplete.sequence,
     )
     : false;
@@ -778,13 +778,13 @@ function verifyStreams(events, codexPlan, copilotPlan) {
   const copilotEvents = native.filter((event) => event.sessionId === copilotPlan.sessionId);
   const copilotComplete = [...copilotEvents].reverse().find((event) =>
     event.nativeType === "assistant.message" &&
-    event.payload?.data?.content === copilotPlan.marker,
+    event.payload.json?.data?.content === copilotPlan.marker,
   );
   const copilotDeltas = copilotComplete
     ? copilotEvents.filter((event) =>
       event.nativeType === "assistant.message_delta" &&
       event.runtimeEpoch === copilotComplete.runtimeEpoch &&
-      event.payload?.data?.messageId === copilotComplete.payload?.data?.messageId,
+      event.payload.json?.data?.messageId === copilotComplete.payload.json?.data?.messageId,
     )
     : [];
   const copilotIdle = copilotComplete
@@ -804,13 +804,13 @@ function verifyStreams(events, codexPlan, copilotPlan) {
       codexDeltaStreamReassembledExactly:
         codexDeltas.length >= 1 &&
         codexDeltas.every((event) => event.sequence < codexComplete.sequence) &&
-        codexDeltas.map((event) => event.payload.delta).join("") === codexPlan.marker,
+        codexDeltas.map((event) => event.payload.json.delta).join("") === codexPlan.marker,
       codexTurnCompletedAfterMessage: codexTurnCompleted,
       copilotCompletedExactMarker: copilotComplete !== undefined,
       copilotDeltaStreamReassembledExactly:
         copilotDeltas.length >= 1 &&
         copilotDeltas.every((event) => event.sequence < copilotComplete.sequence) &&
-        copilotDeltas.map((event) => event.payload.data.deltaContent).join("") ===
+        copilotDeltas.map((event) => event.payload.json.data.deltaContent).join("") ===
           copilotPlan.marker,
       copilotIdleAfterMessage: copilotIdle,
       noNativeGap: events.every((event) => event.kind !== "nativeGap"),
@@ -819,13 +819,13 @@ function verifyStreams(events, codexPlan, copilotPlan) {
       nativeEventCount: codexEvents.length,
       deltaCount: codexDeltas.length,
       finalSequence: codexComplete?.sequence ?? null,
-      reconstructed: codexDeltas.map((event) => event.payload.delta).join(""),
+      reconstructed: codexDeltas.map((event) => event.payload.json.delta).join(""),
     },
     copilot: {
       nativeEventCount: copilotEvents.length,
       deltaCount: copilotDeltas.length,
       finalSequence: copilotComplete?.sequence ?? null,
-      reconstructed: copilotDeltas.map((event) => event.payload.data.deltaContent).join(""),
+      reconstructed: copilotDeltas.map((event) => event.payload.json.data.deltaContent).join(""),
     },
     rawNativeEventCount: segments.reduce((total, segment) => total + segment.length, 0),
     uniqueNativeEventCount: native.length,
@@ -880,7 +880,7 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
   );
   const modelSettings = codexEvents.find((event) =>
     event.nativeType === "thread/settings/updated" &&
-    event.payload?.threadSettings?.model === plan.secondModel
+    event.payload.json?.threadSettings?.model === plan.secondModel
   );
 
   const planModeCommand = commandMatches(
@@ -897,12 +897,12 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
   );
   const planSettings = codexEvents.find((event) =>
     event.nativeType === "thread/settings/updated" &&
-    event.payload?.threadSettings?.model === plan.secondModel &&
-    event.payload?.threadSettings?.collaborationMode?.mode === "plan"
+    event.payload.json?.threadSettings?.model === plan.secondModel &&
+    event.payload.json?.threadSettings?.collaborationMode?.mode === "plan"
   );
   const defaultSettings = codexEvents.find((event) =>
     event.nativeType === "thread/settings/updated" &&
-    event.payload?.threadSettings?.collaborationMode?.mode === "default" &&
+    event.payload.json?.threadSettings?.collaborationMode?.mode === "default" &&
     (planSettings === undefined || event.sequence > planSettings.sequence)
   );
   const planPromptCommand = commandMatches(
@@ -910,13 +910,13 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
     (request) => codexSendMatches(request, controls.plan.prompt),
   );
   const planSendRecord = commandById(controls.plan.sendCommandId);
-  const planCommandTurnId = planSendRecord?.result?.turn?.id;
+  const planCommandTurnId = planSendRecord?.result?.json?.turn?.id;
 
   const interactionEvents = events.filter((event) =>
     event.kind === "control" &&
     event.change?.type === "interaction.changed" &&
     event.change.interaction?.sessionId === session.sessionId &&
-    event.change.interaction?.payload?.params?.turnId === controls.plan.turnId &&
+    event.change.interaction?.payload.json?.params?.turnId === controls.plan.turnId &&
     event.change.interaction?.requestType === "userInput"
   );
   const interactionIds = new Set(
@@ -933,25 +933,25 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
   const resolvedInteractionEvent = interactionEvents.find((event) =>
     event.change.interaction?.interactionId === controls.plan.interactionId &&
     event.change.interaction.state === "resolved" &&
-    sameJson(event.change.interaction.resolution, expectedResolution)
+    sameJson(event.change.interaction.resolution.json, expectedResolution)
   )?.change.interaction;
   const canonicalInteraction = interactions.find((interaction) =>
     interaction.interactionId === controls.plan.interactionId
   );
   const nativeResolution = codexEvents.find((event) =>
     event.nativeType === "serverRequest/resolved" &&
-    String(event.payload?.requestId) === controls.plan.nativeRequestId
+    String(event.payload.json?.requestId) === controls.plan.nativeRequestId
   );
   const planFinal = codexEvents.find((event) =>
     event.nativeType === "item/completed" &&
-    event.payload?.turnId === controls.plan.turnId &&
-    event.payload?.item?.type === "agentMessage" &&
-    event.payload?.item?.text === controls.plan.finalMarker
+    event.payload.json?.turnId === controls.plan.turnId &&
+    event.payload.json?.item?.type === "agentMessage" &&
+    event.payload.json?.item?.text === controls.plan.finalMarker
   );
   const planTurnCompleted = codexEvents.find((event) =>
     event.nativeType === "turn/completed" &&
-    event.payload?.turn?.id === controls.plan.turnId &&
-    event.payload?.turn?.status === "completed"
+    event.payload.json?.turn?.id === controls.plan.turnId &&
+    event.payload.json?.turn?.status === "completed"
   );
 
   const interruptSendSucceeded = commandMatches(
@@ -966,38 +966,38 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
       (request.command.turnId === undefined || request.command.turnId === controls.interrupt.turnId),
   );
   const interruptEvents = codexEvents.filter((event) =>
-    event.payload?.turnId === controls.interrupt.turnId ||
-    event.payload?.turn?.id === controls.interrupt.turnId
+    event.payload.json?.turnId === controls.interrupt.turnId ||
+    event.payload.json?.turn?.id === controls.interrupt.turnId
   );
   const commandStarted = interruptEvents.find((event) =>
     event.nativeType === "item/started" &&
-    event.payload?.item?.id === controls.interrupt.itemId &&
-    event.payload?.item?.type === "commandExecution" &&
-    event.payload?.item?.status === "inProgress"
+    event.payload.json?.item?.id === controls.interrupt.itemId &&
+    event.payload.json?.item?.type === "commandExecution" &&
+    event.payload.json?.item?.status === "inProgress"
   );
   const commandCompleted = interruptEvents.find((event) =>
     event.nativeType === "item/completed" &&
-    event.payload?.item?.id === controls.interrupt.itemId &&
-    event.payload?.item?.type === "commandExecution" &&
-    event.payload?.item?.status !== "inProgress"
+    event.payload.json?.item?.id === controls.interrupt.itemId &&
+    event.payload.json?.item?.type === "commandExecution" &&
+    event.payload.json?.item?.status !== "inProgress"
   );
   const interruptedTurn = interruptEvents.find((event) =>
     event.nativeType === "turn/completed" &&
-    event.payload?.turn?.status === "interrupted"
+    event.payload.json?.turn?.status === "interrupted"
   );
   const interruptOutput = interruptEvents
     .filter((event) =>
       event.nativeType === "item/commandExecution/outputDelta" &&
-      event.payload?.itemId === controls.interrupt.itemId
+      event.payload.json?.itemId === controls.interrupt.itemId
     )
-    .map((event) => typeof event.payload?.delta === "string" ? event.payload.delta : "")
+    .map((event) => typeof event.payload.json?.delta === "string" ? event.payload.json.delta : "")
     .join("");
   const ticks = [...interruptOutput.matchAll(
     new RegExp(`${escapeRegExp(controls.interrupt.visibleTick.replace(/_002$/, ""))}_(\\d{3})`, "g"),
   )].map((match) => Number(match[1]));
   const maximumObservedTick = ticks.length > 0 ? Math.max(...ticks) : 0;
   const forbiddenCompletionAbsent = !codexEvents.some((event) =>
-    deepContainsExact(event.payload, controls.interrupt.forbiddenMarker)
+    deepContainsExact(event.payload.json, controls.interrupt.forbiddenMarker)
   );
 
   return {
@@ -1021,7 +1021,7 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
         pendingInteraction !== undefined &&
         resolvedInteractionEvent !== undefined &&
         canonicalInteraction?.state === "resolved" &&
-        sameJson(canonicalInteraction.resolution, expectedResolution),
+        sameJson(canonicalInteraction.resolution.json, expectedResolution),
       planResolutionAcknowledgedNatively:
         nativeResolution !== undefined &&
         nativeResolution.sequence === controls.plan.resolvedNativeSequence,
@@ -1033,7 +1033,7 @@ function verifyCodexControls(events, commands, interactions, plan, session) {
         planFinal.sequence < planTurnCompleted.sequence,
       interruptCommandsSucceeded:
         interruptSendSucceeded &&
-        interruptSendRecord?.result?.turn?.id === controls.interrupt.turnId &&
+        interruptSendRecord?.result?.json?.turn?.id === controls.interrupt.turnId &&
         interruptCommandSucceeded,
       interruptCommandWasVisibleAndRunning:
         commandStarted !== undefined &&
@@ -1229,9 +1229,9 @@ function expectedPlanQuestion(interaction) {
   if (
     interaction?.harness !== "codex" ||
     interaction?.requestType !== "userInput" ||
-    interaction?.payload?.method !== "item/tool/requestUserInput"
+    interaction?.payload.json?.method !== "item/tool/requestUserInput"
   ) return false;
-  const questions = interaction.payload?.params?.questions;
+  const questions = interaction.payload.json?.params?.questions;
   if (!Array.isArray(questions) || questions.length !== 1) return false;
   const question = questions[0];
   return question?.id === "receipt_choice" &&

@@ -1,3 +1,16 @@
+import type {
+  ImageAbortUploadResult,
+  ImageBeginUploadInput,
+  ImageDescriptor,
+  ImageLimits,
+  ImageReadInput,
+  ImageReadResult,
+  ImageResolvePathInput,
+  ImageTarget,
+  ImageUploadIdInput,
+  ImageUploadState,
+  ImageWriteUploadInput,
+} from "@arduano/agent-multiplex-protocol";
 import { P2PError, type Peer } from "@arduano/p2prpc-core";
 import type { RuntimeNodeConnection } from "@arduano/agent-multiplex-control-node-core";
 import { TERMINAL_STREAM_BUFFER_ITEMS } from "@arduano/agent-multiplex-protocol";
@@ -211,6 +224,34 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
       sessionId,
       request,
     });
+  }
+
+  public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {
+    return this.peer.rpc.images.beginUpload.mutate(input);
+  }
+
+  public writeImageUpload(input: ImageWriteUploadInput): Promise<ImageUploadState> {
+    return this.peer.rpc.images.writeUpload.mutate(input);
+  }
+
+  public commitImageUpload(input: ImageUploadIdInput): Promise<ImageDescriptor> {
+    return this.peer.rpc.images.commitUpload.mutate(input);
+  }
+
+  public abortImageUpload(input: ImageUploadIdInput): Promise<ImageAbortUploadResult> {
+    return this.peer.rpc.images.abortUpload.mutate(input);
+  }
+
+  public resolveImagePath(input: ImageResolvePathInput): Promise<ImageDescriptor> {
+    return this.peer.rpc.images.resolvePath.mutate(input);
+  }
+
+  public readImage(input: ImageReadInput): Promise<ImageReadResult> {
+    return this.peer.rpc.images.read.query(input);
+  }
+
+  public imageLimits(input: ImageTarget): Promise<ImageLimits> {
+    return this.peer.rpc.images.limits.query(input);
   }
 
   public getTerminal(input: TerminalGetInput): Promise<TerminalDescriptor | null> {

@@ -37,7 +37,7 @@ function addSession(catalog: ControlNodeCatalog) {
     name: "metadata-runtime",
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -66,7 +66,7 @@ function attach(parent: ControlNodeCatalog, child: ControlNodeCatalog) {
     controlNodeBootId: local.controlNodeBootId,
     feedId: local.feedId,
     name: local.name,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

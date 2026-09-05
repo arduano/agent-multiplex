@@ -161,6 +161,18 @@ describe("gateway edge authentication", () => {
       epochId: newAuthorityEpochId(),
     };
 
+    const imageTarget = {
+      sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeId(), bindingRevision: 1,
+      runtimeNodeBootId: newRuntimeNodeBootId(), imageId: newSessionId(),
+    };
+    await expect(caller.images.beginUpload({
+      ...imageTarget, byteLength: 4, sha256: "a".repeat(64), mediaType: "image/png",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.images.writeUpload({
+      ...imageTarget, offset: 0, dataBase64: "AAAAAA==",
+    })).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.images.commitUpload(imageTarget)).rejects.toMatchObject({ code: "FORBIDDEN" });
+    await expect(caller.images.abortUpload(imageTarget)).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(caller.sessions.refresh({
       runtimeNodeId: newRuntimeNodeId(),
     })).rejects.toMatchObject({ code: "FORBIDDEN" });
@@ -299,7 +311,7 @@ describe("gateway edge authentication", () => {
         result: {
           data: {
             instanceId: "test-gateway",
-            protocolVersion: 4,
+            protocolVersion: 5,
             componentKind: "access-gateway",
             dataAuthority: "none",
           },
@@ -425,7 +437,7 @@ function gatewaySourceWithSession(historyError: Error) {
   const snapshot: GatewaySourceSnapshot = {
     manifest: {
       componentKind: "control-node",
-      protocolVersion: 4,
+      protocolVersion: 5,
       sourceControlNodeId: controlNodeId,
       sourceControlNodeBootId: controlNodeBootId,
       authority,
@@ -447,7 +459,7 @@ function gatewaySourceWithSession(historyError: Error) {
       dataRole: { role: "authority", authority },
       connectedAt: at,
       lastHeartbeatAt: at,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: [],
     }],
     runtimeNodes: [{
@@ -461,7 +473,7 @@ function gatewaySourceWithSession(historyError: Error) {
       lastHeartbeatAt: at,
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     }],
     sessions: [{
       sessionId,

@@ -1,4 +1,17 @@
 import type {
+  ImageAbortUploadResult,
+  ImageBeginUploadInput,
+  ImageDescriptor,
+  ImageLimits,
+  ImageReadInput,
+  ImageReadResult,
+  ImageResolvePathInput,
+  ImageTarget,
+  ImageUploadIdInput,
+  ImageUploadState,
+  ImageWriteUploadInput,
+} from "@arduano/agent-multiplex-protocol";
+import type {
   ChildControlNodeConnection,
   CompositeControlNodeIngressContext,
   RuntimeNodeConnection,
@@ -62,6 +75,16 @@ import type { AnyTRPCRouter } from "@trpc/server";
 import { P2PRuntimeNodeConnection } from "./runtime-node-bridge.js";
 
 interface ControlNodeLinkPeerRpc {
+  images: {
+    beginUpload: { mutate(input: ControlNodeLinkFence & { request: ImageBeginUploadInput }): Promise<ImageUploadState> };
+    writeUpload: { mutate(input: ControlNodeLinkFence & { request: ImageWriteUploadInput }): Promise<ImageUploadState> };
+    commitUpload: { mutate(input: ControlNodeLinkFence & { request: ImageUploadIdInput }): Promise<ImageDescriptor> };
+    abortUpload: { mutate(input: ControlNodeLinkFence & { request: ImageUploadIdInput }): Promise<ImageAbortUploadResult> };
+    resolvePath: { mutate(input: ControlNodeLinkFence & { request: ImageResolvePathInput }): Promise<ImageDescriptor> };
+    read: { query(input: ControlNodeLinkFence & { request: ImageReadInput }): Promise<ImageReadResult> };
+    limits: { query(input: ControlNodeLinkFence & { request: ImageTarget }): Promise<ImageLimits> };
+  };
+
   controlNode: {
     describe: { query(input?: void): Promise<ControlNodeDescriptor> };
   };
@@ -384,6 +407,13 @@ export function childControlNodeConnectionFromPeerResolver(
     execute: (command) => rpc().commands.execute.mutate({ ...fence(), command }),
     readNativeHistory: (sessionId, request) =>
       rpc().sessions.readNativeHistory.query({ ...fence(), sessionId, request }),
+    beginImageUpload: (request) => rpc().images.beginUpload.mutate({ ...fence(), request }),
+    writeImageUpload: (request) => rpc().images.writeUpload.mutate({ ...fence(), request }),
+    commitImageUpload: (request) => rpc().images.commitUpload.mutate({ ...fence(), request }),
+    abortImageUpload: (request) => rpc().images.abortUpload.mutate({ ...fence(), request }),
+    resolveImagePath: (request) => rpc().images.resolvePath.mutate({ ...fence(), request }),
+    readImage: (request) => rpc().images.read.query({ ...fence(), request }),
+    imageLimits: (request) => rpc().images.limits.query({ ...fence(), request }),
     getTerminal: (request) =>
       rpc().terminals.get.query({ ...fence(), request }),
     openTerminal: (request) =>

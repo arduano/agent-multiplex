@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 
+import { constants } from "node:fs";
+import { open } from "node:fs/promises";
+import { extname } from "node:path";
+
 import {
   archiveRequest,
   createAccessClient,
   launchRequest,
+  imageMessage,
+  imageTarget,
+  uploadImage,
   resumeCommand,
   sessionCommand,
   stopCommand as createStopCommand,
@@ -32,6 +39,7 @@ import {
   type Harness,
   type HarnessCommand,
   type InteractionRecord,
+  type ImageMediaType,
   type JsonObject,
   type JsonValue,
   type LaunchProfileDescriptor,
@@ -45,7 +53,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 const DEFAULT_HTTP_URL = "http://127.0.0.1:4317/trpc";
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 interface GlobalOptions {
   readonly httpUrl: string;
@@ -420,7 +428,7 @@ async function promptCommand(
 ): Promise<void> {
   const parsed = parseOptions(
     argv,
-    new Set(["prompt-json", "native", "expected-turn"]),
+    new Set(["prompt-json", "native", "expected-turn", "image"]),
   );
   if (parsed.positionals.length < 1) {
     throw new UsageError(`${kind} requires <session> and a prompt`);
@@ -428,8 +436,9 @@ async function promptCommand(
   const session = await resolveSession(client, parsed.positionals[0] ?? "");
   const text = parsed.positionals.slice(1).join(" ");
   const encoded = singleOption(parsed, "prompt-json");
-  if (!encoded && text.length === 0) {
-    throw new UsageError(`provide prompt text or --prompt-json <json>`);
+  const imagePaths = optionValues(parsed, "image");
+  if (!encoded && text.length === 0 && imagePaths.length === 0) {
+    throw new UsageError(`provide prompt text, --image <path>, or --prompt-json <json>`);
   }
   if (encoded && text.length > 0) {
     throw new UsageError("prompt text and --prompt-json are mutually exclusive");
@@ -439,6 +448,46 @@ async function promptCommand(
     : text;
   const native = optionalJsonObject(singleOption(parsed, "native"), "--native");
   const expectedTurnId = singleOption(parsed, "expected-turn");
+
+  if (imagePaths.length > 0) {
+    if (encoded) throw new UsageError("--image and --prompt-json are mutually exclusive");
+    if (native && Object.hasOwn(native, "attachments")) throw new UsageError("--image cannot be combined with native.attachments");
+    if (imagePaths.length > 10) throw new UsageError("A message supports at most 10 images");
+    const runtime = (await client.runtimeNodes.list.query()).find((item) => item.runtimeNodeId === session.runtimeNodeId);
+    if (!runtime) throw new UsageError("The session runtime is unavailable");
+    const target = imageTarget(session, runtime);
+    const descriptors = [];
+    let total = 0;
+    for (const path of imagePaths) {
+      const mediaType = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif" } as Record<string, string>)[extname(path).toLowerCase()];
+      if (!mediaType) throw new UsageError("--image supports PNG, JPEG, WebP, and GIF; convert SVGs to raster images before sending");
+      const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+      let bytes: Buffer;
+      try {
+        const stat = await handle.stat();
+        if (!stat.isFile() || stat.size <= 0 || stat.size > 10 * 1_024 * 1_024) throw new UsageError("Image must be a regular file of at most 10 MiB");
+        total += stat.size;
+        if (total > 50 * 1_024 * 1_024) throw new UsageError("Image attachments exceed 50 MiB");
+        bytes = Buffer.alloc(stat.size);
+        let offset = 0;
+        while (offset < bytes.length) {
+          const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+          if (!read.bytesRead) throw new UsageError("Image changed while reading");
+          offset += read.bytesRead;
+        }
+        if ((await handle.stat()).size !== stat.size) throw new UsageError("Image changed while reading");
+      } finally {
+        await handle.close();
+      }
+      descriptors.push(await uploadImage(client, target, bytes, mediaType as ImageMediaType));
+    }
+    const message = imageMessage(session.harness, kind, text, descriptors);
+    if (expectedTurnId && message.request.harness !== "codex") throw new UsageError("--expected-turn is Codex-only");
+    if (native) Object.assign(message.request.command, { native });
+    if (expectedTurnId && kind === "steer") Object.assign(message.request.command, { expectedTurnId });
+    printCommandRecord(await client.sessions.execute.mutate(sessionCommand(session, message.request, message.images)), json);
+    return;
+  }
 
   let request: HarnessCommand;
   if (session.harness === "codex") {
@@ -1892,7 +1941,7 @@ function shortId(value: string): string {
   return value.length <= 12 ? value : value.slice(0, 8);
 }
 
-function inlineJson(value: JsonValue | undefined): string {
+function inlineJson(value: unknown): string {
   return value === undefined ? "" : JSON.stringify(value);
 }
 
@@ -2024,14 +2073,16 @@ explicit provider/profile selection.`,
 
 Resumes a stopped logical session through the launch provider and native
 backend recorded in its immutable launch provenance.`,
-  send: `Usage: agent-multiplex send SESSION PROMPT...
-       [--prompt-json JSON] [--native OBJECT]
+  send: `Usage: agent-multiplex send SESSION [PROMPT...]
+       [--image PATH]... [--prompt-json JSON] [--native OBJECT]
 
 Codex JSON prompts must be a string or native UserInput array. Copilot JSON
 prompts must be a string or native prompt object. Text and --prompt-json are
-mutually exclusive. Use -- before prompt text that begins with --.`,
-  steer: `Usage: agent-multiplex steer SESSION PROMPT...
-       [--prompt-json JSON] [--native OBJECT] [--expected-turn CODEX_TURN_ID]`,
+mutually exclusive. Repeat --image for PNG, JPEG, WebP, or GIF attachments;
+image-only messages are supported. --image and --prompt-json are exclusive.
+Convert SVGs to raster images before sending. Use -- before text beginning with --.`,
+  steer: `Usage: agent-multiplex steer SESSION [PROMPT...]
+       [--image PATH]... [--prompt-json JSON] [--native OBJECT] [--expected-turn CODEX_TURN_ID]`,
   interrupt: "Usage: agent-multiplex interrupt SESSION [--turn CODEX_TURN_ID]",
   stop: "Usage: agent-multiplex stop SESSION",
   archive: `Usage: agent-multiplex archive SESSION

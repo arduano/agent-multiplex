@@ -32,6 +32,7 @@ import {
   metadataOperationRecordSchema,
   metadataPatchSchema,
   metadataValuesSchema,
+  nativePayloadSchema,
   newAttachmentId,
   newAuthorityEpochId,
   newAuthorityTransitionId,
@@ -224,6 +225,11 @@ export class ControlNodeCatalog {
           name: "control-node-v4-session-lifecycle",
           apply: ControlNodeCatalog.#migrateV4,
         },
+        {
+          version: 5,
+          name: "control-node-v5-native-image-envelope",
+          apply: ControlNodeCatalog.#migrateV5,
+        },
       ],
       ...(options.now === undefined ? {} : { now: options.now }),
     });
@@ -369,7 +375,7 @@ export class ControlNodeCatalog {
     const local = this.localControlNode();
     return sourceManifestSchema.parse({
       componentKind: "control-node",
-      protocolVersion: 4,
+      protocolVersion: 5,
       sourceControlNodeId: local.controlNodeId,
       sourceControlNodeBootId: local.controlNodeBootId,
       authority: this.authority(),
@@ -552,7 +558,7 @@ export class ControlNodeCatalog {
       dataRole: role,
       connectedAt: timestamp,
       lastHeartbeatAt: timestamp,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: request.capabilities,
     });
     this.#mutate(() => {
@@ -2568,7 +2574,7 @@ export class ControlNodeCatalog {
   }
 
   #commandVendorSessionId(record: CommandRecord): string {
-    const result = record.result;
+    const result = record.result?.json;
     if (!result || Array.isArray(result) || typeof result !== "object") {
       throw new ControlNodeCoreError(
         "PAYLOAD_MISMATCH",
@@ -2921,6 +2927,44 @@ export class ControlNodeCatalog {
     `);
   }
 
+  static #migrateV5(database: DatabaseSync): void {
+    // Durable old receipts are wrapped once. Feed generations reset so no v4
+    // event or child checkpoint can be mistaken for the new wire contract.
+    const wrap = (json: unknown) => {
+      const result = nativePayloadSchema.safeParse({ encoding: "native-json-images-v1", json, images: [] });
+      if (!result.success) {
+        throw new Error("protocol-v5 migration refused: a stored v4 native payload exceeds the bounded envelope or is invalid; the original database has been preserved");
+      }
+      return result.data;
+    };
+    for (const [table, key] of [["commands", "command_id"], ["interactions", "interaction_id"]] as const) {
+      const update = database.prepare(`UPDATE ${table} SET record_json=? WHERE ${key}=?`);
+      for (const row of database.prepare(`SELECT ${key}, record_json FROM ${table}`).all() as Row[]) {
+        const value = decode(row.record_json) as Record<string, unknown>;
+        if (table === "commands" && value.result !== undefined) value.result = wrap(value.result);
+        if (table === "interactions") {
+          value.payload = wrap(value.payload);
+          if (value.resolution !== undefined) value.resolution = wrap(value.resolution);
+        }
+        update.run(encode(value), String(row[key]));
+      }
+    }
+    const nextFeedId = newFeedId();
+    database.prepare("UPDATE control_node_identity SET feed_id=? WHERE singleton=1").run(nextFeedId);
+    database.exec(`
+      UPDATE control_nodes SET record_json=json_set(record_json, '$.protocolVersion', 5);
+      UPDATE runtime_nodes SET record_json=json_set(record_json, '$.protocolVersion', 5);
+      DELETE FROM imported_events;
+      DELETE FROM child_checkpoints;
+      DELETE FROM control_events;
+      UPDATE control_feed_state SET last_cursor=0, minimum_cursor=0 WHERE singleton=1;
+    `);
+    database.prepare(`
+      UPDATE control_nodes SET record_json=json_set(record_json, '$.feedId', ?)
+      WHERE control_node_id=(SELECT control_node_id FROM control_node_identity WHERE singleton=1)
+    `).run(nextFeedId);
+  }
+
   #loadOrCreateIdentity(expected?: ControlNodeId): {
     controlNodeId: ControlNodeId;
     feedId: FeedId;
@@ -2976,7 +3020,7 @@ export class ControlNodeCatalog {
       dataRole: this.dataRole(),
       connectedAt: timestamp,
       lastHeartbeatAt: timestamp,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: [
         "catalog.sqlite-v4",
         "sessions.lifecycle-v4",
@@ -3632,6 +3676,19 @@ export class ControlNodeCatalog {
 
   #putLaunch(launch: LaunchRecord, projectionSource: ControlNodeId | null): void {
     const value = launchRecordSchema.parse(launch);
+    // Runtime journals permanently reserve one logical session per launch,
+    // including failed launches. Apply the same fence before any control-side
+    // admission or projected write commits; both callers hold a transaction.
+    const reserved = this.#db.prepare(`
+      SELECT launch_id FROM launch_operations
+      WHERE session_id = ? AND launch_id <> ? LIMIT 1
+    `).get(value.sessionId, value.launchId) as Row | undefined;
+    if (reserved !== undefined) {
+      throw new ControlNodeCoreError(
+        "CONFLICT",
+        `logical session ${value.sessionId} is already reserved by launch ${String(reserved.launch_id)}`,
+      );
+    }
     this.#db.prepare(`
       INSERT INTO launch_operations(
         launch_id,runtime_node_id,session_id,provider_id,profile_id,state,

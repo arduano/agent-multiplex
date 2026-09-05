@@ -1,14 +1,15 @@
 # GitHub Copilot instructions
 
-This repository maintains Agent Multiplex protocol v4. Read
-`docs/wiki/Home.md`, `docs/checkpoint-v4.md`, and the role-specific design before
-editing.
+This repository maintains Agent Multiplex protocol v5. Read
+`docs/wiki/Current-State.md` first, then the role-specific topical guide and
+deep design before editing. `docs/wiki/Home.md` is the documentation index and
+`docs/checkpoint-v4.md` is the release-evidence ledger.
 
 - Active roles are control node, runtime node, access gateway, client, and
   harness adapter. `apps/host` and `packages/host-core` are archived v2 evidence;
   never import or repair them.
 - Session creation is `launches.create` with an exact profile/provider/schema
-  fence. There is no v4 `sessions.spawn` network API.
+  fence. There is no v5 `sessions.spawn` network API.
 - Control nodes alone own canonical catalog state and namespaced flat JSON
   metadata. Runtimes own native bindings/processes. Gateways have zero authority
   and cannot be chained.

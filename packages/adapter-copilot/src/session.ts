@@ -1,3 +1,4 @@
+import type { AdapterNativeHistoryResult } from "@arduano/agent-multiplex-runtime-node-core";
 import type {
   ElicitationResult,
   ExitPlanModeResult,
@@ -12,18 +13,19 @@ import {
   type AdapterSession,
 } from "@arduano/agent-multiplex-runtime-node-core";
 import {
+  NATIVE_PAYLOAD_MAX_BYTES,
   type AdapterScopeId,
   type HarnessCommand,
   type HarnessSessionSettings,
   type JsonObject,
   type JsonValue,
   type NativeHistoryRequest,
-  type NativeHistoryResult,
   type RuntimeEpoch,
   type SessionRuntimeStatus,
 } from "@arduano/agent-multiplex-protocol";
 
 import { copilotJson, jsonRecord, requiredString } from "./json.js";
+import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 
 const HISTORY_CURSOR_PREFIX = "copilot:event-index:";
 
@@ -245,7 +247,7 @@ export class CopilotAdapterSession implements AdapterSession {
     }
   }
 
-  public async readNativeHistory(request: NativeHistoryRequest): Promise<NativeHistoryResult> {
+  public async readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
     this.assertActive();
     if (request.harness !== "copilot") {
       throw new TypeError(`Copilot session cannot read ${request.harness} history`);
@@ -255,7 +257,22 @@ export class CopilotAdapterSession implements AdapterSession {
     // returned opaque events; it never opens or interprets Copilot's session store.
     const events = await this.#native.getEvents();
     const start = decodeHistoryCursor(request.cursor);
-    const end = Math.min(start + request.limit, events.length);
+    const requestedEnd = Math.min(start + request.limit, events.length);
+    let end = start;
+    let bytes = 128;
+    let images = 0;
+    while (end < requestedEnd) {
+      const event = copilotJson(events[end]);
+      const itemBytes = copilotHistoryEventBytes(event, end - start);
+      const itemImages = copilotImageLeaves(event).length;
+      if (bytes + itemBytes > NATIVE_PAYLOAD_MAX_BYTES || images + itemImages > 256) {
+        if (end === start) throw new Error("One native Copilot history event exceeds the bounded wire envelope");
+        break;
+      }
+      bytes += itemBytes;
+      images += itemImages;
+      end += 1;
+    }
     const payload = copilotJson(events.slice(start, end));
     const complete = end >= events.length;
     return {

@@ -46,7 +46,7 @@ function InteractionCard({ interaction }: { readonly interaction: InteractionRec
     },
     onError: (error) => setStatus(errorMessage(error)),
   });
-  const payload = record(interaction.payload);
+  const payload = record(interaction.payload.json);
   const copilotRequest = record(payload?.request);
   const codexParams = record(payload?.params);
   const codexQuestions = Array.isArray(codexParams?.questions) ? codexParams.questions : [];
@@ -239,7 +239,7 @@ function defaultResponse(interaction: InteractionRecord): JsonRecord {
 }
 
 function interactionSummary(interaction: InteractionRecord): string {
-  const payload = record(interaction.payload);
+  const payload = record(interaction.payload.json);
   const permission = record(payload?.permissionRequest);
   const request = record(payload?.request);
   if (typeof permission?.intention === "string") return permission.intention;
@@ -252,12 +252,12 @@ function interactionSummary(interaction: InteractionRecord): string {
 }
 
 function recommendedAction(interaction: InteractionRecord): string {
-  const request = record(record(interaction.payload)?.request);
+  const request = record(record(interaction.payload.json)?.request);
   return typeof request?.recommendedAction === "string" ? request.recommendedAction : "exit_only";
 }
 
 function codexApproval(interaction: InteractionRecord, decision: "accept" | "session" | "decline"): JsonValue {
-  const method = record(interaction.payload)?.method;
+  const method = record(interaction.payload.json)?.method;
   const normalized = decision === "accept" ? "approved" : decision === "session" ? "approved_for_session" : { denied: { rejection: "Declined in Agent Multiplex" } };
   if (method === "execCommandApproval" || method === "applyPatchApproval") return { decision: normalized };
   return { decision: decision === "accept" ? "accept" : decision === "session" ? "acceptForSession" : "decline" };

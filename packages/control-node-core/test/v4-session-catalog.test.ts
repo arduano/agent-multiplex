@@ -5,6 +5,9 @@ import { DatabaseSync } from "node:sqlite";
 
 import {
   canonicalJson,
+  newCommandId,
+  newInteractionId,
+  packNativePayload,
   newArchiveOperationId,
   newLaunchId,
   newOperationId,
@@ -39,7 +42,7 @@ function fixture() {
     allowedRoots: ["/work"],
     harnesses: [],
     launchProfiles: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -72,7 +75,7 @@ describe("control-node v4 session catalog", () => {
       allowedRoots: ["/work"],
       harnesses: [],
       launchProfiles: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     catalog.reconcileInventory({
       runtimeNodeId: secondRuntimeNodeId,
@@ -236,6 +239,13 @@ describe("control-node v4 session catalog", () => {
     })).toThrowError(expect.objectContaining<Partial<ControlNodeCoreError>>({
       code: "PAYLOAD_MISMATCH",
     }));
+    const competing = { ...record, launchId: newLaunchId(), runtimeNodeId: newRuntimeNodeId() };
+    const cursor = catalog.sourceManifest().controlCursor;
+    expect(() => catalog.recordLaunch(competing)).toThrowError(
+      expect.objectContaining({ code: "CONFLICT" }),
+    );
+    expect(catalog.getLaunch(competing.launchId)).toBeNull();
+    expect(catalog.sourceManifest().controlCursor).toBe(cursor);
     catalog.close();
   });
 
@@ -324,7 +334,7 @@ describe("control-node v4 session catalog", () => {
       allowedRoots: ["/work"],
       harnesses: [],
       launchProfiles: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     const [session] = initial.reconcileInventory({
       runtimeNodeId,
@@ -399,17 +409,17 @@ describe("control-node v4 session catalog", () => {
       ALTER TABLE sessions DROP COLUMN last_activity_at;
       ALTER TABLE sessions DROP COLUMN provider_id;
       ALTER TABLE sessions DROP COLUMN profile_id;
-      DELETE FROM schema_migrations WHERE version=4;
+      DELETE FROM schema_migrations WHERE version>=4;
       PRAGMA user_version=3;
     `);
     downgrade.close();
 
     const migrated = new ControlNodeCatalog({ filename, now: () => new Date(later) });
-    expect(migrated.diagnostics().userVersion).toBe(4);
-    expect(migrated.localControlNode()).toMatchObject({ protocolVersion: 4 });
+    expect(migrated.diagnostics().userVersion).toBe(5);
+    expect(migrated.localControlNode()).toMatchObject({ protocolVersion: 5 });
     expect(migrated.localControlNode().feedId).not.toBe(previousFeedId);
     expect(migrated.getRuntimeNode(runtimeNodeId)).toMatchObject({
-      protocolVersion: 4,
+      protocolVersion: 5,
       launchProfiles: [],
     });
     expect(migrated.getSession(session.sessionId)).toMatchObject({
@@ -432,4 +442,87 @@ describe("control-node v4 session catalog", () => {
     });
     migrated.close();
   });
+});
+
+
+describe("control-node protocol-v5 storage upgrade", () => {
+  it("wraps old native receipts exactly once, preserves immutable command input, and rotates the feed", () => {
+    const filename = join(mkdtempSync(join(tmpdir(), "multiplex-v5-migration-")), "catalog.sqlite");
+    const initial = new ControlNodeCatalog({ filename, now: () => new Date(first) });
+    const previousFeed = initial.localControlNode().feedId;
+    const runtimeNodeId = newRuntimeNodeId();
+    const sessionId = newSessionId();
+    const commandId = newCommandId();
+    const interactionId = newInteractionId();
+    initial.close();
+    const legacy = new DatabaseSync(filename);
+    // Model the released v4 wire values inside a valid v4 ledger. The request
+    // includes an encoding-looking object to prove migration is not coercion.
+    const request = { harness: "codex", command: { type: "send", input: "hello" } };
+    const nativeResult = { encoding: "native-json-images-v1", json: { native: true }, images: [] };
+    const command = {
+      commandId, payloadHash: "unchanged-command-hash", sessionId, runtimeNodeId,
+      state: "succeeded", request, result: nativeResult, createdAt: first, updatedAt: first,
+    };
+    const interaction = {
+      interactionId, sessionId, harness: "codex", runtimeEpoch: newRuntimeEpoch(),
+      requestType: "approval", payload: { command: "echo hello" }, resolution: { approved: true },
+      ephemeral: false, state: "resolved", createdAt: first, expiresAt: null, resolvedAt: first,
+    };
+    legacy.prepare("INSERT INTO commands(command_id,payload_hash,state,updated_at,record_json) VALUES(?,?,?,?,?)")
+      .run(commandId, command.payloadHash, command.state, first, JSON.stringify(command));
+    legacy.prepare("INSERT INTO interactions(interaction_id,session_id,state,created_at,record_json) VALUES(?,?,?,?,?)")
+      .run(interactionId, sessionId, interaction.state, first, JSON.stringify(interaction));
+    legacy.exec("DELETE FROM schema_migrations WHERE version=5; PRAGMA user_version=4;");
+    legacy.close();
+    const upgraded = new ControlNodeCatalog({ filename, now: () => new Date(later) });
+    expect(upgraded.diagnostics().userVersion).toBe(5);
+    expect(upgraded.localControlNode().feedId).not.toBe(previousFeed);
+    expect(upgraded.getCommand(commandId)).toEqual({ ...command, result: packNativePayload(nativeResult) });
+    expect(upgraded.getInteraction(interactionId)).toEqual({
+      ...interaction, payload: packNativePayload(interaction.payload), resolution: packNativePayload(interaction.resolution),
+    });
+    const migratedFeed = upgraded.localControlNode().feedId;
+    upgraded.close();
+    const reopened = new ControlNodeCatalog({ filename, now: () => new Date(later) });
+    expect(reopened.localControlNode().feedId).toBe(migratedFeed);
+    expect(reopened.getCommand(commandId)?.result).toEqual(packNativePayload(nativeResult));
+    reopened.close();
+  });
+
+  it("refuses oversized legacy receipts atomically without rewriting their immutable bytes", () => {
+    const filename = join(mkdtempSync(join(tmpdir(), "multiplex-v5-incompatible-")), "catalog.sqlite");
+    const initial = new ControlNodeCatalog({ filename, now: () => new Date(first) });
+    const previousFeed = initial.localControlNode().feedId;
+    initial.close();
+    const legacy = new DatabaseSync(filename);
+    const commandId = newCommandId();
+    const sessionId = newSessionId();
+    const command = JSON.stringify({
+      commandId, payloadHash: "unchanged-command-hash", sessionId, runtimeNodeId: newRuntimeNodeId(),
+      state: "succeeded", request: { input: "unchanged" }, result: { first: "bounded receipt" },
+      createdAt: first, updatedAt: first,
+    });
+    const interactionId = newInteractionId();
+    const interaction = JSON.stringify({
+      interactionId, sessionId, harness: "codex", runtimeEpoch: newRuntimeEpoch(),
+      requestType: "approval", payload: { native: "x".repeat(1_024 * 1_024) },
+      ephemeral: false, state: "pending", createdAt: first, expiresAt: null, resolvedAt: null,
+    });
+    legacy.prepare("INSERT INTO commands(command_id,payload_hash,state,updated_at,record_json) VALUES(?,?,?,?,?)")
+      .run(commandId, "unchanged-command-hash", "succeeded", first, command);
+    legacy.prepare("INSERT INTO interactions(interaction_id,session_id,state,created_at,record_json) VALUES(?,?,?,?,?)")
+      .run(interactionId, sessionId, "pending", first, interaction);
+    legacy.exec("DELETE FROM schema_migrations WHERE version=5; PRAGMA user_version=4;");
+    legacy.close();
+    expect(() => new ControlNodeCatalog({ filename })).toThrow(/protocol-v5 migration refused.*original database has been preserved/);
+    const unchanged = new DatabaseSync(filename);
+    expect(unchanged.prepare("PRAGMA user_version").get()).toMatchObject({ user_version: 4 });
+    expect(unchanged.prepare("SELECT version FROM schema_migrations WHERE version=5").get()).toBeUndefined();
+    expect(unchanged.prepare("SELECT record_json FROM commands WHERE command_id=?").get(commandId)?.record_json).toBe(command);
+    expect(unchanged.prepare("SELECT record_json FROM interactions WHERE interaction_id=?").get(interactionId)?.record_json).toBe(interaction);
+    expect(unchanged.prepare("SELECT feed_id FROM control_node_identity").get()?.feed_id).toBe(previousFeed);
+    unchanged.close();
+  });
+
 });

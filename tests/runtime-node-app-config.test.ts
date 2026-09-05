@@ -122,3 +122,10 @@ describe("runtime node Copilot BYOK configuration", () => {
     ).toThrow(`${legacy} is a removed protocol-v2 environment variable; use ${replacement}`);
   });
 });
+
+it("validates runtime-local BYOK image capability overrides", () => {
+  const environment = { ...requiredEnvironment(), AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL: "https://provider.example/v1", AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL: "vision-model" };
+  const capabilities = { "vision-model": { supports: { vision: true, reasoningEffort: false }, limits: { max_context_window_tokens: 128000, vision: { supported_media_types: ["image/png"], max_prompt_images: 4, max_prompt_image_size: 3145728 } } } };
+  expect(configFromEnvironment({ ...environment, AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL_CAPABILITIES: JSON.stringify(capabilities) }).copilotProviderModelCapabilities).toEqual(capabilities);
+  expect(() => configFromEnvironment({ ...environment, AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL_CAPABILITIES: '{"vision-model":{"supports":{"vision":"yes"}}}' })).toThrow("must map model IDs");
+});

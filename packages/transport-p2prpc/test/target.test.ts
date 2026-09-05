@@ -180,6 +180,24 @@ describe("p2prpc transport identity", () => {
     }
   });
 
+  it("authorizes image transfer over pinned gateway peers with the same edge scopes", async () => {
+    for (const [path, type, scope] of [
+      ["access.images.beginUpload", "mutation", "agent-control"],
+      ["access.images.writeUpload", "mutation", "agent-control"],
+      ["access.images.commitUpload", "mutation", "agent-control"],
+      ["access.images.abortUpload", "mutation", "agent-control"],
+      ["access.images.resolvePath", "mutation", "read"],
+      ["access.images.read", "query", "read"],
+      ["access.images.limits", "query", "read"],
+    ] as const) {
+      for (const candidate of ["read", "agent-control"] as const) {
+        const authorize = createMultiplexRoleAuthorization({ authorizationForPrincipal: () => ({ role: "access-gateway", scopes: new Set([candidate]) }) });
+        const result = await authorize({ principal: { id: "gateway" }, remotePeerId: "gateway", action: { kind: "rpc", path, type, headers: {} } } as unknown as Parameters<MultiplexAuthorization>[0]);
+        expect(result, `${candidate} ${path}`).toEqual(candidate === scope ? true : expect.objectContaining({ allowed: false }));
+      }
+    }
+  });
+
   it("keeps raw terminal access separate from read and agent control", async () => {
     const decide = (
       scopes: ReadonlySet<"read" | "agent-control" | "terminal-view" | "terminal-control">,

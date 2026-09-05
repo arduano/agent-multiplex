@@ -31,6 +31,13 @@ Keep control-node HTTP loopback-only. Expose only a bearer-authenticated gateway
 through Tailscale, a LAN, or an identity-aware reverse proxy. Tailscale network
 membership does not replace gateway authentication.
 
+Runtime shutdown stops admitting native/provider work and waits for admitted
+operations before closing their handles and backends. Give it enough time to
+drain; the service does not impose a shutdown timeout. Cleanup continues after
+individual failures and reports an aggregate error after all attempts finish.
+Embedding applications must close their SQLite store in `finally`, after
+awaiting service shutdown, including when shutdown rejects.
+
 ## Bootstrap discipline
 
 Enrollment flags are temporary apertures. Open one role at a time, enroll and

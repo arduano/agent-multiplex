@@ -5,7 +5,8 @@ import {
   runtimeNodeIdSchema,
   sessionIdSchema,
 } from "./ids.js";
-import { jsonObjectSchema, jsonValueSchema } from "./json.js";
+import { jsonObjectSchema, jsonValueSchema, jsonWireByteUpperBound } from "./json.js";
+import { commandImageBindingSchema, IMAGE_MAX_COMMAND_IMAGES, nativeImagePointerValue, nativePayloadSchema, NATIVE_PAYLOAD_MAX_BYTES } from "./image.js";
 import { isoDateSchema } from "./session.js";
 
 export const commandStateSchema = z.enum([
@@ -93,6 +94,21 @@ export const commandEnvelopeSchema = z.object({
   runtimeNodeId: runtimeNodeIdSchema,
   bindingRevision: z.number().int().positive(),
   request: harnessCommandSchema,
+  /** Pointers are relative to request; the immutable request journal retains references. */
+  images: z.array(commandImageBindingSchema).max(IMAGE_MAX_COMMAND_IMAGES).optional(),
+}).superRefine((input, context) => {
+  const seen = new Set<string>();
+  for (const [index, slot] of (input.images ?? []).entries()) {
+    if (seen.has(slot.pointer) || nativeImagePointerValue(input.request, slot.pointer) !== null ||
+      slot.image.sessionId !== input.sessionId || slot.image.runtimeNodeId !== input.runtimeNodeId ||
+      slot.image.bindingRevision !== input.bindingRevision) {
+      context.addIssue({ code: "custom", path: ["images", index], message: "command image must target a unique null leaf and the same session binding" });
+    }
+    seen.add(slot.pointer);
+  }
+  if (jsonWireByteUpperBound(input) > NATIVE_PAYLOAD_MAX_BYTES) {
+    context.addIssue({ code: "custom", message: "command exceeds the bounded wire envelope" });
+  }
 });
 export type CommandEnvelope = z.infer<typeof commandEnvelopeSchema>;
 
@@ -125,7 +141,7 @@ export const commandRecordSchema = z.object({
   runtimeNodeId: runtimeNodeIdSchema,
   state: commandStateSchema,
   request: jsonValueSchema,
-  result: jsonValueSchema.optional(),
+  result: nativePayloadSchema.optional(),
   error: z.string().optional(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema,

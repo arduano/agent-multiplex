@@ -145,7 +145,7 @@ function attachmentRequest(
     feedId: local.feedId,
     name: local.name,
     ...(local.endpointId === undefined ? {} : { endpointId: local.endpointId }),
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: local.capabilities,
     expectedParentControlNodeId: desired.controlNodeId,
     childProof: catalog.attachmentProof(),

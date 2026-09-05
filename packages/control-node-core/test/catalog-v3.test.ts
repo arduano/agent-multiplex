@@ -47,7 +47,7 @@ function attach(parent: ControlNodeCatalog, child: ControlNodeCatalog, childEndp
     controlNodeBootId: local.controlNodeBootId,
     feedId: local.feedId,
     name: local.name,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),
@@ -66,7 +66,7 @@ function addSession(catalog: ControlNodeCatalog, vendorSessionId = "native-sessi
     name: "runtime",
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -350,7 +350,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       name: "post-restart-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     const runtimeEvent = childCatalog.controlEventsAfter(
       snapshot.source.manifest.controlCursor,
@@ -391,7 +391,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       lastHeartbeatAt: now,
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
     };
     const makeSession = (vendor: string): SessionRecord => ({
       sessionId: newSessionId(),
@@ -416,7 +416,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       source: {
         manifest: {
           componentKind: "control-node",
-          protocolVersion: 4,
+          protocolVersion: 5,
           sourceControlNodeId: child.controlNodeId,
           sourceControlNodeBootId: child.controlNodeBootId,
           authority: parentCatalog.authority(),
@@ -517,7 +517,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       name: "healthy-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     const item = await nextHealthy;
     expect(item.value).toMatchObject({ kind: "control" });

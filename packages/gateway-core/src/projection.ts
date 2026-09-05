@@ -1,3 +1,19 @@
+import {
+  assertImageResponseTarget,
+  imageContract,
+  type ImageAbortUploadResult,
+  type ImageBeginUploadInput,
+  type ImageDescriptor,
+  type ImageLimits,
+  type ImagePort,
+  type ImageReadInput,
+  type ImageReadResult,
+  type ImageResolvePathInput,
+  type ImageTarget,
+  type ImageUploadIdInput,
+  type ImageUploadState,
+  type ImageWriteUploadInput,
+} from "@arduano/agent-multiplex-protocol";
 import { isDeepStrictEqual } from "node:util";
 
 import {
@@ -103,7 +119,7 @@ export interface LaunchProfileQuery {
  * or a test source can implement the same boundary. The gateway never accepts
  * a peer that identifies itself as another gateway.
  */
-export interface ControlNodeSourceClient {
+export interface ControlNodeSourceClient extends ImagePort {
   loadSnapshot(): Promise<GatewaySourceSnapshot>;
   watch(
     cursor: StreamCursor,
@@ -835,6 +851,78 @@ export class AccessGatewayProjection {
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
     return this.#ownerForSession(sessionId).definition.client.readNativeHistory(sessionId, request);
+  }
+
+  public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {
+    const request = imageContract.beginUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.beginImageUpload(request), "beginUpload")
+      .then((result) => imageContract.beginUpload.output.parse(result));
+  }
+
+  public writeImageUpload(input: ImageWriteUploadInput): Promise<ImageUploadState> {
+    const request = imageContract.writeUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.writeImageUpload(request), "writeUpload")
+      .then((result) => imageContract.writeUpload.output.parse(result));
+  }
+
+  public commitImageUpload(input: ImageUploadIdInput): Promise<ImageDescriptor> {
+    const request = imageContract.commitUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.commitImageUpload(request), "commitUpload")
+      .then((result) => imageContract.commitUpload.output.parse(result));
+  }
+
+  public abortImageUpload(input: ImageUploadIdInput): Promise<ImageAbortUploadResult> {
+    const request = imageContract.abortUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.abortImageUpload(request), "abortUpload")
+      .then((result) => imageContract.abortUpload.output.parse(result));
+  }
+
+  public resolveImagePath(input: ImageResolvePathInput): Promise<ImageDescriptor> {
+    const request = imageContract.resolvePath.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.resolveImagePath(request), "resolvePath")
+      .then((result) => imageContract.resolvePath.output.parse(result));
+  }
+
+  public readImage(input: ImageReadInput): Promise<ImageReadResult> {
+    const request = imageContract.read.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.readImage(request))
+      .then((result) => imageContract.read.output.parse(result));
+  }
+
+  public imageLimits(input: ImageTarget): Promise<ImageLimits> {
+    const request = imageContract.limits.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.imageLimits(request))
+      .then((result) => imageContract.limits.output.parse(result));
+  }
+
+  async #routeImage<T>(
+    input: ImageTarget,
+    operation: (owner: ImagePort) => Promise<T>,
+    mutation?: string,
+  ): Promise<T> {
+    const owner = this.#ownerForSessionBinding(input);
+    const feedId = this.#feedId;
+    const sourceBootId = owner.snapshot!.manifest.sourceControlNodeBootId;
+    const sourceFeedId = owner.snapshot!.manifest.feedId;
+    const assertCurrent = () => {
+      const snapshot = owner.snapshot;
+      const session = snapshot?.sessions.find((candidate) => candidate.sessionId === input.sessionId);
+      const runtime = snapshot?.runtimeNodes.find((candidate) => candidate.runtimeNodeId === input.runtimeNodeId);
+      if (this.#feedId !== feedId || this.#ownerForSessionBinding(input) !== owner ||
+        snapshot?.manifest.sourceControlNodeBootId !== sourceBootId || snapshot.manifest.feedId !== sourceFeedId ||
+        session?.catalogState !== "open" || runtime?.runtimeNodeBootId !== input.runtimeNodeBootId) {
+        throw new GatewayRoutingError("CONFLICT", "image source or runtime binding changed during the request");
+      }
+    };
+    assertCurrent();
+    const dispatch = () => operation(owner.definition.client);
+    const result = mutation === undefined
+      ? await dispatch()
+      : await this.#mutate(owner, `image ${mutation}`, dispatch);
+    try { assertImageResponseTarget(input, result); }
+    catch (cause) { throw new GatewayRoutingError("CONFLICT", "image response escaped the requested target", undefined, { cause }); }
+    assertCurrent();
+    return result;
   }
 
   public async getTerminal(input: TerminalGetInput): Promise<TerminalDescriptor | null> {

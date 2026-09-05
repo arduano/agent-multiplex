@@ -80,7 +80,7 @@ export interface P2PAccessGatewayNodeHandle {
 /**
  * Creates one local p2prpc gateway node with N independently pinned
  * control-node peers. A remote gateway can never be admitted as a source:
- * enrollment and the returned protocol-v4 control-node descriptor are both
+ * enrollment and the returned protocol-v5 control-node descriptor are both
  * required before its access client becomes usable.
  */
 export async function createP2PAccessGatewayNode(
@@ -145,18 +145,18 @@ export async function createP2PAccessGatewayNode(
         );
         const composite = peer.rpc;
         if (!composite.ingress?.gateways?.enroll || !composite.access) {
-          throw new Error("pinned peer is not a protocol-v4 composite control node");
+          throw new Error("pinned peer is not a protocol-v5 composite control node");
         }
         const enrollment = await composite.ingress.gateways.enroll.mutate({
           name: source.name,
-          protocolVersion: 4,
+          protocolVersion: 5,
           requestedScopes: [...source.requestedScopes],
         });
         if (!enrollment.accepted) {
           throw new Error("control node rejected access-gateway enrollment");
         }
         if (
-          enrollment.canonical.protocolVersion !== 4 ||
+          enrollment.canonical.protocolVersion !== 5 ||
           enrollment.canonical.endpointId !== undefined &&
           enrollment.canonical.endpointId !== target.endpointId
         ) {
@@ -164,11 +164,11 @@ export async function createP2PAccessGatewayNode(
         }
         const description = await composite.access.system.describe.query();
         if (
-          description.protocolVersion !== 4 ||
+          description.protocolVersion !== 5 ||
           description.componentKind !== "control-node" ||
           description.dataAuthority !== "control-node"
         ) {
-          throw new Error("pinned peer is not a protocol-v4 control-node source");
+          throw new Error("pinned peer is not a protocol-v5 control-node source");
         }
         if (enrollment.p2pTicket !== undefined) {
           target = withRenewedTicket(target, enrollment.p2pTicket);

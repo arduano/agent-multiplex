@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { CodexAdapter } from "@arduano/agent-multiplex-adapter-codex";
+import { CodexAdapter } from "../src/adapter.js";
 import {
   newCommandId,
   newLaunchId,
@@ -38,7 +38,7 @@ describe("CodexAdapter", () => {
     await adapter.close();
   });
 
-  it("uses the native handshake, streaming, reverse interaction, and thread/read history APIs", async () => {
+  it("uses the native handshake, streaming, reverse interaction, and paginated history APIs", async () => {
     const adapter = new CodexAdapter({
       spawnProcess: () => spawnFakeCodex(false),
     });
@@ -211,11 +211,8 @@ describe("CodexAdapter", () => {
       vendorSessionId: "thread-1",
       complete: true,
       payload: {
-        includeTurns: true,
-        thread: {
-          id: "thread-1",
-          turns: [{ id: "turn-1" }],
-        },
+        data: [{ turnId: "turn-1", item: { type: "agentMessage" } }],
+        nextCursor: null,
       },
     });
     expect(
@@ -485,7 +482,7 @@ describe("CodexAdapter", () => {
         runtimeNodeId,
         request: { harness: "codex", cwd: root },
       })).resolves.toMatchObject({ state: "succeeded" });
-      expect(service.listInteractions(sessionId)).toHaveLength(1);
+      await eventually(() => service.listInteractions(sessionId).length === 1 || undefined);
 
       await expect(service.execute({
         commandId: newCommandId(),
@@ -666,6 +663,10 @@ rl.on("line", (line) => {
     case "thread/read": send({ id: message.id, result: {
       thread: { ...thread([turn]), id: message.params.threadId },
       includeTurns: message.params.includeTurns,
+    }}); break;
+    case "thread/items/list": send({ id: message.id, result: {
+      data: [{ turnId: "turn-1", item: { type: "agentMessage", id: "history-1", text: "Native reply", phase: "final_answer" } }],
+      nextCursor: null, backwardsCursor: null,
     }}); break;
     case "thread/list": send({ id: message.id, result: {
       data: [thread()], nextCursor: null,

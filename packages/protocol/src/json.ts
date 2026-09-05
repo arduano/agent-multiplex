@@ -24,6 +24,49 @@ export const jsonObjectSchema: z.ZodType<JsonObject> = z.record(
   jsonValueSchema,
 );
 
+const wireTextEncoder = new TextEncoder();
+
+/**
+ * Conservative byte bound for both JSON and plain MessagePack, including the
+ * transport's preflight estimate. Numbers reserve at least float64's nine
+ * bytes, strings/containers reserve five-byte headers, and JSON punctuation
+ * and escaping are also counted. Taking the larger bound at every value keeps
+ * mixed numeric/text payloads safe without depending on a transport encoder.
+ * Every value/map key reserves at least 16 bytes as well: two 960 KiB
+ * envelopes then contain at most 122,880 values, leaving room below the
+ * transport's 131,072-value limit for their enclosing record/event/RPC.
+ *
+ * Call on validated plain protocol data. Own undefined object properties have
+ * the same omission semantics as canonicalProtocolRecordJson; undefined array
+ * entries and other non-JSON values remain invalid.
+ */
+export function jsonWireByteUpperBound(value: unknown): number {
+  if (value === null || typeof value === "boolean") return 16;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(16, JSON.stringify(value).length);
+  }
+  if (typeof value === "string") {
+    return Math.max(
+      16,
+      wireTextEncoder.encode(value).byteLength + 6,
+      wireTextEncoder.encode(JSON.stringify(value)).byteLength,
+    );
+  }
+  if (Array.isArray(value)) {
+    // One byte per member covers JSON commas (including a spare final comma).
+    return 16 + value.reduce((bytes, member) => bytes + 1 + jsonWireByteUpperBound(member), 0);
+  }
+  if (typeof value === "object" && value !== null &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)) {
+    let bytes = 16;
+    for (const [key, member] of Object.entries(value)) {
+      if (member !== undefined) bytes += jsonWireByteUpperBound(key) + 2 + jsonWireByteUpperBound(member);
+    }
+    return bytes;
+  }
+  throw new TypeError("Wire byte bounds require plain JSON protocol data");
+}
+
 /** Deterministic JSON encoding suitable for command payload comparison. */
 export function canonicalJson(value: JsonValue): string {
   if (value === null || typeof value !== "object") {

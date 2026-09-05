@@ -119,7 +119,7 @@ describe("edge gateway", () => {
       await expect(response.json()).resolves.toMatchObject({
         result: { data: {
           instanceId: "test-access-gateway",
-          protocolVersion: 4,
+          protocolVersion: 5,
           componentKind: "access-gateway",
           dataAuthority: "none",
         } },

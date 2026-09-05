@@ -1,5 +1,16 @@
 import {
   canonicalJson,
+  packNativePayload,
+  nativePayloadSchema,
+  nativeImagePointerValue,
+  type NativePayload,
+  type NativeImageSlot,
+  type ImageBeginUploadInput,
+  type ImageWriteUploadInput,
+  type ImageUploadIdInput,
+  type ImageResolvePathInput,
+  type ImageReadInput,
+  type ImageTarget,
   canonicalProtocolRecordJson,
   emptyMetadataSnapshot,
   harnessResumeOptionsSchema,
@@ -100,6 +111,8 @@ import {
   type TerminalBrokerOptions,
   type TerminalProvider,
 } from "./terminal.js";
+import { collectCleanupErrors, waitForAll } from "./settled-work.js";
+import { RuntimeImages, RuntimeImageError, type RuntimeImageOptions } from "./images.js";
 
 const now = (): string => new Date().toISOString();
 
@@ -140,6 +153,9 @@ export interface RuntimeNodeServiceOptions {
   /** Runtime-local native terminal providers; terminal bytes are never persisted. */
   terminalProviders?: readonly TerminalProvider[];
   terminalBrokerOptions?: Omit<TerminalBrokerOptions, "runtimeNodeBootId" | "providers">;
+  images?: RuntimeImageOptions;
+  nativeEventQueueLimit?: number;
+  nativeEventQueueBytes?: number;
 }
 
 interface ActiveBinding {
@@ -147,6 +163,12 @@ interface ActiveBinding {
   unsubscribe: () => void;
   sequence: number;
   lastActivityPersistedAt: number;
+  events: Promise<void>;
+  pendingEvents: number;
+  pendingEventBytes: number;
+  eventOverflowed: boolean;
+  queuedInteractions: Set<AdapterInteractionEvent>;
+  deferredLifecycle: Map<string, Exclude<AdapterEvent, { kind: "native" | "interaction" }>>;
 }
 
 interface PendingInteraction {
@@ -179,8 +201,16 @@ export class RuntimeNodeService {
   readonly #scheduledArchives = new Set<ArchiveRequest["archiveOperationId"]>();
   readonly #events: RuntimeNodeEventHub;
   readonly #terminals: TerminalBroker;
+  readonly #images: RuntimeImages;
+  readonly #localImageBackends = new Set<string>();
+  readonly #nativeEventTasks = new Map<Promise<void>, SessionId>();
+  readonly #nativeEventQueueLimit: number;
+  readonly #nativeEventQueueBytes: number;
+  #acceptingNativeEvents = true;
   #lastSnapshot: InventorySnapshot | undefined;
   #closed = false;
+  #closePromise: Promise<void> | undefined;
+  readonly #admitted = new Set<Promise<unknown>>();
 
   public constructor(options: RuntimeNodeServiceOptions) {
     this.#store = options.store;
@@ -215,6 +245,13 @@ export class RuntimeNodeService {
       providers.push(new DirectWorkspaceLaunchProvider({ backends }));
     }
     this.#launchRegistry = new LaunchProviderRegistry(providers, backends);
+    for (const backend of legacyBackends) this.#localImageBackends.add(backend.backendId);
+    this.#images = new RuntimeImages(this.#store, this.#runtimeNodeId, options.images);
+    this.#nativeEventQueueLimit = options.nativeEventQueueLimit ?? 256;
+    this.#nativeEventQueueBytes = options.nativeEventQueueBytes ?? 32 * 1_024 * 1_024;
+    for (const limit of [this.#nativeEventQueueLimit, this.#nativeEventQueueBytes]) {
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError("native event queue limits must be positive safe integers");
+    }
     this.#events = new RuntimeNodeEventHub({
       ...(options.eventRingSize === undefined ? {} : { ringSize: options.eventRingSize }),
     });
@@ -242,9 +279,14 @@ export class RuntimeNodeService {
     }
   }
 
-  public async describe(): Promise<RuntimeNodeRegistration> {
+  public describe(): Promise<RuntimeNodeRegistration> {
+    return this.#admit(() => this.#describe());
+  }
+
+  async #describe(): Promise<RuntimeNodeRegistration> {
+    await this.#images.ready();
     const roots = await this.#pathPolicy.roots();
-    const harnesses = await this.catalog();
+    const harnesses = await this.#catalog();
     const descriptor = {
       runtimeNodeId: this.#runtimeNodeId,
       runtimeNodeBootId: this.#runtimeNodeBootId,
@@ -252,14 +294,18 @@ export class RuntimeNodeService {
       allowedRoots: [...roots],
       harnesses,
       launchProfiles: this.launchProfiles(),
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
       ...(this.#endpointId ? { endpointId: this.#endpointId } : {}),
     };
     return descriptor;
   }
 
-  public async catalog(): Promise<HarnessCatalogEntry[]> {
-    const entries = await Promise.all(
+  public catalog(): Promise<HarnessCatalogEntry[]> {
+    return this.#admit(() => this.#catalog());
+  }
+
+  async #catalog(): Promise<HarnessCatalogEntry[]> {
+    const entries = await waitForAll(
       this.#launchRegistry.backends().map(async ({ adapter }) => {
         const entry = await adapter.describe();
         if (
@@ -295,11 +341,15 @@ export class RuntimeNodeService {
     );
   }
 
-  public async models(harness: Harness): Promise<NativeModel[]> {
-    const results = await Promise.all(
+  public models(harness: Harness): Promise<NativeModel[]> {
+    return this.#admit(() => this.#models(harness));
+  }
+
+  async #models(harness: Harness): Promise<NativeModel[]> {
+    const results = await waitForAll(
       this.#launchRegistry
         .backendsForHarness(harness)
-        .map(({ adapter }) => adapter.listModels()),
+        .map(async ({ adapter }) => adapter.listModels()),
     );
     if (results.length === 0) {
       throw new RuntimeNodeProtocolError("UNSUPPORTED", `${harness} is unavailable`);
@@ -315,7 +365,14 @@ export class RuntimeNodeService {
     return this.launchProfiles();
   }
 
-  public async launchProfileModels(
+  public launchProfileModels(
+    profile: LaunchRequest["profile"],
+    harness: Harness,
+  ): Promise<NativeModel[]> {
+    return this.#admit(() => this.#launchProfileModels(profile, harness));
+  }
+
+  async #launchProfileModels(
     profile: LaunchRequest["profile"],
     harness: Harness,
   ): Promise<NativeModel[]> {
@@ -337,7 +394,7 @@ export class RuntimeNodeService {
         }),
       );
     }
-    return this.models(harness);
+    return this.#models(harness);
   }
 
   public listLaunchProfileModels(
@@ -357,7 +414,11 @@ export class RuntimeNodeService {
     };
   }
 
-  public async refreshInventory(): Promise<InventorySnapshot> {
+  public refreshInventory(): Promise<InventorySnapshot> {
+    return this.#admit(() => this.#refreshInventory());
+  }
+
+  async #refreshInventory(): Promise<InventorySnapshot> {
     const adapterInventories = await Promise.allSettled(
       this.#launchRegistry.backends().map(async ({ adapter }) => {
         const items = await adapter.listSessions();
@@ -380,7 +441,7 @@ export class RuntimeNodeService {
       result.status === "fulfilled" ? result.value : [],
     );
     const native = (
-      await Promise.all(
+      await waitForAll(
         discovered.map(async (item): Promise<NativeInventoryItem | null> => {
           if (item.cwd === null) return null;
           try {
@@ -589,6 +650,7 @@ export class RuntimeNodeService {
 
   /** Durably admit a generic launch and return before provider/native work begins. */
   public createLaunch(request: LaunchRequest): LaunchRecord {
+    this.#assertOpen();
     if (request.runtimeNodeId !== this.#runtimeNodeId) {
       throw new RuntimeNodeProtocolError(
         "FENCED",
@@ -673,7 +735,11 @@ export class RuntimeNodeService {
     };
   }
 
-  public async resume(input: ResumeCommand): Promise<CommandRecord> {
+  public resume(input: ResumeCommand): Promise<CommandRecord> {
+    return this.#admit(() => this.#resume(input));
+  }
+
+  async #resume(input: ResumeCommand): Promise<CommandRecord> {
     return this.#serialize(input.sessionId, () =>
       this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
         const existing = this.#boundSessionForCommand(input, "resume");
@@ -707,7 +773,11 @@ export class RuntimeNodeService {
     );
   }
 
-  public async stop(input: StopCommand): Promise<CommandRecord> {
+  public stop(input: StopCommand): Promise<CommandRecord> {
+    return this.#admit(() => this.#stop(input));
+  }
+
+  async #stop(input: StopCommand): Promise<CommandRecord> {
     return this.#serialize(input.sessionId, () =>
       this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
         const record = this.#boundSessionForCommand(input, "stop");
@@ -740,7 +810,11 @@ export class RuntimeNodeService {
     );
   }
 
-  public async execute(input: CommandEnvelope): Promise<CommandRecord> {
+  public execute(input: CommandEnvelope): Promise<CommandRecord> {
+    return this.#admit(() => this.#execute(input));
+  }
+
+  async #execute(input: CommandEnvelope): Promise<CommandRecord> {
     return this.#serialize(input.sessionId, async () => {
       return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
         if (input.runtimeNodeId !== this.#runtimeNodeId) {
@@ -765,7 +839,9 @@ export class RuntimeNodeService {
           throw new RuntimeNodeProtocolError("NOT_FOUND", "session is resumable but not active");
         }
         harnessCommandSchema.parse(input.request);
-        const request = await this.#nativePathPolicy.command(input.request);
+        this.#launchRegistry.backendForSession(record).adapter.imageCodec?.validateCommand?.(input.request);
+        const reconstructed = await this.#reconstructImages(input, record);
+        const request = await this.#nativePathPolicy.command(reconstructed);
         const result = await active.session.execute(request);
         this.#syncHarnessSettings(input.sessionId, active);
         return result;
@@ -777,7 +853,14 @@ export class RuntimeNodeService {
     return this.#store.getCommand(commandId) ?? null;
   }
 
-  public async readNativeHistory(
+  public readNativeHistory(
+    sessionId: SessionId,
+    request: NativeHistoryRequest,
+  ): Promise<NativeHistoryResult> {
+    return this.#admit(() => this.#readNativeHistory(sessionId, request));
+  }
+
+  async #readNativeHistory(
     sessionId: SessionId,
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
@@ -790,14 +873,18 @@ export class RuntimeNodeService {
         throw new RuntimeNodeProtocolError("FENCED", "history request harness does not match binding");
       }
       const active = this.#active.get(sessionId);
-      if (active) return active.session.readNativeHistory(request);
+      if (active) {
+        const result = await active.session.readNativeHistory(request);
+        return { ...result, payload: await this.#externalize(record, result.payload) };
+      }
 
       const plan = await this.#resumePlan(record, "history");
       const options = await this.#validateResumeOptions(record, plan.resumeOptions);
       const temporary = await plan.backend.adapter.resume(options);
       await this.#validateResumedHandle(record, options, plan.backend, temporary);
       try {
-        return await temporary.readNativeHistory(request);
+        const result = await temporary.readNativeHistory(request);
+        return { ...result, payload: await this.#externalize(record, result.payload) };
       } finally {
         // Temporary history handles are never installed in #active, and the
         // lock stays held until stop completes so a live resume cannot race it.
@@ -808,6 +895,7 @@ export class RuntimeNodeService {
 
   /** Durably admit stopped-session cleanup and return before release begins. */
   public archive(request: ArchiveRequest): ArchiveRecord {
+    this.#assertOpen();
     if (request.runtimeNodeId !== this.#runtimeNodeId) {
       throw new RuntimeNodeProtocolError(
         "FENCED",
@@ -883,44 +971,161 @@ export class RuntimeNodeService {
     return this.#store.getArchive(archiveOperationId) ?? null;
   }
 
+  public beginImageUpload(input: ImageBeginUploadInput) {
+    return this.#admit(() => this.#serialize(input.sessionId, async () => {
+      this.#imageSession(input);
+      return this.#images.begin(input);
+    }));
+  }
+  public writeImageUpload(input: ImageWriteUploadInput) {
+    return this.#admit(() => this.#serialize(input.sessionId, async () => {
+      this.#imageSession(input);
+      return this.#images.write(input);
+    }));
+  }
+  public commitImageUpload(input: ImageUploadIdInput) {
+    return this.#admit(() => this.#serialize(input.sessionId, async () => {
+      this.#imageSession(input);
+      return this.#images.commit(input);
+    }));
+  }
+  public abortImageUpload(input: ImageUploadIdInput) {
+    return this.#admit(() => this.#serialize(input.sessionId, async () => {
+      this.#imageSession(input);
+      return this.#images.abort(input);
+    }));
+  }
+  public readImage(input: ImageReadInput) {
+    return this.#admit(() => this.#serialize(input.sessionId, async () => {
+      this.#imageSession(input);
+      return this.#images.read(input);
+    }));
+  }
+  public resolveImagePath(input: ImageResolvePathInput) {
+    return this.#admit(() => this.#serialize(input.sessionId, async () => {
+      const session = this.#imageSession(input);
+      const backend = this.#launchRegistry.backendForSession(session);
+      return this.#images.snapshot(input, input.sourceKey, input.path, session, backend, this.#localImageBackends.has(backend.backendId));
+    }));
+  }
+  public imageLimits(input: ImageTarget) {
+    return this.#admit(async () => {
+      this.#imageSession(input);
+      return this.#images.limits();
+    });
+  }
+
+  #imageSession(input: ImageTarget): RuntimeNodeSessionRecord {
+    this.assertRuntimeNodeBootId(input.runtimeNodeBootId);
+    if (input.runtimeNodeId !== this.#runtimeNodeId) throw new RuntimeNodeProtocolError("FENCED", "image targets another runtime node");
+    const session = this.#store.getSession(input.sessionId);
+    if (!session) throw new RuntimeNodeProtocolError("NOT_FOUND", "image session binding not found");
+    this.#assertBindingRevision(session, input.bindingRevision);
+    if (this.#store.listArchiveEntriesForSession(input.sessionId).some(({ record }) => !isTerminalArchive(record.state))) {
+      throw new RuntimeNodeProtocolError("FENCED", "image session is being archived");
+    }
+    return session;
+  }
+
+  #imageTarget(session: RuntimeNodeSessionRecord): ImageTarget {
+    return { sessionId: session.sessionId, runtimeNodeId: this.#runtimeNodeId, bindingRevision: session.bindingRevision, runtimeNodeBootId: this.#runtimeNodeBootId };
+  }
+
+  async #externalize(session: RuntimeNodeSessionRecord, payload: JsonValue): Promise<NativePayload> {
+    const backend = this.#launchRegistry.backendForSession(session);
+    if (!backend.adapter.imageCodec) return packNativePayload(payload);
+    const target = this.#imageTarget(session);
+    const unavailable = (error: unknown): NativeImageSlot["image"] => ({
+      unavailable: true,
+      reason: error instanceof RuntimeImageError
+        ? error.code === "RESOURCE_EXHAUSTED" ? "quotaExceeded"
+          : error.code === "UNSUPPORTED" ? "unsupported"
+            : error.code === "NOT_FOUND" ? "missing" : "invalid"
+        : "unavailable",
+    });
+    const result = await backend.adapter.imageCodec.externalize(payload, {
+      storeBase64: async ({ dataBase64, mediaType }) => {
+        try { return await this.#images.storeBase64(target, dataBase64, mediaType); }
+        catch (error) { return unavailable(error); }
+      },
+      snapshotPath: async ({ sourceKey, path }) => {
+        try { return await this.#images.snapshot(target, sourceKey, path, session, backend, this.#localImageBackends.has(backend.backendId)); }
+        catch (error) { return unavailable(error); }
+      },
+    });
+    return nativePayloadSchema.parse(result);
+  }
+
+  async #reconstructImages(input: CommandEnvelope, session: RuntimeNodeSessionRecord): Promise<CommandEnvelope["request"]> {
+    if (!input.images?.length) return input.request;
+    if (input.images.length > this.#images.limits().maximumImagesPerCommand) throw new RuntimeNodeProtocolError("RESOURCE_EXHAUSTED", "command contains too many images");
+    if (input.images.reduce((sum, slot) => sum + slot.image.byteLength, 0) > 50 * 1_024 * 1_024) throw new RuntimeNodeProtocolError("RESOURCE_EXHAUSTED", "command image bytes exceed the 50 MiB total bound");
+    const codec = this.#launchRegistry.backendForSession(session).adapter.imageCodec;
+    for (const slot of input.images) {
+      if (codec?.acceptsCommandImage?.(input.request, slot) !== true) throw new RuntimeNodeProtocolError("FENCED", "command image pointer is outside the adapter image input allowlist");
+    }
+    const json = structuredClone(input.request) as unknown as JsonValue;
+    const seen = new Set<string>();
+    for (const slot of input.images) {
+      if (seen.has(slot.pointer) || nativeImagePointerValue(json, slot.pointer) !== null) throw new RuntimeNodeProtocolError("FENCED", "command image must target a unique null leaf");
+      seen.add(slot.pointer);
+      const image = slot.image;
+      const bytes = await this.#images.getBytes(this.#imageTarget(session), image);
+      const value = slot.representation === "base64" ? bytes.toString("base64") : `data:${image.mediaType};base64,${bytes.toString("base64")}`;
+      const segments = slot.pointer.slice(1).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+      if (!slot.pointer || segments.some((part) => ["__proto__", "prototype", "constructor"].includes(part))) throw new RuntimeNodeProtocolError("FENCED", "command image pointer is unsafe");
+      let parent = json;
+      for (const key of segments.slice(0, -1)) parent = (parent as Record<string, JsonValue>)[key]!;
+      (parent as Record<string, JsonValue>)[segments.at(-1)!] = value;
+    }
+    return harnessCommandSchema.parse(json);
+  }
+
   public terminalGet(input: TerminalGetInput): TerminalDescriptor | null {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.get(input);
   }
 
   public terminalOpen(input: TerminalOpenInput): Promise<TerminalOpenResult> {
-    return this.#terminals.open(this.#terminalBinding(input, true), input);
+    return this.#admit(() => this.#terminals.open(this.#terminalBinding(input, true), input));
   }
 
   public terminalAttach(
     input: TerminalAttachInput,
     signal?: AbortSignal,
   ): AsyncIterable<TerminalStreamItem> {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.attach(input, signal);
   }
 
   public terminalLeaseAcquire(input: TerminalLeaseAcquireInput): TerminalLeaseAcquireResult {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.acquire(input);
   }
 
   public terminalLeaseRenew(input: TerminalLeaseRenewInput): TerminalLeaseRenewResult {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.renew(input);
   }
 
   public terminalLeaseRelease(input: TerminalLeaseReleaseInput): TerminalLeaseReleaseResult {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.release(input);
   }
 
   public terminalInput(input: TerminalInput): TerminalInputResult {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.input(input);
   }
 
   public terminalTerminate(input: TerminalTerminateInput): TerminalDescriptor {
+    this.#assertOpen();
     this.#terminalBinding(input, false);
     return this.#terminals.terminate(input);
   }
@@ -931,13 +1136,17 @@ export class RuntimeNodeService {
       .filter((record) => !sessionId || record.sessionId === sessionId);
   }
 
-  public async resolveInteraction(input: ResolveInteractionInput): Promise<InteractionRecord> {
+  public resolveInteraction(input: ResolveInteractionInput): Promise<InteractionRecord> {
+    return this.#admit(() => this.#resolveInteraction(input));
+  }
+
+  async #resolveInteraction(input: ResolveInteractionInput): Promise<InteractionRecord> {
     const completed = this.#resolvedInteractions.get(input.interactionId);
     if (completed) {
       this.#assertInteractionBinding(completed, input);
       if (
         completed.resolution === undefined ||
-        canonicalJson(completed.resolution) !== canonicalJson(input.response)
+        canonicalJson(completed.resolution.json) !== canonicalJson(input.response)
       ) {
         throw new RuntimeNodeProtocolError(
           "CONFLICT",
@@ -979,6 +1188,7 @@ export class RuntimeNodeService {
     pending: PendingInteraction,
     response: JsonValue,
   ): Promise<InteractionRecord> {
+    const resolution = packNativePayload(response);
     await pending.native.resolve(response);
     if (
       pending.retired ||
@@ -992,7 +1202,7 @@ export class RuntimeNodeService {
     const resolved: InteractionRecord = {
       ...pending.record,
       state: "resolved",
-      resolution: response,
+      resolution,
       resolvedAt: now(),
     };
     this.#pendingInteractions.delete(interactionId);
@@ -1173,23 +1383,69 @@ export class RuntimeNodeService {
     });
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
-    await Promise.allSettled([...this.#launchTasks, ...this.#archiveTasks]);
-    await this.#terminals.close();
-    await Promise.allSettled(
-      [...this.#active.values()].map(async ({ session, unsubscribe }) => {
-        unsubscribe();
-        await session.stop();
+    this.#closePromise = this.#close();
+    return this.#closePromise;
+  }
+
+  async #close(): Promise<void> {
+    // Closing fences admission synchronously. Already admitted work retains its
+    // adapter/provider access until its complete operation (including cleanup)
+    // settles; failures remain visible through its original result or journal.
+    await Promise.allSettled([
+      ...this.#admitted,
+      ...this.#launchTasks,
+      ...this.#archiveTasks,
+    ]);
+    this.#acceptingNativeEvents = false;
+    await Promise.allSettled(this.#nativeEventTasks.keys());
+    const errors = await collectCleanupErrors([() => this.#terminals.close()]);
+    errors.push(...await collectCleanupErrors(
+      [...this.#active.values()].map(({ session, unsubscribe }) => async () => {
+        const sessionErrors = await collectCleanupErrors([unsubscribe]);
+        sessionErrors.push(...await collectCleanupErrors([() => session.stop()]));
+        if (sessionErrors.length > 0) {
+          throw new AggregateError(sessionErrors, "runtime session cleanup failed");
+        }
       }),
-    );
+    ));
     this.#active.clear();
     this.#pendingInteractions.clear();
     this.#resolvedInteractions.clear();
-    await Promise.allSettled([
-      this.#launchRegistry.closeProviders(),
-      this.#launchRegistry.closeBackends(),
-    ]);
+    // Backend processes may depend on provider-owned resources during close.
+    errors.push(...await collectCleanupErrors([() => this.#launchRegistry.closeBackends()]));
+    errors.push(...await collectCleanupErrors([() => this.#launchRegistry.closeProviders()]));
+    errors.push(...await collectCleanupErrors([() => this.#images.close()]));
+    if (errors.length > 0) throw new AggregateError(errors, "runtime node cleanup failed");
+  }
+
+  #assertOpen(): void {
+    if (this.#closed) throw new RuntimeNodeProtocolError("FENCED", "runtime node is closing");
+  }
+
+  #admit<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.#closed) {
+      return Promise.reject(new RuntimeNodeProtocolError("FENCED", "runtime node is closing"));
+    }
+    // Track before calling adapter/provider code, including reentrant close(),
+    // while preserving the operation's existing synchronous admission timing.
+    let complete!: (value: T | PromiseLike<T>) => void;
+    let fail!: (error: unknown) => void;
+    const task = new Promise<T>((resolve, reject) => {
+      complete = resolve;
+      fail = reject;
+    });
+    this.#admitted.add(task);
+    const release = () => { this.#admitted.delete(task); };
+    void task.then(release, release);
+    try {
+      complete(operation());
+    } catch (error) {
+      fail(error);
+    }
+    return task;
   }
 
   #recoverDurableOperations(): void {
@@ -1623,6 +1879,10 @@ export class RuntimeNodeService {
         return;
       }
     }
+    await Promise.allSettled([...this.#nativeEventTasks]
+      .filter(([, sessionId]) => sessionId === session.sessionId)
+      .map(([task]) => task));
+    await this.#images.releaseSession(session.sessionId);
     const timestamp = now();
     const succeeded: RuntimeArchiveJournalEntry = {
       ...entry,
@@ -1744,7 +2004,7 @@ export class RuntimeNodeService {
     const cwd = await this.#pathPolicy.validate(options.cwd);
     const additionalDirectories =
       options.harness === "copilot" && options.additionalDirectories
-        ? await Promise.all(
+        ? await waitForAll(
             options.additionalDirectories.map((path) => this.#pathPolicy.validate(path)),
           )
         : undefined;
@@ -1778,7 +2038,7 @@ export class RuntimeNodeService {
     });
     const additionalDirectories =
       options.harness === "copilot" && options.additionalDirectories
-        ? await Promise.all(
+        ? await waitForAll(
             options.additionalDirectories.map((path) => this.#pathPolicy.validate(path)),
           )
         : undefined;
@@ -2105,7 +2365,7 @@ export class RuntimeNodeService {
     vendorSessionId: string,
     source: string,
   ): Promise<string> {
-    const canonical = await Promise.all(
+    const canonical = await waitForAll(
       candidates.map((cwd) => this.#validateAttachmentCwd(cwd, vendorSessionId)),
     );
     const distinct = [...new Set(canonical)];
@@ -2192,12 +2452,18 @@ export class RuntimeNodeService {
       session,
       sequence: 0,
       lastActivityPersistedAt: Date.now(),
+      events: Promise.resolve(),
+      pendingEvents: 0,
+      pendingEventBytes: 0,
+      eventOverflowed: false,
+      queuedInteractions: new Set(),
+      deferredLifecycle: new Map(),
       unsubscribe: () => undefined,
     };
     this.#active.set(sessionId, binding);
     try {
       const unsubscribe = session.subscribe((event) =>
-        this.#onAdapterEvent(sessionId, binding, event),
+        this.#queueAdapterEvent(sessionId, binding, event),
       );
       binding.unsubscribe = unsubscribe;
       // A synchronously replayed terminal status may have retired the binding
@@ -2209,7 +2475,88 @@ export class RuntimeNodeService {
     }
   }
 
-  #onAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent): void {
+  #queueAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent): void {
+    if (!this.#acceptingNativeEvents || this.#active.get(sessionId) !== binding) return;
+    const hasPayload = event.kind === "native" || event.kind === "interaction";
+    if (binding.eventOverflowed) {
+      if (!hasPayload) this.#deferLifecycleEvent(sessionId, binding, event);
+      return;
+    }
+    const session = this.#store.getSession(sessionId);
+    const codec = session && this.#launchRegistry.backendForSession(session).adapter.imageCodec;
+    // subscribe() can replay startup events before the launch transaction installs
+    // its session row. Queue payloads until that synchronous commit completes;
+    // terminal statuses still need to retire a stopped binding immediately.
+    if (binding.pendingEvents === 0 && (!hasPayload || (session && !codec))) {
+      try { this.#onAdapterEvent(sessionId, binding, event); }
+      catch { this.#events.publish({ kind: "nativeGap", sessionId, reason: "native payload validation failed", recovery: "readNativeHistory" }); }
+      return;
+    }
+    const bytes = Buffer.byteLength(JSON.stringify(event));
+    if (binding.pendingEvents >= this.#nativeEventQueueLimit || binding.pendingEventBytes + bytes > this.#nativeEventQueueBytes) {
+      binding.eventOverflowed = binding.pendingEvents > 0;
+      if (!hasPayload) this.#deferLifecycleEvent(sessionId, binding, event);
+      this.#events.publish({ kind: "nativeGap", sessionId, reason: "native image extraction queue overflowed", recovery: "readNativeHistory" });
+      return;
+    }
+    binding.pendingEvents += 1;
+    binding.pendingEventBytes += bytes;
+    if (event.kind === "interaction") binding.queuedInteractions.add(event);
+    const task = binding.events.then(async () => {
+      const current = this.#store.getSession(sessionId);
+      if (!current || this.#active.get(sessionId) !== binding) return;
+      const payload = hasPayload ? await this.#externalize(current, event.payload) : undefined;
+      this.#onAdapterEvent(sessionId, binding, event, payload);
+    }).catch(() => {
+      this.#events.publish({ kind: "nativeGap", sessionId, reason: "native image extraction failed", recovery: "readNativeHistory" });
+    });
+    binding.events = task;
+    this.#nativeEventTasks.set(task, sessionId);
+    void task.then(() => {
+      if (event.kind === "interaction") binding.queuedInteractions.delete(event);
+      binding.pendingEvents -= 1;
+      binding.pendingEventBytes -= bytes;
+      if (binding.pendingEvents === 0) {
+        const deferred = [...binding.deferredLifecycle.values()];
+        binding.deferredLifecycle.clear();
+        // Payload admission resumes only after all earlier lifecycle updates
+        // have drained. A stopped binding then rejects every later callback.
+        for (const update of deferred) {
+          try { this.#onAdapterEvent(sessionId, binding, update); }
+          catch { this.#events.publish({ kind: "nativeGap", sessionId, reason: "native lifecycle validation failed", recovery: "readNativeHistory" }); }
+        }
+        binding.eventOverflowed = false;
+      }
+      this.#nativeEventTasks.delete(task);
+    });
+  }
+
+  #deferLifecycleEvent(
+    sessionId: SessionId,
+    binding: ActiveBinding,
+    event: Exclude<AdapterEvent, { kind: "native" | "interaction" }>,
+  ): void {
+    let key: string = event.kind;
+    if (event.kind === "interactionSettled") {
+      // Never allocate entries for arbitrary request IDs. This buffer has at
+      // most two snapshots plus one settlement per already admitted interaction
+      // (including those still waiting for bounded payload extraction).
+      const known = [...binding.queuedInteractions].some((queued) => queued.nativeRequestId === event.nativeRequestId) ||
+        [...this.#pendingInteractions.values()].some(({ record }) => record.sessionId === sessionId &&
+          record.runtimeEpoch === binding.session.runtimeEpoch && record.nativeRequestId === event.nativeRequestId);
+      if (!known) return;
+      key = `interaction:${event.nativeRequestId}`;
+    } else if (event.kind === "status") {
+      const previous = binding.deferredLifecycle.get(key);
+      if (previous?.kind === "status" && previous.status === "stopped") return;
+    }
+    // Replacing a snapshot moves it to its latest arrival position, preserving
+    // the relative order of the retained lifecycle updates after payload drain.
+    binding.deferredLifecycle.delete(key);
+    binding.deferredLifecycle.set(key, event);
+  }
+
+  #onAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent, payload?: NativePayload): void {
     // Unsubscription cannot recall a callback that was already queued by an
     // adapter. Fence every callback by the installed binding so a retired
     // native runtime cannot overwrite or interleave with its replacement.
@@ -2235,7 +2582,7 @@ export class RuntimeNodeService {
         runtimeEpoch: binding.session.runtimeEpoch,
         sequence: binding.sequence++,
         nativeType: event.nativeType,
-        payload: event.payload,
+        payload: payload ?? packNativePayload(event.payload),
         ephemeral: event.ephemeral,
       });
       return;
@@ -2308,7 +2655,7 @@ export class RuntimeNodeService {
       runtimeEpoch: binding.session.runtimeEpoch,
       ...(event.nativeRequestId ? { nativeRequestId: event.nativeRequestId } : {}),
       requestType: event.requestType,
-      payload: event.payload,
+      payload: payload ?? packNativePayload(event.payload),
       ephemeral: event.ephemeral,
       state: "pending",
       createdAt: now(),
@@ -2421,12 +2768,22 @@ export class RuntimeNodeService {
     this.#store.putCommand(record);
     try {
       const result = await execute();
+      let packedResult: NativePayload | undefined;
+      if (result !== undefined) {
+        try {
+          const json = toJsonValue(JSON.parse(JSON.stringify(result)));
+          const session = sessionId ? this.#store.getSession(sessionId) : undefined;
+          packedResult = session ? await this.#externalize(session, json) : packNativePayload(json);
+        } catch (error) {
+          throw new AdapterOutcomeUnknownError("native command completed but its bounded result could not be recorded", { cause: error });
+        }
+      }
       record = {
         ...record,
         state: "succeeded",
-        ...(result === undefined
+        ...(packedResult === undefined
           ? {}
-          : { result: toJsonValue(JSON.parse(JSON.stringify(result))) }),
+          : { result: packedResult }),
         updatedAt: now(),
       };
     } catch (error) {

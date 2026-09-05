@@ -1,21 +1,28 @@
 # Repository instructions for coding agents
 
-Agent Multiplex is a protocol-v4 distributed control plane. Before changing it,
-read [`docs/wiki/Home.md`](docs/wiki/Home.md),
-[`docs/checkpoint-v4.md`](docs/checkpoint-v4.md), and the design document for the
-role you are touching.
+Agent Multiplex is a protocol-v5 distributed control plane. Before changing it,
+read the single fresh-session handoff at
+[`docs/wiki/Current-State.md`](docs/wiki/Current-State.md), then the topical
+guide and deep design for the role you are touching. Use
+[`docs/wiki/Home.md`](docs/wiki/Home.md) only as the documentation index; the
+checkpoint is an evidence ledger, not a second onboarding document.
 
 ## Maintained boundary
 
 - Active roles are control node, runtime node, access gateway, client, and
   harness adapter.
 - `apps/host` and `packages/host-core` are archived protocol-v2 evidence. Never
-  import, repair, build, test, or use them as a v4 compatibility layer.
-- Protocol v4 has no `sessions.spawn`; public creation is `launches.create` via
+  import, repair, build, test, or use them as a v5 compatibility layer.
+- Protocol v5 has no `sessions.spawn`; public creation is `launches.create` via
   an exact launch profile fence.
 - `@arduano/p2prpc-core` is an exact, independently released transport
   dependency. Use `../p2prpc` to develop and qualify transport changes, but do
   not commit a local/file dependency to a release candidate.
+- Image bytes and first-display file snapshots belong to runtime nodes and
+  remain immutable until archive. Read [the image design](docs/design/images-v5.md)
+  before changing image paths, transfer, retention, or native envelopes.
+- Runtime code never fetches remote image URLs or renders/converts SVG; clients
+  own interpretation of transferred `image/svg+xml` bytes.
 - Native history belongs to Codex/Copilot. Never parse vendor history files or
   use terminal scrollback as canonical history.
 
@@ -91,10 +98,18 @@ Do not call a run qualified unless the exact source and dependency boundary
 produced a successful, scrubbed, checksummed receipt. Failed receipt directories
 are diagnostics, not evidence. Never publish raw tickets, bearers, shared
 secrets, provider credentials/endpoints, terminal lease secrets, or auth homes.
+The complete `receipts/` tree is intentionally local and gitignored; use the
+tracked checkpoint and linked release evidence for facts available to a fresh
+clone.
 
 ## Documentation
 
 Update the relevant wiki page and deep design document when a maintained
-boundary changes. Keep examples on protocol v4 terminology and link to source
+boundary changes. Keep examples on protocol v5 terminology and link to source
 contracts rather than copying large unstable type definitions. Security-impacting
 changes also require review of `SECURITY.md` and `THIRD_PARTY_NOTICES.md`.
+
+`docs/wiki/Current-State.md` owns current release/session-handoff facts,
+topic pages own operational guidance, maintained design documents own detailed
+invariants, and `docs/checkpoint-v4.md` owns qualification evidence. Update the
+owner instead of repeating changing facts across several pages.

@@ -10,6 +10,7 @@ import {
   newRuntimeEpoch,
   newRuntimeNodeBootId,
   newRuntimeNodeId,
+  newSessionId,
   type AccessSnapshot,
   type AdapterScopeId,
   type ArchiveRecord,
@@ -52,7 +53,7 @@ function addArchivedSession(
     allowedRoots: ["/work"],
     harnesses: [],
     launchProfiles: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   });
   const active = sessionId === undefined
     ? catalog.reconcileInventory({
@@ -150,7 +151,7 @@ function attach(
     feedId: childNode.feedId,
     name: childNode.name,
     endpointId: childEndpointId,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: childNode.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),
@@ -488,16 +489,18 @@ describe("protocol-v4 recursive cold discovery", () => {
     );
 
     const newestId = newLaunchId();
-    const staleNewest = launchFor(archived.session, newestId);
+    const staleNewest = launchFor(archived.session, newestId, { sessionId: newSessionId() });
     const newest = launchFor(archived.session, newestId, {
+      sessionId: staleNewest.sessionId,
       statusMessage: "newest owner checkpoint",
       updatedAt: later,
     });
     childCatalog.recordLaunch(newest);
 
     const advancedId = newLaunchId();
-    const staleAdvanced = launchFor(archived.session, advancedId);
+    const staleAdvanced = launchFor(archived.session, advancedId, { sessionId: newSessionId() });
     const advanced = launchFor(archived.session, advancedId, {
+      sessionId: staleAdvanced.sessionId,
       state: "preparing",
       statusMessage: "local advanced checkpoint",
       updatedAt: later,
@@ -552,7 +555,7 @@ describe("protocol-v4 recursive cold discovery", () => {
     expect(rootCatalog.getLaunch(advancedId)).toEqual(advanced);
 
     const mismatchedId = newLaunchId();
-    const canonical = launchFor(archived.session, mismatchedId);
+    const canonical = launchFor(archived.session, mismatchedId, { sessionId: newSessionId() });
     rootCatalog.recordLaunch(
       canonical,
       childCatalog.localControlNode().controlNodeId,

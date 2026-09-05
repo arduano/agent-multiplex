@@ -63,7 +63,7 @@ describe("p2prpc access-gateway node", () => {
     for (const peer of peers.values()) {
       expect(peer.enroll).toHaveBeenCalledWith({
         name: expect.stringMatching(/^agent-multiplex-gateway:source-/),
-        protocolVersion: 4,
+        protocolVersion: 5,
         requestedScopes: ["read", "agent-control"],
       });
     }
@@ -86,7 +86,7 @@ describe("p2prpc access-gateway node", () => {
     });
 
     await expect(handle.sources.get("bad-source")!.connect()).rejects.toThrow(
-      /not a protocol-v4 control-node source/,
+      /not a protocol-v5 control-node source/,
     );
     await handle.close();
   });
@@ -251,7 +251,7 @@ describe("p2prpc access-gateway node", () => {
     });
 
     await expect(handle.sources.get("wrong-role")!.connect()).rejects.toThrow(
-      /not a protocol-v4 control-node source/,
+      /not a protocol-v5 control-node source/,
     );
     expect(node.ensureConnectedAs).toHaveBeenCalledOnce();
     await handle.close();
@@ -300,7 +300,7 @@ function fakePeer(
     dataRole: { role: "authority", authority },
     connectedAt: null,
     lastHeartbeatAt: null,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: [],
   };
   const enroll = vi.fn().mockResolvedValue({
@@ -312,7 +312,7 @@ function fakePeer(
     source: {
       manifest: {
         componentKind: "control-node" as const,
-        protocolVersion: 4 as const,
+        protocolVersion: 5 as const,
         sourceControlNodeId: controlNodeId,
         sourceControlNodeBootId: canonical.controlNodeBootId,
         authority,
@@ -350,7 +350,7 @@ function fakePeer(
           describe: {
             query: vi.fn().mockResolvedValue({
               application: "agent-multiplex",
-              protocolVersion: 4,
+              protocolVersion: 5,
               instanceId: endpointId,
               componentKind,
               dataAuthority: componentKind === "control-node" ? "control-node" : "none",

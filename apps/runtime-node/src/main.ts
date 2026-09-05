@@ -20,6 +20,7 @@ import {
   CopilotAdapter,
   createExperimentalCopilotRuntime,
   type CopilotProviderConfig,
+  type CopilotAdapterOptions,
 } from "@arduano/agent-multiplex-adapter-copilot";
 import { MockAgentAdapter } from "@arduano/agent-multiplex-adapter-mock";
 import type { CompositeControlNodeRouter } from "@arduano/agent-multiplex-control-node-core";
@@ -47,6 +48,8 @@ import {
   type AgentAdapter,
   type TerminalProvider,
   type RuntimeNodeRouter,
+  type RuntimeAgentBackend,
+  type RuntimeLaunchProvider,
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import {
@@ -63,7 +66,7 @@ const DEFAULT_INVENTORY_REFRESH_MS = 60_000;
 const DEFAULT_METADATA_FLUSH_MS = 5_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const DEFAULT_MAX_RUNNING_TERMINALS = 32;
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 type HarnessName = "codex" | "copilot";
 type AdapterMode = "native" | "mock";
@@ -81,6 +84,9 @@ export interface RuntimeNodeAppConfig {
   readonly metadataFlushMs: number;
   readonly reconnectMaxMs: number;
   readonly maxRunningTerminals: number;
+  readonly imageOutputRoots?: readonly string[];
+  readonly imageMaximumSessionBytes?: number;
+  readonly imageMaximumRuntimeBytes?: number;
   readonly codexBinary?: string;
   readonly codexArgs?: readonly string[];
   readonly codexAdapterScopeId?: string;
@@ -91,6 +97,7 @@ export interface RuntimeNodeAppConfig {
   readonly copilotProvider?: CopilotProviderConfig;
   readonly copilotProviderDefaultModel?: string;
   readonly copilotProviderModels?: readonly string[];
+  readonly copilotProviderModelCapabilities?: CopilotAdapterOptions["providerModelCapabilities"];
   readonly copilotLogLevel?:
     | "none"
     | "error"
@@ -122,7 +129,10 @@ type ControlNodePeer = RuntimeNodeControlNodePeer;
 export async function runRuntimeNode(
   config: RuntimeNodeAppConfig,
   signal: AbortSignal,
+  options: RuntimeNodeAppOptions = {},
 ): Promise<void> {
+  // Root resolution has no durable or native ownership; fail before opening stores.
+  const allowedRoots = await new AllowedPathPolicy(config.allowedRoots).roots();
   const identity = await loadOrCreateIdentity(config.stateDirectory);
   const runtimeNodeBootId = newRuntimeNodeBootId();
   const store = new RuntimeNodeStore(join(config.stateDirectory, DATABASE_FILENAME));
@@ -130,10 +140,18 @@ export async function runRuntimeNode(
   // Canonicalize the roots before constructing a harness. Most adapters start
   // lazily, but the opt-in Copilot UI-server must be probed eagerly so a
   // broken hidden CLI can fall back without advertising terminal support.
-  const allowedRoots = await new AllowedPathPolicy(config.allowedRoots).roots();
   const runtimeConfig = { ...config, allowedRoots };
-  const { adapters, terminalProviders } = await createRuntimeComponents(runtimeConfig);
-  const service = new RuntimeNodeService({
+  let components: RuntimeComponents;
+  try {
+    components = await (options.createComponents ?? createRuntimeComponents)(runtimeConfig);
+  } catch (error) {
+    store.close();
+    throw error;
+  }
+  const { adapters, terminalProviders, backends, launchProviders, includeDirectWorkspaceProvider } = components;
+  let service: RuntimeNodeService;
+  try {
+    service = new RuntimeNodeService({
     store,
     runtimeNodeId: identity.runtimeNodeId,
     runtimeNodeBootId,
@@ -141,8 +159,28 @@ export async function runRuntimeNode(
     allowedRoots,
     adapters,
     terminalProviders,
+    ...(backends === undefined ? {} : { backends }),
+    ...(launchProviders === undefined ? {} : { launchProviders }),
+    ...(includeDirectWorkspaceProvider === undefined ? {} : { includeDirectWorkspaceProvider }),
     terminalBrokerOptions: { maxRunningTerminals: config.maxRunningTerminals },
-  });
+    images: {
+      directory: join(config.stateDirectory, "images"),
+      outputRoots: config.imageOutputRoots ?? [],
+      ...(config.imageMaximumSessionBytes === undefined ? {} : { maximumSessionBytes: config.imageMaximumSessionBytes }),
+      ...(config.imageMaximumRuntimeBytes === undefined ? {} : { maximumRuntimeBytes: config.imageMaximumRuntimeBytes }),
+    },
+    });
+  } catch (error) {
+    // Registration can reject a conflicting static provider/backend. The service
+    // has not taken ownership yet, so close every returned component ourselves.
+    await Promise.allSettled([
+      ...new Set([...adapters, ...(backends ?? []).map((backend) => backend.adapter)]),
+      ...terminalProviders,
+      ...(launchProviders ?? []),
+    ].map(async (component) => component.close?.()));
+    store.close();
+    throw error;
+  }
   const router = createRuntimeNodeRouter(service);
   let node: RuntimeNodeP2PNode | undefined;
   const closeTransport = (): void => {
@@ -193,8 +231,11 @@ export async function runRuntimeNode(
   } finally {
     signal.removeEventListener("abort", closeTransport);
     await node?.close().catch((error: unknown) => logError("closing p2prpc", error));
-    await service.close();
-    store.close();
+    try {
+      await service.close();
+    } finally {
+      store.close();
+    }
   }
 }
 
@@ -402,9 +443,17 @@ export async function flushMetadataOutbox(
   service.settleMetadataOutbox(results);
 }
 
-interface RuntimeComponents {
-  adapters: AgentAdapter[];
-  terminalProviders: TerminalProvider[];
+export interface RuntimeComponents {
+  adapters: readonly AgentAdapter[];
+  terminalProviders: readonly TerminalProvider[];
+  backends?: readonly RuntimeAgentBackend[];
+  launchProviders?: readonly RuntimeLaunchProvider[];
+  includeDirectWorkspaceProvider?: boolean;
+}
+
+/** Static application composition; reconnect, journal, and shutdown remain daemon-owned. */
+export interface RuntimeNodeAppOptions {
+  createComponents?: (config: RuntimeNodeAppConfig) => RuntimeComponents | Promise<RuntimeComponents>;
 }
 
 export async function createRuntimeComponents(
@@ -453,6 +502,7 @@ export async function createRuntimeComponents(
           : {}),
         ...(config.copilotLogLevel ? { logLevel: config.copilotLogLevel } : {}),
       },
+      ...(config.copilotProviderModelCapabilities ? { providerModelCapabilities: config.copilotProviderModelCapabilities } : {}),
       ...(config.copilotProvider ? { provider: config.copilotProvider } : {}),
       ...(config.copilotProviderDefaultModel
         ? { defaultModel: config.copilotProviderDefaultModel }
@@ -522,6 +572,10 @@ export function configFromEnvironment(
       requiredEnvironment(environment, "AGENT_MULTIPLEX_RUNTIME_NODE_ALLOWED_ROOTS"),
     ),
     enabledHarnesses,
+    imageOutputRoots: environment.AGENT_MULTIPLEX_RUNTIME_NODE_IMAGE_OUTPUT_ROOTS === undefined
+      ? [] : parseAllowedRoots(environment.AGENT_MULTIPLEX_RUNTIME_NODE_IMAGE_OUTPUT_ROOTS),
+    imageMaximumSessionBytes: positiveIntegerEnvironment(environment, "AGENT_MULTIPLEX_RUNTIME_NODE_IMAGE_SESSION_BYTES", 512 * 1_024 * 1_024),
+    imageMaximumRuntimeBytes: positiveIntegerEnvironment(environment, "AGENT_MULTIPLEX_RUNTIME_NODE_IMAGE_RUNTIME_BYTES", 10 * 1_024 * 1_024 * 1_024),
     adapterMode,
     sharedSecret,
     controlNode: {
@@ -609,7 +663,7 @@ function copilotProviderFromEnvironment(
   environment: NodeJS.ProcessEnv,
 ): Pick<
   RuntimeNodeAppConfig,
-  "copilotProvider" | "copilotProviderDefaultModel" | "copilotProviderModels"
+  "copilotProvider" | "copilotProviderDefaultModel" | "copilotProviderModels" | "copilotProviderModelCapabilities"
 > | Record<never, never> {
   const prefix = "AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_";
   const relevant = Object.keys(environment).some((key) =>
@@ -685,9 +739,30 @@ function copilotProviderFromEnvironment(
           }
         : {}),
     },
+    ...(environment.AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL_CAPABILITIES ? {
+      copilotProviderModelCapabilities: parseProviderCapabilities(environment.AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL_CAPABILITIES),
+    } : {}),
     copilotProviderDefaultModel: model,
     copilotProviderModels: models,
   };
+}
+
+function parseProviderCapabilities(encoded: string): NonNullable<CopilotAdapterOptions["providerModelCapabilities"]> {
+  const fail = () => { throw new Error("AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL_CAPABILITIES must map model IDs to native model capabilities"); };
+  let value: unknown;
+  try { value = JSON.parse(encoded); } catch { return fail(); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
+  for (const [id, entry] of Object.entries(value)) {
+    if (!id.trim() || !entry || typeof entry !== "object" || Array.isArray(entry)) return fail();
+    const { supports, limits } = entry;
+    if (!supports || typeof supports.vision !== "boolean" || typeof supports.reasoningEffort !== "boolean" ||
+      !limits || !Number.isSafeInteger(limits.max_context_window_tokens) || limits.max_context_window_tokens < 1) return fail();
+    if (limits.vision && (!Array.isArray(limits.vision.supported_media_types) ||
+      !limits.vision.supported_media_types.every((type: unknown) => typeof type === "string" && type.length > 0) ||
+      !Number.isSafeInteger(limits.vision.max_prompt_images) || limits.vision.max_prompt_images < 1 ||
+      !Number.isSafeInteger(limits.vision.max_prompt_image_size) || limits.vision.max_prompt_image_size < 1)) return fail();
+  }
+  return value as NonNullable<CopilotAdapterOptions["providerModelCapabilities"]>;
 }
 
 function validateProviderUrl(value: string): void {

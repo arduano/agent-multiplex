@@ -1,3 +1,4 @@
+import { packNativePayload } from "@arduano/agent-multiplex-protocol";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,10 @@ import { describe, expect, it } from "vitest";
 import {
   emptyMetadataSnapshot,
   newAuthorityEpochId,
+  newCommandId,
+  imageDescriptorSchema,
+  type ImageReadInput,
+  type ImageReadResult,
   newControlNodeBootId,
   newControlNodeId,
   newFeedId,
@@ -49,6 +54,7 @@ class FakeSource implements ControlNodeSourceClient {
   public getCommandError: Error | undefined;
   public recoveredCommand: CommandRecord | null = null;
   public loadError: Error | undefined;
+  public imageRead: ((input: ImageReadInput) => Promise<ImageReadResult>) | undefined;
   public terminalReads = 0;
   public terminalAttaches = 0;
   public launchDispatches = 0;
@@ -122,6 +128,15 @@ class FakeSource implements ControlNodeSourceClient {
     });
   }
   public readNativeHistory(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public beginImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public writeImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public commitImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public abortImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public resolveImagePath(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public imageLimits(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public readImage(input: ImageReadInput): Promise<ImageReadResult> {
+    return this.imageRead?.(input) ?? Promise.reject(new Error("unused"));
+  }
   public getTerminal(input: TerminalGetInput): Promise<TerminalDescriptor> {
     this.terminalReads += 1;
     return Promise.resolve(this.#terminal(input));
@@ -213,7 +228,7 @@ function controlNode(
         },
     connectedAt: timestamp,
     lastHeartbeatAt: timestamp,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: [],
   };
 }
@@ -226,7 +241,7 @@ function snapshot(
   const sourceControlNodeId = ids[0]!;
   const manifest: SourceManifest = {
     componentKind: "control-node",
-    protocolVersion: 4,
+    protocolVersion: 5,
     sourceControlNodeId,
     sourceControlNodeBootId: newControlNodeBootId(),
     authority: authorityRef,
@@ -251,7 +266,7 @@ function snapshot(
         allowedRoots: ["/work"],
         harnesses: [],
         launchProfiles: [],
-        protocolVersion: 4,
+        protocolVersion: 5,
       }]
     : [];
   const sessions: SessionRecord[] = options.withSession
@@ -343,7 +358,7 @@ function nativeEvent(
     runtimeEpoch,
     sequence,
     nativeType: `test/${sequence}`,
-    payload: { sequence },
+    payload: packNativePayload({ sequence }),
     ephemeral: false,
     provenance: {
       originControlNodeId: sourceSnapshot.manifest.sourceControlNodeId,
@@ -891,7 +906,7 @@ describe("AccessGatewayProjection routing and feed", () => {
       runtimeEpoch: newRuntimeNodeBootId(),
       sequence: 0,
       nativeType: "test",
-      payload: { ok: true },
+      payload: packNativePayload({ ok: true }),
       ephemeral: false,
       provenance: {
         originControlNodeId: root,
@@ -1147,5 +1162,65 @@ describe("GatewayOperationalStore", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+
+describe("protocol-v5 image source routing", () => {
+  function imageFixture() {
+    const root = newControlNodeId();
+    const definition = source("images", snapshot(authority(root), [root], { withSession: true }));
+    const gateway = new AccessGatewayProjection([definition]);
+    const session = definition.client.snapshot.sessions[0]!;
+    const runtime = definition.client.snapshot.runtimeNodes[0]!;
+    const image = imageDescriptorSchema.parse({
+      sessionId: session.sessionId, runtimeNodeId: runtime.runtimeNodeId, bindingRevision: session.bindingRevision,
+      imageId: newCommandId(), byteLength: 4, sha256: "a".repeat(64), mediaType: "image/svg+xml",
+    });
+    const input = { ...image, runtimeNodeBootId: runtime.runtimeNodeBootId, offset: 0, length: 4 };
+    const result = { image, offset: 0, dataBase64: "AAAAAA==", eof: true };
+    return { gateway, definition, input, result };
+  }
+
+  it("keeps image bytes on the selected source and rejects substituted identities", async () => {
+    const { gateway, definition, input, result } = imageFixture();
+    let reads = 0;
+    definition.client.imageRead = async (request) => { reads += 1; expect(request).toMatchObject({ imageId: input.imageId, sessionId: input.sessionId, offset: 0, length: 4 }); return result; };
+    await gateway.refreshAll();
+    await expect(gateway.readImage(input)).resolves.toEqual(result);
+    definition.client.imageRead = async () => ({ ...result, image: { ...result.image, imageId: newCommandId() } });
+    await expect(gateway.readImage(input)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(reads).toBe(1);
+  });
+
+  it.each(["source boot", "source feed", "runtime boot", "archived"] as const)("rejects an in-flight read after %s changes", async (change) => {
+    const { gateway, definition, input, result } = imageFixture();
+    let reply!: (value: ImageReadResult) => void;
+    definition.client.imageRead = () => new Promise((resolve) => { reply = resolve; });
+    await gateway.refreshAll();
+    const pending = gateway.readImage(input);
+    const current = definition.client.snapshot;
+    if (change === "source boot") {
+      const boot = newControlNodeBootId();
+      definition.client.snapshot = {
+        ...current, manifest: { ...current.manifest, sourceControlNodeBootId: boot },
+        controlNodes: current.controlNodes.map((node) => ({ ...node, controlNodeBootId: boot })),
+      };
+    } else if (change === "source feed") {
+      const feedId = newFeedId();
+      definition.client.snapshot = {
+        ...current, manifest: { ...current.manifest, feedId },
+        controlNodes: current.controlNodes.map((node) => ({ ...node, feedId })),
+      };
+    } else if (change === "runtime boot") {
+      definition.client.snapshot = {
+        ...current, runtimeNodes: current.runtimeNodes.map((runtime) => ({ ...runtime, runtimeNodeBootId: newRuntimeNodeBootId() })),
+      };
+    } else {
+      definition.client.snapshot = { ...current, sessions: [] };
+    }
+    await gateway.refreshAll();
+    reply(result);
+    await expect(pending).rejects.toBeInstanceOf(GatewayRoutingError);
   });
 });

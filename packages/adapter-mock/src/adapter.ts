@@ -1,3 +1,4 @@
+import { externalizeNativeImages, type NativeImageCodec, type NativeImageLeaf, type AdapterNativeHistoryResult } from "@arduano/agent-multiplex-runtime-node-core";
 import {
   adapterScopeIdSchema,
   newRuntimeEpoch,
@@ -9,7 +10,6 @@ import {
   type HarnessSpawnOptions,
   type JsonValue,
   type NativeHistoryRequest,
-  type NativeHistoryResult,
   type NativeInventoryItem,
   type NativeModel,
   type RuntimeEpoch,
@@ -32,6 +32,7 @@ interface MockTurn {
   readonly id: string;
   readonly itemId: string;
   readonly prompt: string;
+  readonly imageInput?: JsonValue[];
   readonly response: string;
   status: "inProgress" | "completed" | "interrupted";
 }
@@ -55,6 +56,7 @@ const now = (): string => new Date().toISOString();
  */
 export class MockAgentAdapter implements AgentAdapter {
   public readonly harness = "codex" as const;
+  public readonly imageCodec = mockImageCodec;
   public readonly adapterScopeId: AdapterScopeId;
   readonly #records = new Map<string, MockRecord>();
   readonly #streamIntervalMs: number;
@@ -253,7 +255,7 @@ class MockAgentSession implements AdapterSession {
     const command = request.command;
     switch (command.type) {
       case "send":
-        return this.#send(inputText(command.input));
+        return this.#send(inputText(command.input), Array.isArray(command.input) && command.input.some((item) => item && typeof item === "object" && !Array.isArray(item) && item.type === "image") ? command.input : undefined);
       case "steer":
         return { mock: true, accepted: false, reason: "no steerable mock turn" };
       case "interrupt":
@@ -286,7 +288,7 @@ class MockAgentSession implements AdapterSession {
 
   public async readNativeHistory(
     request: NativeHistoryRequest,
-  ): Promise<NativeHistoryResult> {
+  ): Promise<AdapterNativeHistoryResult> {
     if (request.harness !== "codex") throw new Error("mock history is Codex-shaped");
     return {
       harness: this.harness,
@@ -298,7 +300,7 @@ class MockAgentSession implements AdapterSession {
           turns: this.#record.turns.map((turn) => ({
             id: turn.id,
             status: turn.status,
-            items: [{
+            items: [...(turn.imageInput ? [{ type: "userMessage", id: `${turn.id}:user`, content: turn.imageInput }] : []), {
               type: "agentMessage",
               id: turn.itemId,
               text: turn.response,
@@ -321,7 +323,7 @@ class MockAgentSession implements AdapterSession {
     this.#onStop();
   }
 
-  #send(prompt: string): JsonValue {
+  #send(prompt: string, imageInput?: JsonValue[]): JsonValue {
     if (this.#stopped) throw new Error("mock session is stopped");
     if (this.#activeTurn) throw new Error("mock session already has a running turn");
     const ordinal = this.#record.turns.length + 1;
@@ -338,6 +340,7 @@ class MockAgentSession implements AdapterSession {
       id,
       itemId,
       prompt,
+      ...(imageInput ? { imageInput } : {}),
       response,
       status: "inProgress",
     };
@@ -350,6 +353,7 @@ class MockAgentSession implements AdapterSession {
       threadId: this.vendorSessionId,
       turn: { id, status: "inProgress", items: [] },
     });
+    if (imageInput) this.#emitNative("item/completed", { threadId: this.vendorSessionId, turnId: id, item: { type: "userMessage", id: `${id}:user`, content: imageInput } });
     this.#emitNative("item/started", {
       mock: true,
       threadId: this.vendorSessionId,
@@ -482,7 +486,7 @@ class MockAgentSession implements AdapterSession {
 }
 
 function inputText(input: string | JsonValue[]): string {
-  return typeof input === "string" ? input : JSON.stringify(input);
+  return typeof input === "string" ? input : JSON.stringify(input.map((value) => value && typeof value === "object" && !Array.isArray(value) && value.type === "image" ? { type: "image", url: "[uploaded image]" } : value));
 }
 
 function settingsFromRecord(record: MockRecord): HarnessSessionSettings {
@@ -532,3 +536,31 @@ function nonnegativeInteger(value: number, name: string): number {
   }
   return value;
 }
+
+/** Mirrors only the Codex-shaped image locations emitted by this fixture. */
+const mockImageCodec: NativeImageCodec = {
+  acceptsCommandImage(request, slot) {
+    const match = /^\/command\/input\/(0|[1-9][0-9]*)\/url$/.exec(slot.pointer);
+    if (!match || slot.representation !== "dataUrl" || request.harness !== "codex" || !("input" in request.command) || !Array.isArray(request.command.input)) return false;
+    const value = request.command.input[Number(match[1])];
+    return Boolean(value && typeof value === "object" && !Array.isArray(value) && value.type === "image" && value.url === null);
+  },
+  externalize(payload, sink) {
+    const leaves: NativeImageLeaf[] = [];
+    const object = (value: JsonValue | undefined) => value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+    const item = (value: JsonValue | undefined, pointer: string) => {
+      const entry = object(value);
+      if (entry?.type === "userMessage" && Array.isArray(entry.content)) entry.content.forEach((content, index) => {
+        if (object(content)?.type === "image") leaves.push({ pointer: `${pointer}/content/${index}/url`, representation: "dataUrl" });
+      });
+    };
+    const root = object(payload);
+    item(root?.item, "/item");
+    const turns = object(root?.thread)?.turns;
+    if (Array.isArray(turns)) turns.forEach((turn, index) => {
+      const items = object(turn)?.items;
+      if (Array.isArray(items)) items.forEach((value, position) => item(value, `/thread/turns/${index}/items/${position}`));
+    });
+    return externalizeNativeImages(payload, sink, leaves);
+  },
+};

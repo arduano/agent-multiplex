@@ -94,7 +94,7 @@ describe("distributed terminal replay", () => {
         }],
       }],
       launchProfiles: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     };
     const ingress = {
       endpointId,

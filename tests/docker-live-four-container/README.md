@@ -1,4 +1,4 @@
-# Protocol-v4 live four-container acceptance
+# Protocol-v5 live four-container acceptance
 
 This is the integration receipt for the smallest realistic mixed-harness
 deployment:
@@ -20,7 +20,7 @@ container or public ingress, and remains available when a retained run exits.
 
 ## What it proves
 
-- the gateway projects one protocol-v4 authority and two simultaneously online
+- the gateway projects one protocol-v5 authority and two simultaneously online
   harness-specific runtime nodes;
 - Playwright uses the web UI—not a test-only API—to launch one Codex and one
   Copilot session in `/workspace/project`. It explicitly selects the
@@ -142,3 +142,7 @@ in a private temporary file until the post-run ephemerality scanner finishes,
 then is deleted before the receipt checksum and cleanup phases. The retained
 `terminal-ephemerality.json` contains only its digest, length, scan counts, and
 boolean assertions.
+
+The suite targets current protocol-v5 source. Existing command names and receipt
+directory paths containing `v4` remain stable; historical receipts retain their
+original protocol/source identity and do not qualify v5.

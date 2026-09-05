@@ -141,7 +141,7 @@ try {
     timeoutMs,
     async () => {
       const description = await client.system.describe.query();
-      return description.protocolVersion === 4 &&
+      return description.protocolVersion === 5 &&
         description.componentKind === "access-gateway" &&
         description.dataAuthority === "none"
         ? description
@@ -158,7 +158,7 @@ try {
       return sources.length === 1 &&
         sources[0].sourceId === "canonical" &&
         sources[0].state === "selected" &&
-        sources[0].manifest?.protocolVersion === 4 &&
+        sources[0].manifest?.protocolVersion === 5 &&
         sources[0].manifest.coveredControlNodeIds.length === 1
         ? sources
         : undefined;
@@ -175,7 +175,7 @@ try {
         values[0].name === "scale-authority" &&
         values[0].presence === "online" &&
         values[0].dataRole.role === "authority" &&
-        values[0].protocolVersion === 4
+        values[0].protocolVersion === 5
         ? values
         : undefined;
     },
@@ -836,7 +836,7 @@ try {
 function isReadyMockRuntimeNode(runtimeNode) {
   return (
     runtimeNode.presence === "online" &&
-    runtimeNode.protocolVersion === 4 &&
+    runtimeNode.protocolVersion === 5 &&
     runtimeNode.harnesses.some(
       (entry) =>
         entry.harness === "codex" &&
@@ -876,11 +876,11 @@ function assertNativeTranscript({
   assert(events.every((event) => event.runtimeEpoch === session.runtimeEpoch), `${session.sessionId} changed runtime epoch within one turn`);
   assert(events.every((event) => event.harness === "codex"), `${session.sessionId} emitted a non-Codex native event`);
 
-  const turnStarted = events[0].payload;
-  const itemStarted = events[1].payload;
+  const turnStarted = events[0].payload.json;
+  const itemStarted = events[1].payload.json;
   const deltas = events.slice(2, 2 + chunkCount);
-  const itemCompleted = events[2 + chunkCount].payload;
-  const turnCompleted = events[3 + chunkCount].payload;
+  const itemCompleted = events[2 + chunkCount].payload.json;
+  const turnCompleted = events[3 + chunkCount].payload.json;
   assert(isObject(turnStarted), `${session.sessionId} turn/started payload is not an object`);
   assert(isObject(itemStarted), `${session.sessionId} item/started payload is not an object`);
   assert(isObject(itemCompleted), `${session.sessionId} item/completed payload is not an object`);
@@ -901,15 +901,15 @@ function assertNativeTranscript({
   assert(
     deltas.every(
       (event) =>
-        isObject(event.payload) &&
-        event.payload.threadId === vendorSessionId &&
-        event.payload.turnId === turnId &&
-        event.payload.itemId === itemId &&
-        typeof event.payload.delta === "string",
+        isObject(event.payload.json) &&
+        event.payload.json.threadId === vendorSessionId &&
+        event.payload.json.turnId === turnId &&
+        event.payload.json.itemId === itemId &&
+        typeof event.payload.json.delta === "string",
     ),
     `${session.sessionId} has malformed delta routing`,
   );
-  const reassembled = deltas.map((event) => event.payload.delta).join("");
+  const reassembled = deltas.map((event) => event.payload.json.delta).join("");
   assert(reassembled === expectedText, `${session.sessionId} delta reassembly is not byte-exact`);
   assert(itemCompleted.turnId === turnId, `${session.sessionId} item/completed turn mismatch`);
   assert(itemCompleted.item?.id === itemId, `${session.sessionId} item/completed ID mismatch`);
@@ -930,7 +930,7 @@ function assertNativeTranscript({
   // The deterministic mock stamps each native payload at its source; use that
   // clock for workload overlap and retain receipt timing only as diagnostics.
   const emittedAtMs = events.map((event) => {
-    const value = event.payload?.emittedAtMs;
+    const value = event.payload.json?.emittedAtMs;
     assert(
       Number.isSafeInteger(value) && value > 0,
       `${session.sessionId} native event omitted its mock source timestamp`,

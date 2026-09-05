@@ -34,7 +34,7 @@ export type ActionScopes = z.infer<typeof actionScopesSchema>;
 /** Bootstrap request for a zero-authority gateway. */
 export const gatewayEnrollmentSchema = z.object({
   name: z.string().min(1).max(256),
-  protocolVersion: z.literal(4),
+  protocolVersion: z.literal(5),
   requestedScopes: actionScopesSchema.default(["read"]),
 });
 export type GatewayEnrollment = z.infer<typeof gatewayEnrollmentSchema>;
@@ -53,7 +53,7 @@ export type SourceId = z.infer<typeof sourceIdSchema>;
 export const sourceManifestSchema = z
   .object({
     componentKind: z.literal("control-node"),
-    protocolVersion: z.literal(4),
+    protocolVersion: z.literal(5),
     sourceControlNodeId: controlNodeIdSchema,
     sourceControlNodeBootId: controlNodeBootIdSchema,
     authority: authorityRefSchema,

@@ -844,10 +844,15 @@ describe("TerminalBroker", () => {
       terminalClientId: newTerminalClientId(),
     });
     await provider.entered;
-    await broker.close();
+    const rejected = expect(opening).rejects.toThrow("closed while the native terminal was opening");
+    const closing = broker.close();
+    let closed = false;
+    void closing.then(() => { closed = true; });
+    await Promise.resolve();
+    expect(closed).toBe(false);
     provider.release();
 
-    await expect(opening).rejects.toThrow("closed while the native terminal was opening");
+    await Promise.all([closing, rejected]);
     expect(provider.opened[0]?.kills).toBe(1);
     expect(broker.get(binding.target)).toBeNull();
   });

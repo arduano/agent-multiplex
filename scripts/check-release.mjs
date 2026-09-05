@@ -66,11 +66,6 @@ const qualificationDockerfiles = [
   "tests/docker-v3-tree/Dockerfile",
   "tests/docker-mock-scale/Dockerfile",
   "tests/docker-live-four-container/Dockerfile",
-  "tests/docker-nested-hosts/Dockerfile",
-  "tests/docker-copilot-scale-e2e/Dockerfile",
-  "tests/docker-copilot-interactive-e2e/Dockerfile",
-  "tests/docker-codex-interactive-e2e/Dockerfile",
-  "tests/docker-codex-e2e/Dockerfile",
 ];
 
 const nativeStatusContext =

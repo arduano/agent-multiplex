@@ -41,12 +41,27 @@ import {
 import { createControlNodeHttpSurface } from "./http.js";
 import { superviseUpstreamControlNode } from "./upstream.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
+
+export interface ControlNodeReadyInfo {
+  readonly controlNodeId: ControlNodeId;
+  readonly endpointId: string;
+  readonly ticket: string;
+  readonly httpUrl: string;
+}
+
+export interface ControlNodeAppOptions {
+  /** Persist provisioning material privately instead of scraping process output. */
+  readonly onReady?: (info: ControlNodeReadyInfo) => void | Promise<void>;
+  /** Reference CLI compatibility; embedded hosts can suppress locator output. */
+  readonly printTicket?: boolean;
+}
 
 /** Start one durable control node and keep it alive until `signal` aborts. */
 export async function runControlNode(
   config: ControlNodeAppConfig,
   signal: AbortSignal,
+  options: ControlNodeAppOptions = {},
 ): Promise<void> {
   const instanceId = config.instanceId ?? randomUUID();
   const secretKey = await loadOrCreateControlNodeSecretKey(config.identityPath);
@@ -293,13 +308,21 @@ export async function runControlNode(
     const address = http.server.address();
     const port = typeof address === "object" && address ? address.port : config.port;
     const local = catalog.localControlNode();
+    await options.onReady?.({
+      controlNodeId: local.controlNodeId,
+      endpointId: p2pNode.id,
+      ticket: startupTicket,
+      httpUrl: `http://${config.bindAddress}:${port}`,
+    });
     console.log(`Agent Multiplex control node ${instanceId}`);
     console.log(`Control node ID: ${local.controlNodeId}`);
     console.log(`Data role:       ${local.dataRole.role}`);
     console.log(`Dashboard:       http://${config.bindAddress}:${port}`);
     console.log(`tRPC:            http://${config.bindAddress}:${port}/trpc`);
     console.log(`P2P endpoint:    ${p2pNode.id}`);
-    console.log(`P2P ticket (reachability locator; not a credential):\n${startupTicket}`);
+    if (options.printTicket ?? true) {
+      console.log(`P2P ticket (reachability locator; not a credential):\n${startupTicket}`);
+    }
 
     await aborted(signal);
   } finally {

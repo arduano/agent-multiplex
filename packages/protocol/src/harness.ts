@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { adapterScopeIdSchema } from "./ids.js";
 import { jsonObjectSchema, jsonValueSchema } from "./json.js";
+import { nativePayloadSchema } from "./image.js";
 
 export const harnessSchema = z.enum(["codex", "copilot"]);
 export type Harness = z.infer<typeof harnessSchema>;
@@ -107,6 +108,8 @@ export const nativeHistoryRequestSchema = z.discriminatedUnion("harness", [
   z.object({
     harness: z.literal("codex"),
     includeTurns: z.boolean().default(true),
+    cursor: z.string().optional(),
+    limit: z.number().int().positive().max(100).default(100),
     native: jsonObjectSchema.optional(),
   }),
   z.object({
@@ -121,7 +124,7 @@ export type NativeHistoryRequest = z.infer<typeof nativeHistoryRequestSchema>;
 export const nativeHistoryResultSchema = z.object({
   harness: harnessSchema,
   vendorSessionId: z.string().min(1),
-  payload: jsonValueSchema,
+  payload: nativePayloadSchema,
   nextCursor: z.string().optional(),
   complete: z.boolean().optional(),
 });

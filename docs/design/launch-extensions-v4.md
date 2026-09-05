@@ -1,6 +1,6 @@
-# Protocol-v4 launch extensions
+# Protocol-v5 launch extensions
 
-Protocol v4 makes session creation a small distributed kernel surrounded by
+Protocol v5 makes session creation a small distributed kernel surrounded by
 trusted, deployment-specific TypeScript modules. The kernel owns identities,
 fences, journals, routing, and lifecycle. It deliberately does not own worktree
 policy, container orchestration, PR validation, credentials, placement, quotas,
@@ -158,6 +158,23 @@ interrupted `nativeStarting` becomes `outcomeUnknown` because a native session
 may already exist. Native binding and launch success commit in one runtime
 transaction.
 
+The first launch permanently reserves its logical session ID, including after
+failure. The runtime enforces this in its launch journal; each control enforces
+it in the same transaction that admits or imports a launch record. Another
+launch ID cannot replace that reservation. Same-launch payload mismatches and
+historical conflicting records fail closed without rewriting either identity.
+This prevents competing dispatch through a common control. Independently
+addressed branches have no global admission handshake; their conflicting
+projections are rejected on convergence.
+
+Initial dispatch and recovery use the same admission-rejection path. Only a
+validated semantic rejection followed by an absent owner record under the
+unchanged dispatch fence can settle a locally accepted launch as failed. A
+matching owner record is reconciled instead; an immutable mismatch is a
+conflict. Transport, lookup, and fence failures preserve recovery by the same
+launch ID. Runtime identity/reservation checks precede journaling, and a
+missing provider never supplies an invented implementation version.
+
 Launch metadata follows the ordinary metadata-authority path. A runtime session
 upsert can never initialize canonical metadata, even when it supplies a newer
 revision. Once reconciliation supplies the current authority fence, the runtime
@@ -217,6 +234,19 @@ one session.
 
 ## Embedding surfaces
 
+The published runtime daemon also accepts a static `createComponents` factory
+through `RuntimeNodeAppOptions`. Applications can register custom providers and
+disable the direct workspace profile without duplicating transport supervision.
+The factory runs after allowed-root canonicalization and before network startup.
+Once returned, its adapters/providers belong to the daemon's normal service
+shutdown; a failing factory must clean up its own partially constructed resources.
+
+Embedded control daemons can use `ControlNodeAppOptions.onReady` to persist the
+control identity, endpoint, and signed locator privately. `printTicket: false`
+suppresses the reference CLI's locator output. The callback runs after the HTTP
+surface is listening and before the daemon waits for shutdown; callback failure
+uses normal startup cleanup. This is process composition, not a wire API change.
+
 The reusable boundary is split intentionally:
 
 - `@arduano/agent-multiplex-protocol` supplies Zod schemas and tRPC-compatible access,
@@ -238,3 +268,13 @@ Domain systems should store their own workflow state and link it through
 namespaced session metadata. Metadata remains a flat key/value document whose
 values may be arbitrary JSON. It is not a plugin database, work scheduler, or
 native transcript store.
+
+
+## Backend image filesystem boundary
+
+A custom backend that exposes native output files implements bounded
+`readImageFile` for its own filesystem and applies workspace/explicit-output-root
+confinement. Core must not read host-local paths on behalf of a container or
+remote backend. Image bytes and snapshots are runtime-owned resources retained
+until archive; archive includes their release before its tombstone succeeds.
+See [the image-v5 contract](images-v5.md).

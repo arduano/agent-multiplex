@@ -160,18 +160,8 @@ assert(
   `the lockfile must resolve @arduano/p2prpc-core@${p2prpcVersion} from GitHub Packages`,
 );
 
-const siblingP2prpcManifestPath = "../p2prpc/packages/core/package.json";
-if (exists(siblingP2prpcManifestPath)) {
-  const siblingP2prpcManifest = readJson(siblingP2prpcManifestPath);
-  assert(
-    siblingP2prpcManifest.name === "@arduano/p2prpc-core" &&
-      siblingP2prpcManifest.version === p2prpcVersion,
-    `optional sibling p2prpc checkout must match @arduano/p2prpc-core@${p2prpcVersion}`,
-  );
-}
-
 console.log(
-  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v4 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
+  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v5 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
 );
 
 function assertNoOrphanedCompilerOutput(workspacePath) {

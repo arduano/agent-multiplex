@@ -260,13 +260,13 @@ describe("HardenedSqliteDatabase", () => {
 });
 
 describe("RuntimeNodeStore SQLite schema", () => {
-  it("uses an independently identified v4 database with STRICT JSON tables", () => {
+  it("uses an independently identified v5 database with STRICT JSON tables", () => {
     const root = mkdtempSync(join(tmpdir(), "agent-multiplex-runtime-schema-"));
     const filename = join(root, "runtime.sqlite");
     const store = new RuntimeNodeStore(filename);
     expect(store.diagnostics()).toMatchObject({
       applicationId: 0x414d_5254,
-      userVersion: 4,
+      userVersion: 5,
       foreignKeys: true,
       synchronous: "full",
     });

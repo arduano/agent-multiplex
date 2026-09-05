@@ -55,6 +55,7 @@ import {
   resolveInteractionInputSchema,
 } from "./interaction.js";
 import { jsonValueSchema } from "./json.js";
+import { imageContract } from "./image.js";
 import {
   metadataOperationRecordSchema,
   metadataOperationStatusSchema,
@@ -118,7 +119,7 @@ export type ComponentKind = z.infer<typeof componentKindSchema>;
 
 const systemDescriptionBase = {
   application: z.literal("agent-multiplex"),
-  protocolVersion: z.literal(4),
+  protocolVersion: z.literal(5),
   instanceId: z.string().min(1),
   capabilities: z.array(z.string().min(1).max(256)),
 } as const;
@@ -156,6 +157,8 @@ export type AccessGatewayDescription = z.infer<
  * controls; only a control node may commit domain state.
  */
 export const accessContract = {
+  images: imageContract,
+
   system: {
     describe: { input: z.void(), output: systemDescriptionSchema },
   },
@@ -344,6 +347,8 @@ export const accessContract = {
 } as const;
 
 export const runtimeNodeContract = {
+  images: imageContract,
+
   runtimeNode: {
     describe: { input: z.void(), output: runtimeNodeRegistrationSchema },
   },
@@ -667,6 +672,16 @@ export const controlNodeIngressContract = {
 
 /** Fenced recursive surface exposed by an attached branch to its parent. */
 export const controlNodeLinkContract = {
+  images: {
+    beginUpload: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.beginUpload.input }), output: imageContract.beginUpload.output },
+    writeUpload: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.writeUpload.input }), output: imageContract.writeUpload.output },
+    commitUpload: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.commitUpload.input }), output: imageContract.commitUpload.output },
+    abortUpload: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.abortUpload.input }), output: imageContract.abortUpload.output },
+    resolvePath: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.resolvePath.input }), output: imageContract.resolvePath.output },
+    read: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.read.input }), output: imageContract.read.output },
+    limits: { input: controlNodeLinkFenceSchema.extend({ request: imageContract.limits.input }), output: imageContract.limits.output },
+  },
+
   controlNode: {
     describe: { input: z.void(), output: controlNodeDescriptorSchema },
   },

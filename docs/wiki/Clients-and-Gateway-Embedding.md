@@ -1,6 +1,6 @@
 # Clients and gateway embedding
 
-The reusable client boundary is the protocol-v4 access router. The same shape is
+The reusable client boundary is the protocol-v5 access router. The same shape is
 served by a trusted-local control node and by the authenticated multi-source
 gateway; applications do not need separate data models for the two.
 
@@ -133,3 +133,25 @@ and interactions must come from the access API. Model and mode controls are
 harness-native. Transcripts come from native history plus the live native
 stream. Terminal data is a separate ephemeral channel and must not be merged
 into canonical chat history.
+
+
+## Images and native payloads
+
+The v5 `images` API routes authenticated upload, read, and path-snapshot requests
+through the selected source to the owning runtime. Use the client image helpers
+and retain the same image ID/bytes when reconciling interrupted uploads. Native
+history, events, command results, and interactions use a bounded
+`native-json-images-v1` envelope; access harness fields through `.json` and use
+`.images` for the referenced bytes. Image pointers preserve native shape rather
+than define a common transcript model. See [images and native payloads](Images-and-Native-Payloads.md).
+
+## Custom application edges
+
+The reference gateway exports `createAccessGatewayRouter` and accepts an optional
+`runGateway(config, signal, { httpSurface })` composition. A custom surface declares
+`authentication: "external"` and owns all HTTP and WebSocket authentication before
+creating `GatewayAuthContext`. It must preserve action scopes, bounded messages,
+origin policy, and authenticated connection expiry. This is trusted static code,
+not a configuration switch for bypassing authentication. Bearer configuration and
+a custom surface cannot be combined. The stock daemon's bearer/loopback behavior
+is unchanged.

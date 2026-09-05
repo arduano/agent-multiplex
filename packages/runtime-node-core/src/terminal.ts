@@ -361,13 +361,23 @@ class ManagedTerminal {
   public dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.clearLease(false);
-    this.pauseProcessOutput();
-    this.disposeExit();
-    this.serializer.dispose();
-    this.emulator.dispose();
-    for (const waiter of this.emulatorWaiters.splice(0)) waiter.resolve();
-    for (const subscriber of [...this.subscribers]) subscriber.close();
+    const errors: unknown[] = [];
+    for (const cleanup of [
+      () => this.clearLease(false),
+      () => this.pauseProcessOutput(),
+      () => this.disposeExit(),
+      () => this.serializer.dispose(),
+      () => this.emulator.dispose(),
+      ...this.emulatorWaiters.splice(0).map((waiter) => () => waiter.resolve()),
+      ...[...this.subscribers].map((subscriber) => () => subscriber.close()),
+    ]) {
+      try {
+        cleanup();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "managed terminal cleanup failed");
   }
 
   private didParse(sequence: number): void {
@@ -408,6 +418,7 @@ export class TerminalBroker {
   readonly #limits: ManagedTerminal["limits"];
   #pendingProcessOpens = 0;
   #closed = false;
+  #closePromise: Promise<void> | undefined;
 
   public constructor(options: TerminalBrokerOptions) {
     this.#runtimeNodeBootId = options.runtimeNodeBootId;
@@ -840,19 +851,40 @@ export class TerminalBroker {
     terminal.dispose();
   }
 
-  public async close(): Promise<void> {
-    if (this.#closed) return;
+  public close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
+    this.#closePromise = this.#close();
+    return this.#closePromise;
+  }
+
+  async #close(): Promise<void> {
+    await Promise.allSettled([...this.#locks.values()]);
+    const errors: unknown[] = [];
     const processes = new Set<TerminalProcess>();
     for (const terminal of this.#bySession.values()) {
       if (terminal.provider.capabilities.terminate) processes.add(terminal.process);
-      terminal.dispose();
+      try {
+        terminal.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
     }
-    for (const process of processes) process.kill();
+    for (const process of processes) {
+      try {
+        process.kill();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
     this.#bySession.clear();
     this.#byScope.clear();
     this.#acquireReceipts.clear();
-    await Promise.allSettled([...this.#providers.values()].map((provider) => provider.close()));
+    const providers = await Promise.allSettled(
+      [...this.#providers.values()].map(async (provider) => provider.close()),
+    );
+    errors.push(...providers.flatMap((result) => result.status === "rejected" ? [result.reason] : []));
+    if (errors.length > 0) throw new AggregateError(errors, "terminal broker cleanup failed");
   }
 
   #provider(binding: TerminalBinding): TerminalProvider {

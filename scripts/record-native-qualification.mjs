@@ -539,7 +539,7 @@ function validateReceipt(snapshot, directory, expectedCommit) {
       manifest.versions.nodeInImage === `v${releaseNodeVersion}`,
     `receipt image must use Node v${releaseNodeVersion} and identify Docker`,
   );
-  assert(manifest.versions.multiplexProtocol === 4, "receipt did not qualify protocol v4");
+  assert(manifest.versions.multiplexProtocol === 5, "receipt did not qualify protocol v5");
   assert(
     manifest.versions.p2prpcVersion === p2prpc.version &&
       manifest.versions.p2prpcIntegrity === p2prpc.integrity,
@@ -1029,15 +1029,15 @@ function validateRpcEvidence(
 
   assert(
     system.application === "agent-multiplex" &&
-      system.protocolVersion === 4 &&
+      system.protocolVersion === 5 &&
       system.componentKind === "access-gateway" &&
       system.dataAuthority === "none",
-    "gateway system description violates the zero-authority protocol-v4 boundary",
+    "gateway system description violates the zero-authority protocol-v5 boundary",
   );
   assert(
     controls.length === 1 &&
       controls[0]?.presence === "online" &&
-      controls[0].protocolVersion === 4 &&
+      controls[0].protocolVersion === 5 &&
       controls[0].dataRole?.role === "authority" &&
       controls[0].controlNodeId === topology.authority.controlNodeId,
     "control-node RPC evidence does not identify one online authority",
@@ -1045,7 +1045,7 @@ function validateRpcEvidence(
   assert(
     sources.length === 1 &&
       sources[0]?.state === "selected" &&
-      sources[0].manifest?.protocolVersion === 4 &&
+      sources[0].manifest?.protocolVersion === 5 &&
       sources[0].manifest.sourceControlNodeId === controls[0].controlNodeId,
     "gateway source RPC evidence does not select the canonical authority",
   );
@@ -1055,7 +1055,7 @@ function validateRpcEvidence(
       runtimes.every((runtime) =>
         runtime.presence === "online" &&
         runtime.reachability === "reachable" &&
-        runtime.protocolVersion === 4 &&
+        runtime.protocolVersion === 5 &&
         runtime.ownerControlNodeId === controls[0].controlNodeId
       ) &&
       sameStringSet(

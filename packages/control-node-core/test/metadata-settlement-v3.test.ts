@@ -40,7 +40,7 @@ function addSession(catalog: ControlNodeCatalog) {
     name: "metadata-settlement-runtime",
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -82,7 +82,7 @@ function attachedFixture(prefix: string) {
     controlNodeBootId: childNode.controlNodeBootId,
     feedId: childNode.feedId,
     name: childNode.name,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: childNode.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),
@@ -358,7 +358,7 @@ describe("protocol-v4 downstream metadata settlement", () => {
         controlNodeBootId: local.controlNodeBootId,
         feedId: local.feedId,
         name: local.name,
-        protocolVersion: 4,
+        protocolVersion: 5,
         capabilities: local.capabilities,
         expectedParentControlNodeId: parent.localControlNode().controlNodeId,
         childProof: child.attachmentProof(),

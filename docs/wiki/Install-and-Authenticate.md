@@ -49,7 +49,7 @@ The node transport pins `@arduano/p2prpc-core` exactly. The sibling
 release candidate must not contain a `file:` dependency. Release p2prpc first,
 then update this repository's exact version and lockfile.
 
-After version `0.1.0` has been published, install only the role needed on each
+The current public release is `0.1.0`. Install only the role needed on each
 machine and pin every package to the same release version:
 
 ```bash
@@ -103,8 +103,9 @@ tickets, tokens, native auth homes, or provider keys.
    more sources are `selected`, then disable gateway enrollment.
 6. Bind control-node HTTP to loopback. Publish only an authenticated gateway.
 
-The complete environment examples are in the root [README](../../README.md) and
-[`.env.example`](../../.env.example).
+The complete environment-variable template is [`.env.example`](../../.env.example);
+the detailed bootstrap and failure procedures are in the
+[deployment runbook](../deployment-v4.md).
 
 ## Gateway scopes
 
@@ -128,6 +129,11 @@ credential. A gateway remains zero-authority even when it is allowed to propose
 these operations.
 
 ## Harness authentication
+
+Applications embedding the control daemon can receive private provisioning
+material with `runControlNode(config, signal, { onReady, printTicket: false })`.
+Persist the callback's endpoint/locator in an owner-only configuration file;
+do not scrape or publish process output for pairing.
 
 Codex uses the authenticated native installation available to the runtime
 process. The runtime supervises `codex app-server` on a private Unix socket;
