@@ -5,8 +5,9 @@ Copilot agent sessions. Native app servers stay on runtime machines while one
 typed access API serves CLIs, browsers, mobile clients, and bespoke internal
 dashboards.
 
-Current development uses protocol v5; the released `v0.1.0` packages use v4.
-Upgrade all roles together when adopting v5. Archived protocol-v2 `host`,
+The maintained package graph uses protocol v5. Upgrade all roles together when
+adopting v5; see the [current release baseline](docs/wiki/Current-State.md#release-and-compatibility-baseline).
+Archived protocol-v2 `host`,
 `worker`, `observer`, and `Fleet` APIs remain outside the maintained boundary.
 
 ## Start here
@@ -19,8 +20,8 @@ Upgrade all roles together when adopting v5. Archived protocol-v2 `host`,
 - Installation: use [Install and authenticate](docs/wiki/Install-and-Authenticate.md).
 - Production-risk review: read [Security](docs/wiki/Security.md) and the
   [personal deployment runbook](docs/deployment-v4.md).
-- Exact `v0.1.0` qualification and publication evidence: use the
-  [protocol-v4 checkpoint](docs/checkpoint-v4.md).
+- Exact qualification and publication evidence: use the
+  [release checkpoint](docs/checkpoint-v4.md).
 
 The documentation has explicit owners: Current State holds fresh-session facts,
 wiki topic pages hold operational guidance, `docs/design/` holds detailed

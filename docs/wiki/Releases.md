@@ -1,20 +1,15 @@
 # Releases and compatibility
 
-Development source uses protocol v5; `v0.1.0` remains the released protocol-v4
-boundary. Protocol v5 peers must not be mixed with v4 or earlier peers. A release identity
+Protocol v5 is the coordinated `v0.2.0` package boundary. Its signed source passed
+the exact-commit qualification gates and publication completed successfully.
+Protocol v5 peers must not be mixed with v4 or earlier peers. A release identity
 is the exact Git tag, source commit, package manifest, and recorded artifact
 digests.
 
-The signed `v0.1.0` tag and its 16 lockstep packages establish the supported
-protocol-v4 wire baseline. Earlier untagged builds are not compatibility
-releases and must not be mixed with it. The current release identity is:
-
-- tag object `da9497ed9ae5e020dd51ec21523bf91139f811e7`;
-- peeled source commit `38236480a88e5a7f350097b1bc43fd9a7674096d`;
-- [GitHub Release](https://github.com/arduano/agent-multiplex/releases/tag/v0.1.0)
-  with exactly 21 assets;
-- 16 public `@arduano/agent-multiplex-*` packages with `latest` and `next` at
-  `0.1.0`.
+[Current state](Current-State.md#release-and-compatibility-baseline) owns the
+current publication state. The [checkpoint](../checkpoint-v4.md#protocol-v5-release-qualification-2026-09-05)
+owns immutable source/tag identities, workflow results, receipt digests, and
+artifact verification. Historical `v0.1.0` evidence is retained separately there.
 
 The public graph contains 16 packages under `@arduano/agent-multiplex-*` and
 pins `@arduano/p2prpc-core@0.2.1` exactly. GitHub Packages requires
@@ -222,7 +217,7 @@ attestation for each tarball:
 
 ```bash
 release_dir="$(mktemp -d)"
-gh release download v0.1.0 \
+gh release download v0.2.0 \
   --repo arduano/agent-multiplex \
   --dir "$release_dir"
 (
@@ -238,41 +233,17 @@ done
 `pack-manifest.json` additionally records each npm SHA-512 integrity. A
 downstream automation that consumes GitHub Packages should pin the exact
 version, keep a least-privilege `read:packages` token outside source, and may
-compare `npm view <package>@0.1.0 dist.integrity` with that manifest before
+compare `npm view <package>@0.2.0 dist.integrity` with that manifest before
 installing. Never copy the token into a URL, lockfile, receipt, or release asset.
 
-## Current qualification evidence
+## Qualification evidence
 
-The decisive protocol-v4 receipts for the released boundary are:
-
-- `receipts/protocol-v4-control-tree/20260904T173822Z-c7222b0a5c27` — four
-  containers, authority/branch/warm-source routing, queued metadata, failover and
-  recovery.
-- `receipts/protocol-v4-mock-docker-scale/20260904T200448Z-a3183b58086d` — 12
-  containers, 10 runtimes, 100 sessions, 100 launches and sends, 3,600 native
-  events, zero gaps/duplicates, partition recovery, CAS, and UI checks.
-- `receipts/protocol-v4-live-four-container/20260904T220013Z-716384c05b18` — the
-  signed release commit in four containers for more than 15 minutes: one
-  control, one gateway, real Codex and Copilot runtimes, 641 native events,
-  native history, Codex model/plan/question/interrupt controls, metadata,
-  terminal isolation/replay, responsive/accessibility browser checks, and
-  successful commands after p2prpc credential renewal.
-
-The live receipt records Node `24.19.0`, Codex CLI `0.152.0`, Copilot CLI
-`1.0.81`, protocol 4, and exact public `@arduano/p2prpc-core@0.2.1` integrity.
-Its manifest has `credentialMaterialRecorded=false`; its independently recorded
-owner status binds release commit `38236480a88e5a7f350097b1bc43fd9a7674096d`
-to inventory SHA-256
-`62630865b3d3b583c0e954bfe21c879ee1fefcfcb8fc223f59d134065741d849`.
-
-Publication workflow run
-[`33925122627`](https://github.com/arduano/agent-multiplex/actions/runs/33925122627)
-completed successfully on attempt 3 after the exact-byte dist-tag recovery. The
-release was then independently checked for signed-tag binding, all 21 server
-asset digests, all 16 registry integrities and byte-identical tarballs, public
-visibility, exact-workflow SLSA provenance, and isolated downstream installs.
-Duplicate valid provenance statements are expected because each publication
-attempt attested the same immutable tarball set.
+Use the [checkpoint](../checkpoint-v4.md) for current and historical run
+identities and outcomes. The exact-source native release receipt must pass its
+independent recorder before publication; a successful deterministic or offline
+native test does not substitute for that gate. Conversely, the ordinary native
+release suite does not claim checks absent from its recorded scope, such as a
+new external-model image-prompt trial.
 
 ## What the evidence does not prove
 

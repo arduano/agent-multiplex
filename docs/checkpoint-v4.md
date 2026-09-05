@@ -1,13 +1,62 @@
-# Protocol-v4 release checkpoint
+# Release qualification checkpoint
 
-Status: released and verified `v0.1.0` boundary as of 2026-09-05.
+Status: signed `v0.2.0` source qualified and published as of 2026-09-05.
 
-This document records the first protocol-v4 release and separately scoped
-unreleased development evidence. It is not a second architecture guide. Start a new development session with
+This document records release qualification and separately scoped development
+evidence. Its filename remains stable for existing links. It is not a second
+architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
-## Immutable release identity
+## Protocol-v5 release qualification (2026-09-05)
+
+| Evidence | Identity |
+| --- | --- |
+| Signed annotated tag | `v0.2.0`; tag object `cf4d8a3fa9221587bd96adc058d631e0a7fd4b34` |
+| Peeled source commit | `0e043478538a30a0a42fd854f5f5c8a14309cbf0` |
+| Wire/package boundary | Protocol `5`; 16 lockstep packages at `0.2.0` |
+| CI | [Run `33955393265`](https://github.com/arduano/agent-multiplex/actions/runs/33955393265), passed on the exact source commit |
+| CodeQL | [Run `33955393288`](https://github.com/arduano/agent-multiplex/actions/runs/33955393288), passed on the exact source commit |
+| Deterministic Docker | [Run `33955393260`](https://github.com/arduano/agent-multiplex/actions/runs/33955393260), passed on the exact source commit |
+| Native qualification | Owner-recorded `Agent Multiplex / Native four-container qualification` [success status](https://github.com/arduano/agent-multiplex/commit/0e043478538a30a0a42fd854f5f5c8a14309cbf0) |
+| Publication | [Run `33956925510`](https://github.com/arduano/agent-multiplex/actions/runs/33956925510), passed on the exact source commit |
+| GitHub Release | [`v0.2.0`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.0), published 2026-09-05 at 09:09:07 UTC with 21 assets |
+
+The qualifying native receipt is
+`receipts/protocol-v4-live-four-container/20260905T084042Z-1429aa03a5d9`.
+The historical directory name is retained by the runner; its manifest explicitly
+records protocol **5** and the exact source commit above. The requested
+930,000 ms soak completed, with fresh post-soak native Codex and Copilot replies.
+The independent recorder validated the scrubbed inventory before creating the
+owner status. SHA-256 of `SHA256SUMS` is
+`79e7bfff5878448ef574f1d888024a8a11a000644eb8cb31bbb9f093a18ee077`.
+
+The run used Node `24.19.0`, Docker Server `29.7.2`, Codex CLI `0.152.0`,
+Copilot SDK `1.0.11`, Copilot CLI package `1.0.81`, and exact public
+`@arduano/p2prpc-core@0.2.1`; transport/native pins are unchanged. It exercised
+the four-container native control, streaming/history, browser, terminal,
+metadata, and renewal checks. Cleanup removed the disposable containers,
+network, image, relay, and runtime state; no material user data was removed.
+The manifest records `credentialMaterialRecorded=false`.
+
+All 16 public tarballs match the consumer's locked artifact integrities.
+Independent downloads verified all 21 inventory checksums and all 16 package
+attestations. The public tarballs differ in archive bytes from the local
+qualification packs, but their extracted files match byte-for-byte. The publication workflow completed packed-consumer and
+registry-consumer verification, package attestation, exact-artifact publication
+and `latest` promotion, public-package visibility checks, and exact GitHub
+Release creation/recovery. The Release API independently confirms 21 uploaded
+assets. These are the `v0.2.0` workflow results; the separate manual
+registry/Release byte-equality and provenance audit below belongs to `v0.1.0`.
+
+This release qualification does not erase the narrower outcomes of the earlier
+image trials. Those receipts retain their original implementation fingerprints;
+the live release suite is not an additional external-model image-prompt suite.
+Raw receipt trees remain local and gitignored. The tracked identities, public
+workflow links, immutable owner status, and inventory digest form the portable
+audit trail.
+
+## Historical v0.1.0 release identity
 
 | Evidence | Identity |
 | --- | --- |
@@ -19,13 +68,11 @@ wiki and design documents linked at the end of this page.
 | Transport dependency | Public `@arduano/p2prpc-core@0.2.1`, exact pin and integrity `sha512-vsSv2Wd8V/X+mykNSXK0Dfc4ygI+DuI6Wjdkmfa4kBm5j/PPkm4ekX0+ngwQeKuQ0DQ9EmmWRlk4RGu45DfD7A==` |
 | Release toolchain | Node `24.19.0`, npm `11.17.0` |
 
-The release establishes protocol 4 as the supported wire baseline. Untagged
-pre-release trees and protocol-v2/v3 peers are not compatibility targets.
-Current development includes the protocol-v5 image change. Released evidence
-below does not qualify that change; the unreleased section records its separate
-checks. The table above always identifies the immutable released baseline.
+This historical release established the protocol-v4 baseline. Its qualification
+does not cover protocol-v5 changes. The table above identifies only the immutable
+`v0.1.0` release; current qualification is recorded separately above.
 
-## Exact-commit gates
+### Exact-commit gates
 
 The signed release commit passed all required gates before publication:
 
@@ -53,7 +100,7 @@ an idempotent `latest` promotion. Recovery run
 [`33929719531`](https://github.com/arduano/agent-multiplex/actions/runs/33929719531)
 completed successfully. No package was republished and the tag was never moved.
 
-## Retained qualification receipts
+### Retained qualification receipts
 
 These passing local receipts cover distinct boundaries:
 
@@ -101,16 +148,16 @@ clone cannot inspect these local paths. Portable evidence is the tracked ledger
 on this page plus the immutable commit status, linked Actions runs, Release
 assets, and recorded inventory digest above.
 
-## Published-artifact verification
+### Published-artifact verification
 
-The completed release was also audited from the consumer side:
+The completed `v0.1.0` release was also audited from the consumer side:
 
 - the remote tag object and peeled commit match the locally verified signature;
 - exactly 21 uploaded Release assets match GitHub's recorded SHA-256 and size;
 - `SHA256SUMS`, the artifact manifest, embedded package manifests, SHA-1,
   SHA-256, and npm SHA-512 integrity all agree for 16 tarballs;
 - all 16 GitHub package records are public and linked to this repository;
-- both `next` and `latest` select `0.1.0` for the complete package set;
+- both `next` and `latest` selected `0.1.0` for the complete package set at that audit;
 - registry downloads are byte-identical to Release tarballs;
 - every tarball has SLSA provenance for this repository's `publish.yml`, exact
   tag ref, exact source commit, and a GitHub-hosted runner;
@@ -179,10 +226,11 @@ This checkpoint does not prove:
 - correctness of a bespoke launch provider without its own crash, cleanup,
   resume/history/archive, and end-to-end qualification.
 
-## Unreleased protocol-v5 images (2026-09-05)
+## Protocol-v5 image development evidence (2026-09-05)
 
-The image implementation is an unreleased coordinated wire upgrade. Package
-versions and the exact transport pin remain unchanged. The tested implementation
+This earlier image-development checkpoint preceded the `0.2.0` release
+candidate. Package manifests were still at `0.1.0`; the transport pin was
+unchanged. Its tested implementation
 fingerprint is `cb7f5bcf3a430239ed812e6290a5da6e43c779a06ab7fc3b55dfb601e9c9b830`;
 the lockfile SHA-256 is
 `cb245a0d96c784541b8eb73b875a5f8764e78f15eba599ee713a6712cae00903`.
@@ -236,9 +284,12 @@ and CLI package `1.0.81` against a loopback completion fixture. Receipt
 reproduced the exact event shape, externalized its image bytes, verified all 30
 native event envelopes, and retained image references in native and resumed
 history. It records source/dependency hashes and verified checksums, with no raw
-prompts, endpoints, or auth homes. It used zero external model calls. The final
-source has **not** been requalified against external model services after the
-fixes; no authorized real-model turns remain.
+prompts, endpoints, or auth homes. It used zero external model calls. At that
+checkpoint, the source had not been
+requalified against external model services after the fixes and that image-trial
+allowance was exhausted. A later, separately authorized four-container run
+qualified the exact `v0.2.0` source as recorded above; it did not repeat the
+external-model image-prompt suite.
 
 ## Maintained documentation
 

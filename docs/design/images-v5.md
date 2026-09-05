@@ -158,6 +158,6 @@ migrated. Preserve a complete pre-upgrade backup; resolve an incompatibility
 through an explicit upgrade/export decision rather than editing receipts or
 released migration entries.
 
-The [`v0.1.0` checkpoint](../checkpoint-v4.md) qualifies only its released v4
-source. Current v5 qualification requires new checksummed receipts from its exact
-source and dependency boundary.
+The [release checkpoint](../checkpoint-v4.md) records separately scoped v4 and
+v5 qualification. Each passing receipt qualifies only its exact source,
+dependency boundary, and recorded checks.
