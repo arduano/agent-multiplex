@@ -39,8 +39,10 @@ metadata, and renewal checks. Cleanup removed the disposable containers,
 network, image, relay, and runtime state; no material user data was removed.
 The manifest records `credentialMaterialRecorded=false`.
 
-All 16 tarballs packed from this exact source match the consumer's locked
-artifact integrities. The publication workflow completed packed-consumer and
+All 16 public tarballs match the consumer's locked artifact integrities.
+Independent downloads verified all 21 inventory checksums and all 16 package
+attestations. The public tarballs differ in archive bytes from the local
+qualification packs, but their extracted files match byte-for-byte. The publication workflow completed packed-consumer and
 registry-consumer verification, package attestation, exact-artifact publication
 and `latest` promotion, public-package visibility checks, and exact GitHub
 Release creation/recovery. The Release API independently confirms 21 uploaded
