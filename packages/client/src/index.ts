@@ -5,3 +5,4 @@ export * from "./access-watch.js";
 export * from "./http.js";
 export * from "./resilient-subscription.js";
 export * from "./terminal.js";
+export * from "./images.js";

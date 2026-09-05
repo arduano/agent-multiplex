@@ -50,6 +50,7 @@ mkdir -p "$RECEIPT_DIR/logs" "$RECEIPT_DIR/rpc" "$RECEIPT_DIR/phases" \
 
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/agent-multiplex-v4-tree.XXXXXXXX")
 mkdir -p "$RUNTIME_DIR/authority-state" "$RUNTIME_DIR/branch-state"
+node "$REPO_ROOT/tests/image-fixtures.mjs" "$RUNTIME_DIR/image-fixtures"
 CONTAINER_UID=$(id -u)
 CONTAINER_GID=$(id -g)
 if (( CONTAINER_UID == 0 )); then
@@ -149,7 +150,7 @@ cleanup() {
     rm -rf -- "$RUNTIME_DIR"
   fi
   if (( COMPLETED == 0 )); then
-    printf 'Protocol-v4 tree acceptance failed. Inspect driver-failure.json and logs/.\n' \
+    printf 'Protocol-v5 tree acceptance failed. Inspect driver-failure.json and logs/.\n' \
       >"$RECEIPT_DIR/FAILED.txt"
   fi
   if (( status == 0 && COMPLETED == 1 )); then
@@ -208,7 +209,7 @@ wait_for_file() {
   fail "timed out waiting for $description"
 }
 
-note "building immutable protocol-v4 image"
+note "building immutable protocol-v5 image"
 if ! docker build --progress=plain \
   --secret "id=npmrc,src=$DOCKER_NPMRC" \
   --file "$SCRIPT_DIR/Dockerfile" \
@@ -290,6 +291,7 @@ docker run --detach \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$BRANCH_ENDPOINT" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_TICKET="$BRANCH_TICKET" \
   --env 'AGENT_MULTIPLEX_RUNTIME_NODE_ALLOWED_ROOTS=["/workspace"]' \
+  --mount type=bind,src="$RUNTIME_DIR/image-fixtures",dst=/workspace/images,readonly \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_STATE_DIR=/state/runtime-node \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_NAME="$RUNTIME_NODE_NAME" \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_HARNESSES=codex \
@@ -412,7 +414,12 @@ DRIVER_PID=""
 jq -e '.passed == true and .authority.noImplicitPromotion == true and
   .authority.queuedWhileDisconnected == true and
   .authority.settledAfterRecovery == true and
-  .routing.exactNativeDeltaReassemblies == 3' "$RECEIPT_DIR/summary.json" >/dev/null \
+  .routing.exactNativeDeltaReassemblies == 3 and
+  .images.exactUploadRead == true and
+  .images.exactChunkRetry == true and
+  .images.immutablePathSnapshot == true and
+  .images.uploadResumedOnBranch == true and
+  .images.preservedThroughAncestorRecovery == true' "$RECEIPT_DIR/summary.json" >/dev/null \
   || fail "driver summary assertions failed"
 
 AGENT_MULTIPLEX_ACCEPTANCE_BEARER_TOKEN_FILE="$RUNTIME_DIR/access-token" \
@@ -420,6 +427,10 @@ AGENT_MULTIPLEX_ACCEPTANCE_BEARER_TOKEN_FILE="$RUNTIME_DIR/access-token" \
     "$RECEIPT_DIR/screenshots/03-ancestor-recovered.png" \
     "$RECEIPT_DIR/logs/browser-recovered.log" selected suppressed "$RUN_ID" \
     >"$RECEIPT_DIR/phases/browser-recovered.json"
+
+AGENT_MULTIPLEX_ACCEPTANCE_BEARER_TOKEN_FILE="$RUNTIME_DIR/access-token" \
+  node "$SCRIPT_DIR/capture-images.mjs" "$GATEWAY_URL" "$RECEIPT_DIR" \
+  >"$RECEIPT_DIR/phases/browser-images.json"
 
 capture_logs
 if rg --fixed-strings --quiet "$SHARED_SECRET" "$RECEIPT_DIR" || \
@@ -504,6 +515,7 @@ jq -n \
     runId:$runId,
     imageId:$imageId,
     passed:true,
+    multiplexProtocol:5,
     topology:{authorityControlNodeId:$authorityId,branchControlNodeId:$branchId,runtimeNodes:1,gatewaySources:2},
     endpointPins:{authority:$authorityEndpoint,branch:$branchEndpoint,preservedAcrossRestart:true},
     receiptSecurity:{rawSecretsRecorded:false,rawTicketsRecorded:false,
@@ -521,4 +533,4 @@ jq -n \
 )
 
 COMPLETED=1
-note "all protocol-v4 control-tree assertions passed"
+note "all protocol-v5 control-tree assertions passed"

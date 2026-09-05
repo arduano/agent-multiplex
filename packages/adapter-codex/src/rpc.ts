@@ -73,10 +73,13 @@ export class CodexRpcClient {
   readonly #serverRequests = new Set<(request: CodexServerRequest) => void>();
   readonly #exits = new Set<(error: Error) => void>();
   readonly #pending = new Map<number, Pending>();
+  readonly #connectionClosures = new WeakMap<CodexRpcConnection, Promise<void>>();
   #connection: CodexRpcConnection | undefined;
   #connectionDisposers: Array<() => void> = [];
   #nextId = 1;
   #starting: Promise<void> | undefined;
+  #closing: Promise<void> | undefined;
+  #ready = false;
   #closed = false;
 
   public constructor(options: CodexRpcClientOptions = {}) {
@@ -99,9 +102,9 @@ export class CodexRpcClient {
   }
 
   public async start(): Promise<void> {
-    if (this.#closed) throw new CodexRpcError("Codex RPC client is closed");
-    if (this.#connection) return;
+    this.#assertOpen();
     if (this.#starting) return this.#starting;
+    if (this.#ready) return;
     this.#starting = this.#start();
     try {
       await this.#starting;
@@ -112,6 +115,7 @@ export class CodexRpcClient {
 
   async #start(): Promise<void> {
     await this.#options.prepareProcess?.();
+    this.#assertOpen();
     const connection = this.#options.createConnection?.() ?? new StdioCodexRpcConnection(() =>
       this.#options.spawnProcess?.() ??
         spawn(this.#options.binary ?? "codex", [...(this.#options.args ?? ["app-server"])], {
@@ -122,18 +126,19 @@ export class CodexRpcClient {
     this.#connection = connection;
     this.#connectionDisposers = [
       connection.onMessage((message) => this.#receive(message)),
-      connection.onExit((error) => this.#didExit(error)),
+      connection.onExit((error) => this.#didExit(connection, error)),
       connection.onDiagnostic?.((message) => {
-      if (message) {
-        for (const listener of this.#notifications) {
-          listener({ method: "agent-multiplex/codex-stderr", params: message });
+        if (message) {
+          for (const listener of this.#notifications) {
+            listener({ method: "agent-multiplex/codex-stderr", params: message });
+          }
         }
-      }
       }) ?? (() => undefined),
     ];
     try {
       await connection.start();
-      await this.request("initialize", {
+      this.#assertConnection(connection);
+      await this.#request(connection, "initialize", {
         clientInfo: {
           name: "agent_multiplex",
           title: "Agent Multiplex",
@@ -141,24 +146,42 @@ export class CodexRpcClient {
         },
         capabilities: { experimentalApi: true },
       });
-      this.notify("initialized");
+      this.#assertConnection(connection);
+      await connection.send(JSON.stringify({ method: "initialized" }));
+      this.#assertConnection(connection);
+      this.#ready = true;
     } catch (error) {
-      if (this.#connection === connection) {
-        this.#connection = undefined;
-        this.#disposeConnectionListeners();
-      }
-      await connection.close().catch(() => undefined);
+      this.#disconnect(connection, asError(error));
+      await this.#closeConnection(connection).catch(() => undefined);
       throw error;
     }
   }
 
   public async request<T = unknown>(method: string, params: unknown = {}): Promise<T> {
-    if (!this.#connection) await this.start();
+    try {
+      await this.start();
+    } catch (error) {
+      // An uncertain handshake does not make this as-yet undispatched request
+      // uncertain. In particular, shutdown must not mark a queued native
+      // command outcomeUnknown when it never reached the transport.
+      this.#assertOpen();
+      if (error instanceof AdapterOutcomeUnknownError) {
+        throw new CodexRpcError("Codex RPC initialization failed before request dispatch");
+      }
+      throw error;
+    }
     const connection = this.#connection;
-    if (!connection) {
+    this.#assertOpen();
+    if (!connection || !this.#ready) {
       throw new CodexRpcError("codex app-server is not writable");
     }
+    return this.#request<T>(connection, method, params);
+  }
+
+  #request<T = unknown>(connection: CodexRpcConnection, method: string, params: unknown): Promise<T> {
+    this.#assertConnection(connection);
     const id = this.#nextId++;
+    const message = JSON.stringify({ method, id, params });
     const result = new Promise<T>((resolve, reject) => {
       this.#pending.set(id, {
         resolve: (value) => resolve(value as T),
@@ -166,39 +189,65 @@ export class CodexRpcClient {
         dispatched: false,
       });
     });
-    // Startup/process errors can reject the pending request before the async
-    // method reaches `return result`. Mark it observed immediately while still
-    // returning the original promise to callers.
-    void result.catch(() => undefined);
+    const pending = this.#pending.get(id)!;
+    // Once handed to the transport, a close can race its write callback. Treat
+    // that interval as dispatched rather than claiming the native effect failed.
+    pending.dispatched = true;
+    const failed = (error: unknown) => {
+      if (this.#pending.delete(id)) pending.reject(asError(error));
+    };
     try {
-      await connection.send(JSON.stringify({ method, id, params }));
-      const pending = this.#pending.get(id);
-      if (pending) pending.dispatched = true;
+      void connection.send(message).catch(failed);
     } catch (error) {
-      const pending = this.#pending.get(id);
-      this.#pending.delete(id);
-      const failure =
-        error instanceof Error ? error : new CodexRpcError(String(error));
-      pending?.reject(failure);
-      throw failure;
+      failed(error);
     }
     return result;
   }
 
   public notify(method: string, params?: unknown): void {
+    this.#assertOpen();
     const connection = this.#connection;
-    if (!connection) throw new CodexRpcError("codex app-server is not writable");
+    if (!connection || !this.#ready) throw new CodexRpcError("codex app-server is not writable");
     void connection
       .send(JSON.stringify(params === undefined ? { method } : { method, params }))
-      .catch((error: unknown) => this.#didExit(asError(error)));
+      .catch((error: unknown) => this.#didExit(connection, asError(error)));
   }
 
-  public async close(): Promise<void> {
+  public close(): Promise<void> {
+    if (this.#closing) return this.#closing;
     this.#closed = true;
+    this.#closing = this.#close();
+    return this.#closing;
+  }
+
+  async #close(): Promise<void> {
     const connection = this.#connection;
-    this.#connection = undefined;
-    this.#disposeConnectionListeners();
-    await connection?.close();
+    if (connection) this.#disconnect(connection, new CodexRpcError("Codex RPC client is closed"));
+    // Close the transport before waiting for startup: its initialize request
+    // must be rejected so startup cannot deadlock shutdown.
+    const [closed] = await Promise.allSettled([
+      connection ? this.#closeConnection(connection) : Promise.resolve(),
+      this.#starting,
+    ]);
+    if (closed.status === "rejected") throw closed.reason;
+  }
+
+  #closeConnection(connection: CodexRpcConnection): Promise<void> {
+    let closing = this.#connectionClosures.get(connection);
+    if (!closing) {
+      closing = Promise.resolve().then(() => connection.close());
+      this.#connectionClosures.set(connection, closing);
+    }
+    return closing;
+  }
+
+  #assertOpen(): void {
+    if (this.#closed) throw new CodexRpcError("Codex RPC client is closed");
+  }
+
+  #assertConnection(connection: CodexRpcConnection): void {
+    this.#assertOpen();
+    if (this.#connection !== connection) throw new CodexRpcError("codex app-server is not writable");
   }
 
   #receive(line: string): void {
@@ -270,13 +319,19 @@ export class CodexRpcClient {
     const connection = this.#connection;
     if (!connection) return;
     void connection.send(JSON.stringify(response)).catch((error: unknown) => {
-      this.#didExit(asError(error));
+      this.#didExit(connection, asError(error));
     });
   }
 
-  #didExit(error: Error): void {
-    if (!this.#connection) return;
+  #didExit(connection: CodexRpcConnection, error: Error): void {
+    if (!this.#disconnect(connection, error)) return;
+    for (const listener of this.#exits) listener(error);
+  }
+
+  #disconnect(connection: CodexRpcConnection, error: Error): boolean {
+    if (this.#connection !== connection) return false;
     this.#connection = undefined;
+    this.#ready = false;
     this.#disposeConnectionListeners();
     for (const pending of this.#pending.values()) {
       pending.reject(
@@ -286,7 +341,7 @@ export class CodexRpcClient {
       );
     }
     this.#pending.clear();
-    for (const listener of this.#exits) listener(error);
+    return true;
   }
 
   #disposeConnectionListeners(): void {

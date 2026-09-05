@@ -1,7 +1,9 @@
 import type {
   NativeEvent,
   NativeHistoryResult,
+  NativePayload,
 } from "@arduano/agent-multiplex-protocol";
+import type { TranscriptImage } from "./image-media.js";
 
 export type TimelineKind =
   | "user"
@@ -23,14 +25,16 @@ export interface TimelineEntry {
   readonly raw: unknown;
   readonly sequence?: number | undefined;
   readonly pending?: boolean | undefined;
+  readonly images?: readonly TranscriptImage[] | undefined;
 }
 
 type JsonRecord = Record<string, unknown>;
 
 export function entriesFromHistory(result: NativeHistoryResult): TimelineEntry[] {
-  return result.harness === "codex"
-    ? codexHistory(result.payload)
-    : copilotHistory(result.payload);
+  const entries = result.harness === "codex"
+    ? codexHistory(result.payload.json)
+    : copilotHistory(result.payload.json);
+  return linkCopilotAssets(withImages(entries, result.payload));
 }
 
 export function mergeTimeline(
@@ -56,7 +60,7 @@ export function mergeTimeline(
       pending: current.pending ?? previous.pending,
     });
   }
-  return [...merged.values()].sort(compareEntries);
+  return linkCopilotAssets([...merged.values()].sort(compareEntries));
 }
 
 export function applyNativeEvent(
@@ -66,10 +70,16 @@ export function applyNativeEvent(
   const next = new Map(entries.map((entry) => [entry.id, entry]));
   if (event.harness === "codex") applyCodexLive(next, event);
   else applyCopilotLive(next, event);
-  return [...next.values()].sort(compareEntries).slice(-1_000);
+  return linkCopilotAssets(withImages([...next.values()], event.payload).sort(compareEntries).slice(-1_000));
 }
 
 function codexHistory(payload: unknown): TimelineEntry[] {
+  const items = array(record(payload)?.data);
+  if (items.length > 0) return items.map((entry, index) => {
+    const item = record(entry);
+    const projected = codexItem(item?.item, undefined, `history:${index}`);
+    return projected ? { ...projected, sequence: index, pending: false } : null;
+  }).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   const thread = record(payload)?.thread;
   const turns = array(record(thread)?.turns);
   const entries: TimelineEntry[] = [];
@@ -240,6 +250,8 @@ function copilotEvent(rawEvent: unknown, sequence?: number): TimelineEntry | nul
         body: pretty(data),
         status: type.endsWith("started") ? "running" : "completed",
       };
+    case "session.binary_asset":
+      return data?.type === "image" ? { ...base, kind: "tool", title: "Image asset", body: string(data.description) ?? "Native image", pending: false } : null;
     case "session.error":
       return { ...base, kind: "notice", title: "Session error", body: pretty(data), status: "failed" };
     default:
@@ -248,7 +260,7 @@ function copilotEvent(rawEvent: unknown, sequence?: number): TimelineEntry | nul
 }
 
 function applyCodexLive(entries: Map<string, TimelineEntry>, event: NativeEvent): void {
-  const payload = record(event.payload);
+  const payload = record(event.payload.json);
   const item = payload?.item;
   if ((event.nativeType === "item/started" || event.nativeType === "item/completed") && item) {
     const timestampMs = number(
@@ -299,7 +311,7 @@ function applyCodexLive(entries: Map<string, TimelineEntry>, event: NativeEvent)
 }
 
 function applyCopilotLive(entries: Map<string, TimelineEntry>, event: NativeEvent): void {
-  const payload = record(event.payload);
+  const payload = record(event.payload.json);
   if (event.nativeType === "assistant.message_delta") {
     const data = record(payload?.data);
     const messageId = string(data?.messageId);
@@ -320,8 +332,62 @@ function applyCopilotLive(entries: Map<string, TimelineEntry>, event: NativeEven
     }
     return;
   }
-  const projected = copilotEvent(event.payload, event.sequence);
+  const projected = copilotEvent(event.payload.json, event.sequence);
   if (projected) entries.set(projected.id, projected);
+}
+
+function withImages(entries: readonly TimelineEntry[], payload: NativePayload): TimelineEntry[] {
+  const byObject = new WeakMap<object, TranscriptImage[]>();
+  for (const slot of payload.images) {
+    let current: unknown = payload.json;
+    const ancestors: object[] = [];
+    let assetId: string | undefined;
+    if (current && typeof current === "object") ancestors.push(current);
+    for (const part of slot.pointer.slice(1).split("/")) {
+      const key = part.replace(/~1/g, "/").replace(/~0/g, "~");
+      current = record(current)?.[key] ?? (Array.isArray(current) ? current[Number(key)] : undefined);
+      if (current && typeof current === "object") { ancestors.push(current); assetId = string(record(current)?.assetId) ?? assetId; }
+    }
+    for (const object of ancestors) byObject.set(object, [...(byObject.get(object) ?? []), { image: slot.image, ...(assetId ? { nativeAssetId: assetId } : {}) }]);
+  }
+  return entries.map((entry) => {
+    const raw = record(entry.raw);
+    const retained = raw ? byObject.get(raw) ?? [] : [];
+    const paths: TranscriptImage[] = [];
+    if (raw?.type === "userMessage") {
+      for (const part of array(raw.content)) {
+        const value = record(part);
+        if (value?.type === "localImage" && typeof value.path === "string") paths.push({ path: value.path, alt: "Attached image" });
+        if (value?.type === "image" && typeof value.url === "string" && value.url) paths.push({ path: value.url, alt: "Attached image" });
+      }
+    }
+    if (raw?.type === "imageView" && typeof raw.path === "string") paths.push({ path: raw.path, alt: "Viewed image" });
+    if (raw?.type === "imageGeneration" && typeof raw.savedPath === "string" && retained.length === 0) paths.push({ path: raw.savedPath, alt: "Generated image" });
+    if (raw?.type === "user.message") {
+      for (const attachment of array(record(raw.data)?.attachments)) {
+        const value = record(attachment);
+        if (value?.type === "file" && typeof value.path === "string" && /\.(png|jpe?g|webp|gif|svg)$/i.test(value.path)) paths.push({ path: value.path, alt: string(value.displayName) ?? "Attached image" });
+      }
+    }
+    const images = [...retained, ...paths];
+    return images.length ? { ...entry, images } : entry;
+  });
+}
+
+/** Asset events and referring messages may arrive in different history pages. */
+function linkCopilotAssets(entries: TimelineEntry[]): TimelineEntry[] {
+  const assets = new Map<string, TranscriptImage>();
+  for (const entry of entries) {
+    const raw = record(entry.raw);
+    const assetId = string(record(raw?.data)?.assetId);
+    if (raw?.type !== "session.binary_asset" || !assetId) continue;
+    const image = entry.images?.find((image) => image.image && !("unavailable" in image.image));
+    if (image) assets.set(assetId, image);
+  }
+  if (!assets.size) return entries;
+  return entries.map((entry) => entry.images?.some((image) => image.nativeAssetId && assets.has(image.nativeAssetId))
+    ? { ...entry, images: entry.images.map((image) => image.nativeAssetId && assets.has(image.nativeAssetId) ? { ...image, image: assets.get(image.nativeAssetId)!.image! } : image) }
+    : entry);
 }
 
 function compareEntries(left: TimelineEntry, right: TimelineEntry): number {

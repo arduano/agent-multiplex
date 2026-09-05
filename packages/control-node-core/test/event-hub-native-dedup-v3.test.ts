@@ -1,3 +1,4 @@
+import { packNativePayload } from "@arduano/agent-multiplex-protocol";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,7 +41,7 @@ function nativeEvent(
     runtimeEpoch,
     sequence,
     nativeType: "test/native",
-    payload: { sequence },
+    payload: packNativePayload({ sequence }),
     ephemeral: false,
     provenance: {
       originControlNodeId: catalog.localControlNode().controlNodeId,
@@ -98,7 +99,7 @@ describe("ControlNodeEventHub native replay deduplication", () => {
       value: replacement,
     });
     const replayLive = replay.next();
-    hub.publish({ ...replacement, sequence: 1, payload: { sequence: 1 } });
+    hub.publish({ ...replacement, sequence: 1, payload: packNativePayload({ sequence: 1 }) });
     await expect(replayLive).resolves.toMatchObject({
       done: false,
       value: { runtimeEpoch: replacement.runtimeEpoch, sequence: 1 },
@@ -120,7 +121,7 @@ describe("ControlNodeEventHub native replay deduplication", () => {
       name: "native-dedup-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     const previousEpoch = newRuntimeEpoch();
     const [session] = catalog.reconcileInventory({

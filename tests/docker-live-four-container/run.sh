@@ -1387,7 +1387,7 @@ jq -n \
         codexRuntime:$codex,
         copilotCli:$copilotCli,
         copilotRuntime:$copilot,
-        multiplexProtocol:4,
+        multiplexProtocol:5,
         p2prpcVersion:$p2prpcVersion,
         p2prpcIntegrity:$p2prpcIntegrity
       },

@@ -1,4 +1,5 @@
 export * from "./adapter.js";
+export * from "./native-images.js";
 export * from "./event-hub.js";
 export * from "./launch-provider.js";
 export * from "./native-path-policy.js";
@@ -7,3 +8,4 @@ export * from "./router.js";
 export * from "./service.js";
 export * from "./store.js";
 export * from "./terminal.js";
+export * from "./images.js";

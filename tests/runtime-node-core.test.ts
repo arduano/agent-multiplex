@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  packNativePayload,
   newAuthorityEpochId,
   newCommandId,
   newControlNodeId,
@@ -846,7 +847,7 @@ describe("RuntimeNodeService", () => {
     expect(selfDescription).toMatchObject({
       runtimeNodeId: service.runtimeNodeId,
       runtimeNodeBootId,
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     expect(selfDescription).not.toHaveProperty("ownerHostId");
     expect(selfDescription).not.toHaveProperty("reachability");
@@ -1154,7 +1155,7 @@ describe("RuntimeNodeService", () => {
         kind: "native",
         sessionId,
         nativeType: "fake/message",
-        payload: { text: "hello" },
+        payload: packNativePayload({ text: "hello" }),
       },
       done: false,
     });
@@ -1167,7 +1168,7 @@ describe("RuntimeNodeService", () => {
     ).resolves.toMatchObject({
       harness: "codex",
       vendorSessionId: "fake-1",
-      payload: { source: "native", prompts: ["hello"] },
+      payload: packNativePayload({ source: "native", prompts: ["hello"] }),
       complete: true,
     });
 
@@ -2167,7 +2168,7 @@ describe("RuntimeNodeService", () => {
     expect(resolved).toMatchObject({
       interactionId: pending.interactionId,
       state: "resolved",
-      resolution: resolution.response,
+      resolution: packNativePayload(resolution.response),
     });
     await expect(service.resolveInteraction(resolution)).resolves.toEqual(resolved);
     expect(nativeSession.interactionResponses).toHaveLength(1);
@@ -2193,7 +2194,7 @@ describe("RuntimeNodeService", () => {
           interaction: {
             interactionId: pending.interactionId,
             state: "resolved",
-            resolution: resolution.response,
+            resolution: packNativePayload(resolution.response),
           },
         },
       },

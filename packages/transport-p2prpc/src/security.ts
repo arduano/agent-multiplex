@@ -82,6 +82,10 @@ const agentControlPaths = new Set([
   "access.sessions.stop",
   "access.sessions.execute",
   "access.interactions.resolve",
+  "access.images.beginUpload",
+  "access.images.writeUpload",
+  "access.images.commitUpload",
+  "access.images.abortUpload",
 ]);
 
 const agentLaunchPaths = new Set([
@@ -107,7 +111,7 @@ const terminalControlPaths = new Set([
 ]);
 
 /**
- * Path- and procedure-aware authorization for a composite protocol-v4 control
+ * Path- and procedure-aware authorization for a composite protocol-v5 control
  * node. Access gateways have no implicit authority: each mutation category
  * requires an explicit effective scope.
  */
@@ -174,6 +178,7 @@ function gatewayScopeAllows(
   type: "query" | "mutation" | "subscription",
 ): boolean {
   if (!path.startsWith("access.")) return false;
+  if (path === "access.images.resolvePath") return type === "mutation" && scopes.has("read");
   if (path.startsWith("access.terminals.")) {
     if (terminalViewPaths.has(path)) {
       const expectedType = path === "access.terminals.get"

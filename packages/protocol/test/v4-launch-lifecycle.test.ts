@@ -424,7 +424,7 @@ describe("protocol v4 compatibility boundary", () => {
       capabilities: [],
     };
     expect(
-      systemDescriptionSchema.safeParse({ ...description, protocolVersion: 4 })
+      systemDescriptionSchema.safeParse({ ...description, protocolVersion: 5 })
         .success,
     ).toBe(true);
     expect(
@@ -434,7 +434,7 @@ describe("protocol v4 compatibility boundary", () => {
     expect(
       gatewayEnrollmentSchema.safeParse({
         name: "gateway",
-        protocolVersion: 4,
+        protocolVersion: 5,
         requestedScopes: ["read", "agent-launch"],
       }).success,
     ).toBe(true);

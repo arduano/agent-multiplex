@@ -177,6 +177,6 @@ function runtime(
       capabilities,
     }],
     launchProfiles: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   };
 }

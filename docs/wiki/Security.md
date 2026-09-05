@@ -34,7 +34,8 @@ input, metadata, headers intended for plugins, or terminal receipts.
 ## Sensitive capabilities
 
 - `agent-launch` can allocate compute and run an agent in an allowed workspace.
-- `agent-control` can prompt, steer, interrupt, resume, or stop a native agent.
+- `read` exposes retained images and permits snapshots of eligible workspace/output image paths.
+- `agent-control` can upload images, prompt, steer, interrupt, resume, or stop a native agent.
 - `agent-archive` can release provider/backend resources and remove hot access.
 - `metadata-propose` can alter searchable authority-owned workflow links.
 - `terminal-view` exposes unredacted PTY output.
@@ -70,6 +71,19 @@ Terminal bytes and lease secrets are intentionally memory-only, but viewers see
 opaque unredacted output. Native history comes directly from the harness and may
 also contain source, prompts, tool output, or secrets. Apply access and retention
 policy at the client/edge.
+
+## Image interpretation
+
+Image reads are restricted to the session workspace and explicit image output
+roots, with symlink checks and immutable snapshots. They do not inherit every
+allowed launch root. Custom backends must enforce equivalent policy in their
+own filesystem. Private image directories belong in the runtime backup unit.
+
+The runtime transports SVG as `image/svg+xml` bytes without rendering or
+conversion and never fetches external URLs. The reference UI verifies the bytes
+and uses Blob URLs only in image elements, including the enlarged preview.
+Custom clients must keep SVG out of markup injection and document/frame
+contexts. External image URLs stay links by default.
 
 ## Network exposure
 

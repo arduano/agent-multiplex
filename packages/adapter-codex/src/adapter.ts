@@ -1,6 +1,8 @@
+import type { AdapterNativeHistoryResult } from "@arduano/agent-multiplex-runtime-node-core";
 import {
   adapterScopeIdSchema,
   newRuntimeEpoch,
+  NATIVE_PAYLOAD_MAX_BYTES,
   toJsonValue,
   type AdapterScopeId,
   type HarnessCatalogEntry,
@@ -10,7 +12,6 @@ import {
   type HarnessSpawnOptions,
   type JsonValue,
   type NativeHistoryRequest,
-  type NativeHistoryResult,
   type NativeInventoryItem,
   type NativeModel,
   type RuntimeEpoch,
@@ -26,10 +27,12 @@ import {
 import type { Model } from "./generated/v2/Model.js";
 import type { ModelListResponse } from "./generated/v2/ModelListResponse.js";
 import type { Thread } from "./generated/v2/Thread.js";
+import { codexImageCodec, codexHistoryPageBytes, codexImageLeaves } from "./images.js";
 import type { ThreadBackgroundTerminal } from "./generated/v2/ThreadBackgroundTerminal.js";
 import type { ThreadBackgroundTerminalsListResponse } from "./generated/v2/ThreadBackgroundTerminalsListResponse.js";
 import type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";
 import type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
+import type { ThreadItemsListResponse } from "./generated/v2/ThreadItemsListResponse.js";
 import type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
@@ -166,6 +169,7 @@ export interface CodexAdapterOptions extends CodexRpcClientOptions {
 }
 
 export class CodexAdapter implements AgentAdapter {
+  public readonly imageCodec = codexImageCodec;
   public readonly harness = "codex" as const;
   public readonly adapterScopeId: AdapterScopeId;
   readonly #rpc: CodexRpcClient;
@@ -761,8 +765,33 @@ class CodexSession implements AdapterSession {
     }
   }
 
-  public async readNativeHistory(request: NativeHistoryRequest): Promise<NativeHistoryResult> {
+  public async readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
     if (request.harness !== "codex") throw new Error("history request harness mismatch");
+    if (request.includeTurns) {
+      let limit = Math.min(request.limit ?? 100, 100);
+      let response: ThreadItemsListResponse;
+      for (;;) {
+        response = await this.#rpc.request<ThreadItemsListResponse>("thread/items/list", {
+          ...(request.native ?? {}),
+          threadId: this.vendorSessionId,
+          limit,
+          sortDirection: "asc",
+          cursor: request.cursor ?? null,
+          turnId: null,
+        });
+        const page = json(response);
+        if (codexHistoryPageBytes(page) <= NATIVE_PAYLOAD_MAX_BYTES && codexImageLeaves(page).length <= 256) break;
+        if (limit === 1) throw new Error("One native Codex history item exceeds the bounded wire envelope");
+        // Re-read the same native cursor with a smaller page; never invent a
+        // cursor or silently discard native items after the server advanced it.
+        limit = Math.max(1, Math.floor(limit / 2));
+      }
+      return {
+        harness: "codex", vendorSessionId: this.vendorSessionId, payload: json(response),
+        complete: response.nextCursor === null,
+        ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
+      };
+    }
     const response = await this.#rpc.request<ThreadReadResponse>("thread/read", {
       ...(request.native ?? {}),
       threadId: this.vendorSessionId,

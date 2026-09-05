@@ -12,10 +12,13 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+
+import { createPortal } from "react-dom";
 
 import { IconButton, classes } from "./ui.js";
 
@@ -59,6 +62,14 @@ const DEFAULT_LAYOUT: LayoutPreferences = {
 
 export function WorkspaceShell({ left, center, inspector, selectedLabel }: WorkspaceShellProps) {
   const mode = useViewportMode();
+  // Keep the conversation mounted when responsive shells change. Uploads,
+  // uncertain command IDs, and drafts belong to the session, not a viewport.
+  const [conversationHost] = useState(() => {
+    const host = document.createElement("div");
+    host.className = "flex min-h-0 min-w-0 flex-1 flex-col";
+    return host;
+  });
+  const mount = <ConversationMount host={conversationHost} />;
   const [layout, setLayout] = useState<LayoutPreferences>(readLayoutPreferences);
 
   function updateLayout(update: Partial<LayoutPreferences>): void {
@@ -69,37 +80,21 @@ export function WorkspaceShell({ left, center, inspector, selectedLabel }: Works
     });
   }
 
-  if (mode === "desktop") {
-    return (
-      <DesktopWorkspace
-        layout={layout}
-        onLayout={updateLayout}
-        left={left}
-        center={center}
-        inspector={inspector}
-      />
-    );
-  }
-  if (mode === "compact") {
-    return (
-      <CompactWorkspace
-        layout={layout}
-        onLayout={updateLayout}
-        left={left}
-        center={center}
-        inspector={inspector}
-        selectedLabel={selectedLabel}
-      />
-    );
-  }
-  return (
-    <MobileWorkspace
-      left={left}
-      center={center}
-      inspector={inspector}
-      selectedLabel={selectedLabel}
-    />
-  );
+  const workspace = mode === "desktop"
+    ? <DesktopWorkspace layout={layout} onLayout={updateLayout} left={left} center={mount} inspector={inspector} />
+    : mode === "compact"
+      ? <CompactWorkspace layout={layout} onLayout={updateLayout} left={left} center={mount} inspector={inspector} selectedLabel={selectedLabel} />
+      : <MobileWorkspace left={left} center={mount} inspector={inspector} selectedLabel={selectedLabel} />;
+  return <>{workspace}{createPortal(center, conversationHost)}</>;
+}
+
+function ConversationMount({ host }: { host: HTMLDivElement }) {
+  const container = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    container.current?.append(host);
+    return () => { host.remove(); };
+  }, [host]);
+  return <div ref={container} className="flex min-h-0 min-w-0 flex-1 flex-col" />;
 }
 
 function DesktopWorkspace({ layout, onLayout, left, center, inspector }: {

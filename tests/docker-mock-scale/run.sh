@@ -772,7 +772,7 @@ jq -n \
       versions: {
         dockerServer: $docker,
         nodeInImage: $node,
-        multiplexProtocol: 4,
+        multiplexProtocol: 5,
         p2prpcVersion: $p2prpcVersion,
         p2prpcIntegrity: $p2prpcIntegrity
       },
@@ -826,7 +826,7 @@ jq -n \
           $lifecycle[0] | length == 12 and (map(.image) | unique | length) == 1
         ),
         gatewayHasNoDataAuthority: (
-          $system[0].protocolVersion == 4 and
+          $system[0].protocolVersion == 5 and
           $system[0].componentKind == "access-gateway" and
           $system[0].dataAuthority == "none"
         ),
@@ -839,7 +839,7 @@ jq -n \
         controlNodeIsCanonicalAuthority: (
           ($controls[0] | length) == 1 and
           $controls[0][0].dataRole.role == "authority" and
-          $controls[0][0].protocolVersion == 4
+          $controls[0][0].protocolVersion == 5
         ),
         unauthenticatedGatewayRpcRejected: ($auth[0].unauthenticatedRejected == true)
       },

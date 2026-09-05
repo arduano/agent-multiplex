@@ -37,14 +37,27 @@ import {
   createGatewayHttpSurface,
   validateGatewayBindAddress,
   type GatewayBearerAuthConfig,
+  type GatewayHttpSurface,
 } from "./http.js";
+
+export { createAccessGatewayRouter } from "./router.js";
+export type { GatewayAuthContext, GatewayAccessIdentity } from "./auth.js";
+export type { GatewayHttpSurface } from "./http.js";
+
+/** A trusted static application edge must authenticate both HTTP and WebSockets. */
+export interface GatewayComposition {
+  readonly httpSurface?: {
+    readonly authentication: "external";
+    create(projection: AccessGatewayProjection, instanceId: string): GatewayHttpSurface;
+  };
+}
 
 const DEFAULT_IDENTITY_PATH = ".agent-multiplex/access-gateway.identity";
 const DEFAULT_STATE_PATH = ".agent-multiplex/access-gateway.sqlite";
 const DEFAULT_HTTP_PORT = 4318;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const SOURCE_CONFIG_VERSION = 1 as const;
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 const DEFAULT_SOURCE_SCOPES = Object.freeze([
   "read",
 ] satisfies readonly ActionScope[]);
@@ -117,8 +130,14 @@ export function gatewayConfigFromEnvironment(
 export async function runGateway(
   config: GatewayAppConfig,
   signal: AbortSignal,
+  composition: GatewayComposition = {},
 ): Promise<void> {
-  validateGatewayBindAddress(config.bindAddress, config.auth);
+  if (composition.httpSurface === undefined) {
+    validateGatewayBindAddress(config.bindAddress, config.auth);
+  } else if (composition.httpSurface.authentication !== "external" ||
+    typeof composition.httpSurface.create !== "function" || config.auth !== undefined) {
+    throw new TypeError("a custom gateway edge requires explicit external authentication and cannot combine bearer configuration");
+  }
   const secretKey = await loadOrCreateGatewaySecretKey(config.identityPath);
   const store = new GatewayOperationalStore(config.statePath);
   const persisted = new Map(store.listSources().map((source) => [source.sourceId, source]));
@@ -191,7 +210,7 @@ export async function runGateway(
       .filter((source) => source.enabled)
       .map((source) => projection.refreshSource(source.sourceId)));
 
-    http = createGatewayHttpSurface(projection, {
+    http = composition.httpSurface?.create(projection, p2p.localEndpointId) ?? createGatewayHttpSurface(projection, {
       instanceId: p2p.localEndpointId,
       ...(config.auth === undefined ? {} : { auth: config.auth }),
     });

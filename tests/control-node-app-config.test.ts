@@ -199,7 +199,7 @@ describe("protocol-v4 control-node application configuration", () => {
       expect(response.headers.get("referrer-policy")).toBe("no-referrer");
       await expect(response.json()).resolves.toMatchObject({
         result: { data: {
-          protocolVersion: 4,
+          protocolVersion: 5,
           componentKind: "control-node",
           dataAuthority: "control-node",
         } },

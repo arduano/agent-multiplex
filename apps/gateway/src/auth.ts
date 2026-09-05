@@ -18,7 +18,7 @@ export interface GatewayBearerCredential {
 }
 
 export interface GatewayAccessIdentity {
-  readonly authentication: "loopback" | "bearer";
+  readonly authentication: "loopback" | "bearer" | "external";
   readonly subject: string;
   /** Scopes permit requests; they never give the gateway data authority. */
   readonly scopes: readonly ActionScope[];

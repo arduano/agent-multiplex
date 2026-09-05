@@ -10,6 +10,7 @@ import {
   Code2,
   CornerDownRight,
   History,
+  ImagePlus,
   LoaderCircle,
   MessageSquareText,
   Radio,
@@ -18,6 +19,7 @@ import {
   Sparkles,
   TerminalSquare,
   UserRound,
+  X,
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tabs from "@radix-ui/react-tabs";
@@ -31,17 +33,23 @@ import {
   type KeyboardEvent,
   type UIEvent,
 } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import {
   sessionCommand,
+  imageMessage,
+  imageTarget,
+  uploadImage,
   watchAccess,
   type AccessClient,
 } from "@arduano/agent-multiplex-client/browser";
 import type {
   AccessStreamItem,
   CommandRecord,
+  CommandEnvelope,
+  ImageDescriptor,
+  ImageMediaType,
   HarnessCommand,
   HarnessSessionSettings,
   SessionRecord,
@@ -56,6 +64,7 @@ import {
   type SettingDraft,
 } from "./agent-settings.js";
 import { errorMessage, useApi } from "./api.js";
+import { ImageSessionProvider, TranscriptImagePreview, prepareImageFile, isLocalImagePath, modelImageLimits } from "./image-media.js";
 import { pendingInteractionRefetchInterval } from "./interaction-refresh.js";
 import { InteractionCards } from "./interactions.js";
 import {
@@ -83,7 +92,11 @@ interface CommandAction {
   readonly request: HarnessCommand;
   readonly success: string;
   readonly optimistic?: TimelineEntry;
+  readonly images?: CommandEnvelope["images"];
+  readonly envelope?: CommandEnvelope;
 }
+
+interface DraftImage { id: string; file: File; url: string; descriptor?: ImageDescriptor; }
 
 export function SessionConsole({ session, terminalCapability }: {
   readonly session: SessionRecord | null;
@@ -119,6 +132,21 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   const [historySignal, setHistorySignal] = useState<NativeHistorySignal | null>(null);
   const [recentEvents, setRecentEvents] = useState<AccessStreamItem[]>([]);
   const [prompt, setPrompt] = useState("");
+  const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
+  const draftsRef = useRef(draftImages);
+  draftsRef.current = draftImages;
+  const mounted = useRef(true);
+  const preparing = useRef(false);
+  const [preparingImages, setPreparingImages] = useState(false);
+  const imagePicker = useRef<HTMLInputElement>(null);
+  const imageUpload = useRef<AbortController | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uncertain, setUncertain] = useState<CommandEnvelope | null>(null);
+  useEffect(() => { mounted.current = true; return () => {
+    mounted.current = false;
+    imageUpload.current?.abort();
+    for (const image of draftsRef.current) URL.revokeObjectURL(image.url);
+  }; }, []);
   const [actionStatus, setActionStatus] = useState("");
   const [modelDraft, setModelDraft] = useState<SettingDraft>(() =>
     createSettingDraft(session?.harnessSettings?.model ?? "")
@@ -321,16 +349,22 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
     retry: false,
     mutationFn: async (action: CommandAction) => {
       if (!session) throw new Error("Select a session first");
-      const envelope = await sessionCommand(session, action.request);
-      if (action.optimistic) {
+      const envelope = action.envelope ?? await sessionCommand(session, action.request, action.images);
+      setUncertain(envelope);
+      if (action.optimistic && !action.envelope) {
         setLocal((current) => [...current, { ...action.optimistic!, id: `local:${envelope.commandId}` }]);
       }
       const record = await client.sessions.execute.mutate(envelope);
+      if (record.state !== "outcomeUnknown" && record.state !== "received" && record.state !== "started") setUncertain(null);
       return { action, record };
     },
     onSuccess: ({ action, record }) => {
       setActionStatus(commandStatus(action.success, record));
-      if (record.state === "succeeded") setPrompt("");
+      if (record.state === "succeeded" && (action.request.command.type === "send" || action.request.command.type === "steer")) {
+        setPrompt("");
+        for (const image of draftsRef.current) URL.revokeObjectURL(image.url);
+        setDraftImages([]);
+      }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
     onError: (error) => setActionStatus(errorMessage(error)),
@@ -339,7 +373,11 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   const nativeTimeline = useMemo(() => mergeTimeline(history, live), [history, live]);
   const timeline = useMemo(() => {
     const unreconciled = local.filter((candidate) => !nativeTimeline.some((entry) =>
-      entry.kind === candidate.kind && entry.body === candidate.body,
+      entry.kind === candidate.kind && entry.body === candidate.body &&
+      (candidate.images ?? []).length === (entry.images ?? []).length &&
+      (candidate.images ?? []).every((image, index) => image.image && !("unavailable" in image.image) &&
+        entry.images?.[index]?.image && !("unavailable" in entry.images[index]!.image!) &&
+        image.image.sha256 === (entry.images[index]!.image as ImageDescriptor).sha256),
     ));
     return mergeTimeline(nativeTimeline, unreconciled);
   }, [local, nativeTimeline]);
@@ -388,24 +426,84 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
     models.data ?? [],
   );
 
+  const imageLimits = modelImageLimits(session.harnessSettings?.model
+    ? (models.data ?? []).find((model) => model.id === session.harnessSettings?.model)
+    : preferredModel(models.data ?? []));
+
   function dispatch(request: HarnessCommand, success: string, optimistic?: TimelineEntry): void {
+    if (uncertain || uploading || mutation.isPending) return;
     setActionStatus("Dispatching command once…");
     mutation.mutate({ request, success, ...(optimistic ? { optimistic } : {}) });
   }
 
-  function send(kind: "send" | "steer"): void {
-    if (!session || !prompt.trim()) return;
+  async function attachImages(files: readonly File[]): Promise<void> {
+    if (!active || uploading || mutation.isPending || uncertain || preparing.current) return;
+    preparing.current = true;
+    setPreparingImages(true);
+    try {
+      if (imageLimits.support === "unsupported") throw new Error("The applied model does not accept images");
+      if (draftsRef.current.length + files.length > imageLimits.count) throw new Error(`Attach at most ${imageLimits.count} images for this model`);
+      const prepared = await Promise.all(files.map(prepareImageFile));
+      if (!mounted.current) return;
+      if (prepared.some((file) => file.size > imageLimits.bytes)) throw new Error(`This model accepts images of at most ${Math.floor(imageLimits.bytes / 1024)} KiB`);
+      if (imageLimits.mediaTypes && prepared.some((file) => !imageLimits.mediaTypes!.includes(file.type))) throw new Error("This image type is not supported by the applied model");
+      if ([...draftsRef.current.map((item) => item.file), ...prepared].reduce((total, file) => total + file.size, 0) > 50 * 1_024 * 1_024) throw new Error("Image attachments exceed 50 MiB");
+      const next = [...draftsRef.current, ...prepared.map((file) => ({ id: crypto.randomUUID(), file, url: URL.createObjectURL(file) }))];
+      draftsRef.current = next;
+      setDraftImages(next);
+      setActionStatus(imageLimits.support === "unknown" ? "Image support is unreported for this model" : "");
+    } catch (error) { if (mounted.current) setActionStatus(errorMessage(error)); }
+    finally { preparing.current = false; if (mounted.current) setPreparingImages(false); }
+  }
+
+  async function send(kind: "send" | "steer"): Promise<void> {
+    if (!session || (!prompt.trim() && !draftImages.length) || uploading || uncertain || preparing.current) return;
+    if (draftImages.length && (imageLimits.support === "unsupported" || draftImages.length > imageLimits.count ||
+      draftImages.some((image) => image.file.size > imageLimits.bytes || imageLimits.mediaTypes && !imageLimits.mediaTypes.includes(image.file.type)))) {
+      setActionStatus("Attachments exceed the applied model's image capabilities");
+      return;
+    }
     forceFollow.current = true;
     setUnreadCount(0);
     const body = prompt.trim();
-    const request: HarnessCommand = session.harness === "codex"
+    let request: HarnessCommand = session.harness === "codex"
       ? kind === "send"
         ? { harness: "codex", command: { type: "send", input: body } }
         : { harness: "codex", command: { type: "steer", input: body } }
       : kind === "send"
         ? { harness: "copilot", command: { type: "send", prompt: body, mode: "enqueue" } }
         : { harness: "copilot", command: { type: "steer", prompt: body, mode: "immediate" } };
-    dispatch(request, kind === "send" ? "Message sent" : "Steering message sent", {
+    let images: CommandEnvelope["images"];
+    let descriptors: ImageDescriptor[] = [];
+    if (draftImages.length) {
+      const controller = new AbortController();
+      imageUpload.current = controller;
+      setUploading(true);
+      try {
+        const runtime = (await client.runtimeNodes.list.query()).find((item) => item.runtimeNodeId === session.runtimeNodeId);
+        if (!runtime) throw new Error("The session runtime is unavailable");
+        const target = imageTarget(session, runtime);
+        for (const draft of draftImages) {
+          controller.signal.throwIfAborted();
+          const descriptor = draft.descriptor ?? await uploadImage(client, target, new Uint8Array(await draft.file.arrayBuffer()), draft.file.type as ImageMediaType, {
+            imageId: draft.id,
+            signal: controller.signal,
+            onProgress: (sent, total) => setActionStatus(`Uploading ${draft.file.name} · ${Math.round(sent / total * 100)}%`),
+          });
+          descriptors.push(descriptor);
+          setDraftImages((current) => current.map((item) => item.id === draft.id ? { ...item, descriptor } : item));
+        }
+        const message = imageMessage(session.harness, kind, body, descriptors);
+        request = message.request;
+        images = message.images;
+      } catch (error) {
+        setActionStatus(controller.signal.aborted ? "Upload cancelled; your draft is retained" : errorMessage(error));
+        return;
+      } finally { if (mounted.current) setUploading(false); imageUpload.current = null; }
+      if (!mounted.current) return;
+    }
+    setActionStatus("Dispatching command once…");
+    mutation.mutate({ request, images, success: kind === "send" ? "Message sent" : "Steering message sent", optimistic: {
       id: "local:pending",
       kind: "user",
       title: kind === "send" ? "You" : "You · steer",
@@ -414,13 +512,14 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
       raw: { local: true, kind },
       sequence: 2_000_000_000 + Date.now(),
       pending: true,
-    });
+      images: descriptors.map((image) => ({ image })),
+    } });
   }
 
   function keyboardSend(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    if (!mutation.isPending && active && prompt.trim()) send("send");
+    if (!mutation.isPending && !uploading && active && (prompt.trim() || draftImages.length)) void send("send");
   }
 
   function trackTranscriptPosition(event: UIEvent<HTMLDivElement>): void {
@@ -438,19 +537,19 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   }
 
   return (
-    <Tabs.Root
+    <ImageSessionProvider session={session}><Tabs.Root
       className="flex min-h-0 flex-1 flex-col"
       value={workspaceView}
       onValueChange={(value) => setWorkspaceView(value as "chat" | "terminal")}
       data-testid="session-console"
     >
-      <header className="flex min-h-[72px] flex-col items-stretch justify-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-shell)] px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-5 [@media(max-height:500px)]:min-h-14 [@media(max-height:500px)]:py-2">
+      <header className="flex min-h-[72px] flex-col items-stretch justify-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-shell)] px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3 sm:px-5 [@media(max-height:500px)]:min-h-12 [@media(max-height:500px)]:py-1">
         <div className="min-w-0 sm:flex-1">
           <div className="flex min-w-0 items-center gap-2">
             <h1 className="truncate text-sm font-semibold text-[var(--text-primary)]" title={title}>{title}</h1>
             <Badge tone={session.harness === "codex" ? "brand" : "good"}>{session.harness}</Badge>
           </div>
-          <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-[var(--text-secondary)]">
+          <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-[var(--text-secondary)] [@media(max-height:500px)]:hidden">
             <span className="truncate font-mono" title={session.cwd ?? undefined}>{session.cwd ?? "Workspace unavailable"}</span>
             <span aria-hidden="true">·</span>
             <span className="max-w-40 shrink truncate font-mono" title={session.sessionId} data-testid="selected-session-id">{session.sessionId}</span>
@@ -493,7 +592,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
               className="h-8 min-h-8 px-2.5 py-1 text-xs"
               tone="danger"
               icon={CircleStop}
-              disabled={!active || mutation.isPending}
+              disabled={!active || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
               onClick={() => dispatch(
                 session.harness === "codex"
                   ? { harness: "codex", command: { type: "interrupt" } }
@@ -565,24 +664,35 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
         </div>
       ) : null}
 
-      <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-shell)] px-3 py-3 sm:px-5 [@media(max-height:500px)]:py-2">
-        <div className="mx-auto max-w-[76ch]">
+      <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-shell)] px-3 py-3 sm:px-5 [@media(max-height:500px)]:py-2"
+        onDragOver={(event) => { if (event.dataTransfer.types.includes("Files")) event.preventDefault(); }}
+        onDrop={(event) => { if (event.dataTransfer.files.length) { event.preventDefault(); void attachImages([...event.dataTransfer.files]); } }}>
+        <div className={classes("mx-auto max-w-[76ch]", draftImages.length > 0 && "[@media(max-height:500px)]:grid [@media(max-height:500px)]:grid-cols-[auto_minmax(0,1fr)] [@media(max-height:500px)]:items-end [@media(max-height:500px)]:gap-x-3")}>
+          {draftImages.length > 0 ? <div className="mb-2 flex max-h-28 gap-2 overflow-x-auto [@media(max-height:500px)]:mb-0 [@media(max-height:500px)]:max-w-28" aria-label="Image attachments" data-testid="image-attachments">
+            {draftImages.map((image) => <div className="relative shrink-0" key={image.id}>
+              <img className="h-20 w-24 [@media(max-height:500px)]:h-10 rounded border border-[var(--border-subtle)] object-contain" src={image.url} alt={image.file.name} />
+              <button className="absolute right-0 top-0 grid size-9 place-items-center rounded bg-[var(--surface-shell)]" disabled={uploading || mutation.isPending || Boolean(uncertain)} aria-label={`Remove ${image.file.name}`} onClick={() => { URL.revokeObjectURL(image.url); setDraftImages((current) => current.filter((item) => item.id !== image.id)); }}><X className="size-4" /></button>
+            </div>)}
+          </div> : null}
           <div className="relative rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-base)] transition focus-within:border-[var(--accent)]/40 focus-within:ring-2 focus-within:ring-[var(--accent)]/[0.08]">
             <Textarea
-              className="min-h-20 max-h-48 border-0 bg-transparent pb-11 text-sm leading-6 focus:ring-0"
+              className="min-h-20 [@media(max-height:500px)]:min-h-16 max-h-48 border-0 bg-transparent pb-11 text-sm leading-6 focus:ring-0"
               rows={1}
               value={prompt}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={keyboardSend}
+              onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void attachImages(files); } }}
               placeholder={active ? "Message this agent…" : "Resume this session before sending a message"}
-              disabled={!active || mutation.isPending}
+              disabled={!active || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
               data-testid="prompt-input"
             />
             <div className="absolute inset-x-2 bottom-2 flex items-center gap-2">
+              <input ref={imagePicker} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" multiple className="hidden" onChange={(event) => { void attachImages([...(event.target.files ?? [])]); event.target.value = ""; }} data-testid="image-file-input" />
+              <Button icon={ImagePlus} disabled={!active || mutation.isPending || uploading || preparingImages || Boolean(uncertain) || imageLimits.support === "unsupported"} aria-label="Attach images" title={imageLimits.support === "unsupported" ? "The applied model does not accept images" : "Attach images"} onClick={() => imagePicker.current?.click()} data-testid="attach-images-button" />
               <AgentSettings
                 session={session}
                 active={active}
-                busy={mutation.isPending}
+                busy={mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
                 loadingModels={models.isPending}
                 models={models.data ?? []}
                 appliedSettings={session.harnessSettings}
@@ -625,7 +735,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
               <div className="ml-auto flex gap-1.5">
                 <Button
                   icon={CornerDownRight}
-                  disabled={!active || !running || !prompt.trim() || mutation.isPending}
+                  disabled={!active || !running || (!prompt.trim() && !draftImages.length) || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
                   onClick={() => send("steer")}
                   data-testid="steer-button"
                 >
@@ -635,7 +745,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
                   tone="primary"
                   icon={mutation.isPending ? LoaderCircle : Send}
                   className={mutation.isPending ? "[&_svg]:animate-spin" : undefined}
-                  disabled={!active || !prompt.trim() || mutation.isPending}
+                  disabled={!active || (!prompt.trim() && !draftImages.length) || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
                   onClick={() => send("send")}
                   data-testid="send-button"
                 >
@@ -644,8 +754,10 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
               </div>
             </div>
           </div>
-          <div className="mt-1.5 flex min-h-6 items-center justify-between gap-3 [@media(max-height:500px)]:mt-0 [@media(max-height:500px)]:min-h-0">
-            <p className="min-w-0 truncate text-xs text-[var(--text-secondary)]" role="status" data-testid="action-status">{actionStatus}</p>
+          {uploading ? <button className="col-span-full min-h-9 text-xs text-[var(--accent)]" onClick={() => imageUpload.current?.abort()}>Cancel upload</button> : null}
+          {uncertain && !mutation.isPending ? <button className="col-span-full min-h-9 text-xs text-[var(--accent)]" onClick={() => mutation.mutate({ request: uncertain.request, envelope: uncertain, success: "Command reconciled" })} data-testid="reconcile-command">Check the original command</button> : null}
+          <div className="col-span-full mt-1.5 flex min-h-6 items-center justify-between gap-3 [@media(max-height:500px)]:mt-0 [@media(max-height:500px)]:min-h-0">
+            <p className="min-w-0 truncate text-xs text-[var(--text-secondary)]" role="status" title={actionStatus} data-testid="action-status">{actionStatus}</p>
             <span className="hidden shrink-0 text-xs text-[var(--text-secondary)] sm:inline [@media(max-height:500px)]:hidden">Enter to send · Shift+Enter for newline</span>
           </div>
           <details className="group mt-0.5 text-xs text-[var(--text-secondary)] [@media(max-height:500px)]:hidden">
@@ -663,7 +775,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
           <TerminalPanel session={session} capability={terminalCapability} />
         </Suspense>
       </Tabs.Content>
-    </Tabs.Root>
+    </Tabs.Root></ImageSessionProvider>
   );
 }
 
@@ -707,6 +819,7 @@ function TimelineItem({ entry }: { readonly entry: TimelineEntry }) {
             <div className="whitespace-pre-wrap break-words border-t border-[var(--border-subtle)] px-3 py-2 text-xs leading-5 text-[var(--text-secondary)]">{entry.body || "No details"}</div>
           )}
         </details>
+        {entry.images?.map((image, index) => <TranscriptImagePreview key={index} {...image} sourceKey={`${entry.id}:image:${index}`} />)}
       </article>
     );
   }
@@ -740,10 +853,11 @@ function TimelineItem({ entry }: { readonly entry: TimelineEntry }) {
                   : "rounded-md border border-[var(--border-subtle)] bg-[var(--surface-shell)] px-3 py-2 text-[var(--text-secondary)]",
         )}>
           {entry.kind === "user" ? (
-            <div className="whitespace-pre-wrap">{entry.body || "…"}</div>
+            <div className="whitespace-pre-wrap">{entry.body || (entry.images?.length ? "" : "…")}</div>
           ) : (
-            <MarkdownBody body={entry.body || "…"} />
+            <MarkdownBody body={entry.body || (entry.images?.length ? "" : "…")} sourceKey={entry.id} />
           )}
+          {entry.images?.map((image, index) => <TranscriptImagePreview key={index} {...image} sourceKey={`${entry.id}:image:${index}`} />)}
         </div>
       </div>
     </article>
@@ -796,8 +910,8 @@ function AgentSettings({
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <Button className="h-8 min-h-8 max-w-48 px-2.5 py-1 text-xs" icon={Settings2} data-testid="agent-settings-button">
-          <span className="truncate">Agent settings</span>
+        <Button className="h-8 min-h-8 max-w-48 px-2.5 py-1 text-xs" icon={Settings2} aria-label="Agent settings" data-testid="agent-settings-button">
+          <span className="hidden truncate sm:inline">Agent settings</span>
         </Button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -900,28 +1014,30 @@ function SettingDraftLabel({ label, changed }: { readonly label: string; readonl
   );
 }
 
-function MarkdownBody({ body }: { readonly body: string }) {
+function MarkdownBody({ body, sourceKey }: { readonly body: string; readonly sourceKey: string }) {
+  // ReactMarkdown uses these functions as component types. Keep their identity
+  // stable so transcript refreshes preserve image dialogs, blobs, and focus.
+  const components = useMemo<Components>(() => ({
+    a: ({ node: _node, ...props }) => <a {...props} rel="noreferrer" target="_blank" />,
+    img: ({ node, alt, src }) => src && isLocalImagePath(src)
+      ? <TranscriptImagePreview path={decodeMarkdownImagePath(src)} alt={alt || "Image"} sourceKey={`${sourceKey}:markdown:${node?.position?.start.offset ?? 0}`} />
+      : <span className="inline-flex rounded border border-[var(--border-subtle)] px-2 py-1 text-xs text-[var(--text-secondary)]">{src && /^https?:\/\//i.test(src) ? <a href={src} rel="noreferrer" target="_blank">{alt || "External image"}</a> : alt || "Unsupported image reference"}</span>,
+  }), [sourceKey]);
   return (
     <div className="space-y-2 [&_a]:text-[var(--accent)] [&_a]:underline [&_a]:underline-offset-2 [&_blockquote]:border-l-2 [&_blockquote]:border-[var(--border-subtle)] [&_blockquote]:pl-3 [&_blockquote]:text-[var(--text-secondary)] [&_code]:rounded [&_code]:bg-[var(--surface-canvas)] [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-inherit [&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mt-3 [&_h3]:font-semibold [&_li]:ml-5 [&_li]:pl-1 [&_ol]:list-decimal [&_p]:whitespace-pre-wrap [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-[var(--border-subtle)] [&_pre]:bg-[var(--surface-canvas)] [&_pre]:p-3 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:text-xs [&_td]:border [&_td]:border-[var(--border-subtle)] [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-[var(--border-subtle)] [&_th]:px-2 [&_th]:py-1 [&_ul]:list-disc">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         skipHtml
-        components={{
-          a: ({ node: _node, ...props }) => <a {...props} rel="noreferrer" target="_blank" />,
-          // Native agent text is untrusted. Do not let a transcript silently
-          // issue third-party image requests; native attachments remain owned
-          // and rendered by the harness-specific event surface.
-          img: ({ node: _node, alt }) => (
-            <span className="inline-flex rounded border border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-2 py-1 text-xs text-[var(--text-secondary)]">
-              {alt ? `Image: ${alt}` : "Image attachment"}
-            </span>
-          ),
-        }}
+        components={components}
       >
         {body}
       </ReactMarkdown>
     </div>
   );
+}
+
+function decodeMarkdownImagePath(path: string): string {
+  try { return decodeURIComponent(path); } catch { return path; }
 }
 
 function ExecutionStatus({ status }: { readonly status: string }) {
@@ -953,30 +1069,25 @@ function StatusLabel({ tone, children }: { readonly tone: ReturnType<typeof runt
   );
 }
 
-async function loadNativeHistory(client: AccessClient, session: SessionRecord): Promise<TimelineEntry[]> {
-  if (session.harness === "codex") {
-    const result = await client.sessions.readNativeHistory.query({
-      sessionId: session.sessionId,
-      request: { harness: "codex", includeTurns: true },
-    });
-    return entriesFromHistory(result);
-  }
-
+export async function loadNativeHistory(client: AccessClient, session: SessionRecord): Promise<TimelineEntry[]> {
   let cursor: string | undefined;
   let entries: TimelineEntry[] = [];
   const seen = new Set<string>();
   for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
     const result = await client.sessions.readNativeHistory.query({
       sessionId: session.sessionId,
-      request: { harness: "copilot", limit: 100, ...(cursor ? { cursor } : {}) },
+      request: session.harness === "codex"
+        ? { harness: "codex", includeTurns: true, limit: 100, ...(cursor ? { cursor } : {}) }
+        : { harness: "copilot", limit: 100, ...(cursor ? { cursor } : {}) },
     });
-    entries = mergeTimeline(entries, entriesFromHistory(result));
+    const page = entriesFromHistory(result).map((entry, index) => ({ ...entry, sequence: entries.length + index }));
+    entries = mergeTimeline(entries, page);
     if (result.complete || !result.nextCursor) return entries;
-    if (seen.has(result.nextCursor)) throw new Error("Copilot native history repeated its cursor");
+    if (seen.has(result.nextCursor)) throw new Error("Native history repeated its cursor");
     seen.add(result.nextCursor);
     cursor = result.nextCursor;
   }
-  throw new Error("Copilot native history exceeded the 100-page UI safety limit");
+  throw new Error("Native history exceeded the 100-page UI safety limit");
 }
 
 function commandStatus(success: string, record: CommandRecord): string {

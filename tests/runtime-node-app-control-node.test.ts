@@ -36,7 +36,7 @@ describe("runtime-node control-node RPC path", () => {
       allowedRoots: ["/tmp"],
       harnesses: [],
       launchProfiles: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     };
     const inventory: InventorySnapshot = {
       runtimeNodeId,

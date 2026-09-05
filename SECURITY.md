@@ -9,7 +9,7 @@ host, secret, and audit controls where organizational users are involved.
 
 | Version | Security fixes |
 | --- | --- |
-| `0.1.x` and current protocol-v4 `main` | Yes |
+| `0.1.x` (v4 release) and current protocol-v5 development | Yes |
 | Protocol v3 and earlier | No |
 | Archived protocol-v2 host/worker source | No |
 
@@ -56,6 +56,12 @@ disclosure.
   locators, not identity.
 - Terminal output is opaque and unredacted. `terminal-control` is equivalent to
   typing at a native agent under the runtime account.
+- Image `read` includes immutable bytes and first-display snapshots inside the
+  session workspace plus explicitly configured image output roots. Uploads use
+  `agent-control`; quotas and exact binding/boot/source fences bound the operation.
+- SVG is transferred as bytes. Runtime code never renders/converts it or fetches
+  remote URLs; clients must use an inert image context rather than markup
+  injection, frames, or document navigation.
 - Allowed-root validation is a path policy, not process, network, credential, or
   filesystem isolation.
 
@@ -71,7 +77,7 @@ disclosure.
 - Never publish Codex's private Unix socket or Copilot's experimental loopback
   UI-server.
 - Protect SQLite databases, WAL/SHM files, endpoint identities, backups, logs,
-  and native histories as sensitive data.
+  retained image directories, and native histories as sensitive data.
 - Never store secrets, transcripts, terminal bytes, or provider checkpoints in
   session metadata.
 - Reconcile `outcomeUnknown` by its stable operation/resource identity; do not
@@ -83,3 +89,9 @@ disclosure.
 The concise threat model and operator checklist are in
 [`docs/wiki/Security.md`](docs/wiki/Security.md); deployment details are in
 [`docs/deployment-v4.md`](docs/deployment-v4.md).
+
+Bespoke gateways can statically compose an externally authenticated HTTP/WS edge.
+That trusted edge must verify credentials, assign action scopes, enforce origins
+and connection expiry, and retain the reference byte bounds. Declaring an external
+edge is not a remote or environment-controlled authentication bypass; the reference
+daemon retains its bearer/explicit-loopback policy.

@@ -36,7 +36,7 @@ export const controlNodeDescriptorSchema = z
     dataRole: controlNodeDataRoleSchema,
     connectedAt: isoDateSchema.nullable(),
     lastHeartbeatAt: isoDateSchema.nullable(),
-    protocolVersion: z.literal(4),
+    protocolVersion: z.literal(5),
     capabilities: z.array(z.string().min(1).max(256)),
   })
   .superRefine((descriptor, ctx) => {
@@ -91,7 +91,7 @@ export const controlNodeAttachmentRequestSchema = z
     feedId: feedIdSchema,
     name: z.string().min(1).max(256),
     endpointId: z.string().min(1).max(512).optional(),
-    protocolVersion: z.literal(4),
+    protocolVersion: z.literal(5),
     capabilities: z.array(z.string().min(1).max(256)),
     expectedParentControlNodeId: controlNodeIdSchema,
     childProof: controlNodeAttachmentProofSchema,

@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-runtime-node",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reference Codex and Copilot runtime-node daemon for Agent Multiplex.",
   "private": false,
   "type": "module",
@@ -27,13 +27,13 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-adapter-codex": "0.1.0",
-    "@arduano/agent-multiplex-adapter-copilot": "0.1.0",
-    "@arduano/agent-multiplex-adapter-mock": "0.1.0",
-    "@arduano/agent-multiplex-control-node-core": "0.1.0",
-    "@arduano/agent-multiplex-protocol": "0.1.0",
-    "@arduano/agent-multiplex-runtime-node-core": "0.1.0",
-    "@arduano/agent-multiplex-transport-p2prpc": "0.1.0",
+    "@arduano/agent-multiplex-adapter-codex": "0.2.0",
+    "@arduano/agent-multiplex-adapter-copilot": "0.2.0",
+    "@arduano/agent-multiplex-adapter-mock": "0.2.0",
+    "@arduano/agent-multiplex-control-node-core": "0.2.0",
+    "@arduano/agent-multiplex-protocol": "0.2.0",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.0",
+    "@arduano/agent-multiplex-transport-p2prpc": "0.2.0",
     "@types/node": "24.3.0"
   }
 }

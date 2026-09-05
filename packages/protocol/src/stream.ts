@@ -21,7 +21,7 @@ import {
   controlNodeIdSchema,
 } from "./ids.js";
 import { interactionRecordSchema } from "./interaction.js";
-import { jsonValueSchema } from "./json.js";
+import { nativePayloadSchema } from "./image.js";
 import { launchRecordSchema } from "./launch.js";
 import {
   metadataOperationRecordSchema,
@@ -134,7 +134,7 @@ const nativeEventCoreSchema = z.object({
   runtimeEpoch: runtimeEpochSchema,
   sequence: z.number().int().nonnegative(),
   nativeType: z.string().min(1),
-  payload: jsonValueSchema,
+  payload: nativePayloadSchema,
   ephemeral: z.boolean(),
 });
 

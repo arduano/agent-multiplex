@@ -32,7 +32,7 @@ describe("P2PControlNodeSourceClient", () => {
     };
     const manifest = {
       componentKind: "control-node" as const,
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
       sourceControlNodeId: controlNodeId,
       sourceControlNodeBootId: newControlNodeBootId(),
       authority,
@@ -53,7 +53,7 @@ describe("P2PControlNodeSourceClient", () => {
       dataRole: { role: "authority" as const, authority },
       connectedAt: timestamp,
       lastHeartbeatAt: timestamp,
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
       capabilities: [],
     };
     const snapshot = accessSnapshotSchema.parse({

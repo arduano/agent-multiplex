@@ -1135,7 +1135,7 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "thread/settings/updated" &&
-        event.payload?.threadSettings?.model === codexSecondModel,
+        event.payload.json?.threadSettings?.model === codexSecondModel,
     );
     await assertActionStatusClean("model switch");
     return {
@@ -1163,7 +1163,7 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "thread/settings/updated" &&
-        event.payload?.threadSettings?.collaborationMode?.mode === "plan",
+        event.payload.json?.threadSettings?.collaborationMode?.mode === "plan",
     );
     await assertActionStatusClean("Plan-mode switch");
 
@@ -1212,7 +1212,7 @@ async function exerciseCodexControls(sessionId) {
         event.change?.type === "interaction.changed" &&
         event.change.interaction?.interactionId === pending.interactionId &&
         event.change.interaction.state === "resolved" &&
-        deepEqual(event.change.interaction.resolution, JSON.parse(response)),
+        deepEqual(event.change.interaction.resolution.json, JSON.parse(response)),
     );
     await card.waitFor({ state: "detached", timeout: 30_000 });
     const resolvedNative = await waitForFleetEvent(
@@ -1221,7 +1221,7 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "serverRequest/resolved" &&
-        String(event.payload?.requestId) === pending.nativeRequestId,
+        String(event.payload.json?.requestId) === pending.nativeRequestId,
     );
     const finalMessage = await waitForFleetEvent(
       "typed Plan answer in the exact final Codex message",
@@ -1229,9 +1229,9 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "item/completed" &&
-        event.payload?.turnId === pending.payload?.params?.turnId &&
-        event.payload?.item?.type === "agentMessage" &&
-        event.payload.item.text === markers.planFinal,
+        event.payload.json?.turnId === pending.payload.json?.params?.turnId &&
+        event.payload.json?.item?.type === "agentMessage" &&
+        event.payload.json.item.text === markers.planFinal,
     );
     const completed = await waitForFleetEvent(
       "completed Codex Plan turn",
@@ -1239,8 +1239,8 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "turn/completed" &&
-        event.payload?.turn?.id === pending.payload?.params?.turnId &&
-        event.payload?.turn?.status === "completed",
+        event.payload.json?.turn?.id === pending.payload.json?.params?.turnId &&
+        event.payload.json?.turn?.status === "completed",
     );
     await waitForChatMessage("assistant", markers.planFinal, timeoutMs);
 
@@ -1261,7 +1261,7 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "thread/settings/updated" &&
-        event.payload?.threadSettings?.collaborationMode?.mode === "default",
+        event.payload.json?.threadSettings?.collaborationMode?.mode === "default",
     );
     await assertActionStatusClean("return to default mode");
     return {
@@ -1269,7 +1269,7 @@ async function exerciseCodexControls(sessionId) {
       modeSettingsSequence: modeSettings.sequence,
       prompt: prompts.plan,
       sendCommandId: sendCommand.change.command.commandId,
-      turnId: pending.payload.params.turnId,
+      turnId: pending.payload.json.params.turnId,
       interactionId: pending.interactionId,
       nativeRequestId: pending.nativeRequestId,
       answer: markers.planAnswer,
@@ -1302,11 +1302,11 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "item/started" &&
-        event.payload?.item?.type === "commandExecution" &&
-        event.payload?.item?.status === "inProgress",
+        event.payload.json?.item?.type === "commandExecution" &&
+        event.payload.json?.item?.status === "inProgress",
     );
-    const turnId = commandStarted.payload?.turnId;
-    const itemId = commandStarted.payload?.item?.id;
+    const turnId = commandStarted.payload.json?.turnId;
+    const itemId = commandStarted.payload.json?.item?.id;
     assert(typeof turnId === "string" && turnId, "long command item omitted its turn ID");
     assert(typeof itemId === "string" && itemId, "long command item omitted its item ID");
     await waitFor("second live Codex command tick", timeoutMs, async () => {
@@ -1315,9 +1315,9 @@ async function exerciseCodexControls(sessionId) {
         .filter((event) => event.kind === "native" &&
           event.sessionId === sessionId &&
           event.nativeType === "item/commandExecution/outputDelta" &&
-          event.payload?.turnId === turnId &&
-          event.payload?.itemId === itemId)
-        .map((event) => typeof event.payload?.delta === "string" ? event.payload.delta : "")
+          event.payload.json?.turnId === turnId &&
+          event.payload.json?.itemId === itemId)
+        .map((event) => typeof event.payload.json?.delta === "string" ? event.payload.json.delta : "")
         .join("")
         .includes(secondTick);
     });
@@ -1345,8 +1345,8 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "turn/completed" &&
-        event.payload?.turn?.id === turnId &&
-        event.payload?.turn?.status === "interrupted",
+        event.payload.json?.turn?.id === turnId &&
+        event.payload.json?.turn?.status === "interrupted",
     );
     const commandCompleted = await waitForFleetEvent(
       "terminal Codex command item after interrupt",
@@ -1354,21 +1354,21 @@ async function exerciseCodexControls(sessionId) {
       (event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "item/completed" &&
-        event.payload?.turnId === turnId &&
-        event.payload?.item?.id === itemId &&
-        event.payload?.item?.type === "commandExecution" &&
-        event.payload?.item?.status !== "inProgress",
+        event.payload.json?.turnId === turnId &&
+        event.payload.json?.item?.id === itemId &&
+        event.payload.json?.item?.type === "commandExecution" &&
+        event.payload.json?.item?.status !== "inProgress",
     );
     await waitForStableInterruptOutput(sessionId, turnId, markers.interruptPrefix, timeoutMs);
     const allEvents = await readFleetEvents();
     const turnEvents = allEvents.filter((event) =>
       event.kind === "native" &&
       event.sessionId === sessionId &&
-      (event.payload?.turnId === turnId || event.payload?.turn?.id === turnId),
+      (event.payload.json?.turnId === turnId || event.payload.json?.turn?.id === turnId),
     );
     const outputText = turnEvents
       .filter((event) => event.nativeType === "item/commandExecution/outputDelta")
-      .map((event) => event.payload?.delta ?? "")
+      .map((event) => event.payload.json?.delta ?? "")
       .join("");
     const ticks = [...outputText.matchAll(
       new RegExp(`${escapeRegExp(markers.interruptPrefix)}_(\\d{3})`, "g"),
@@ -1380,7 +1380,7 @@ async function exerciseCodexControls(sessionId) {
       `interrupted command continued unexpectedly through tick ${maximumObservedTick}`,
     );
     assert(
-      !turnEvents.some((event) => deepContainsExact(event.payload, markers.interruptFinished)),
+      !turnEvents.some((event) => deepContainsExact(event.payload.json, markers.interruptFinished)),
       "Codex emitted the forbidden post-command completion marker after interrupt",
     );
     await assertActionStatusClean("interrupt");
@@ -1453,7 +1453,7 @@ function isExpectedPlanInteraction(event, sessionId, state) {
     event.change.interaction?.requestType !== "userInput" ||
     event.change.interaction?.state !== state
   ) return false;
-  const payload = event.change.interaction.payload;
+  const payload = event.change.interaction.payload.json;
   const questions = payload?.params?.questions;
   if (
     payload?.method !== "item/tool/requestUserInput" ||
@@ -1502,8 +1502,8 @@ async function waitForStableInterruptOutput(sessionId, turnId, prefix, limitMs) 
       .filter((event) => event.kind === "native" &&
         event.sessionId === sessionId &&
         event.nativeType === "item/commandExecution/outputDelta" &&
-        event.payload?.turnId === turnId)
-      .map((event) => event.payload?.delta ?? "")
+        event.payload.json?.turnId === turnId)
+      .map((event) => event.payload.json?.delta ?? "")
       .join("");
     const ticks = [...output.matchAll(new RegExp(`${escapeRegExp(prefix)}_(\\d{3})`, "g"))]
       .map((match) => Number(match[1]));

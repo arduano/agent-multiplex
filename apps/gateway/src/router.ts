@@ -62,7 +62,7 @@ export function createAccessGatewayRouter(
         .output(accessContract.system.describe.output)
         .query(() => ({
           application: "agent-multiplex" as const,
-          protocolVersion: 4 as const,
+          protocolVersion: 5 as const,
           instanceId: options.instanceId,
           componentKind: "access-gateway" as const,
           dataAuthority: "none" as const,
@@ -280,6 +280,22 @@ export function createAccessGatewayRouter(
               item.kind !== "control" || item.change.type === "archive.changed",
           ),
         ),
+    }),
+    images: gatewayTrpc.router({
+      beginUpload: agentControl.input(accessContract.images.beginUpload.input).output(accessContract.images.beginUpload.output)
+        .mutation(({ input }) => guarded(() => projection.beginImageUpload(input))),
+      writeUpload: agentControl.input(accessContract.images.writeUpload.input).output(accessContract.images.writeUpload.output)
+        .mutation(({ input }) => guarded(() => projection.writeImageUpload(input))),
+      commitUpload: agentControl.input(accessContract.images.commitUpload.input).output(accessContract.images.commitUpload.output)
+        .mutation(({ input }) => guarded(() => projection.commitImageUpload(input))),
+      abortUpload: agentControl.input(accessContract.images.abortUpload.input).output(accessContract.images.abortUpload.output)
+        .mutation(({ input }) => guarded(() => projection.abortImageUpload(input))),
+      resolvePath: read.input(accessContract.images.resolvePath.input).output(accessContract.images.resolvePath.output)
+        .mutation(({ input }) => guarded(() => projection.resolveImagePath(input))),
+      read: read.input(accessContract.images.read.input).output(accessContract.images.read.output)
+        .query(({ input }) => guarded(() => projection.readImage(input))),
+      limits: read.input(accessContract.images.limits.input).output(accessContract.images.limits.output)
+        .query(({ input }) => guarded(() => projection.imageLimits(input))),
     }),
     terminals: gatewayTrpc.router({
       get: terminalView

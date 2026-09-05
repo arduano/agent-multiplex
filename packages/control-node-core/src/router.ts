@@ -211,6 +211,22 @@ export function createAccessRouter(service: ControlNodeService) {
           includeNative: false,
         }, signal)),
     }),
+    images: t.router({
+      beginUpload: scoped("agent-control").input(accessContract.images.beginUpload.input).output(accessContract.images.beginUpload.output)
+        .mutation(({ input }) => guarded(() => service.beginImageUpload(input))),
+      writeUpload: scoped("agent-control").input(accessContract.images.writeUpload.input).output(accessContract.images.writeUpload.output)
+        .mutation(({ input }) => guarded(() => service.writeImageUpload(input))),
+      commitUpload: scoped("agent-control").input(accessContract.images.commitUpload.input).output(accessContract.images.commitUpload.output)
+        .mutation(({ input }) => guarded(() => service.commitImageUpload(input))),
+      abortUpload: scoped("agent-control").input(accessContract.images.abortUpload.input).output(accessContract.images.abortUpload.output)
+        .mutation(({ input }) => guarded(() => service.abortImageUpload(input))),
+      resolvePath: scoped("read").input(accessContract.images.resolvePath.input).output(accessContract.images.resolvePath.output)
+        .mutation(({ input }) => guarded(() => service.resolveImagePath(input))),
+      read: scoped("read").input(accessContract.images.read.input).output(accessContract.images.read.output)
+        .query(({ input }) => guarded(() => service.readImage(input))),
+      limits: scoped("read").input(accessContract.images.limits.input).output(accessContract.images.limits.output)
+        .query(({ input }) => guarded(() => service.imageLimits(input))),
+    }),
     terminals: t.router({
       get: scoped("terminal-view")
         .input(accessContract.terminals.get.input)
@@ -447,6 +463,22 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
         .input(controlNodeLinkContract.archives.get.input)
         .output(controlNodeLinkContract.archives.get.output)
         .query(({ input, ctx }) => checked(ctx, input, () => service.getArchive(input.archiveOperationId))),
+    }),
+    images: t.router({
+      beginUpload: t.procedure.input(controlNodeLinkContract.images.beginUpload.input).output(controlNodeLinkContract.images.beginUpload.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.beginImageUpload(input.request))),
+      writeUpload: t.procedure.input(controlNodeLinkContract.images.writeUpload.input).output(controlNodeLinkContract.images.writeUpload.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.writeImageUpload(input.request))),
+      commitUpload: t.procedure.input(controlNodeLinkContract.images.commitUpload.input).output(controlNodeLinkContract.images.commitUpload.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.commitImageUpload(input.request))),
+      abortUpload: t.procedure.input(controlNodeLinkContract.images.abortUpload.input).output(controlNodeLinkContract.images.abortUpload.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.abortImageUpload(input.request))),
+      resolvePath: t.procedure.input(controlNodeLinkContract.images.resolvePath.input).output(controlNodeLinkContract.images.resolvePath.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.resolveImagePath(input.request))),
+      read: t.procedure.input(controlNodeLinkContract.images.read.input).output(controlNodeLinkContract.images.read.output)
+        .query(({ input, ctx }) => checked(ctx, input, () => service.readImage(input.request))),
+      limits: t.procedure.input(controlNodeLinkContract.images.limits.input).output(controlNodeLinkContract.images.limits.output)
+        .query(({ input, ctx }) => checked(ctx, input, () => service.imageLimits(input.request))),
     }),
     terminals: t.router({
       get: t.procedure

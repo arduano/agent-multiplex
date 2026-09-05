@@ -13,6 +13,7 @@ import type {
   ControlNodeSubtreeSnapshotPage,
   Harness,
   InteractionRecord,
+  ImagePort,
   InventorySnapshot,
   LaunchId,
   LaunchListInput,
@@ -56,7 +57,7 @@ import type {
 } from "@arduano/agent-multiplex-protocol";
 
 /** Reverse RPC port associated with one authenticated runtime-node peer. */
-export interface RuntimeNodeConnection {
+export interface RuntimeNodeConnection extends ImagePort {
   readonly runtimeNodeId: RuntimeNodeId;
   readonly runtimeNodeBootId: RuntimeNodeBootId;
   readonly endpointId?: string | undefined;
@@ -94,7 +95,7 @@ export interface RuntimeNodeConnection {
 }
 
 /** One immediate child; recursive routing stays behind this typed boundary. */
-export interface ChildControlNodeConnection {
+export interface ChildControlNodeConnection extends ImagePort {
   readonly controlNodeId: ControlNodeId;
   readonly controlNodeBootId: ControlNodeBootId;
   readonly endpointId?: string | undefined;

@@ -181,7 +181,7 @@ function nativeItem(sequence: number): AccessStreamItem {
     runtimeEpoch,
     sequence,
     nativeType: "item/updated",
-    payload: { text: "hello" },
+    payload: { encoding: "native-json-images-v1", json: { text: "hello" }, images: [] },
     ephemeral: false,
     provenance: { originControlNodeId, authority },
   });

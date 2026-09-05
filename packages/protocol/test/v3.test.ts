@@ -47,7 +47,7 @@ describe("protocol v4 data roles", () => {
       dataRole: { role: "authority", authority: authority() },
       connectedAt: now,
       lastHeartbeatAt: now,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: [],
     };
 
@@ -94,7 +94,7 @@ describe("protocol v4 data roles", () => {
       controlNodeBootId: newControlNodeBootId(),
       feedId: newFeedId(),
       name: "child",
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: [],
       expectedParentControlNodeId: newControlNodeId(),
       childProof: {
@@ -129,7 +129,7 @@ describe("protocol v4 source and stream fences", () => {
     const sourceControlNodeId = newControlNodeId();
     const manifest = {
       componentKind: "control-node",
-      protocolVersion: 4,
+      protocolVersion: 5,
       sourceControlNodeId,
       sourceControlNodeBootId: newControlNodeBootId(),
       authority: authority(sourceControlNodeId),
@@ -260,7 +260,7 @@ describe("protocol v4 source and stream fences", () => {
         },
         connectedAt: null,
         lastHeartbeatAt: null,
-        protocolVersion: 4,
+        protocolVersion: 5,
         capabilities: [],
       }).success,
     ).toBe(true);
@@ -279,12 +279,12 @@ describe("protocol v4 source and stream fences", () => {
       dataRole: { role: "authority" as const, authority: authorityRef },
       connectedAt: now,
       lastHeartbeatAt: now,
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
       capabilities: [],
     };
     const manifest = {
       componentKind: "control-node" as const,
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
       sourceControlNodeId: controlNodeId,
       sourceControlNodeBootId: descriptor.controlNodeBootId,
       authority: authorityRef,
@@ -378,7 +378,7 @@ describe("protocol v4 source and stream fences", () => {
       source: {
         manifest: {
           componentKind: "control-node" as const,
-          protocolVersion: 4 as const,
+          protocolVersion: 5 as const,
           sourceControlNodeId: controlNodeId,
           sourceControlNodeBootId: controlNodeBootId,
           authority: authorityRef,
@@ -401,7 +401,7 @@ describe("protocol v4 source and stream fences", () => {
         dataRole: { role: "authority" as const, authority: authorityRef },
         connectedAt: now,
         lastHeartbeatAt: now,
-        protocolVersion: 4 as const,
+        protocolVersion: 5 as const,
         capabilities: [],
       }],
       runtimeNodes: [{
@@ -416,7 +416,7 @@ describe("protocol v4 source and stream fences", () => {
         allowedRoots: ["/work"],
         harnesses: [],
         launchProfiles: [],
-        protocolVersion: 4 as const,
+        protocolVersion: 5 as const,
       }],
       sessions: [session, { ...session, sessionId: newSessionId() }],
       interactions: [],
@@ -437,7 +437,7 @@ describe("protocol v4 source and stream fences", () => {
       source: {
         manifest: {
           componentKind: "control-node" as const,
-          protocolVersion: 4 as const,
+          protocolVersion: 5 as const,
           sourceControlNodeId: controlNodeId,
           sourceControlNodeBootId: controlNodeBootId,
           authority: authorityRef,
@@ -460,7 +460,7 @@ describe("protocol v4 source and stream fences", () => {
         dataRole: { role: "authority" as const, authority: authorityRef },
         connectedAt: now,
         lastHeartbeatAt: now,
-        protocolVersion: 4 as const,
+        protocolVersion: 5 as const,
         capabilities: [],
       }],
       runtimeNodes: [{
@@ -475,7 +475,7 @@ describe("protocol v4 source and stream fences", () => {
         allowedRoots: ["/work"],
         harnesses: [],
         launchProfiles: [],
-        protocolVersion: 4 as const,
+        protocolVersion: 5 as const,
       }],
       sessions: [{
         sessionId,

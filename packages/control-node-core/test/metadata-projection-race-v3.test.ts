@@ -1,3 +1,4 @@
+import { packNativePayload } from "@arduano/agent-multiplex-protocol";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,7 +46,7 @@ function addSession(catalog: ControlNodeCatalog, vendorSessionId: string) {
     name: `runtime-${vendorSessionId}`,
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 4,
+    protocolVersion: 5,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -158,7 +159,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -451,7 +452,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -465,7 +466,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       name: "command-child-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     parent.replaceChildSnapshot(
       childNode.controlNodeId,
@@ -552,7 +553,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 4,
+      protocolVersion: 5,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -566,7 +567,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       name: "proxy-command-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 4,
+      protocolVersion: 5,
     });
     parent.replaceChildSnapshot(
       childNode.controlNodeId,
@@ -619,7 +620,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
     const childTerminal = commandRecordSchema.parse({
       ...childStarted,
       state: "succeeded",
-      result: { sessionId, vendorSessionId: "native-proxy-session" },
+      result: packNativePayload({ sessionId, vendorSessionId: "native-proxy-session" }),
       updatedAt: completedAt,
     });
     const beforeTerminal = child.controlCursor();
@@ -646,7 +647,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       cursor: terminalEvent.cursor + 1,
       change: {
         type: "command.changed" as const,
-        command: { ...childTerminal, result: { forged: true } },
+        command: { ...childTerminal, result: packNativePayload({ forged: true }) },
       },
     };
     expect(() => parent.importChildControl(
@@ -703,7 +704,7 @@ function attachControlNode(
     feedId: local.feedId,
     name: local.name,
     endpointId: local.endpointId,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

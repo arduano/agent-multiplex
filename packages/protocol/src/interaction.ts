@@ -3,6 +3,7 @@ import { z } from "zod";
 import { harnessSchema } from "./harness.js";
 import { interactionIdSchema, runtimeEpochSchema, sessionIdSchema } from "./ids.js";
 import { jsonValueSchema } from "./json.js";
+import { nativePayloadSchema } from "./image.js";
 import { isoDateSchema } from "./session.js";
 
 export const interactionStateSchema = z.enum([
@@ -26,10 +27,10 @@ export const interactionRecordSchema = z.object({
     "exitPlan",
     "other",
   ]),
-  payload: jsonValueSchema,
+  payload: nativePayloadSchema,
   ephemeral: z.boolean(),
   state: interactionStateSchema,
-  resolution: jsonValueSchema.optional(),
+  resolution: nativePayloadSchema.optional(),
   createdAt: isoDateSchema,
   expiresAt: isoDateSchema.nullable(),
   resolvedAt: isoDateSchema.nullable(),

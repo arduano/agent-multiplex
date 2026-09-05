@@ -1,15 +1,17 @@
 # Contributing
 
 Thank you for helping improve Agent Multiplex. The project is currently a
-protocol-v4 internal/personal control plane with experimental upstream harness
+protocol-v5 internal/personal control plane with experimental upstream harness
 boundaries, so small changes with explicit invariants and evidence are preferred.
 
 ## Before proposing a change
 
-Read the [wiki home](../docs/wiki/Home.md),
-[protocol-v4 checkpoint](../docs/checkpoint-v4.md), and the relevant deep design.
-Open a design issue before changing the wire protocol, data authority, topology,
-persistence format, plugin trust boundary, or public package graph.
+Read the [current-state handoff](../docs/wiki/Current-State.md), then the
+relevant topical guide and deep design from the
+[wiki home](../docs/wiki/Home.md). The
+[protocol-v4 checkpoint](../docs/checkpoint-v4.md) is the release-evidence
+ledger. Open a design issue before changing the wire protocol, data authority,
+topology, persistence format, plugin trust boundary, or public package graph.
 
 Security reports must follow [SECURITY.md](../SECURITY.md), not a public issue.
 Scrub tickets, tokens, transcripts, private source, terminal output, auth homes,

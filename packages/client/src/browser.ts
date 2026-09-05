@@ -2,6 +2,7 @@
  * Browser-only client surface. Keep this export list explicit: importing it
  * must not evaluate the synchronous command helpers or native p2prpc transport.
  */
+export * from "./images.js";
 export {
   createAccessClient,
   type AccessClient,

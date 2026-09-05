@@ -40,7 +40,7 @@ function requestFor(
     feedId: local.feedId,
     name: local.name,
     ...(local.endpointId === undefined ? {} : { endpointId: local.endpointId }),
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: proof,
@@ -67,7 +67,7 @@ function freshRequest(
     feedId: newFeedId(),
     name: "fresh-child",
     endpointId: `endpoint-${controlNodeId}`,
-    protocolVersion: 4,
+    protocolVersion: 5,
     capabilities: [],
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: {

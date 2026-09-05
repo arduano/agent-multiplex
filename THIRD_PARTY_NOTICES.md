@@ -63,3 +63,14 @@ Before publishing a binary, container, web bundle, or npm package, generate an
 SBOM from the exact lockfile/artifact, inspect every `UNKNOWN` or custom license,
 and ship all license/NOTICE files required by that artifact. This summary is a
 navigation aid, not a substitute for the full upstream licenses or legal review.
+
+
+## Image transport and rendering review
+
+The v5 image feature uses existing Node filesystem/crypto APIs, the already
+included `@noble/hashes` client dependency, and browser Blob/image rendering. It
+adds no SVG renderer, converter, image codec package, or external image-fetch
+service. Runtime code preserves image bytes. Native vendor image data and
+user-supplied images retain their owners' applicable terms; the project's MIT
+license does not relicense those contents. Regenerate the web license inventory
+and SBOM from the exact release artifact as usual.

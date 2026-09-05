@@ -1,6 +1,6 @@
-# Agent Multiplex protocol v4 data roles
+# Agent Multiplex protocol v5 data roles
 
-Protocol v4 separates data authority, execution, aggregation, and presentation.
+Protocol v5 separates data authority, execution, aggregation, and presentation.
 The distinction is an invariant, not merely naming.
 
 ## Roles
@@ -22,7 +22,7 @@ A detached branch becomes authoritative only through `authority.promote`.
 Promotion is a local database transaction which mints a fresh realm ID and a
 fresh authority epoch ID. Neither identifier is supplied by the caller.
 
-The v4 MVP deliberately fails closed on the online `topology.detach` mutation.
+The current MVP deliberately fails closed on the online `topology.detach` mutation.
 A correct graceful detach requires a durable prepare/drain/commit handshake
 across the child feed and the independently transported metadata outbox; a
 single parent-side transaction cannot provide that guarantee. The supported
@@ -96,7 +96,7 @@ These checks prevent implicit reparenting and practical ancestor/descendant
 cycles before either catalog mutates. The subtree proof is an authenticated
 claim by the child inside the internal p2prpc trust domain; mutually malicious
 or simultaneously attaching peers would require a multi-party reservation
-protocol, which is outside the v4 single-writer MVP.
+protocol, which is outside the current single-writer MVP.
 
 ## Launch extension roles
 
@@ -125,7 +125,7 @@ sessions. It exposes no metadata mutation, agent command, terminal, source,
 topology, or authority methods. This is an API-discipline boundary, not a
 sandbox: a statically imported TypeScript module is trusted with the gateway
 process. Dynamic package installation and remotely supplied plugin code are
-outside protocol v4.
+outside protocol v5.
 
 Runtime providers and backends are also registered statically at process
 startup. The runtime independently validates every input even when a gateway
@@ -141,7 +141,7 @@ state machines and a concrete PR-review/container composition.
 
 ## Session catalog lifecycle
 
-Protocol v4 deliberately separates catalog visibility from transient native
+Protocol v5 deliberately separates catalog visibility from transient native
 status. The stable user-facing state is derived as follows:
 
 | State | Durable representation | Default visibility | Allowed next actions |
@@ -190,6 +190,14 @@ does not pretend rollback or blindly repeat it. The runtime tombstone survives
 restart and prevents later app-server inventory from resurrecting the released
 native binding. Archiving one session never closes a shared app server; process
 shutdown remains a separate backend lifecycle.
+
+## Runtime images
+
+Image bytes belong to the runtime that owns the session binding. Controls route
+bounded transfers and journal native payload descriptors; gateways retain no
+durable image store. Read/path resolution uses `read`, uploads use
+`agent-control`, and archive releases retained images. The full byte, path,
+retention, and migration rules live in [the image design](images-v5.md).
 
 ## Ephemeral terminal side channel
 
@@ -345,6 +353,20 @@ journals, provider-private checkpoints, archived-binding tombstones, and
 metadata outboxes. Managed PTYs, replay buffers, and keyboard leases are
 explicitly excluded.
 
+Runtime shutdown closes admission before draining all previously admitted
+native/provider operations, including commands, history, inventory, and
+interaction responses. Dependencies stay open until that work settles. It
+then attempts terminal, session-handle, backend, and provider cleanup, waits
+for every attempt, and reports aggregate failures. Repeated close calls share
+the same completion; the embedding process closes SQLite afterward in
+`finally`. No new shutdown timeout or forced-cancellation policy is implied.
+
+The Codex RPC client separately gates ordinary requests on its complete
+initialization handshake. Closure fences unfinished preparation, retires the
+connection, and settles every pending request. Dispatched requests without a
+definitive response retain unknown-outcome semantics. Failed initialization
+cleans up its connection before a new startup attempt.
+
 Gateway SQLite stores contain operational data only: source configuration,
 pinned locators, renewed tickets, independent upstream cursors, and health.
 They never contain an authoritative domain projection.
@@ -358,7 +380,10 @@ identity; the stable listener preserves the ticket's direct route.
 All stores use distinct SQLite application IDs, WAL, full synchronization,
 foreign keys, integrity checks, strict tables, an exclusive lifetime writer
 lock, checkpoint/backup APIs, and immutable migration ledgers. Control and
-runtime stores migrate an exact v3 ledger prefix transactionally to v4. The
+runtime stores retain their released v3/v4 ledger entries and append v5
+migrations for image storage and bounded native payload envelopes. Incompatible
+legacy payloads cause an atomic migration refusal; immutable receipts are never
+truncated or silently rewritten. See [images](images-v5.md). The
 gateway operational schema remains at its unchanged v3 migration target; schema
 version is per store, not a claim about wire compatibility. Foreign,
 unversioned, future, corrupt, or rewritten migration histories fail closed.
@@ -387,3 +412,13 @@ authenticated transport channels. The browser does not send fragments to the
 gateway, but the credential remains exposed to browser history, the address
 bar, extensions, screenshots, and anyone receiving the link; production and
 shared deployments should not use this convenience bootstrap.
+
+### Static external authentication composition
+
+A bespoke gateway may supply its own HTTP/WebSocket surface to the reference
+gateway supervisor. That surface must explicitly declare external authentication
+and build an authenticated, scoped request context before invoking the exported
+access router. Native bearer configuration cannot be combined with this mode.
+The trusted application owns origin/CSRF defenses and authentication expiry for
+long-lived connections, and retains the maintained ingress/egress byte bounds.
+This embedding API changes no wire contract or data authority.

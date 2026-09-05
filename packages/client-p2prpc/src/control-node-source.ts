@@ -1,3 +1,16 @@
+import type {
+  ImageAbortUploadResult,
+  ImageBeginUploadInput,
+  ImageDescriptor,
+  ImageLimits,
+  ImageReadInput,
+  ImageReadResult,
+  ImageResolvePathInput,
+  ImageTarget,
+  ImageUploadIdInput,
+  ImageUploadState,
+  ImageWriteUploadInput,
+} from "@arduano/agent-multiplex-protocol";
 import {
   accessSnapshotSchema,
   accessStreamItemSchema,
@@ -213,6 +226,34 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
         sessionId,
         request,
       }));
+  }
+
+  public async beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {
+    return this.#mutation(async () => (await this.#access()).images.beginUpload.mutate(input));
+  }
+
+  public async writeImageUpload(input: ImageWriteUploadInput): Promise<ImageUploadState> {
+    return this.#mutation(async () => (await this.#access()).images.writeUpload.mutate(input));
+  }
+
+  public async commitImageUpload(input: ImageUploadIdInput): Promise<ImageDescriptor> {
+    return this.#mutation(async () => (await this.#access()).images.commitUpload.mutate(input));
+  }
+
+  public async abortImageUpload(input: ImageUploadIdInput): Promise<ImageAbortUploadResult> {
+    return this.#mutation(async () => (await this.#access()).images.abortUpload.mutate(input));
+  }
+
+  public async resolveImagePath(input: ImageResolvePathInput): Promise<ImageDescriptor> {
+    return this.#mutation(async () => (await this.#access()).images.resolvePath.mutate(input));
+  }
+
+  public async readImage(input: ImageReadInput): Promise<ImageReadResult> {
+    return this.#query(async () => (await this.#access()).images.read.query(input));
+  }
+
+  public async imageLimits(input: ImageTarget): Promise<ImageLimits> {
+    return this.#query(async () => (await this.#access()).images.limits.query(input));
   }
 
   public async getTerminal(input: TerminalGetInput) {

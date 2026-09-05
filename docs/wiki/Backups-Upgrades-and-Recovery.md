@@ -9,7 +9,7 @@ owned by a launch provider.
 | Role | Preserve together | What loss means |
 | --- | --- | --- |
 | Control node | SQLite database, live WAL/SHM when applicable, endpoint identity | Canonical catalog, metadata, authority, topology, operation feed, endpoint pin |
-| Runtime node | Entire runtime state directory, SQLite/WAL/SHM, endpoint identity, provider-managed recovery references | Bindings, commands, outbox, launch/archive checkpoints and tombstones |
+| Runtime node | Entire runtime state directory, SQLite/WAL/SHM, endpoint identity, provider-managed recovery references | Bindings, commands, outbox, launch/archive checkpoints, tombstones, and retained images |
 | Gateway | Gateway SQLite and identity | Source locators, renewed tickets, cursors, health; no canonical domain data |
 | Harness/provider | Native auth/config and provider resources under their own backup policy | Native history or external workspace/container state |
 
@@ -23,6 +23,12 @@ SQLite backup. It creates and integrity-checks a destination without copying a
 changing WAL by hand. If an application does not expose that API operationally,
 stop its sole writer cleanly, verify it has exited, and copy the database plus
 identity/state unit from explicit paths.
+
+Runtime images are separate private files: the reference app uses
+`<stateDirectory>/images`, while the default embedded file store uses
+`<sqlite filename>.images`. A SQLite `backup()` alone does not copy them. Stop
+the runtime and preserve the complete database/image/identity unit together
+unless the embedding provides a coordinated filesystem snapshot.
 
 Never copy only a live `.sqlite` file while ignoring its `-wal` file. Do not
 reuse one backup as two live nodes; endpoint identity and single-writer state
@@ -87,9 +93,18 @@ node_modules/.bin/codex app-server generate-ts --experimental \
   --out packages/adapter-codex/src/generated
 ```
 
-Do not assume protocol-v4 labels alone make arbitrary old/new builds safe for a
-rolling upgrade. Qualify the exact mixed-version sequence or take a coordinated
-maintenance window.
+Protocol v5 is a coordinated upgrade of controls, runtimes, gateways, and
+clients; mixed v4/v5 peers are rejected. New control/runtime migrations append
+version 5 while retaining the released v3/v4 identities. They wrap legacy native
+receipts exactly once. An oversized legacy payload refuses migration atomically
+and preserves the original database and migration ledger. Keep a complete
+pre-upgrade backup and resolve incompatible records through an explicit
+upgrade/export decision; do not truncate receipts or edit released migrations.
+See [the image design](../design/images-v5.md).
+
+The Docker command names above retain `v4` for compatibility with existing
+automation; they test the current source, whose wire protocol is v5. Historical
+v4 receipts qualify only their recorded released source.
 
 ## Recovery decisions
 
@@ -118,7 +133,7 @@ runtime and reconcile old external/provider resources manually.
 Restore the control database and identity first. Promotion of an explicitly
 detached branch creates a new realm/epoch; it is disaster recovery, not a
 transparent replica election. Any later reunion of divergent realms is an
-administrative data merge outside protocol v4.
+administrative data merge outside protocol v5.
 
 ### `outcomeUnknown`
 

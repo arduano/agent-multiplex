@@ -19,6 +19,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 import type { RuntimeAgentBackend } from "./adapter.js";
+import { collectCleanupErrors, waitForAll } from "./settled-work.js";
 
 /** Durable provider output written before the first native spawn attempt. */
 export interface RuntimePreparedLaunch {
@@ -211,11 +212,17 @@ export class LaunchProviderRegistry {
   }
 
   public async closeProviders(): Promise<void> {
-    await Promise.all([...this.#providers.values()].map((provider) => provider.close?.()));
+    const errors = await collectCleanupErrors(
+      [...this.#providers.values()].map((provider) => () => provider.close?.()),
+    );
+    if (errors.length > 0) throw new AggregateError(errors, "launch provider cleanup failed");
   }
 
   public async closeBackends(): Promise<void> {
-    await Promise.all(this.backends().map((backend) => backend.adapter.close()));
+    const errors = await collectCleanupErrors(
+      this.backends().map((backend) => () => backend.adapter.close()),
+    );
+    if (errors.length > 0) throw new AggregateError(errors, "agent backend cleanup failed");
   }
 
   #registerBackend(backend: RuntimeAgentBackend): void {
@@ -338,8 +345,8 @@ export class DirectWorkspaceLaunchProvider implements RuntimeLaunchProvider {
   ): Promise<NativeModel[]> {
     const configured = this.#backendByHarness.get(harness);
     if (!configured) return [];
-    const results = await Promise.all(
-      [...configured.keys()].map((backendId) => context.backend(backendId).adapter.listModels()),
+    const results = await waitForAll(
+      [...configured.keys()].map(async (backendId) => context.backend(backendId).adapter.listModels()),
     );
     return deduplicateModels(results.flat());
   }

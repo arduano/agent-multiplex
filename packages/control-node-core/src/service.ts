@@ -1,3 +1,19 @@
+import {
+  assertImageResponseTarget,
+  imageContract,
+  type ImageAbortUploadResult,
+  type ImageBeginUploadInput,
+  type ImageDescriptor,
+  type ImageLimits,
+  type ImagePort,
+  type ImageReadInput,
+  type ImageReadResult,
+  type ImageResolvePathInput,
+  type ImageTarget,
+  type ImageUploadIdInput,
+  type ImageUploadState,
+  type ImageWriteUploadInput,
+} from "@arduano/agent-multiplex-protocol";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -100,7 +116,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 import { ControlNodeCatalog, type RuntimeNodeRoute, type SessionFilter } from "./catalog.js";
-import { ControlNodeCoreError } from "./errors.js";
+import { ControlNodeCoreError, readValidatedTRPCClientErrorCode } from "./errors.js";
 import { ControlNodeEventHub } from "./event-hub.js";
 import type {
   AccessContext,
@@ -199,6 +215,8 @@ interface DispatchRouteFence {
   readonly lineageId?: import("@arduano/agent-multiplex-protocol").LineageId;
 }
 
+type LaunchConnection = Pick<RuntimeNodeConnection, "createLaunch" | "getLaunch">;
+
 type TerminalConnection = Required<Pick<
   RuntimeNodeConnection,
   | "getTerminal"
@@ -290,7 +308,7 @@ export class ControlNodeService {
   public describe() {
     return {
       application: "agent-multiplex" as const,
-      protocolVersion: 4 as const,
+      protocolVersion: 5 as const,
       componentKind: "control-node" as const,
       dataAuthority: "control-node" as const,
       instanceId: this.#instanceId,
@@ -1001,7 +1019,7 @@ export class ControlNodeService {
     // session under a fresh logical ID. Each forwarding control records its
     // own admission timestamp; record merging retains that local timestamp.
     const admittedAt = this.#now().toISOString();
-    this.catalog.recordLaunch(launchRecordSchema.parse({
+    const admitted = this.catalog.recordLaunch(launchRecordSchema.parse({
       ...request,
       implementationVersion: profile.implementationVersion,
       state: "accepted",
@@ -1009,25 +1027,10 @@ export class ControlNodeService {
       updatedAt: admittedAt,
     }), route.immediateChildControlNodeId ?? null);
 
-    const promise = (async () => {
-      let resultValue: LaunchRecord;
-      try {
-        resultValue = route.immediateChildControlNodeId
-          ? await this.#child(route).createLaunch(request)
-          : await this.#runtime(request.runtimeNodeId).createLaunch(request);
-      } catch (cause) {
-        const durable = this.catalog.getLaunch(request.launchId);
-        if (durable) return durable;
-        throw cause;
-      }
-      const result = launchRecordSchema.parse(resultValue);
-      this.#assertDispatchFence(fence);
-      assertLaunchRequest(result, request);
-      return this.catalog.recordLaunch(
-        result,
-        route.immediateChildControlNodeId ?? null,
-      );
-    })();
+    const owner = route.immediateChildControlNodeId
+      ? this.#child(route)
+      : this.#runtime(request.runtimeNodeId);
+    const promise = this.#dispatchLaunch(admitted, owner, route, fence);
     this.#launchDispatches.set(request.launchId, { request, promise });
     const release = () => {
       if (this.#launchDispatches.get(request.launchId)?.promise === promise) {
@@ -1134,6 +1137,64 @@ export class ControlNodeService {
     return route.immediateChildControlNodeId
       ? this.#child(route).readNativeHistory(sessionId, request)
       : this.#runtime(session.runtimeNodeId).readNativeHistory(sessionId, request);
+  }
+
+  public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {
+    const request = imageContract.beginUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.beginImageUpload(request))
+      .then((result) => imageContract.beginUpload.output.parse(result));
+  }
+
+  public writeImageUpload(input: ImageWriteUploadInput): Promise<ImageUploadState> {
+    const request = imageContract.writeUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.writeImageUpload(request))
+      .then((result) => imageContract.writeUpload.output.parse(result));
+  }
+
+  public commitImageUpload(input: ImageUploadIdInput): Promise<ImageDescriptor> {
+    const request = imageContract.commitUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.commitImageUpload(request))
+      .then((result) => imageContract.commitUpload.output.parse(result));
+  }
+
+  public abortImageUpload(input: ImageUploadIdInput): Promise<ImageAbortUploadResult> {
+    const request = imageContract.abortUpload.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.abortImageUpload(request))
+      .then((result) => imageContract.abortUpload.output.parse(result));
+  }
+
+  public resolveImagePath(input: ImageResolvePathInput): Promise<ImageDescriptor> {
+    const request = imageContract.resolvePath.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.resolveImagePath(request))
+      .then((result) => imageContract.resolvePath.output.parse(result));
+  }
+
+  public readImage(input: ImageReadInput): Promise<ImageReadResult> {
+    const request = imageContract.read.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.readImage(request))
+      .then((result) => imageContract.read.output.parse(result));
+  }
+
+  public imageLimits(input: ImageTarget): Promise<ImageLimits> {
+    const request = imageContract.limits.input.parse(input);
+    return this.#routeImage(request, (owner) => owner.imageLimits(request))
+      .then((result) => imageContract.limits.output.parse(result));
+  }
+
+  async #routeImage<T>(input: ImageTarget, operation: (owner: ImagePort) => Promise<T>): Promise<T> {
+    this.#assertOpenBinding(input.sessionId, input.runtimeNodeId, input.bindingRevision);
+    const fence = this.#captureDispatchFence(input.runtimeNodeId);
+    if (fence.runtimeNodeBootId !== input.runtimeNodeBootId) {
+      throw new ControlNodeCoreError("FENCED", "image request targets an obsolete runtime boot");
+    }
+    const route = this.#route(input.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(input.runtimeNodeId);
+    const result = await operation(owner);
+    try { assertImageResponseTarget(input, result); }
+    catch (cause) { throw new ControlNodeCoreError("FENCED", "image response escaped the requested target", undefined, { cause }); }
+    this.#assertDispatchFence(fence);
+    this.#assertOpenBinding(input.sessionId, input.runtimeNodeId, input.bindingRevision);
+    return result;
   }
 
   public async getTerminal(input: TerminalGetInput): Promise<TerminalDescriptor | null> {
@@ -1332,7 +1393,7 @@ export class ControlNodeService {
       if (
         current.state === "resolved" &&
         current.resolution !== undefined &&
-        sameJson(current.resolution, input.response)
+        current.resolution.images.length === 0 && sameJson(current.resolution.json, input.response)
       ) return current;
       throw new ControlNodeCoreError(
         "CONFLICT",
@@ -2168,27 +2229,84 @@ export class ControlNodeService {
   async #refreshLaunch(current: LaunchRecord): Promise<LaunchRecord> {
     let recoveredInput: LaunchRecord | null;
     let route: RuntimeNodeRoute;
+    let owner: LaunchConnection;
+    let fence: DispatchRouteFence;
     try {
       route = this.#route(current.runtimeNodeId);
-      const fence = this.#captureDispatchFence(current.runtimeNodeId);
-      const owner = route.immediateChildControlNodeId
+      fence = this.#captureDispatchFence(current.runtimeNodeId);
+      owner = route.immediateChildControlNodeId
         ? this.#child(route)
         : this.#runtime(current.runtimeNodeId);
       recoveredInput = await owner.getLaunch(current.launchId);
-      if (recoveredInput === null && current.state === "accepted") {
-        // A crash can occur after local durable admission but before the first
-        // downstream dispatch. Reissuing an accepted request is safe because
-        // every runtime/child journals launchId before doing provider work and
-        // rejects reuse with a different immutable payload.
-        recoveredInput = await owner.createLaunch(launchRequestFromRecord(current));
-      }
       this.#assertDispatchFence(fence);
-    } catch {
+    } catch (cause) {
       // Reads are safe to retry. Preserve the durable local progress marker
       // while the owning route is temporarily unavailable.
+      if (isLaunchIdentityConflict(cause)) throw cause;
       return current;
     }
+    if (recoveredInput === null && current.state === "accepted") {
+      // A crash can occur after local admission but before dispatch. Reissue
+      // the same immutable request through the ordinary rejection/recovery
+      // path; the owner's journal prevents duplicate provider work.
+      return this.#dispatchLaunch(current, owner, route, fence);
+    }
     if (recoveredInput === null) return current;
+    return this.#recordLaunchResponse(current, recoveredInput, route);
+  }
+
+  async #dispatchLaunch(
+    current: LaunchRecord,
+    owner: LaunchConnection,
+    route: RuntimeNodeRoute,
+    fence: DispatchRouteFence,
+  ): Promise<LaunchRecord> {
+    let response: LaunchRecord;
+    try {
+      response = await owner.createLaunch(launchRequestFromRecord(current));
+    } catch (cause) {
+      if (cause instanceof ControlNodeCoreError && cause.code === "PAYLOAD_MISMATCH") {
+        throw cause;
+      }
+      const rejection = launchAdmissionRejection(cause);
+      if (rejection === undefined) {
+        return this.catalog.getLaunch(current.launchId) ?? current;
+      }
+
+      let recovered: LaunchRecord | null;
+      try {
+        // A semantic rejection alone cannot prove that a previous attempt
+        // was never admitted. Ask the exact owner before committing failure.
+        this.#assertDispatchFence(fence);
+        recovered = await owner.getLaunch(current.launchId);
+        this.#assertDispatchFence(fence);
+      } catch (lookupError) {
+        if (isLaunchIdentityConflict(lookupError)) throw lookupError;
+        return this.catalog.getLaunch(current.launchId) ?? current;
+      }
+      if (recovered !== null) {
+        // Validate outside the transport catch: immutable identity conflicts
+        // must propagate, never masquerade as retryable connection failures.
+        return this.#recordLaunchResponse(current, recovered, route);
+      }
+      const latest = this.catalog.getLaunch(current.launchId) ?? current;
+      if (latest.state !== "accepted") return latest;
+      return this.catalog.recordLaunch(launchRecordSchema.parse({
+        ...latest,
+        state: "failed",
+        error: rejection,
+        updatedAt: this.#now().toISOString(),
+      }), route.immediateChildControlNodeId ?? null);
+    }
+    this.#assertDispatchFence(fence);
+    return this.#recordLaunchResponse(current, response, route);
+  }
+
+  #recordLaunchResponse(
+    current: LaunchRecord,
+    recoveredInput: LaunchRecord,
+    route: RuntimeNodeRoute,
+  ): LaunchRecord {
     const recovered = launchRecordSchema.parse(recoveredInput);
     assertLaunchRequest(recovered, launchRequestFromRecord(current));
     return this.catalog.recordLaunch(
@@ -2569,6 +2687,33 @@ function accessSnapshotItemCount(snapshot: AccessSnapshot): number {
     snapshot.interactions.length + snapshot.metadataOperations.length;
 }
 
+/** Only explicit admission semantics from trusted local or validated wire errors. */
+function launchAdmissionRejection(error: unknown): string | undefined {
+  const code = error instanceof ControlNodeCoreError
+    ? error.code
+    : readValidatedTRPCClientErrorCode(error);
+  switch (code) {
+    case "NOT_FOUND":
+      return "launch admission could not find the requested resource";
+    case "UNSUPPORTED":
+    case "METHOD_NOT_SUPPORTED":
+      return "launch admission does not support the requested profile or harness";
+    case "CONFLICT":
+      return "launch admission rejected conflicting state";
+    case "FENCED":
+    case "PRECONDITION_FAILED":
+      return "launch admission rejected a stale request fence";
+    default:
+      return undefined;
+  }
+}
+
+function isLaunchIdentityConflict(error: unknown): boolean {
+  return error instanceof ControlNodeCoreError
+    ? error.code === "CONFLICT" || error.code === "PAYLOAD_MISMATCH"
+    : readValidatedTRPCClientErrorCode(error) === "CONFLICT";
+}
+
 function sameJson(left: unknown, right: unknown): boolean {
   return canonicalProtocolRecordJson(left) === canonicalProtocolRecordJson(right);
 }
@@ -2724,7 +2869,7 @@ function assertInteractionResponse(
     resolved.state !== "resolved" ||
     resolved.resolution === undefined ||
     resolved.resolvedAt === null ||
-    !sameJson(resolved.resolution, response)
+    resolved.resolution.images.length !== 0 || !sameJson(resolved.resolution.json, response)
   ) {
     throw new ControlNodeCoreError(
       "PAYLOAD_MISMATCH",

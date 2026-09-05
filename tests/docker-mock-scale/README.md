@@ -1,6 +1,6 @@
-# Protocol-v4 mock Docker scale acceptance
+# Protocol-v5 mock Docker scale acceptance
 
-This deterministic suite runs the production protocol-v4 process boundaries:
+This deterministic suite runs the production protocol-v5 process boundaries:
 
 ```text
 10 runtime-node containers (10 mock sessions each)
@@ -59,8 +59,12 @@ are the acceptance target. `AGENT_MULTIPLEX_SCALE_TIMEOUT_MS`,
 10-by-10 topology.
 
 This is a deterministic capacity/integration receipt, not a production load
-limit. Passing establishes that the protocol-v4 control-node catalog,
+limit. Passing establishes that the protocol-v5 control-node catalog,
 authenticated gateway projection, p2prpc fan-in, stream cursors, and reference
 dashboard survive this 100-session workload on the tested machine. It does not
 establish the resource cost of 100 real app-server processes or an unlimited
 fleet size.
+
+The suite targets current protocol-v5 source. Existing command names and receipt
+directory paths containing `v4` remain stable; historical receipts retain their
+original protocol/source identity and do not qualify v5.

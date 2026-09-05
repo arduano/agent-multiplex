@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -10,6 +11,9 @@ import {
   launchRequest,
   sessionCommand,
   watchAccess,
+  imageTarget,
+  uploadImage,
+  readImage,
 } from "@arduano/agent-multiplex-client";
 import { newOperationId } from "@arduano/agent-multiplex-protocol";
 import { WebSocket as NodeWebSocket } from "ws";
@@ -41,6 +45,9 @@ const paths = {
   initialRuntime: join(receiptDirectory, "rpc/runtime-node-initial.json"),
   spawn: join(receiptDirectory, "rpc/spawn.json"),
   baseline: join(receiptDirectory, "phases/baseline.json"),
+  imagesBaseline: join(receiptDirectory, "phases/images-baseline.json"),
+  imagesFailover: join(receiptDirectory, "phases/images-failover.json"),
+  imagesRecovered: join(receiptDirectory, "phases/images-recovered.json"),
   failoverSources: join(receiptDirectory, "rpc/sources-authority-down.json"),
   failoverProjection: join(receiptDirectory, "rpc/projection-authority-down.json"),
   failoverTurn: join(receiptDirectory, "phases/failover-turn.json"),
@@ -74,9 +81,9 @@ const streamResets = [];
 let watcher;
 
 try {
-  const system = await waitFor("protocol-v4 zero-authority gateway", timeoutMs, async () => {
+  const system = await waitFor("protocol-v5 zero-authority gateway", timeoutMs, async () => {
     const value = await client.system.describe.query();
-    return value.protocolVersion === 4 &&
+    return value.protocolVersion === 5 &&
       value.componentKind === "access-gateway" &&
       value.dataAuthority === "none"
       ? value
@@ -155,7 +162,7 @@ try {
       sandbox: "read-only",
     },
     {
-      "agent.title": `Protocol v4 tree ${runId}`,
+      "agent.title": `Protocol v5 tree ${runId}`,
       "acceptance.run_id": runId,
       "acceptance.topology": "control-tree",
     },
@@ -201,6 +208,36 @@ try {
   const baseline = await runTurn(client, session.sessionId, "baseline", runId, nativeEvents, chunkCount, timeoutMs);
   await writeJson(paths.baseline, baseline);
 
+  const target = imageTarget(session, runtime);
+  const imageBytes = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><!--${"bounded-image-transfer".repeat(20_000)}--><rect width="1" height="1"/></svg>`);
+  const uploaded = await uploadImage(client, target, imageBytes, "image/svg+xml");
+  assert(Buffer.from(await readImage(client, target, uploaded)).equals(imageBytes), "initial image upload/read bytes changed");
+  const sourceKey = `tree/${runId}/native-image`;
+  const snapshotImage = await client.images.resolvePath.mutate({ ...target, sourceKey, path: "/workspace/image.svg" });
+  const snapshotBytes = Buffer.from(await readImage(client, target, snapshotImage));
+  const expectedSnapshot = await readFile(new URL("./image.svg", import.meta.url));
+  assert(snapshotBytes.equals(expectedSnapshot), "runtime path snapshot differs from fixture");
+  const secondResolution = await client.images.resolvePath.mutate({ ...target, sourceKey, path: "/workspace/image-other.svg" });
+  assert(secondResolution.imageId === snapshotImage.imageId && secondResolution.sha256 === snapshotImage.sha256,
+    "a resolved native image source key was replaced by another path");
+  const limits = await client.images.limits.query(target);
+  const pendingImageId = randomUUID();
+  const pendingUpload = {
+    ...target, imageId: pendingImageId, byteLength: imageBytes.length,
+    sha256: createHash("sha256").update(imageBytes).digest("hex"), mediaType: "image/svg+xml",
+  };
+  await client.images.beginUpload.mutate(pendingUpload);
+  const firstChunk = imageBytes.subarray(0, limits.maximumChunkBytes);
+  const write = { ...target, imageId: pendingImageId, offset: 0, dataBase64: firstChunk.toString("base64") };
+  const progress = await client.images.writeUpload.mutate(write);
+  const repeated = await client.images.writeUpload.mutate(write);
+  assert(progress.receivedBytes === firstChunk.length && repeated.receivedBytes === progress.receivedBytes,
+    "an exact image chunk retry changed upload progress");
+  await writeJson(paths.imagesBaseline, {
+    uploaded, snapshot: snapshotImage, pendingImageId, receivedBytes: progress.receivedBytes,
+    exactUploadRead: true, immutablePathSnapshot: true, exactChunkRetry: true,
+  });
+
   const initialPatch = await client.metadata.patch.mutate({
     operationId: newOperationId(),
     sessionId: session.sessionId,
@@ -245,6 +282,20 @@ try {
 
   const failoverSession = await client.sessions.get.query(session.sessionId);
   assert(failoverSession, "session disappeared after failover");
+  const failoverRuntime = failoverRuntimes.find((node) => node.runtimeNodeId === runtime.runtimeNodeId);
+  assert(failoverRuntime, "image runtime missing after source failover");
+  const failoverTarget = imageTarget(failoverSession, failoverRuntime);
+  assert(Buffer.from(await readImage(client, failoverTarget, uploaded)).equals(imageBytes), "committed image changed through warm-source failover");
+  const completedUpload = await uploadImage(client, failoverTarget, imageBytes, "image/svg+xml", { imageId: pendingImageId });
+  assert(Buffer.from(await readImage(client, failoverTarget, completedUpload)).equals(imageBytes), "resumed image upload changed bytes");
+  const failoverSnapshot = await client.images.resolvePath.mutate({ ...failoverTarget, sourceKey, path: "/workspace/image-other.svg" });
+  assert(failoverSnapshot.imageId === snapshotImage.imageId, "path snapshot identity changed through failover");
+  assert(Buffer.from(await readImage(client, failoverTarget, failoverSnapshot)).equals(expectedSnapshot), "path snapshot bytes changed through failover");
+  await writeJson(paths.imagesFailover, {
+    completedUpload, snapshot: failoverSnapshot,
+    committedImageRead: true, uploadResumedOnBranch: true, immutableSnapshotRead: true,
+  });
+
   const failoverTurn = await runTurn(
     client,
     failoverSession.sessionId,
@@ -314,6 +365,18 @@ try {
   );
   await writeJson(paths.recoveredTurn, recoveredTurn);
 
+  const recoveredRuntime = (await client.runtimeNodes.list.query()).find((node) => node.runtimeNodeId === runtime.runtimeNodeId);
+  assert(recoveredRuntime, "image runtime missing after ancestor recovery");
+  const recoveredTarget = imageTarget(recovered.session, recoveredRuntime);
+  assert(Buffer.from(await readImage(client, recoveredTarget, completedUpload)).equals(imageBytes), "resumed upload changed after ancestor recovery");
+  const recoveredSnapshot = await client.images.resolvePath.mutate({ ...recoveredTarget, sourceKey, path: "/workspace/image-other.svg" });
+  assert(recoveredSnapshot.imageId === snapshotImage.imageId, "snapshot identity changed after ancestor recovery");
+  assert(Buffer.from(await readImage(client, recoveredTarget, recoveredSnapshot)).equals(expectedSnapshot), "snapshot bytes changed after ancestor recovery");
+  await writeJson(paths.imagesRecovered, {
+    uploaded: completedUpload, snapshot: recoveredSnapshot,
+    committedImageRead: true, immutableSnapshotRead: true,
+  });
+
   const finalControls = await client.controlNodes.list.query();
   assert(finalControls.length === 2, "recovered ancestor projection is incomplete");
   assert(finalControls.filter((node) => node.dataRole.role === "authority").length === 1, "authority count changed");
@@ -343,6 +406,13 @@ try {
       turnsThroughAncestor: 2,
       turnsThroughWarmBranch: 1,
       exactNativeDeltaReassemblies: 3,
+    },
+    images: {
+      exactUploadRead: true,
+      exactChunkRetry: true,
+      immutablePathSnapshot: true,
+      uploadResumedOnBranch: true,
+      preservedThroughAncestorRecovery: true,
     },
     streaming: {
       sourceSelectionResets: streamResets.filter((item) => item.reason === "sourceSelectionChanged").length,
@@ -378,19 +448,19 @@ async function runTurn(client, sessionId, phase, runId, events, count, timeout) 
     const candidates = events.slice(startIndex);
     const completed = candidates.find((event) =>
       event.nativeType === "turn/completed" &&
-      JSON.stringify(event.payload).includes(prompt),
+      JSON.stringify(event.payload.json).includes(prompt),
     );
     if (!completed) return undefined;
-    const turnId = completed.payload?.turn?.id;
+    const turnId = completed.payload.json?.turn?.id;
     if (typeof turnId !== "string") return undefined;
     const matching = candidates.filter((event) =>
-      event.payload?.turnId === turnId || event.payload?.turn?.id === turnId,
+      event.payload.json?.turnId === turnId || event.payload.json?.turn?.id === turnId,
     );
     return matching.some((event) => event.nativeType === "turn/started") ? matching : undefined;
   });
   const deltas = turnEvents.filter((event) => event.nativeType === "item/agentMessage/delta");
   assert(deltas.length === count, `${phase} emitted ${deltas.length}/${count} deltas`);
-  const text = deltas.map((event) => event.payload?.delta ?? "").join("");
+  const text = deltas.map((event) => event.payload.json?.delta ?? "").join("");
   const vendorSessionId = session.vendorSessionId;
   const expectedTurn = phase === "baseline" ? 1 : phase === "authority-down" ? 2 : 3;
   const expected = mockExpectedText(vendorSessionId, expectedTurn, prompt, count);

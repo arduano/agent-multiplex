@@ -3,19 +3,41 @@ import type {
   Harness,
   HarnessCatalogEntry,
   HarnessCommand,
+  CommandImageBinding,
   HarnessResumeOptions,
   HarnessSessionSettings,
   HarnessSpawnOptions,
   JsonValue,
   LaunchBackendId,
   NativeHistoryRequest,
-  NativeHistoryResult,
+  NativePayload,
+  NativeImageSlot,
   NativeInventoryItem,
   NativeModel,
   RuntimeEpoch,
   RuntimeNodeSessionRecord,
   SessionRuntimeStatus,
 } from "@arduano/agent-multiplex-protocol";
+
+/** Adapter results retain harness-native JSON until runtime-owned image extraction. */
+export interface AdapterNativeHistoryResult {
+  harness: Harness;
+  vendorSessionId: string;
+  payload: JsonValue;
+  complete?: boolean;
+  nextCursor?: string;
+}
+
+export interface NativeImageSink {
+  storeBase64(input: { dataBase64: string; mediaType: string }): Promise<NativeImageSlot["image"]>;
+  snapshotPath(input: { sourceKey: string; path: string }): Promise<NativeImageSlot["image"]>;
+}
+
+export interface NativeImageCodec {
+  externalize(payload: JsonValue, sink: NativeImageSink): Promise<NativePayload>;
+  validateCommand?(command: HarnessCommand): void;
+  acceptsCommandImage?(command: HarnessCommand, image: CommandImageBinding): boolean;
+}
 
 export interface AdapterNativeEvent {
   kind: "native";
@@ -79,13 +101,14 @@ export interface AdapterSession {
   settings?(): HarnessSessionSettings | undefined;
   subscribe(listener: (event: AdapterEvent) => void): () => void;
   execute(command: HarnessCommand): Promise<JsonValue | undefined>;
-  readNativeHistory(request: NativeHistoryRequest): Promise<NativeHistoryResult>;
+  readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult>;
   stop(): Promise<void>;
 }
 
 export interface AgentAdapter {
   readonly harness: Harness;
   readonly adapterScopeId: AdapterScopeId;
+  readonly imageCodec?: NativeImageCodec;
   describe(): Promise<HarnessCatalogEntry>;
   listModels(): Promise<NativeModel[]>;
   listSessions(): Promise<NativeInventoryItem[]>;
@@ -105,6 +128,12 @@ export interface AgentAdapter {
 export interface RuntimeAgentBackend {
   readonly backendId: LaunchBackendId;
   readonly adapter: AgentAdapter;
+  /** Read inside a custom backend's own filesystem. There is never host fallback. */
+  readonly readImageFile?: (input: {
+    session: RuntimeNodeSessionRecord;
+    path: string;
+    maximumBytes: number;
+  }) => Promise<Uint8Array>;
   /** Optional backend-specific cleanup for one archived logical session. */
   releaseSession?(session: RuntimeNodeSessionRecord): Promise<void>;
 }

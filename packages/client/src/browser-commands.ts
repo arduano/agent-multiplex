@@ -101,6 +101,7 @@ export async function archiveRequest(session: SessionRecord): Promise<ArchiveReq
 export async function sessionCommand(
   session: SessionRecord,
   request: HarnessCommand,
+  images?: CommandEnvelope["images"],
 ): Promise<CommandEnvelope> {
   const commandId = newCommandId();
   const body = {
@@ -108,6 +109,7 @@ export async function sessionCommand(
     runtimeNodeId: session.runtimeNodeId,
     bindingRevision: session.bindingRevision,
     request,
+    ...(images?.length ? { images } : {}),
   };
   return { commandId, payloadHash: await payloadHash(body), ...body };
 }

@@ -5,6 +5,7 @@ import { runtimeNodeContract } from "@arduano/agent-multiplex-protocol";
 import { RuntimeNodeProtocolError, RuntimeNodeService } from "./service.js";
 import { LaunchProviderError } from "./launch-provider.js";
 import { TerminalBrokerError } from "./terminal.js";
+import { RuntimeImageError } from "./images.js";
 
 export interface RuntimeNodeRouterContext {
   authenticatedPeerId?: string;
@@ -15,6 +16,7 @@ const t = initTRPC.context<RuntimeNodeRouterContext>().create();
 function toTRPC(error: unknown): never {
   if (
     error instanceof RuntimeNodeProtocolError ||
+    error instanceof RuntimeImageError ||
     error instanceof TerminalBrokerError ||
     error instanceof LaunchProviderError
   ) {
@@ -173,6 +175,36 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
           assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
           return service.getArchive(input.archiveOperationId);
         }),
+    }),
+    images: t.router({
+      beginUpload: t.procedure
+        .input(runtimeNodeContract.images.beginUpload.input)
+        .output(runtimeNodeContract.images.beginUpload.output)
+        .mutation(({ input }) => service.beginImageUpload(input).catch(toTRPC)),
+      writeUpload: t.procedure
+        .input(runtimeNodeContract.images.writeUpload.input)
+        .output(runtimeNodeContract.images.writeUpload.output)
+        .mutation(({ input }) => service.writeImageUpload(input).catch(toTRPC)),
+      commitUpload: t.procedure
+        .input(runtimeNodeContract.images.commitUpload.input)
+        .output(runtimeNodeContract.images.commitUpload.output)
+        .mutation(({ input }) => service.commitImageUpload(input).catch(toTRPC)),
+      abortUpload: t.procedure
+        .input(runtimeNodeContract.images.abortUpload.input)
+        .output(runtimeNodeContract.images.abortUpload.output)
+        .mutation(({ input }) => service.abortImageUpload(input).catch(toTRPC)),
+      resolvePath: t.procedure
+        .input(runtimeNodeContract.images.resolvePath.input)
+        .output(runtimeNodeContract.images.resolvePath.output)
+        .mutation(({ input }) => service.resolveImagePath(input).catch(toTRPC)),
+      read: t.procedure
+        .input(runtimeNodeContract.images.read.input)
+        .output(runtimeNodeContract.images.read.output)
+        .query(({ input }) => service.readImage(input).catch(toTRPC)),
+      limits: t.procedure
+        .input(runtimeNodeContract.images.limits.input)
+        .output(runtimeNodeContract.images.limits.output)
+        .query(({ input }) => service.imageLimits(input).catch(toTRPC)),
     }),
     terminals: t.router({
       get: t.procedure

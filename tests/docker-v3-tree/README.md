@@ -1,4 +1,4 @@
-# Protocol-v4 control-tree Docker acceptance
+# Protocol-v5 control-tree Docker acceptance
 
 This acceptance starts four isolated containers:
 
@@ -27,3 +27,12 @@ Receipts are written below `receipts/protocol-v4-control-tree/`. A failed run
 is retained with `FAILED.txt`; a successful run contains `summary.json`, RPC
 and phase records, redacted container logs, Playwright screenshots, an exact
 cleanup receipt, and SHA-256 checksums for every artifact.
+
+The suite targets current protocol-v5 source. Existing command names and receipt
+directory paths containing `v4` remain stable; historical receipts retain their
+original protocol/source identity and do not qualify v5.
+
+Image acceptance covers multi-chunk upload/read, an exact repeated chunk,
+immutable runtime SVG path snapshots, resuming an upload through the selected
+warm branch, and reading the same bytes after ancestor recovery. Phase receipts
+record descriptors and checksums rather than image byte payloads.

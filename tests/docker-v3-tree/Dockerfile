@@ -57,5 +57,8 @@ COPY --from=build /opt/src/agent-multiplex/ /opt/src/agent-multiplex/
 RUN mkdir -p /state /workspace \
     && chown -R 1000:100 /state /workspace
 
-LABEL org.opencontainers.image.title="Agent Multiplex protocol-v4 control-tree acceptance"
+COPY tests/docker-v3-tree/image.svg /workspace/image.svg
+COPY tests/docker-v3-tree/image-other.svg /workspace/image-other.svg
+
+LABEL org.opencontainers.image.title="Agent Multiplex protocol-v5 control-tree acceptance"
 LABEL org.opencontainers.image.description="Authority, attached branch, runtime node, and overlapping gateway sources"

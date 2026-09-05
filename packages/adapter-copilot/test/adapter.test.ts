@@ -240,6 +240,7 @@ describe("CopilotAgentAdapter", () => {
       transport: "http",
     });
     expect(models[1]?.native).toMatchObject({
+      imageSupport: "unknown",
       capabilities: {
         supports: { vision: false, reasoningEffort: false },
         limits: { max_context_window_tokens: 128_000 },
@@ -275,6 +276,41 @@ describe("CopilotAgentAdapter", () => {
         },
       },
     });
+    await adapter.close();
+  });
+
+  it("advertises configured BYOK vision capabilities while preserving conservative unknown models", async () => {
+    const client = new Client();
+    const capabilities = {
+      supports: { vision: true, reasoningEffort: false },
+      limits: { max_context_window_tokens: 64_000, vision: { supported_media_types: ["image/png"], max_prompt_images: 3, max_prompt_image_size: 2_000_000 } },
+    };
+    const adapter = new CopilotAgentAdapter({
+      provider: { type: "openai", baseUrl: "https://provider.example/v1", wireApi: "responses" },
+      defaultModel: "custom-vision",
+      providerModels: ["custom-vision", "custom-unknown"],
+      providerModelCapabilities: { "custom-vision": capabilities },
+      clientFactory: () => client,
+    });
+    const models = await adapter.listModels();
+    expect(models[0]?.native).toMatchObject({ capabilities, imageSupport: "supported" });
+    expect(models[1]?.native).toMatchObject({ imageSupport: "unknown", capabilities: { supports: { vision: false } } });
+    await adapter.close();
+  });
+
+  it.each(["text", "numbers"] as const)("bounds %s history pages by wire bytes and preserves the exact next event index", async (kind) => {
+    const client = new Client();
+    const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    native.events.push(...[0, 1].map((index) => ({ type: "assistant.message", id: `large-${index}`, parentId: null, timestamp: "2026-01-01T00:00:00.000Z", data: kind === "text" ? { content: "x".repeat(600_000) } : { numbers: Array(45_000).fill(0.1) } } as SessionEvent)));
+    const page = await session.readNativeHistory({ harness: "copilot", limit: 100 });
+    expect(page.nextCursor).toBe("copilot:event-index:1");
+    expect(page.complete).toBe(false);
+    expect(page.payload).toHaveLength(1);
+    const second = await session.readNativeHistory({ harness: "copilot", limit: 100, cursor: page.nextCursor! });
+    expect(second.complete).toBe(true);
+    expect(second.payload).toHaveLength(1);
     await adapter.close();
   });
 
