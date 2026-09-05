@@ -167,10 +167,8 @@ export async function reconstructNativePayload(
   for (const binding of payload.images) {
     if (binding.absent) {
       if (!binding.pointer) throw new Error("A root image slot cannot be absent");
-      const parts = binding.pointer.slice(1).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-      let parent = json as Record<string, unknown>;
-      for (const key of parts.slice(0, -1)) parent = parent[key] as Record<string, unknown>;
-      delete parent[parts.at(-1)!];
+      const { parent, leaf } = nativeImagePlaceholder(json, binding.pointer);
+      Reflect.deleteProperty(parent, leaf);
       continue;
     }
     let value: string;
@@ -184,15 +182,26 @@ export async function reconstructNativePayload(
       value = binding.representation === "dataUrl" ? `${binding.dataUrlPrefix ?? `data:${binding.image.mediaType};base64,`}${encoded}` : encoded;
     }
     if (binding.pointer === "") { json = value; continue; }
-    const parts = binding.pointer.slice(1).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-    let parent = json as Record<string, unknown>;
-    for (const part of parts.slice(0, -1)) {
-      if (!parent || !Object.prototype.hasOwnProperty.call(parent, part)) throw new Error("Invalid native image pointer");
-      parent = parent[part] as Record<string, unknown>;
-    }
-    const leaf = parts.at(-1)!;
-    if (!parent || !Object.prototype.hasOwnProperty.call(parent, leaf) || parent[leaf] !== null) throw new Error("Invalid native image placeholder");
+    const { parent, leaf } = nativeImagePlaceholder(json, binding.pointer);
     Object.defineProperty(parent, leaf, { value, enumerable: true, configurable: true, writable: true });
   }
   return json;
+}
+
+/** Recheck the cloned target after asynchronous reads; native keys remain data. */
+function nativeImagePlaceholder(json: unknown, pointer: string): { parent: object; leaf: string } {
+  if (!pointer.startsWith("/")) throw new Error("Invalid native image pointer");
+  const parts = pointer.slice(1).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+  let parent = json;
+  for (const part of parts.slice(0, -1)) {
+    if (parent === null || typeof parent !== "object") throw new Error("Invalid native image pointer");
+    const own = Object.getOwnPropertyDescriptor(parent, part);
+    if (!own || !("value" in own)) throw new Error("Invalid native image pointer");
+    parent = own.value;
+  }
+  const leaf = parts.at(-1)!;
+  if (parent === null || typeof parent !== "object") throw new Error("Invalid native image placeholder");
+  const own = Object.getOwnPropertyDescriptor(parent, leaf);
+  if (!own || !("value" in own) || own.value !== null) throw new Error("Invalid native image placeholder");
+  return { parent, leaf };
 }

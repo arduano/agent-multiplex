@@ -197,6 +197,22 @@ describe('runtime-owned images', () => {
       const oversized = await service.execute({ ...command, commandId:newCommandId(), payloadHash:'images-oversized-total', images:Array.from({ length:6 }, (_, index) => ({ ...command.images[0]!, pointer:`/command/input/${index}/image_url`, image:{ ...image, byteLength:10 * 1_024 * 1_024 } })) });
       expect(oversized).toMatchObject({ state:'failed', error:expect.stringContaining('50 MiB') });
       expect(executed).toHaveBeenCalledTimes(1);
+      const inherited = { image:null };
+      const marker = 'multiplexImageCommandPrototypeSentinel';
+      Object.defineProperty(Object.prototype, marker, { value:inherited, configurable:true });
+      const changedSlot = { ...command.images[0]! };
+      const getBytes = RuntimeImages.prototype.getBytes;
+      const read = vi.spyOn(RuntimeImages.prototype, 'getBytes').mockImplementationOnce(async function (target, descriptor) {
+        const bytes = await getBytes.call(this, target, descriptor);
+        changedSlot.pointer = `/command/input/0/${marker}/image`;
+        return bytes;
+      });
+      try {
+        const rejected = await service.execute({ ...command, commandId:newCommandId(), payloadHash:'images-inherited-parent', images:[changedSlot] });
+        expect(rejected).toMatchObject({ state:'failed', error:expect.stringContaining('pointer is unsafe') });
+        expect(inherited.image).toBeNull();
+        expect(executed).toHaveBeenCalledTimes(1);
+      } finally { read.mockRestore(); Reflect.deleteProperty(Object.prototype, marker); }
       const history = await service.readNativeHistory(target.sessionId, { harness:'codex', includeTurns:true, limit:100 });
       expect(history.payload.json).toEqual({ result:null }); expect(history.payload.images).toHaveLength(1);
       expect(JSON.stringify(history)).not.toContain(png.toString('base64'));

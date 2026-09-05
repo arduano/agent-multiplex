@@ -70,4 +70,36 @@ describe("image client", () => {
     expect(read).not.toHaveBeenCalled();
   });
 
+  it("preserves native prototype-named and escaped own keys when removing absent fields", async () => {
+    const read = vi.fn(async () => bytes);
+    const json = { prototype: { toString: null, hasOwnProperty: null, "a/b~c": null, keep: "native" } };
+    const result = await reconstructNativePayload({ encoding: "native-json-images-v1", json, images: [
+      { pointer: "/prototype/toString", representation: "base64", absent: true, image: descriptor },
+      { pointer: "/prototype/hasOwnProperty", representation: "path", originalPath: "/native/image.png", image: descriptor },
+      { pointer: "/prototype/a~1b~0c", representation: "base64", absent: true, image: descriptor },
+    ] }, read) as { prototype: Record<string, unknown> };
+    expect(result.prototype).toEqual({ hasOwnProperty: "/native/image.png", keep: "native" });
+    expect(Object.hasOwn(result.prototype, "toString")).toBe(false);
+    expect(Object.getPrototypeOf(result.prototype)).toBe(Object.prototype);
+    expect(json.prototype.toString).toBeNull();
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("never follows inherited parents when a sidecar changes during an asynchronous read", async () => {
+    const marker = "multiplexImageAbsentPrototypeSentinel";
+    Object.defineProperty(Object.prototype, marker, { value: "unchanged", configurable: true });
+    const absent = { pointer: "/attachment/data", representation: "base64" as const, absent: true as const, image: descriptor };
+    try {
+      await expect(reconstructNativePayload({ encoding: "native-json-images-v1", json: { image: null, attachment: { data: null } }, images: [
+        { pointer: "/image", representation: "base64", image: descriptor }, absent,
+      ] }, async () => {
+        // A library caller can change the sidecar while its read promise is
+        // pending. Initial schema validation must not authorize a new target.
+        absent.pointer = `/__proto__/${marker}`;
+        return bytes;
+      })).rejects.toThrow("Invalid native image pointer");
+      expect(Object.getOwnPropertyDescriptor(Object.prototype, marker)?.value).toBe("unchanged");
+    } finally { Reflect.deleteProperty(Object.prototype, marker); }
+  });
+
 });

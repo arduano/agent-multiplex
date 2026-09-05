@@ -1075,8 +1075,17 @@ export class RuntimeNodeService {
       const segments = slot.pointer.slice(1).split("/").map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
       if (!slot.pointer || segments.some((part) => ["__proto__", "prototype", "constructor"].includes(part))) throw new RuntimeNodeProtocolError("FENCED", "command image pointer is unsafe");
       let parent = json;
-      for (const key of segments.slice(0, -1)) parent = (parent as Record<string, JsonValue>)[key]!;
-      (parent as Record<string, JsonValue>)[segments.at(-1)!] = value;
+      for (const key of segments.slice(0, -1)) {
+        if (parent === null || typeof parent !== "object") throw new RuntimeNodeProtocolError("FENCED", "command image pointer is unsafe");
+        const own = Object.getOwnPropertyDescriptor(parent, key);
+        if (!own || !("value" in own)) throw new RuntimeNodeProtocolError("FENCED", "command image pointer is unsafe");
+        parent = own.value as JsonValue;
+      }
+      if (parent === null || typeof parent !== "object") throw new RuntimeNodeProtocolError("FENCED", "command image pointer is unsafe");
+      const leaf = segments.at(-1)!;
+      const own = Object.getOwnPropertyDescriptor(parent, leaf);
+      if (!own || !("value" in own) || own.value !== null) throw new RuntimeNodeProtocolError("FENCED", "command image placeholder changed during read");
+      Object.defineProperty(parent, leaf, { value, enumerable: true, configurable: true, writable: true });
     }
     return harnessCommandSchema.parse(json);
   }
