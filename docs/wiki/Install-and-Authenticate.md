@@ -49,14 +49,15 @@ The node transport pins `@arduano/p2prpc-core` exactly. The sibling
 release candidate must not contain a `file:` dependency. Release p2prpc first,
 then update this repository's exact version and lockfile.
 
-The current public release is `0.1.0`. Install only the role needed on each
-machine and pin every package to the same release version:
+Use the [current public release](Current-State.md#release-and-compatibility-baseline).
+Install only the role needed on each machine and pin every package to the same
+release version:
 
 ```bash
-npm install --global @arduano/agent-multiplex-control-node@0.1.0
-npm install --global @arduano/agent-multiplex-runtime-node@0.1.0
-npm install --global @arduano/agent-multiplex-gateway@0.1.0
-npm install --global @arduano/agent-multiplex-cli@0.1.0
+npm install --global @arduano/agent-multiplex-control-node@0.2.0
+npm install --global @arduano/agent-multiplex-runtime-node@0.2.0
+npm install --global @arduano/agent-multiplex-gateway@0.2.0
+npm install --global @arduano/agent-multiplex-cli@0.2.0
 ```
 
 Use the corresponding `agent-multiplex-control-node`,

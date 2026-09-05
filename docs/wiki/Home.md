@@ -55,7 +55,7 @@ several near-duplicate summaries:
 - [Images](../design/images-v5.md) — byte storage, native envelopes, and v5 upgrades.
 - [Launch extensions](../design/launch-extensions-v4.md) — plugin/provider
   contracts and operation state machines.
-- [Protocol-v4 checkpoint](../checkpoint-v4.md) — exact qualification and
+- [Release checkpoint](../checkpoint-v4.md) — exact qualification and
   release evidence.
 - [Deployment runbook](../deployment-v4.md) — detailed personal-deployment and
   failure guidance.

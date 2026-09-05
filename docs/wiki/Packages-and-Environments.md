@@ -48,7 +48,7 @@ consumers should serve or compose the packaged output rather than rebuilding it.
 | Reproducible release toolchain | Node `24.19.0`, npm `11.17.0` |
 | Qualification container base | `node:24.19.0-bookworm-slim` at OCI index digest `sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df` |
 | Module system | TypeScript/JavaScript ESM |
-| Development wire contract | Agent Multiplex protocol 5; released `0.1.0` uses v4 |
+| Wire contract | Agent Multiplex protocol 5; see the [release baseline](Current-State.md#release-and-compatibility-baseline) |
 | Node transport | Exact `@arduano/p2prpc-core@0.2.1` package (p2prpc v1 API) |
 | Qualified OS | Linux x86-64 Docker |
 | Qualified Codex | `@openai/codex` / CLI `0.152.0` |

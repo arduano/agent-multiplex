@@ -10,7 +10,7 @@ Last reconciled: 2026-09-05.
 Suggested first prompt for a new session:
 
 > Read `AGENTS.md` and `docs/wiki/Current-State.md`, inspect the current Git
-> status and commits since `v0.1.0`, then summarize the relevant maintained
+> status and commits since `v0.2.0`, then summarize the relevant maintained
 > boundary before changing anything. Use the topical guide and deep design only
 > for the package you will touch, and preserve unrelated worktree changes.
 
@@ -18,21 +18,21 @@ Suggested first prompt for a new session:
 
 | Boundary | Current value |
 | --- | --- |
-| Development wire protocol | `5` (unreleased; coordinated upgrade required) |
-| Released wire protocol | `4` at `v0.1.0` |
-| Latest release | [`v0.1.0`](https://github.com/arduano/agent-multiplex/releases/tag/v0.1.0) |
-| Signed release commit | `38236480a88e5a7f350097b1bc43fd9a7674096d` |
-| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.1.0`; development manifests at `0.2.0` |
+| Wire protocol | `5`; coordinated upgrade required from v4 |
+| Latest release | [`v0.2.0`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.0) |
+| Signed release commit | `0e043478538a30a0a42fd854f5f5c8a14309cbf0` |
+| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.0` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Exact public `@arduano/p2prpc-core@0.2.1` from the separate [`arduano/p2prpc`](https://github.com/arduano/p2prpc) repository |
 | Qualified native boundaries | Codex CLI `0.152.0`; Copilot SDK `1.0.11` and optional CLI `1.0.81` |
 | Qualified deployment | Linux x86-64 containers on a trusted personal/internal network |
 
-The tag, all 21 Release assets, 16 public registry packages, registry/Release
-tarball byte equality, SLSA provenance, and isolated downstream consumers have
-been verified. Both `latest` and `next` select `0.1.0`. GitHub Packages still
-requires an authenticated client with `read:packages`, even for public
-packages.
+The signed `v0.2.0` source passed all exact-commit release prerequisites and
+publication completed successfully. The [checkpoint](../checkpoint-v4.md#protocol-v5-release-qualification-2026-09-05)
+records its workflow and artifact evidence. The prior `v0.1.0` artifact audit
+remains historical evidence there.
+GitHub Packages requires an authenticated client with `read:packages`, even for
+public packages.
 
 Protocol-v2 `host`, `worker`, `observer`, and `Fleet` code is archived evidence.
 Protocol v5 peers reject v4 and earlier peers. Upgrade controls, runtimes,
@@ -168,7 +168,7 @@ repair or import them to solve a maintained task.
    ```bash
    git status --short --branch
    git log --oneline --decorate -12
-   git diff --stat v0.1.0...HEAD
+   git diff --stat v0.2.0...HEAD
    ```
 
 3. Pick the owning role/package from the table above, then read only its topical
@@ -190,49 +190,39 @@ repair or import them to solve a maintained task.
    and model-credit use is authorized. A run counts only with a scrubbed,
    checksummed passing receipt from the exact source/dependency boundary.
 
-## Unreleased development
+## Protocol-v5 release scope
 
-The current worktree hardens launch reservations and admission-rejection
-recovery, Codex RPC initialization/closure, and runtime shutdown. It also
-decouples checkpoint validation from an optional sibling checkout and keeps
-archived Docker fixtures outside current-toolchain checks. Image support now
-introduces protocol v5 and appended control/runtime SQLite migrations. Development package manifests are now `0.2.0` for the coordinated protocol-v5
-release candidate; transport/native pins remain unchanged. These source changes
-must not be mixed with installed v4 packages.
+The `0.2.0` source adds bounded runtime-owned images, native image envelopes,
+client attachments, and appended control/runtime SQLite migrations. It also
+hardens launch admission/recovery, Codex RPC lifecycle, runtime shutdown, and
+image-queue lifecycle delivery. Runtime component injection, control readiness
+callbacks, and gateway HTTP composition support separately owned applications.
+Transport and native pins remain unchanged. Upgrade controls, runtimes, gateways,
+and clients together; do not mix these packages with v4 peers.
+
 See [lifecycle](Lifecycle-Metadata-and-Search.md),
 [adapters](Adapters-and-Terminals.md), and [operations](Operations.md) for the
-updated behavior and [images](Images-and-Native-Payloads.md) for the new API.
-Implementation and deterministic qualification are complete: repository gates,
-control-tree image routing, browser image flows, and the 100-session mock suite
-pass. The [unreleased checkpoint section](../checkpoint-v4.md#unreleased-protocol-v5-images-2026-09-05)
-records the exact implementation fingerprint, local receipts, and limits of the
-native image trials. Final-source external-model qualification remains outside
-that passing deterministic boundary. The native release evidence below does not
-qualify these unreleased changes.
+updated behavior, and [images](Images-and-Native-Payloads.md) for the image API.
 
 ## Current qualification evidence
 
-The released source has exact-SHA CI, CodeQL, deterministic Docker, and owner-
-recorded native qualification. The canonical evidence ledger is the
-[protocol-v4 checkpoint](../checkpoint-v4.md). The release procedure and
-artifact verification commands live in [Releases](Releases.md).
+The signed release has passing exact-SHA CI, CodeQL, deterministic Docker,
+and owner-recorded native four-container qualification. The native run completed
+the 930-second soak, including fresh Codex and Copilot replies afterward, and
+removed its disposable containers, relay, and state. Its manifest records no
+retained credential material.
 
-The decisive native receipt is
-`receipts/protocol-v4-live-four-container/20260904T220013Z-716384c05b18`.
-It ran the signed release commit in four containers for more than 15 minutes,
-with real Codex and Copilot runtimes, native history, streaming, Codex
-model/plan/question/interrupt controls, metadata, managed terminal behavior,
-browser reload/responsive/accessibility checks, and post-renewal commands. Its
-manifest records no retained credential material.
+The [v0.2.0 checkpoint section](../checkpoint-v4.md#protocol-v5-release-qualification-2026-09-05)
+owns the source/tag identities, workflow links, receipt path, inventory digest,
+and publication result. The [release guide](Releases.md) owns reproduction and
+artifact-verification procedures. `receipts/` remains local and gitignored;
+a fresh clone uses the tracked ledger and linked public workflow/status evidence.
 
-`receipts/` is intentionally gitignored and is not present in a fresh clone.
-The tracked [checkpoint](../checkpoint-v4.md), linked workflow/status evidence,
-Release assets, and inventory digest
-`62630865b3d3b583c0e954bfe21c879ee1fefcfcb8fc223f59d134065741d849`
-are the portable audit trail.
-
-The retained 100-session result proves the distributed control path with mock
-agents. It does not prove capacity for 100 simultaneous real model processes.
+Earlier image development receipts remain scoped to their recorded source and
+checks. The final native release run qualifies the documented native control,
+history, terminal, browser, and renewal behavior; it does not turn an earlier
+failed image trial into passing final-source image evidence. The retained
+100-session result exercises mock agents, not 100 simultaneous model processes.
 
 ## Deliberate limitations and likely next work
 
@@ -253,8 +243,8 @@ agents. It does not prove capacity for 100 simultaneous real model processes.
 - General file attachments remain deferred; the v5 attachment surface currently
   supports images.
 
-The v5 image change is an explicit development boundary; the released v4
-evidence remains historical. There is no partially adopted v2/v3 architecture
+Protocol v5 is an explicit compatibility boundary; the released v4 evidence
+remains historical. There is no partially adopted v2/v3 architecture
 to finish. New work should preserve the boundaries above or make
 an explicit protocol/design change with tests and migration consequences.
 
@@ -272,11 +262,10 @@ an explicit protocol/design change with tests and migration consequences.
 When a boundary changes, update its owner and link here instead of copying a
 second detailed contract into this page.
 
-## Personal application consumer in preparation
+## Personal application consumer
 
-The sibling `leo-multiplex` application is being prepared against `0.2.0`.
-Generic runtime-component injection, control readiness callbacks, and an external
-gateway HTTP-surface composition keep personal provider/UI/authentication policy
-outside protocol core. Main-pc owns its control catalog and runtime; the NAS hosts
-only the personal web/gateway edge. Publication still requires the exact-source
-release gates; no v5 native qualification status has been claimed.
+[`arduano/leo-multiplex`](https://github.com/arduano/leo-multiplex) is the separate
+personal application consumer of the `0.2.0` package graph. Main-pc owns its
+control catalog and runtime; the NAS hosts only the personal web/gateway edge.
+Provider, UI, authentication, and deployment policy belong to that repository.
+Its deployment status and operator instructions are maintained there.
