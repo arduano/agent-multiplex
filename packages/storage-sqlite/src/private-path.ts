@@ -53,12 +53,14 @@ export function assertPrivateFilesSync(filenames: readonly string[]): void {
 // DACL at creation; existing paths are only inspected, never silently repaired.
 const WINDOWS_PRIVATE_PATH_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
+$stage = 'request'
 try {
   $request = ConvertFrom-Json $env:AGENT_MULTIPLEX_PRIVATE_PATH_REQUEST
   $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
   $trusted = @($user.Value, 'S-1-5-18', 'S-1-5-32-544')
   foreach ($path in $request.paths) {
     if ($request.operation -eq 'directory' -and -not [System.IO.Directory]::Exists($path)) {
+      $stage = 'create'
       $acl = New-Object System.Security.AccessControl.DirectorySecurity
       $acl.SetOwner($user)
       $acl.SetAccessRuleProtection($true, $false)
@@ -69,13 +71,16 @@ try {
       }
       [void][System.IO.Directory]::CreateDirectory($path, $acl)
     }
+    $stage = 'inspect'
     $item = Get-Item -LiteralPath $path -Force
     if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'reparse point' }
     $directory = $request.operation -eq 'directory'
     if ($item.PSIsContainer -ne $directory) { throw 'wrong path type' }
+    $stage = 'acl'
     $acl = Get-Acl -LiteralPath $path
     if ($trusted -notcontains $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value) { throw 'untrusted owner' }
     if ($directory -and -not $acl.AreAccessRulesProtected) { throw 'directory inherits access' }
+    $stage = 'rules'
     $userAccess = $false
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
       if ($trusted -notcontains $rule.IdentityReference.Value -or $rule.AccessControlType -ne 'Allow') { throw 'untrusted access rule' }
@@ -90,7 +95,7 @@ try {
     if (-not $userAccess) { throw 'missing owner access' }
   }
   [Console]::Out.Write('private-path-ok')
-} catch { exit 1 }
+} catch { [Console]::Out.Write('private-path-failure:' + $stage + ':' + $_.Exception.GetType().Name); exit 1 }
 `;
 
 function windowsPrivatePaths(operation: "directory" | "files", paths: readonly string[]): void {
@@ -104,6 +109,7 @@ function windowsPrivatePaths(operation: "directory" | "files", paths: readonly s
       encoding: "utf8", windowsHide: true, timeout: 30_000, maxBuffer: 16_384,
     });
   if (result.error || result.status !== 0 || result.stdout !== "private-path-ok") {
-    throw new PrivatePathError("Windows private state requires a regular path with access restricted to the current user, SYSTEM and Administrators; existing directory ACLs must be protected and inherit to children");
+    const stage = /^private-path-failure:(request|create|inspect|acl|rules):([A-Za-z]+Exception)$/.exec(result.stdout ?? "");
+    throw new PrivatePathError("Windows private state requires a regular path with access restricted to the current user, SYSTEM and Administrators; existing directory ACLs must be protected and inherit to children" + (stage ? ` (${stage[1]}: ${stage[2]})` : ""));
   }
 }
