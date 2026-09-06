@@ -84,7 +84,9 @@ try {
     $userAccess = $false
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
       if ($trusted -notcontains $rule.IdentityReference.Value -or $rule.AccessControlType -ne 'Allow') { $stage = 'untrusted'; throw 'untrusted access rule' }
-      $required = if ($directory) { [System.Security.AccessControl.FileSystemRights]::FullControl } else { [System.Security.AccessControl.FileSystemRights]::Modify }
+      # libuv creates data files without execute permission. Requiring Modify
+      # would incorrectly require ExecuteFile too; private state needs read/write.
+      $required = if ($directory) { [System.Security.AccessControl.FileSystemRights]::FullControl } else { [System.Security.AccessControl.FileSystemRights]::Read -bor [System.Security.AccessControl.FileSystemRights]::Write }
       if ($rule.IdentityReference.Value -eq $user.Value -and
           ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
           ($rule.FileSystemRights -band $required) -eq $required) {
