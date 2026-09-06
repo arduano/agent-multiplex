@@ -53,7 +53,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 const DEFAULT_HTTP_URL = "http://127.0.0.1:4317/trpc";
-const VERSION = "0.2.2";
+const VERSION = "0.2.3";
 
 interface GlobalOptions {
   readonly httpUrl: string;

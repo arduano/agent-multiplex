@@ -7,6 +7,17 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
+## Pending patch: embedded locator refresh
+
+The `0.2.3` candidate adds a lifetime-fenced `createTicket()` accessor to
+`ControlNodeReadyInfo`, so trusted application composition can publish fresh
+reachability locally while retaining the running control's identity. The method
+exposes no key and is unavailable after shutdown. Wire protocol, native pins,
+transport and migrations remain unchanged. See
+[gateway embedding](Clients-and-Gateway-Embedding.md#embedding-a-gateway).
+This is candidate source, not a published or native-model-qualified release;
+the latest publication remains `0.2.2` below.
+
 Suggested first prompt for a new session:
 
 > Read `AGENTS.md` and `docs/wiki/Current-State.md`, inspect the current Git

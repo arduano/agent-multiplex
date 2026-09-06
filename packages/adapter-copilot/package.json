@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-adapter-copilot",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Native GitHub Copilot SDK adapter and optional TUI bridge for Agent Multiplex.",
   "private": false,
   "type": "module",
@@ -19,8 +19,8 @@
   "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
   "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
   "dependencies": {
-    "@arduano/agent-multiplex-protocol": "0.2.2",
-    "@arduano/agent-multiplex-runtime-node-core": "0.2.2",
+    "@arduano/agent-multiplex-protocol": "0.2.3",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.3",
     "@github/copilot": "1.0.81",
     "@github/copilot-sdk": "1.0.13",
     "@types/node": "24.3.0",
