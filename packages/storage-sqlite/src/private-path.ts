@@ -82,7 +82,9 @@ try {
     if ($directory -and -not $acl.AreAccessRulesProtected) { $stage = 'inherited'; throw 'directory inherits access' }
     $stage = 'rules'
     $userAccess = $false
-    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+    $rules = $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])
+    if ($rules.Count -eq 0) { $stage = 'untrusted'; throw 'missing DACL rules' }
+    foreach ($rule in $rules) {
       if ($trusted -notcontains $rule.IdentityReference.Value -or $rule.AccessControlType -ne 'Allow') { $stage = 'untrusted'; throw 'untrusted access rule' }
       if ($rule.IdentityReference.Value -eq $user.Value -and
           ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
