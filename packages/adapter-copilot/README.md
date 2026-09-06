@@ -16,8 +16,9 @@ Key behavior:
   so startup events are buffered until runtime-node-core subscribes.
 - prompts use native `enqueue`/`immediate` delivery; models and
   interactive/plan/autopilot modes use the SDK's native APIs.
-- permissions, user input, elicitation, and exit-plan callbacks remain pending
-  in the SDK until a multiplex client resolves the corresponding interaction.
+- permission requests use native request/completion events and the SDK's pending
+  permission RPC, preserving their exact request identities. Questions,
+  elicitation and exit-plan callbacks remain separate pending interactions.
 - history is read exclusively through `CopilotSession.getEvents()`. The adapter
   never reads Copilot files. The opaque pagination cursor has the form
   `copilot:event-index:<n>` and pages the native event array without interpreting
@@ -25,10 +26,38 @@ Key behavior:
 - `stop` disconnects the SDK handle but preserves the vendor session for native
   resume. `close` gracefully disconnects all handles and stops the shared CLI.
 
-The implementation is pinned and tested against `@github/copilot-sdk@1.0.11`.
+The implementation is pinned and tested against `@github/copilot-sdk@1.0.13`.
 The optional stock-TUI integration additionally pins
 `@github/copilot@1.0.81`; it does not accept an auto-updated or merely
 SDK-reported version.
+
+## Native allow-all permissions
+
+The `permissions.mode` capability supports the Copilot command
+`{ type: "setPermissionMode", mode: "manual" | "allow-all" }`. It calls native
+`session.permissions.setMode`, independently of interactive/plan/autopilot.
+Native `allow-all` covers tool, path and URL permission
+requests. The runtime remains responsible for its managed policies; the adapter
+does not replace permission handlers with unconditional approvals.
+
+`harnessSettings.copilotPermissions` contains the native acknowledged permission
+mode. The adapter reads `permissions.getMode` on every fresh
+attachment/resume, accepts root `session.permissions_changed` events and fences
+late reads/replies behind newer native events. Native `assisted` is observable but
+cannot be selected through this command. Missing or unrecognized state remains
+unknown, and attaching never changes permissions. Native persistence determines
+the state after resume; the adapter reads it instead of replaying a stored toggle.
+
+A refused change fails with the native actual state still visible. A dispatched
+change with a lost or malformed reply is `outcomeUnknown`. Use the original
+command receipt; never blindly issue another operation. A newer native state
+may differ from the exact operation's acknowledged result.
+
+Enabling allow-all does not independently answer existing requests. Only native
+`permission.completed` retires the matching permission interaction when another
+native client or policy change has settled it. Questions and plan transitions
+are never answered by that setting. Turning it off does not undo work already
+dispatched or remove separate native approval rules.
 
 ## Experimental stock TUI
 
@@ -93,5 +122,5 @@ credential or replace the runtime node's provider. Adapter model descriptions do
 include the provider object.
 
 See GitHub's pinned
-[custom-provider documentation](https://github.com/github/copilot-sdk/blob/v1.0.11/nodejs/README.md#custom-providers)
+[custom-provider documentation](https://github.com/github/copilot-sdk/blob/v1.0.13/nodejs/README.md#custom-providers)
 for the upstream `ProviderConfig` surface.

@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-cli",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Reference command-line client for the Agent Multiplex protocol-v4 access surface.",
   "private": false,
   "type": "module",
@@ -23,8 +23,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-client": "0.2.1",
-    "@arduano/agent-multiplex-protocol": "0.2.1",
+    "@arduano/agent-multiplex-client": "0.2.2",
+    "@arduano/agent-multiplex-protocol": "0.2.2",
     "@trpc/client": "11.18.0"
   }
 }

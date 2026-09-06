@@ -14,7 +14,9 @@ import {
 } from "@arduano/agent-multiplex-runtime-node-core";
 import {
   NATIVE_PAYLOAD_MAX_BYTES,
+  copilotPermissionsSettingsSchema,
   type AdapterScopeId,
+  type CopilotPermissionsSettings,
   type HarnessCommand,
   type HarnessSessionSettings,
   type JsonObject,
@@ -32,6 +34,11 @@ const HISTORY_CURSOR_PREFIX = "copilot:event-index:";
 export interface CopilotSessionRpc {
   mode: {
     set(input: { mode: "interactive" | "plan" | "autopilot" }): Promise<void>;
+  };
+  permissions?: {
+    getMode(): Promise<unknown>;
+    setMode(input: { mode: "manual" | "allow-all" }): Promise<unknown>;
+    handlePendingPermissionRequest(input: { requestId: string; result: Exclude<PermissionRequestResult, { kind: "no-result" }> }): Promise<unknown>;
   };
 }
 
@@ -56,6 +63,14 @@ interface PendingBridgeInteraction {
   settle(value: JsonValue): void;
 }
 
+interface PendingPermission {
+  readonly requestId: string;
+  readonly nativeRequestId: string;
+  readonly child: boolean;
+  resolving: boolean;
+  completed: boolean;
+}
+
 /**
  * Buffers startup events until RuntimeNodeService installs its subscriber. It also
  * turns SDK reverse callbacks into resolvable runtime-node interactions without
@@ -65,6 +80,12 @@ export class CopilotSessionBridge {
   readonly #listeners = new Set<(event: AdapterEvent) => void>();
   readonly #buffer: AdapterEvent[] = [];
   readonly #pending = new Set<PendingBridgeInteraction>();
+  readonly #permissions = new Map<string, PendingPermission>();
+  readonly #completedPermissions = new Set<string>();
+  #permissionRpc: CopilotSessionRpc["permissions"];
+  #permissionMode: CopilotPermissionsSettings | undefined;
+  #permissionRevision = 0;
+  #permissionsChanged: (() => void) | undefined;
   #closed = false;
   #status: SessionRuntimeStatus = "idle";
 
@@ -83,14 +104,39 @@ export class CopilotSessionBridge {
   }
 
   public nativeEvent(event: SessionEvent): void {
+    if (this.#closed) return;
     this.emit({
       kind: "native",
       nativeType: event.type,
       payload: copilotJson(event),
       ephemeral: event.ephemeral === true,
     });
+    const child = event.agentId !== undefined;
+    if (event.type === "permission.requested") { this.permissionRequested(event); return; }
+    if (event.type === "permission.completed") this.permissionCompleted(event);
+    // Descendant events remain in native history, but cannot change the root's
+    // permission setting or runtime status through a shared SDK stream.
+    if (child) return;
+    if (event.type === "session.permissions_changed") {
+      const data: Record<string, unknown> = isObject(event.data) ? event.data : {};
+      this.observePermissions({ mode: data.mode });
+    }
     const status = statusForNativeEvent(event.type);
-    if (status) this.setStatus(status);
+    if (status) this.setStatus(status === "running" && this.waitingForInput() ? "waitingForInput" : status);
+  }
+
+  public attachPermissions(rpc: CopilotSessionRpc["permissions"], onChanged: () => void): void {
+    this.#permissionRpc = rpc;
+    this.#permissionsChanged = onChanged;
+  }
+  public get permissionRevision(): number { return this.#permissionRevision; }
+  public permissionMode(): CopilotPermissionsSettings | undefined { return this.#permissionMode ? { ...this.#permissionMode } : undefined; }
+  public observePermissions(value: unknown, expectedRevision?: number): void {
+    if (this.#closed || expectedRevision !== undefined && expectedRevision !== this.#permissionRevision) return;
+    const parsed = copilotPermissionsSettingsSchema.safeParse(value);
+    this.#permissionMode = parsed.success ? parsed.data : undefined;
+    this.#permissionRevision += 1;
+    this.#permissionsChanged?.();
   }
 
   public setStatus(status: SessionRuntimeStatus): void {
@@ -127,12 +173,12 @@ export class CopilotSessionBridge {
         payload: copilotJson(payload),
         ephemeral: options.ephemeral,
         resolve: async (response) => {
-          if (pending.settled) throw new Error("Copilot interaction was already resolved");
+          if (this.#closed || pending.settled) throw new Error("Copilot interaction was already resolved");
           const parsed = options.parseResponse(response);
           pending.settled = true;
           this.#pending.delete(pending);
           settle(parsed);
-          this.setStatus("running");
+          this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
         },
       });
     });
@@ -148,8 +194,80 @@ export class CopilotSessionBridge {
       }
     }
     this.#pending.clear();
+    this.#permissions.clear();
+    this.#completedPermissions.clear();
+    this.#permissionsChanged = undefined;
+    this.#permissionRpc = undefined;
     this.#listeners.clear();
     this.#buffer.splice(0);
+  }
+
+  private permissionRequested(event: Extract<SessionEvent, { type: "permission.requested" }>): void {
+    const { requestId, permissionRequest, resolvedByHook } = event.data;
+    if (resolvedByHook || typeof requestId !== "string" || !requestId || !permissionRequest || typeof permissionRequest !== "object") return;
+    const nativeRequestId = permissionIdentity(requestId, event.agentId);
+    if (this.#permissions.has(nativeRequestId) || this.#completedPermissions.has(nativeRequestId)) return;
+    const pending: PendingPermission = { requestId, nativeRequestId, child: event.agentId !== undefined, resolving: false, completed: false };
+    this.#permissions.set(nativeRequestId, pending);
+    if (!pending.child) this.setStatus("waitingForInput");
+    this.emit({ kind: "interaction", requestType: "permission", nativeRequestId, ephemeral: false,
+      payload: copilotJson({ permissionRequest, requestId, ...(event.agentId === undefined ? {} : { agentId: event.agentId }) }),
+      resolve: async (response) => {
+        if (this.#closed || pending.completed || this.#permissions.get(nativeRequestId) !== pending) throw new Error("Copilot permission request is no longer pending");
+        if (pending.resolving) throw new Error("Copilot permission request is already resolving");
+        const rpc = this.#permissionRpc;
+        if (typeof rpc?.handlePendingPermissionRequest !== "function") throw new Error("Copilot does not support native permission decisions");
+        const decision = permissionResponse(response);
+        if (decision.kind === "no-result") throw new TypeError("A permission decision is required");
+        pending.resolving = true;
+        let result: unknown;
+        try {
+          result = await rpc.handlePendingPermissionRequest({ requestId, result: decision });
+        } catch (cause) {
+          pending.resolving = false;
+          if (pending.completed) this.retirePermission(pending);
+          throw new AdapterOutcomeUnknownError("Copilot permission decision was dispatched but not acknowledged", { cause });
+        }
+        pending.resolving = false;
+        if (!isObject(result) || typeof result.success !== "boolean") {
+          if (pending.completed) this.retirePermission(pending);
+          throw new AdapterOutcomeUnknownError("Copilot permission decision returned an unrecognized result");
+        }
+        if (!result.success) {
+          this.retirePermission(pending);
+          throw new Error("Copilot permission request was already resolved");
+        }
+        this.#permissions.delete(nativeRequestId);
+        this.rememberCompletedPermission(nativeRequestId);
+        if (!pending.child) this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
+      },
+    });
+  }
+
+  private permissionCompleted(event: Extract<SessionEvent, { type: "permission.completed" }>): void {
+    const requestId = event.data.requestId;
+    if (typeof requestId !== "string" || !requestId) return;
+    const nativeRequestId = permissionIdentity(requestId, event.agentId);
+    this.rememberCompletedPermission(nativeRequestId);
+    const pending = this.#permissions.get(nativeRequestId);
+    if (!pending) return;
+    pending.completed = true;
+    // A controller's successful decision has its own durable resolution. Let
+    // its acknowledgement finish; an external decision retires the prompt now.
+    if (!pending.resolving) this.retirePermission(pending);
+  }
+  private retirePermission(pending: PendingPermission): void {
+    if (this.#permissions.get(pending.nativeRequestId) !== pending) return;
+    this.#permissions.delete(pending.nativeRequestId);
+    this.rememberCompletedPermission(pending.nativeRequestId);
+    this.emit({ kind: "interactionSettled", nativeRequestId: pending.nativeRequestId, state: "stale" });
+  }
+  private rememberCompletedPermission(nativeRequestId: string): void {
+    this.#completedPermissions.add(nativeRequestId);
+    while (this.#completedPermissions.size > 1_024) this.#completedPermissions.delete(this.#completedPermissions.values().next().value!);
+  }
+  private waitingForInput(): boolean {
+    return this.#pending.size > 0 || [...this.#permissions.values()].some(pending => !pending.child && !pending.completed);
   }
 
   private emit(event: AdapterEvent): void {
@@ -187,6 +305,7 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#settings = options.settings;
     this.#onStopped = options.onStopped;
     this.vendorSessionId = options.native.sessionId;
+    this.#bridge.attachPermissions(this.#native.rpc.permissions, () => this.#bridge.settings(this.settings()));
   }
 
   public readonly adapterScopeId: AdapterScopeId;
@@ -199,7 +318,24 @@ export class CopilotAdapterSession implements AdapterSession {
   }
 
   public settings(): HarnessSessionSettings {
-    return { ...this.#settings };
+    const copilotPermissions = this.#bridge.permissionMode();
+    const settings = { ...this.#settings };
+    delete settings.copilotPermissions;
+    return { ...settings, ...(copilotPermissions === undefined ? {} : { copilotPermissions }) };
+  }
+
+  /** Permission state is native-owned. Read it on each fresh SDK attachment;
+   * absence/unknown versions remain unknown and never default to enabled. */
+  public async readPermissions(): Promise<void> {
+    const read = this.#native.rpc.permissions?.getMode;
+    if (typeof read !== "function") return;
+    const generation = this.#bridge.permissionRevision;
+    try {
+      const result = await read.call(this.#native.rpc.permissions);
+      this.#bridge.observePermissions(result, generation);
+    } catch {
+      this.#bridge.observePermissions(undefined, generation);
+    }
   }
 
   public subscribe(listener: (event: AdapterEvent) => void): () => void {
@@ -244,6 +380,28 @@ export class CopilotAdapterSession implements AdapterSession {
         this.#settings = { ...this.#settings, mode: command.mode };
         this.#bridge.settings(this.settings());
         return { mode: command.mode };
+      case "setPermissionMode": {
+        const permissions = this.#native.rpc.permissions;
+        if (typeof permissions?.setMode !== "function" || typeof permissions.getMode !== "function") throw new Error("Copilot allow-all permissions are unavailable on this native session");
+        const generation = this.#bridge.permissionRevision;
+        let result: CopilotPermissionsSettings & { success: boolean };
+        try {
+          result = await this.mutation("change Copilot allow-all permissions", async () => {
+            const value = await permissions.setMode({ mode: command.mode });
+            if (!isObject(value) || typeof value.success !== "boolean") throw new TypeError("Unrecognized Copilot allow-all result");
+            const state = copilotPermissionsSettingsSchema.parse(value);
+            return { success: value.success, ...state };
+          });
+        } catch (error) {
+          this.#bridge.observePermissions(undefined, generation);
+          throw error;
+        }
+        // A newer native notification wins over a delayed RPC reply. The return
+        // value still records the authoritative outcome of this exact operation.
+        this.#bridge.observePermissions(result, generation);
+        if (!result.success || result.mode !== command.mode) throw new Error("Copilot did not apply the requested allow-all permission mode");
+        return copilotJson(result);
+      }
     }
   }
 
@@ -436,4 +594,11 @@ function statusForNativeEvent(nativeType: string): SessionRuntimeStatus | undefi
     default:
       return undefined;
   }
+}
+
+function permissionIdentity(requestId: string, agentId: string | undefined): string {
+  return agentId === undefined ? requestId : `copilot:child:${JSON.stringify([agentId, requestId])}`;
+}
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

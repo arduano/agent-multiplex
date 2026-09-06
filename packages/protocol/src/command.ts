@@ -79,6 +79,7 @@ export const copilotCommandSchema = z.discriminatedUnion("type", [
     type: z.literal("setMode"),
     mode: z.enum(["interactive", "plan", "autopilot"]),
   }),
+  z.object({ type: z.literal("setPermissionMode"), mode: z.enum(["manual", "allow-all"]) }).strict(),
 ]);
 
 export const harnessCommandSchema = z.discriminatedUnion("harness", [

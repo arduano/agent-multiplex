@@ -122,7 +122,7 @@ async function qualify() {
     assert.equal(description.available, true, "pinned native runtime unavailable");
     stage = "native-version";
     assert.equal(JSON.parse(await readFile(join(repository, "node_modules/@github/copilot/package.json"), "utf8")).version, "1.0.81");
-    assert.equal(JSON.parse(await readFile(join(repository, "node_modules/@github/copilot-sdk/package.json"), "utf8")).version, "1.0.11");
+    assert.equal(JSON.parse(await readFile(join(repository, "node_modules/@github/copilot-sdk/package.json"), "utf8")).version, "1.0.13");
     stage = "native-spawn";
     const session = await adapter.spawn({ harness: "copilot", cwd: workspace, model });
     session.subscribe((event) => { if (event.kind === "native") rawEvents.push(event); });

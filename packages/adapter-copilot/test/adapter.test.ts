@@ -48,6 +48,7 @@ class Client implements CopilotAdapterClient {
   public readonly resumed: Array<{ sessionId: string; config: ResumeSessionConfig }> = [];
   public readonly sessions = new Map<string, NativeSession>();
   public metadata: SessionMetadata[] = [];
+  public permissionRpc: CopilotSessionRpc["permissions"];
 
   public async start(): Promise<void> { this.started = true; }
   public async stop(): Promise<Error[]> { return []; }
@@ -67,6 +68,7 @@ class Client implements CopilotAdapterClient {
   public async createSession(config: SessionConfig): Promise<CopilotNativeSession> {
     this.created.push(config);
     const native = new NativeSession(config.sessionId ?? "generated");
+    if (this.permissionRpc) native.rpc.permissions = this.permissionRpc;
     this.sessions.set(native.sessionId, native);
     config.onEvent?.(event("session.start"));
     return native;
@@ -359,8 +361,10 @@ describe("CopilotAgentAdapter", () => {
     expect(second.complete).toBe(true);
   });
 
-  it("bridges SDK permission callbacks to resolvable runtime-node interactions", async () => {
+  it("bridges exact native permission events to resolvable runtime-node interactions", async () => {
     const client = new Client();
+    client.permissionRpc = { getMode: async () => ({ mode: "manual" }), setMode: async () => ({ success: true, mode: "allow-all" }),
+      handlePendingPermissionRequest: vi.fn(async () => ({ success: true })) };
     const adapter = adapterFor(client);
     const session = await adapter.spawn({ harness: "copilot", cwd: "/repo" });
     const received: AdapterEvent[] = [];
@@ -368,18 +372,18 @@ describe("CopilotAgentAdapter", () => {
 
     const callback = client.created[0]?.onPermissionRequest;
     expect(callback).toBeTypeOf("function");
-    const decision = callback?.(
-      { kind: "read", fileName: "/repo/a.ts", intention: "inspect" },
+    const permissionRequest = { kind: "read", fileName: "/repo/a.ts", intention: "inspect" } as const;
+    expect(callback?.(
+      permissionRequest,
       { sessionId: session.vendorSessionId },
-    );
+    )).toEqual({ kind: "no-result" });
+    client.created[0]?.onEvent?.({ ...event("session.start"), type: "permission.requested", data: { requestId: "native-request", permissionRequest } });
     const interaction = received.find((item) => item.kind === "interaction");
     expect(interaction?.kind).toBe("interaction");
     if (interaction?.kind !== "interaction") throw new Error("interaction not emitted");
     await interaction.resolve({ kind: "approve-once", approvedInteractively: true });
-    await expect(decision).resolves.toEqual({
-      kind: "approve-once",
-      approvedInteractively: true,
-    });
+    expect(interaction.nativeRequestId).toBe("native-request");
+    expect(client.permissionRpc.handlePendingPermissionRequest).toHaveBeenCalledWith({ requestId: "native-request", result: { kind: "approve-once", approvedInteractively: true } });
   });
 
   it("reports SDK sessions as resumable and active without reading storage", async () => {

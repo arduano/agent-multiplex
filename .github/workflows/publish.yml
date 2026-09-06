@@ -97,11 +97,18 @@ jobs:
             "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/statuses?per_page=100")"
           jq -e \
             --arg context "Agent Multiplex / Native four-container qualification" \
+            --arg waiverContext "Agent Multiplex / Owner-approved native-model waiver" \
+            --arg tag "$GITHUB_REF_NAME" \
             --arg owner "$GITHUB_REPOSITORY_OWNER" \
             --argjson ownerId "$repository_owner_id" \
             --arg statusUrl "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
             --arg target "https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}" '
-              [
+              def owned:
+                .state == "success" and .creator.login == $owner and
+                .creator.id == $ownerId and .creator.type == "User" and
+                .url == $statusUrl and .target_url == $target;
+              . as $statuses |
+              ([
                 .[][] |
                 select(.context == $context)
               ] |
@@ -114,9 +121,13 @@ jobs:
               .url == $statusUrl and
               .target_url == $target and
               (.description | type == "string" and
-                test("^PASS [A-Za-z0-9][A-Za-z0-9._-]{0,47} sha256:[0-9a-f]{64}$"))
+                test("^PASS [A-Za-z0-9][A-Za-z0-9._-]{0,47} sha256:[0-9a-f]{64}$"))) or
+              ($tag == "v0.2.2" and
+                ($statuses | [.[][] | select(.context == $waiverContext)] |
+                  sort_by(.created_at, .id) | last |
+                  owned and .description == "WAIVED for v0.2.2 by owner; native permission RPC checks passed without model calls"))
             ' <<< "$native_statuses" >/dev/null || {
-              echo "No latest owner-recorded successful native four-container qualification exists for $GITHUB_SHA" >&2
+              echo "No native qualification or explicit v0.2.2 owner waiver exists for $GITHUB_SHA" >&2
               exit 1
             }
       - name: Set up Node.js and GitHub Packages

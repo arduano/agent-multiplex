@@ -53,6 +53,8 @@ jobs:
         run: npm run typecheck
       - name: Test
         run: npm test
+      - name: Verify native Copilot permission RPCs without model calls
+        run: node tests/copilot-permissions-smoke.mjs
       - name: Audit the complete release-build dependency graph
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}

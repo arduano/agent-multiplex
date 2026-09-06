@@ -27,6 +27,14 @@ Suggested first prompt for a new session:
 | Qualified native boundaries | Codex CLI `0.152.0`; Copilot SDK `1.0.11` and optional CLI `1.0.81` |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
+The unreleased `0.2.2` candidate adds native Copilot permission controls and
+updates the SDK to `1.0.13`, whose `permissions.getMode/setMode` methods match
+the retained CLI `1.0.81`. The released baseline above remains `0.2.1` until the
+candidate passes its release prerequisites and is published. The owner explicitly
+waived model-using qualification for this release to unblock laptop YOLO use;
+the native permission RPC checks use no model calls. See the
+[release exception](Releases.md#tag-and-publication-flow).
+
 The signed `v0.2.1` Windows patch passed exact-commit release prerequisites and
 publication. The [checkpoint](../checkpoint-v4.md#windows-patch-release-qualification-2026-09-06)
 records its workflows, artifact identity and native receipt. The owner authorized
@@ -136,6 +144,10 @@ state machines and extension contracts.
 - Copilot SDK spawn/resume, history, prompts, modes, interrupts, interactions,
   events, and runtime-local OpenAI-compatible BYOK configuration. Its stock TUI
   bridge is opt-in and experimental.
+- Current source also exposes Copilot native `permissions.mode` and its
+  acknowledged setting separately from agent mode. The published baseline above
+  does not yet include this additive command; see the
+  [adapter guide](Adapters-and-Terminals.md#copilot) for semantics.
 - Bounded image upload/read/path resolution across the control tree, immutable
   runtime retention, native image references, browser/CLI attachments, and
   authenticated Markdown image previews.

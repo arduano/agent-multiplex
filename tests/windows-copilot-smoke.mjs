@@ -110,7 +110,7 @@ try {
   assert.ok(status.runtimeVersion.length > 0, "SDK runtime status has its own version, separate from the CLI package version");
   assert.equal((await client.getAuthStatus()).isAuthenticated, false, "smoke must not inherit an authenticated account");
   await adapter.close(); adapter = undefined;
-  checks.push("Copilot SDK 1.0.11 / CLI 1.0.81 structured startup, unauthenticated status, graceful shutdown; no sessions or prompts");
+  checks.push("Copilot SDK 1.0.13 / CLI 1.0.81 structured startup, unauthenticated status, graceful shutdown; no sessions or prompts");
 } finally {
   await adapter?.close().catch(() => undefined);
   await endpoint?.close().catch(() => undefined);

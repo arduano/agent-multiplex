@@ -42,12 +42,11 @@ import {
   CopilotSessionBridge,
   elicitationResponse,
   exitPlanResponse,
-  permissionResponse,
   type CopilotNativeSession,
   userInputResponse,
 } from "./session.js";
 
-export const COPILOT_SDK_VERSION = "1.0.11";
+export const COPILOT_SDK_VERSION = "1.0.13";
 
 export interface CopilotRuntimeStatus {
   version: string;
@@ -269,6 +268,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
+    await session.readPermissions();
     return session;
   }
 
@@ -335,6 +335,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
+    await session.readPermissions();
     return session;
   }
 
@@ -499,18 +500,10 @@ function interactionHandlers(bridge: CopilotSessionBridge): {
   onExitPlanModeRequest: ExitPlanModeHandler;
 } {
   return {
-    onPermissionRequest: async (request, invocation) =>
-      permissionResponse(
-        await bridge.interaction(
-          "permission",
-          { permissionRequest: request, invocation },
-          {
-            ephemeral: false,
-            cancelValue: { kind: "cancelled", reason: "adapter session disconnected" },
-            parseResponse: (response) => copilotJson(permissionResponse(response)),
-          },
-        ),
-      ),
+    // The SDK callback omits native requestId. Its native broadcast carries the
+    // exact identity, so the bridge handles that event and responds through the
+    // supported permission RPC. No callback can independently approve a tool.
+    onPermissionRequest: () => ({ kind: "no-result" }),
     onUserInputRequest: async (request, invocation) =>
       userInputResponse(
         await bridge.interaction(
@@ -655,7 +648,7 @@ function codexLbModelInfo(id: string): ModelInfo | undefined {
 
 // Exact non-policy/non-billing entries reported by the pinned Copilot 1.0.79
 // runtime. Its wire catalog includes `none` and several capability properties
-// that are absent from the narrower SDK 1.0.11 TypeScript declaration.
+// that are absent from the narrower SDK 1.0.13 TypeScript declaration.
 const COPILOT_CODEX_LB_MODELS: Record<string, {
   name: string;
   efforts: readonly string[];
@@ -702,6 +695,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "models.switch", version, experimental: false },
     { name: "reasoning-effort.create-resume", version, experimental: false },
     { name: "mode.native", version, experimental: true },
+    { name: "permissions.mode", version: "v1", experimental: true },
     { name: "interactions.permission", version, experimental: false },
     { name: "interactions.userInput", version, experimental: false },
     { name: "interactions.elicitation", version, experimental: true },

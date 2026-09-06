@@ -135,6 +135,14 @@ implicitly receive access to the independently published p2prpc package.
 ## Tag and publication flow
 
 All workspace versions move together and must exactly match the root version.
+For `v0.2.2` only, the owner explicitly requested deployment without the
+model-using four-container qualification. Publication accepts a separate,
+owner-created native-model waiver status tied to the exact signed source commit.
+This is a recorded exception, not a passing native-model receipt. Native Copilot
+permission RPC checks still run on Linux and Windows without credentials or
+model prompts; CI, CodeQL, Docker qualification and artifact verification remain
+required. Other releases retain the native-model gate below.
+
 Create `v<version>` only on `main`, after main-branch CI, CodeQL's push run, the
 deterministic Docker qualification workflow, and the owner-recorded native
 four-container qualification have succeeded for that exact commit.
