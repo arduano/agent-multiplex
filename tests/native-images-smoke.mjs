@@ -90,7 +90,7 @@ async function qualify(harness) {
     const descriptor=await adapter.describe();
     assert(descriptor.available,`${harness} adapter unavailable`);
     result.nativeVersion=descriptor.version; result.runtimeVersion=descriptor.runtimeVersion ?? descriptor.version;
-    assert.equal(descriptor.version,harness==='codex'?'0.152.0':'1.0.11');
+    assert.equal(descriptor.version,harness==='codex'?'0.152.0':'1.0.13');
     cancel=new AbortController();
     collecting=(async()=>{for await(const event of service.events({native:{}},cancel.signal))events.push(event);})();
   };

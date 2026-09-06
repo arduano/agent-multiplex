@@ -65,10 +65,16 @@ export type SessionLaunchProvenance = z.infer<
 >;
 
 /** Last settings acknowledged by the native harness for this concrete session. */
+export const copilotPermissionsSettingsSchema = z.object({
+  mode: z.enum(["manual", "assisted", "allow-all"]),
+});
+export type CopilotPermissionsSettings = z.infer<typeof copilotPermissionsSettingsSchema>;
+
 export const harnessSessionSettingsSchema = z.object({
   model: z.string().min(1).optional(),
   mode: z.string().min(1).optional(),
   effort: z.string().min(1).nullable().optional(),
+  copilotPermissions: copilotPermissionsSettingsSchema.optional(),
 });
 export type HarnessSessionSettings = z.infer<typeof harnessSessionSettingsSchema>;
 

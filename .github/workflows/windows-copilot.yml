@@ -43,6 +43,8 @@ jobs:
         run: npm.cmd run typecheck
       - name: Qualify Windows startup without model calls
         run: node tests/windows-copilot-smoke.mjs
+      - name: Verify native Copilot permission RPCs without model calls
+        run: node tests/copilot-permissions-smoke.mjs
       - name: Check out optional personal consumer
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,5 +86,12 @@ jobs:
         with:
           name: windows-copilot-${{ github.sha }}
           path: receipts/windows-copilot/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload native permission receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-copilot-permissions-${{ github.sha }}
+          path: receipts/copilot-permissions/
           if-no-files-found: error
           retention-days: 14

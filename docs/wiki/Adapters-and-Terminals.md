@@ -56,6 +56,21 @@ is runtime-local. An OpenAI-compatible BYOK provider can use the Responses wire
 API and a runtime-local API-key or bearer-token file; its secret is never
 projected.
 
+Copilot's native allow-all setting is separate from interactive/plan/autopilot.
+The `permissions.mode` capability advertises the fenced `setPermissionMode`
+command; it selects native `manual` or `allow-all` for tool, path and URL
+permissions. The adapter never autoanswers questions or bypasses managed native
+policy. A native refusal is reported, and a lost mutation reply remains
+`outcomeUnknown` under the original command identity.
+
+`harnessSettings.copilotPermissions` reports native acknowledged state, including
+native `assisted` when observed elsewhere. `assisted` cannot be selected through the
+Multiplex command. Every attachment reads the current state through the SDK;
+it does not restore permissions from gateway storage or blindly reapply a saved
+toggle. Root native changes update the same snapshot. Unknown state stays
+unknown, and native completion retires only its exact pending permission
+request. See the [adapter guide](../../packages/adapter-copilot/README.md#native-allow-all-permissions).
+
 Copilot has no supported stock-TUI attach command. The optional TUI bridge is
 therefore experimental and disabled by default. It pins CLI `1.0.81`, starts its
 hidden `--ui-server --no-auto-update` mode on a random loopback-only port, and

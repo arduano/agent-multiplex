@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-adapter-mock",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Deterministic in-memory harness adapter for Agent Multiplex integration and scale testing.",
   "private": false,
   "type": "module",
@@ -19,7 +19,7 @@
   "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
   "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
   "dependencies": {
-    "@arduano/agent-multiplex-protocol": "0.2.1",
-    "@arduano/agent-multiplex-runtime-node-core": "0.2.1"
+    "@arduano/agent-multiplex-protocol": "0.2.2",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.2"
   }
 }

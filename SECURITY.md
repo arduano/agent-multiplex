@@ -60,6 +60,12 @@ disclosure.
   locators, not identity.
 - Terminal output is opaque and unredacted. `terminal-control` is equivalent to
   typing at a native agent under the runtime account.
+- Copilot's `setPermissionMode` command uses `agent-control` and changes the native
+  session's tool, path and URL permission mode. Native managed policy remains
+  enforced by Copilot. The adapter never substitutes unconditional approval
+  callbacks, resolves unrelated questions, or treats an unacknowledged toggle
+  as enabled. Disabling it cannot undo work already dispatched or remove
+  independently granted native approval rules.
 - Image `read` includes immutable bytes and first-display snapshots inside the
   session workspace plus explicitly configured image output roots. Uploads use
   `agent-control`; quotas and exact binding/boot/source fences bound the operation.

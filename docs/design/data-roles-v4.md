@@ -249,6 +249,25 @@ UI-server builds cannot authenticate that SDK connection with
 runtime's OS/container boundary is part of the experiment's trust boundary.
 Probe failure falls back to structured Copilot with no terminal capability.
 
+Copilot permission policy remains native session state. `setPermissionMode` travels
+through the ordinary fenced command journal under `agent-control`; the adapter
+calls the pinned native permission API and projects only acknowledged state in
+`harnessSettings.copilotPermissions`. Its setter selects native `manual` or `allow-all`;
+native `assisted` can be observed but is not an offered setter. It is independent of
+the interactive/plan/autopilot mode. Reads on attachment/resume never mutate
+permissions, and newer root permission events fence delayed read/mutation
+snapshots. Missing, malformed or unsupported state does not imply off or on.
+
+Native permission requests/completions carry the exact pending request ID. An
+external native completion retires only that matching interaction, fenced by
+the current runtime binding and child provenance. A local resolution already
+in flight may finish through its existing acknowledgement rather than being
+misreported as an external retirement. A policy toggle never fabricates an
+approval response for pending tools, questions, elicitation or plan transitions.
+Native refusal remains a definite failure; a dispatched mutation without a
+recognized acknowledgement is outcome unknown. Native organization policy and
+already-dispatched work remain outside the toggle's authority.
+
 ## Source selection
 
 Each source publishes a manifest with:
