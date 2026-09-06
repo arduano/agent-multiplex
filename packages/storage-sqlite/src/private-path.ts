@@ -84,18 +84,18 @@ try {
     $userAccess = $false
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
       if ($trusted -notcontains $rule.IdentityReference.Value -or $rule.AccessControlType -ne 'Allow') { $stage = 'untrusted'; throw 'untrusted access rule' }
-      # libuv creates data files without execute permission. Requiring Modify
-      # would incorrectly require ExecuteFile too; private state needs read/write.
-      $required = if ($directory) { [System.Security.AccessControl.FileSystemRights]::FullControl } else { [System.Security.AccessControl.FileSystemRights]::Read -bor [System.Security.AccessControl.FileSystemRights]::Write }
       if ($rule.IdentityReference.Value -eq $user.Value -and
           ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
-          ($rule.FileSystemRights -band $required) -eq $required) {
+          ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) {
         if (-not $directory -or
             ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit) -ne 0 -and
             ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit) -ne 0) { $userAccess = $true }
       }
     }
-    if (-not $userAccess) { $stage = 'useraccess'; throw 'missing owner access' }
+    # File validation fences who can access its bytes. Its actual read/write
+    # operation checks usability; requiring a particular effective rights mask
+    # would reject private files created with mapped GENERIC_READ/WRITE ACEs.
+    if ($directory -and -not $userAccess) { $stage = 'useraccess'; throw 'missing owner access' }
   }
   [Console]::Out.Write('private-path-ok')
 } catch { [Console]::Out.Write('private-path-failure:' + $stage + ':' + $_.Exception.GetType().Name); exit 1 }
