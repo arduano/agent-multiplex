@@ -146,6 +146,49 @@ provider, configure `AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL`,
 credential-file variable. Provider secrets never belong in launch input or
 session metadata.
 
+For ordinary corporate GitHub Copilot access, omit BYOK configuration and run
+the pinned CLI's `copilot login` locally under the same account and
+`COPILOT_HOME` used by the SDK. Browser OAuth is the desktop default; the CLI
+also supports `login --device-code` and `login --host https://company.ghe.com`
+for Enterprise Cloud data residency. The SDK's `useLoggedInUser: true` uses
+that native sign-in. Tokens and the native auth directory stay on the runtime.
+An embedding that specifically promises saved-account authentication must remove
+inherited `COPILOT_PROVIDER_*`, `COPILOT_OFFLINE`, `COPILOT_GITHUB_TOKEN`,
+`GH_TOKEN`, `GITHUB_TOKEN`, and SDK token overrides from the native child
+environment: they can otherwise override the selected account or model routing.
+Keep approved corporate proxy and CA configuration intact.
+
+`getStatus()` proves native runtime startup, not authentication or entitlement.
+A local diagnostic can request SDK `getAuthStatus()` and `listModels()` without
+creating a session or making a model call. Corporate CLI enablement, sign-in,
+and network policy still need validation on the actual managed laptop.
+
+## Windows Copilot embedding
+
+Windows x64 startup support is being qualified separately from the Linux release
+baseline. Use structured Copilot and leave the experimental TUI disabled. The
+pinned Iroh package has a Windows x64 binary; it has no Windows ARM64 binary.
+Codex's current Unix-socket supervisor remains unsupported on native Windows.
+
+Before an embedding writes identities or starts either daemon, create its new
+private state directories with `ensurePrivateDirectorySync` from
+`@arduano/agent-multiplex-storage-sqlite`. On Windows this uses the installed
+Windows PowerShell and .NET ACL APIs to create protected inheritable access for
+the current user, SYSTEM, and Administrators. Existing directories are validated
+without silently rewriting their ACLs. `assertPrivateFileSync` and
+`assertPrivateFilesSync` validate existing private files. Unsafe ACLs, reparse
+points, unavailable PowerShell, and policies that prevent validation fail closed.
+The helper does not change execution policy or require administrator elevation.
+Use local state outside shared/synced folders and preserve its ACLs when backing up.
+
+The Windows CI smoke checks the exact source and dependency boundary without
+credentials or model prompts. Its passing receipt covers native imports,
+SQLite ownership/reopen, private ACLs, retained image upload/read, and structured
+Copilot status/shutdown. It does not qualify corporate authentication or egress.
+Windows output-image file snapshots remain explicitly unsupported; uploaded
+image bytes retain their normal runtime ownership. See [image limits and
+durability](Images-and-Native-Payloads.md).
+
 ## First health check
 
 ```bash

@@ -17,6 +17,8 @@ import {
 import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
 import { backup as sqliteBackup, DatabaseSync } from "node:sqlite";
+import { assertPrivateFilesSync, ensurePrivateDirectorySync, PrivatePathError } from "./private-path.js";
+export { assertPrivateFileSync, assertPrivateFilesSync, ensurePrivateDirectorySync, PrivatePathError } from "./private-path.js";
 
 /**
  * Baseline used by the original protocol-v3 store migrations. The migration
@@ -665,6 +667,10 @@ function assertMigrationSet(migrations: readonly SqliteMigration[]): void {
 
 function prepareStateDirectory(filename: string): void {
   const directory = dirname(filename);
+  if (process.platform === "win32") {
+    ensurePrivateDirectorySync(directory);
+    return;
+  }
   const existed = existsSync(directory);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const status = lstatSync(directory);
@@ -695,6 +701,7 @@ function validateSqliteBundle(filename: string): void {
       );
     }
   }
+  if (process.platform === "win32") assertPrivateFilesSync(sqliteBundleFiles(filename).filter(existsSync));
 }
 
 function ensureRegularFile(filename: string, create: boolean): void {
@@ -714,7 +721,8 @@ function ensureRegularFile(filename: string, create: boolean): void {
       `SQLite path must be a regular non-symlink file: ${filename}`,
     );
   }
-  chmodSync(filename, 0o600);
+  if (process.platform === "win32") assertPrivateFilesSync([filename]);
+  else chmodSync(filename, 0o600);
 }
 
 function secureSqliteBundle(filename: string): void {
@@ -727,8 +735,9 @@ function secureSqliteBundle(filename: string): void {
         `SQLite created an unsafe sidecar path: ${candidate}`,
       );
     }
-    chmodSync(candidate, 0o600);
+    if (process.platform !== "win32") chmodSync(candidate, 0o600);
   }
+  if (process.platform === "win32") assertPrivateFilesSync(sqliteBundleFiles(filename).filter(existsSync));
 }
 
 function sqliteBundleFiles(filename: string): readonly string[] {
@@ -776,6 +785,7 @@ class SqliteWriterLock {
     };
 
     ensureRegularFile(filename, true);
+    validateSqliteBundle(filename);
     if (existsSync(ownerFilename)) validateRegularFile(ownerFilename);
     const database = new DatabaseSync(filename, {
       timeout: 0,
@@ -858,7 +868,8 @@ function writeOwnerAtomically(filename: string, value: SqliteWriterLockOwner): v
   } finally {
     closeSync(descriptor);
   }
-  chmodSync(temporary, 0o600);
+  if (process.platform === "win32") assertPrivateFilesSync([temporary]);
+  else chmodSync(temporary, 0o600);
   if (existsSync(filename)) validateRegularFile(filename);
   renameSync(temporary, filename);
 }
@@ -895,7 +906,8 @@ function validateRegularFile(filename: string): void {
       `SQLite state path must be a regular non-symlink file: ${filename}`,
     );
   }
-  chmodSync(filename, 0o600);
+  if (process.platform === "win32") assertPrivateFilesSync([filename]);
+  else chmodSync(filename, 0o600);
 }
 
 function isSqliteBusy(error: unknown): boolean {
@@ -905,6 +917,7 @@ function isSqliteBusy(error: unknown): boolean {
 }
 
 function normalizeSqliteOpenError(error: unknown, storeName: string): unknown {
+  if (error instanceof PrivatePathError) return new SqliteStoreError("UNSAFE_PATH", error.message);
   if (error instanceof SqliteStoreError || !error || typeof error !== "object") return error;
   const errorCode = (error as { errcode?: unknown }).errcode;
   if (errorCode !== 11 && errorCode !== 26) return error;

@@ -1,5 +1,5 @@
 import { readFileSync, rmSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -20,7 +20,7 @@ for (const workspacePath of workspacePaths) {
   }
   const outputPath = resolve(repositoryRoot, workspacePath, "dist");
   const repositoryRelative = relative(repositoryRoot, outputPath);
-  if (repositoryRelative !== `${workspacePath}/dist`) {
+  if (repositoryRelative !== join(workspacePath, "dist")) {
     throw new Error(`refusing unsafe output path ${JSON.stringify(outputPath)}`);
   }
   rmSync(outputPath, { recursive: true, force: true });

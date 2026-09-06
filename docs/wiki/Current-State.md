@@ -237,7 +237,11 @@ failed image trial into passing final-source image evidence. The retained
 - Codex app-server transport is upstream-experimental. Copilot's hidden stock-
   TUI server is more experimental and remains disabled by default.
 - Linux x86-64 Docker is qualified. Native Windows is not supported by the
-  current Unix-socket Codex supervisor; other platforms remain unqualified.
+  current Unix-socket Codex supervisor. The Copilot Windows x64 startup path now
+  has explicit DACL validation and a separate no-model Windows CI smoke; it is
+  not part of the released Linux qualification. Corporate auth/network behavior
+  still requires laptop UAT, and Windows native output-image paths remain
+  unsupported. See [Windows embedding](Install-and-Authenticate.md#windows-copilot-embedding).
 - Bespoke launch providers need their own validation, crash-boundary,
   idempotent cleanup, resume/history/archive, and end-to-end tests.
 - General file attachments remain deferred; the v5 attachment surface currently
@@ -263,6 +267,21 @@ When a boundary changes, update its owner and link here instead of copying a
 second detailed contract into this page.
 
 ## Personal application consumer
+
+Native Windows Copilot startup is prepared in
+[PR #22](https://github.com/arduano/agent-multiplex/pull/22). Source
+`96e2d3e165d7448dbf9cca41658a8467893fd5e7` passed
+[Windows x64 CI](https://github.com/arduano/agent-multiplex/actions/runs/34011570520)
+for protected DACLs, SQLite writer ownership/reopen, retained image uploads,
+Iroh and unauthenticated Copilot SDK startup. The same run qualified the
+personal consumer's control/runtime registration, graceful stop and restart
+with enrollment closed against its exact recorded source. No native session or
+model prompt was created. The framework receipt SHA-256 is
+`fdf3eece8ef55ab4d4fa28c2870a048d7c788fa814346681ded909b7f1ea0a2a`.
+This is source-candidate Windows startup evidence; the published `0.2.0` graph
+is unchanged. Corporate OAuth/network/model UAT and Windows output-image path
+reads remain outside this qualification. The personal Windows runbook owns the
+installation release gate and complete consumer evidence.
 
 [`arduano/leo-multiplex`](https://github.com/arduano/leo-multiplex) is the separate
 personal application consumer of the `0.2.0` package graph. Main-pc owns its

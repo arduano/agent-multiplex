@@ -61,6 +61,13 @@ The app stores private bytes under `<stateDirectory>/images`. Embedders can set
 `<sqlite filename>.images`. Custom filesystem backends must provide a bounded,
 confined `readImageFile` implementation.
 
+Windows x64 uses protected directory and file DACLs for uploaded images and
+supports retention across process restart. Native/Markdown output-path snapshots
+remain unsupported because the current opened-file confinement implementation
+requires Linux. Windows file contents are flushed, but Node cannot fsync Windows
+directory entries; sudden power-loss durability is therefore outside the Windows
+startup smoke's scope. See the [platform persistence details](../design/images-v5.md#retention-and-archive).
+
 See [backup and upgrade guidance](Backups-Upgrades-and-Recovery.md) before
 moving a runtime. The full routing, retention, and migration contract is in
 [the v5 image design](../design/images-v5.md).

@@ -1,0 +1,88 @@
+name: Windows Copilot startup
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      consumer_ref:
+        description: Optional exact leo-multiplex source SHA for disposable composition qualification
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  windows-copilot:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@arduano"
+      - name: Install exact npm
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).packageManager.Replace('npm@', '')
+          npm.cmd install --global --ignore-scripts "npm@$version"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install pinned dependencies
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm.cmd ci --strict-allow-scripts
+      - name: Build exact framework source
+        run: npm.cmd run typecheck
+      - name: Qualify Windows startup without model calls
+        run: node tests/windows-copilot-smoke.mjs
+      - name: Check out optional personal consumer
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: arduano/leo-multiplex
+          ref: ${{ inputs.consumer_ref }}
+          path: .cache/leo-consumer
+          persist-credentials: false
+      - name: Qualify optional personal composition
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
+        working-directory: .cache/leo-consumer
+        env:
+          CONSUMER_SHA: ${{ inputs.consumer_ref }}
+          LEO_QUALIFICATION_FRAMEWORK_SHA: ${{ github.sha }}
+        run: |
+          if ($env:CONSUMER_SHA -notmatch '^[a-f0-9]{40}$') { throw 'Exact consumer source SHA required' }
+          if ((git rev-parse HEAD) -ne $env:CONSUMER_SHA) { throw 'Consumer checkout mismatch' }
+          npm.cmd ci --strict-allow-scripts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/stage-framework-candidate.mjs ../..
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm.cmd run typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node_modules/.bin/tsc.cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/windows-host-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --exit-code -- package.json package-lock.json
+      - name: Upload optional composition receipt
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-leo-consumer-${{ inputs.consumer_ref }}
+          path: .cache/leo-consumer/receipts/windows-host/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload scrubbed passing receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-copilot-${{ github.sha }}
+          path: receipts/windows-copilot/
+          if-no-files-found: error
+          retention-days: 14
