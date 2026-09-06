@@ -66,7 +66,7 @@ const DEFAULT_INVENTORY_REFRESH_MS = 60_000;
 const DEFAULT_METADATA_FLUSH_MS = 5_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const DEFAULT_MAX_RUNNING_TERMINALS = 32;
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 
 type HarnessName = "codex" | "copilot";
 type AdapterMode = "native" | "mock";

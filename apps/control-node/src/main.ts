@@ -41,7 +41,7 @@ import {
 import { createControlNodeHttpSurface } from "./http.js";
 import { superviseUpstreamControlNode } from "./upstream.js";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 
 export interface ControlNodeReadyInfo {
   readonly controlNodeId: ControlNodeId;
