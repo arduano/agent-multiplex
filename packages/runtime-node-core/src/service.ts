@@ -88,7 +88,7 @@ import {
 } from "./adapter.js";
 import { RuntimeNodeEventHub } from "./event-hub.js";
 import { NativePathPolicy } from "./native-path-policy.js";
-import { AllowedPathPolicy } from "./path-policy.js";
+import { AllowedPathPolicy, type RuntimePathPolicy } from "./path-policy.js";
 import {
   DirectWorkspaceLaunchProvider,
   LaunchProviderOutcomeUnknownError,
@@ -138,6 +138,8 @@ export interface RuntimeNodeServiceOptions {
   runtimeNodeBootId: RuntimeNodeBootId;
   name: string;
   allowedRoots: readonly string[];
+  /** Trusted static policy replacing allowedRoots admission; never supplied over the wire. */
+  pathPolicy?: RuntimePathPolicy;
   /** Legacy adapter-only composition; each adapter becomes a default backend. */
   adapters?: readonly AgentAdapter[];
   /** Explicit native backends for multi-scope and provider-aware runtimes. */
@@ -187,7 +189,7 @@ export class RuntimeNodeService {
   readonly #runtimeNodeBootId: RuntimeNodeBootId;
   readonly #name: string;
   readonly #endpointId: string | undefined;
-  readonly #pathPolicy: AllowedPathPolicy;
+  readonly #pathPolicy: RuntimePathPolicy;
   readonly #nativePathPolicy: NativePathPolicy;
   readonly #launchRegistry: LaunchProviderRegistry;
   readonly #active = new Map<SessionId, ActiveBinding>();
@@ -225,7 +227,7 @@ export class RuntimeNodeService {
     ) {
       throw new TypeError("resolvedInteractionCacheSize must be a positive integer");
     }
-    this.#pathPolicy = new AllowedPathPolicy(options.allowedRoots);
+    this.#pathPolicy = options.pathPolicy ?? new AllowedPathPolicy(options.allowedRoots);
     this.#nativePathPolicy = new NativePathPolicy(this.#pathPolicy);
     const explicitBackends = [...(options.backends ?? [])];
     const explicitNativeKeys = new Set(

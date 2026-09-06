@@ -58,8 +58,8 @@ assert(
   "release Docker base must pin the exact Node version and OCI digest",
 );
 assert(
-  releaseNativeMinimumSoakMs === 930_000,
-  "native release qualification must cross the 15-minute authenticated-session boundary",
+  releaseNativeMinimumSoakMs === (releaseVersion === "0.2.1" ? 300_000 : 930_000),
+  "native release qualification requires the full renewal soak except for the owner-authorized five-minute 0.2.1 patch",
 );
 
 const qualificationDockerfiles = [

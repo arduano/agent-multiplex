@@ -237,7 +237,21 @@ one session.
 The published runtime daemon also accepts a static `createComponents` factory
 through `RuntimeNodeAppOptions`. Applications can register custom providers and
 disable the direct workspace profile without duplicating transport supervision.
-The factory runs after allowed-root canonicalization and before network startup.
+The factory runs after path-policy root resolution and before network startup.
+An embedded application may statically inject `RuntimePathPolicy` through
+`RuntimeNodeAppOptions.pathPolicy`; direct service composition accepts the same
+interface on `RuntimeNodeServiceOptions`. One policy instance supplies advertised
+roots and admission/canonicalization for launch, resume, native path fields and
+returned session paths. Implementations must return canonical existing paths
+and apply their intended directory admission rule. The built-in
+`AllowedPathPolicy` remains the default and rejects empty configured roots.
+Custom policies may advertise no roots; this is advisory and never substitutes
+for runtime admission. A client, launch request or metadata document cannot
+install a policy. The app exports `runtimePathPolicyInjectionVersion = 1` so
+embedded consumers can refuse older daemons rather than silently losing policy.
+This hook does not replace image workspace/output-root confinement or native
+guards against changing a bound history/provider identity. It grants no OS
+privileges and provides no process sandbox.
 Once returned, its adapters/providers belong to the daemon's normal service
 shutdown; a failing factory must clean up its own partially constructed resources.
 

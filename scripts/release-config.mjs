@@ -30,8 +30,12 @@ assert(packageManagerMatch !== null, "packageManager must pin an exact npm versi
 export const releaseNpmVersion = packageManagerMatch[1];
 export const releaseDockerBaseImage =
   "node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df";
-/** Cross p2prpc's default 15-minute authenticated-session boundary. */
-export const releaseNativeMinimumSoakMs = 930_000;
+/**
+ * The owner authorized a five-minute soak for the 0.2.1 Windows patch only.
+ * It does not qualify p2prpc's 15-minute authenticated-session renewal boundary.
+ * All other releases retain the full renewal qualification minimum.
+ */
+export const releaseNativeMinimumSoakMs = releaseVersion === "0.2.1" ? 300_000 : 930_000;
 export const githubRegistry = "https://npm.pkg.github.com";
 export const repositoryUrl = "git+https://github.com/arduano/agent-multiplex.git";
 export const homepageUrl = "https://github.com/arduano/agent-multiplex#readme";

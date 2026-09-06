@@ -8,6 +8,16 @@ own reconnect, inventory reconciliation, journals, and shutdown. Return all
 constructed components only after successful preparation; the factory owns
 cleanup if it throws before returning.
 
+Trusted embedded applications can also pass a `pathPolicy` implementing
+[`RuntimePathPolicy`](../../packages/runtime-node-core/src/path-policy.ts).
+The same instance controls startup root advertisement, launch/resume admission,
+returned session paths, and native attachment/path fields. It replaces the
+configured root fence; it is static application code, never launch input or a
+remote setting. Without injection, the ordinary nonempty allowed-root policy
+still applies. Advertised roots are suggestions, so an empty list from a custom
+policy does not itself authorize any client action. Image snapshot confinement
+continues to use the separate session workspace and explicit output roots.
+
 Use a paired extension when session creation needs domain policy: for example a
 PR URL, repository authorization, worktree creation, container placement, quota,
 or cleanup. The gateway half presents and validates the workflow; the runtime

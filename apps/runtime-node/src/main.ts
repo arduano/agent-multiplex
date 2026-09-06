@@ -44,6 +44,7 @@ import {
   RuntimeNodeService,
   RuntimeNodeStore,
   AllowedPathPolicy,
+  type RuntimePathPolicy,
   createRuntimeNodeRouter,
   type AgentAdapter,
   type TerminalProvider,
@@ -66,7 +67,10 @@ const DEFAULT_INVENTORY_REFRESH_MS = 60_000;
 const DEFAULT_METADATA_FLUSH_MS = 5_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const DEFAULT_MAX_RUNNING_TERMINALS = 32;
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
+
+/** Embedded consumers can fail closed when their published daemon lacks this hook. */
+export const runtimePathPolicyInjectionVersion = 1 as const;
 
 type HarnessName = "codex" | "copilot";
 type AdapterMode = "native" | "mock";
@@ -131,8 +135,9 @@ export async function runRuntimeNode(
   signal: AbortSignal,
   options: RuntimeNodeAppOptions = {},
 ): Promise<void> {
-  // Root resolution has no durable or native ownership; fail before opening stores.
-  const allowedRoots = await new AllowedPathPolicy(config.allowedRoots).roots();
+  // Policy resolution has no durable or native ownership; fail before opening stores.
+  const pathPolicy = options.pathPolicy ?? new AllowedPathPolicy(config.allowedRoots);
+  const allowedRoots = await pathPolicy.roots();
   const identity = await loadOrCreateIdentity(config.stateDirectory);
   const runtimeNodeBootId = newRuntimeNodeBootId();
   const store = new RuntimeNodeStore(join(config.stateDirectory, DATABASE_FILENAME));
@@ -157,6 +162,7 @@ export async function runRuntimeNode(
     runtimeNodeBootId,
     name: config.runtimeNodeName,
     allowedRoots,
+    pathPolicy,
     adapters,
     terminalProviders,
     ...(backends === undefined ? {} : { backends }),
@@ -454,6 +460,8 @@ export interface RuntimeComponents {
 /** Static application composition; reconnect, journal, and shutdown remain daemon-owned. */
 export interface RuntimeNodeAppOptions {
   createComponents?: (config: RuntimeNodeAppConfig) => RuntimeComponents | Promise<RuntimeComponents>;
+  /** Trusted static admission policy shared by startup, service and native path validation. */
+  pathPolicy?: RuntimePathPolicy;
 }
 
 export async function createRuntimeComponents(
@@ -516,8 +524,9 @@ export async function createRuntimeComponents(
         const runtime = await createExperimentalCopilotRuntime({
           ...adapterOptions,
           // The TUI needs a bootstrap directory before any session exists.
-          // runRuntimeNode canonicalizes every root before reaching here.
-          workingDirectory: config.allowedRoots[0]!,
+          // A custom policy may advertise no roots. Private runtime state is
+          // already initialized and is only the TUI bootstrap, never session cwd.
+          workingDirectory: config.allowedRoots[0] ?? config.stateDirectory,
           ...(config.copilotBinary ? { binary: config.copilotBinary } : {}),
         });
         adapters.push(runtime.adapter);

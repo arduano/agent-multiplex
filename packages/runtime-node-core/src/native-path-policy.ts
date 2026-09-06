@@ -6,7 +6,7 @@ import {
   type JsonValue,
 } from "@arduano/agent-multiplex-protocol";
 
-import { AllowedPathPolicy, PathPolicyError } from "./path-policy.js";
+import { PathPolicyError, type RuntimePathPolicy } from "./path-policy.js";
 
 const hasOwn = (value: JsonObject, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(value, key);
@@ -26,14 +26,14 @@ export class NativePathPolicyError extends PathPolicyError {
 }
 
 /**
- * Applies the runtime-node-local root fence to path-bearing fields in the pinned
+ * Applies the runtime-node-local path policy to path-bearing fields in the pinned
  * Codex and Copilot native extension surfaces. Unknown native fields remain
  * opaque by design; callers with native passthrough access are trusted.
  */
 export class NativePathPolicy {
-  readonly #paths: AllowedPathPolicy;
+  readonly #paths: RuntimePathPolicy;
 
-  public constructor(paths: AllowedPathPolicy) {
+  public constructor(paths: RuntimePathPolicy) {
     this.#paths = paths;
   }
 
