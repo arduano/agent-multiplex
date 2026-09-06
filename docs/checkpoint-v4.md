@@ -1,12 +1,67 @@
 # Release qualification checkpoint
 
-Status: signed `v0.2.0` source qualified and published as of 2026-09-05.
+Status: signed `v0.2.1` Windows patch qualified and published as of 2026-09-06.
 
 This document records release qualification and separately scoped development
 evidence. Its filename remains stable for existing links. It is not a second
 architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
+
+## Windows patch release qualification (2026-09-06)
+
+| Evidence | Identity |
+| --- | --- |
+| Signed annotated tag | `v0.2.1`; tag object `10223abed9c5b8549923ccde1877c9361acf7a19` |
+| Peeled source commit | `a6b4b1ecc474ae819ab7609486d0978fe0bc4957` |
+| Wire/package boundary | Protocol `5`; 16 lockstep packages at `0.2.1` |
+| CI | [Run `34023055422`](https://github.com/arduano/agent-multiplex/actions/runs/34023055422), passed on the exact source |
+| CodeQL | [Run `34023055398`](https://github.com/arduano/agent-multiplex/actions/runs/34023055398), passed on the exact source |
+| Deterministic Docker | [Run `34023055510`](https://github.com/arduano/agent-multiplex/actions/runs/34023055510), passed on the exact source |
+| Windows Copilot startup | [Run `34023055448`](https://github.com/arduano/agent-multiplex/actions/runs/34023055448), passed on the exact source |
+| Publication | [Run `34023552031`](https://github.com/arduano/agent-multiplex/actions/runs/34023552031), passed on the exact source |
+| Native qualification | [Owner-recorded success status](https://github.com/arduano/agent-multiplex/commit/a6b4b1ecc474ae819ab7609486d0978fe0bc4957) |
+| GitHub Release | [`v0.2.1`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.1) |
+
+Native receipt: `receipts/protocol-v4-live-four-container/20260906T085229Z-295e94b14a7a`.
+SHA-256 of its `SHA256SUMS`: `23f2294bea0301f5a8465c38734575e4fcb91d428827b90f26161da74085bc67`.
+The owner authorized a **300,000 ms soak for 0.2.1 only**. The same browser and
+gateway watcher retained both agents, then received fresh streamed Codex and
+Copilot replies. The recorder validated the exact-source receipt and all
+stream/count/cleanup/secret predicates before recording status. The short soak
+need not reset the independent transport subscription and does **not** requalify
+the 15-minute authenticated-session renewal boundary. Other versions retain
+930,000 ms and positive reset/replay requirements.
+
+The native run also covered UI metadata, Codex model/mode switching, Plan input,
+interruption, managed terminal interaction with two viewers, native history
+reload and responsive accessibility. Disposable containers, network, image,
+relay and state were removed. No installed personal host or existing native
+session was changed. Pins remain Node `24.19.0`/npm `11.17.0`, Codex `0.152.0`,
+Copilot SDK `1.0.11`/CLI `1.0.81` and public p2prpc `0.2.1`.
+
+Windows 2025 x64 separately passed private DACLs, SQLite ownership/reopen,
+retained image uploads, Iroh and unauthenticated Copilot SDK startup, with zero
+model calls. Corporate OAuth/network/suspend and real share access remain laptop
+UAT. Native Windows Codex and output-image paths remain unsupported. The personal
+consumer separately records installation/host/executor tests against the exact
+published artifacts, including C:/D: directories.
+
+The patch adds trusted static runtime path-policy injection without changing
+wire v5, default root fencing or released migration identities. Publication
+verified packed and registry consumers, all 16 tarball integrities, attestations
+and public Release assets. Independent downloaded checksums and provenance:
+all 21 Release asset digests and all 16 package provenance attestations passed.
+The manifest SHA-256 is
+`e4a30672353f771666bfd2c93fd007a2af7e13045b1f79162b8933f37568d8ee`.
+Raw receipts stay local/gitignored; linked workflows,
+owner status and inventory digests are the portable evidence.
+
+The earlier five-minute run at `f070939` passed native acceptance but was
+rejected by the recorder's positive reset/replay requirement. It remains
+diagnostic evidence. The final source explicitly scopes that requirement to
+longer soaks and other versions, preserves sequence/replay integrity checks,
+and has the fresh accepted receipt above.
 
 ## Protocol-v5 release qualification (2026-09-05)
 
