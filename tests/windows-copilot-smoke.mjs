@@ -37,10 +37,10 @@ try {
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", String.raw`
       $ErrorActionPreference = 'Stop'
       try {
-        $acl = Get-Acl -LiteralPath $env:AGENT_MULTIPLEX_SMOKE_FILE
+        $acl = [System.IO.File]::GetAccessControl($env:AGENT_MULTIPLEX_SMOKE_FILE)
         $sid = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
         $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'Read', 'Allow')))
-        Set-Acl -LiteralPath $env:AGENT_MULTIPLEX_SMOKE_FILE -AclObject $acl
+        [System.IO.File]::SetAccessControl($env:AGENT_MULTIPLEX_SMOKE_FILE, $acl)
       } catch { exit 1 }
     `], { env: { ...process.env, AGENT_MULTIPLEX_SMOKE_FILE: file }, encoding: "utf8", windowsHide: true });
   assert.equal(aclChange.status, 0, "ACL fixture setup failed");

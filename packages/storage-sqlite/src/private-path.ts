@@ -77,7 +77,7 @@ try {
     $directory = $request.operation -eq 'directory'
     if ($item.PSIsContainer -ne $directory) { throw 'wrong path type' }
     $stage = 'acl'
-    $acl = Get-Acl -LiteralPath $path
+    $acl = if ($directory) { [System.IO.Directory]::GetAccessControl($path) } else { [System.IO.File]::GetAccessControl($path) }
     if ($trusted -notcontains $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value) { throw 'untrusted owner' }
     if ($directory -and -not $acl.AreAccessRulesProtected) { throw 'directory inherits access' }
     $stage = 'rules'
