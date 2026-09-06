@@ -1409,6 +1409,9 @@ jq -n \
   if (( SOAK_MS > 0 )); then
     printf 'The same browser and gateway-only fleet stream remained attached for a %sms liveness soak, then verified the selected source, both online runtimes, both retained sessions, and fresh streamed Codex and Copilot replies.\n\n' "$SOAK_MS"
   fi
+  if (( SOAK_MS < 930000 )); then
+    printf 'This run does not qualify the 15-minute authenticated-session renewal boundary. The owner authorized a five-minute release minimum for version 0.2.1 only.\n\n'
+  fi
   printf 'No API key, bearer token, shared secret, provider endpoint, or raw p2prpc ticket is present in this receipt.\n'
 } >"$RECEIPT_DIR/README.md"
 

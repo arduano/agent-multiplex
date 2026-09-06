@@ -277,8 +277,9 @@ path-policy hook needed by the personal Windows installer. The personal app can
 allow operator-selected directories across drives and UNC shares without
 changing the default framework root fence. See
 [embedded policy guidance](Paired-Launch-Extensions.md). It does not add Windows Codex supervision or Windows native
-output-image path support. The live four-container release qualification still
-requires the owner's explicit model-credit allowance. See
+output-image path support. The owner authorized live model qualification with
+a five-minute soak for this patch. It does not requalify the 15-minute transport
+renewal boundary; the release minimum returns to 930 seconds for other versions. See
 [release prerequisites](Releases.md#candidate-checklist).
 
 Native Windows Copilot startup is prepared in

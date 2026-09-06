@@ -65,12 +65,17 @@ implicitly receive access to the independently published p2prpc package.
 7. After the candidate is merged, check out a clean `main` that exactly equals
    `origin/main`, then run the real four-container Codex/Copilot qualification.
    The runner records that exact commit in the receipt and refuses a dirty
-   worktree. Also run the 930-second soak for retained deployment upgrades.
+   worktree. Normally run the 930-second soak for retained deployment upgrades.
+   The owner authorized a **300-second soak for `0.2.1` only** to unblock
+   Windows installation, with subsequent laptop UAT. This patch qualification
+   does not cross or requalify p2prpc's 15-minute authenticated-session renewal
+   boundary; later versions retain the 930-second release minimum.
 8. Independently validate the successful receipt and record the owner-attested
    exact-commit status consumed by publication:
 
    ```bash
-   AGENT_MULTIPLEX_LIVE_SOAK_MS=930000 \
+   # 0.2.1 only; use 930000 for other releases.
+   AGENT_MULTIPLEX_LIVE_SOAK_MS=300000 \
      npm run test:docker:v4:live:four
    npm run release:native-status -- \
      receipts/protocol-v4-live-four-container/<successful-run-id>
@@ -80,7 +85,8 @@ implicitly receive access to the independently published p2prpc package.
    requires clean exact `origin/main`, snapshots and rehashes the complete
    receipt inventory, checks topology, native controls, cleanup, secret
    isolation, Node, protocol, the locked p2prpc identity, and a completed soak
-   of at least 930 seconds. Shorter ordinary live runs cannot authorize a
+   of at least 930 seconds, except for the explicit 300-second `0.2.1` policy
+   in `scripts/release-config.mjs`. Other shorter runs cannot authorize a
    release. The recorder requires `gh` to be logged in as the repository
    owner's numeric GitHub identity before it creates the success status. The
    permanent status description records the run ID and SHA-256 of
