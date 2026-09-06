@@ -27,10 +27,10 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-client-p2prpc": "0.2.0",
+    "@arduano/agent-multiplex-client-p2prpc": "0.2.1",
     "@arduano/agent-multiplex-gateway-core": "0.2.1",
     "@arduano/agent-multiplex-protocol": "0.2.1",
-    "@arduano/agent-multiplex-transport-p2prpc": "0.2.0",
+    "@arduano/agent-multiplex-transport-p2prpc": "0.2.1",
     "@arduano/agent-multiplex-web": "0.2.1",
     "@trpc/server": "11.18.0",
     "@types/node": "24.3.0",
