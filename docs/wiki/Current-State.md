@@ -268,6 +268,21 @@ second detailed contract into this page.
 
 ## Personal application consumer
 
+Native Windows Copilot startup is prepared in
+[PR #22](https://github.com/arduano/agent-multiplex/pull/22). Source
+`96e2d3e165d7448dbf9cca41658a8467893fd5e7` passed
+[Windows x64 CI](https://github.com/arduano/agent-multiplex/actions/runs/34011570520)
+for protected DACLs, SQLite writer ownership/reopen, retained image uploads,
+Iroh and unauthenticated Copilot SDK startup. The same run qualified the
+personal consumer's control/runtime registration, graceful stop and restart
+with enrollment closed against its exact recorded source. No native session or
+model prompt was created. The framework receipt SHA-256 is
+`fdf3eece8ef55ab4d4fa28c2870a048d7c788fa814346681ded909b7f1ea0a2a`.
+This is source-candidate Windows startup evidence; the published `0.2.0` graph
+is unchanged. Corporate OAuth/network/model UAT and Windows output-image path
+reads remain outside this qualification. The personal Windows runbook owns the
+installation release gate and complete consumer evidence.
+
 [`arduano/leo-multiplex`](https://github.com/arduano/leo-multiplex) is the separate
 personal application consumer of the `0.2.0` package graph. Main-pc owns its
 control catalog and runtime; the NAS hosts only the personal web/gateway edge.
