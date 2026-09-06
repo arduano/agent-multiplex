@@ -1,0 +1,47 @@
+name: Windows Copilot startup
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  windows-copilot:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: "@arduano"
+      - name: Install exact npm
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).packageManager.Replace('npm@', '')
+          npm.cmd install --global --ignore-scripts "npm@$version"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install pinned dependencies
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm.cmd ci --strict-allow-scripts
+      - name: Build exact framework source
+        run: npm.cmd run typecheck
+      - name: Qualify Windows startup without model calls
+        run: node tests/windows-copilot-smoke.mjs
+      - name: Upload scrubbed passing receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-copilot-${{ github.sha }}
+          path: receipts/windows-copilot/
+          if-no-files-found: error
+          retention-days: 14

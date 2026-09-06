@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, open, realpath, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -16,6 +16,7 @@ import {
 
 import { RuntimeNodeStore, type RuntimeImageEntry } from "./store.js";
 import type { RuntimeAgentBackend } from "./adapter.js";
+import { assertPrivateFilesSync, ensurePrivateDirectorySync } from "@arduano/agent-multiplex-storage-sqlite";
 
 export class RuntimeImageError extends Error {
   constructor(readonly code: "NOT_FOUND" | "FENCED" | "CONFLICT" | "RESOURCE_EXHAUSTED" | "UNSUPPORTED", message: string) {
@@ -229,18 +230,32 @@ export class RuntimeImages {
   }
 
   async #initialize(directory: string | undefined): Promise<string> {
-    const root = directory === undefined ? await mkdtemp(join(tmpdir(), "agent-multiplex-images-")) : resolve(directory);
-    await mkdir(root, { recursive: true, mode: 0o700 });
+    const root = directory === undefined
+      ? process.platform === "win32" ? join(tmpdir(), `agent-multiplex-images-${randomUUID()}`) : await mkdtemp(join(tmpdir(), "agent-multiplex-images-"))
+      : resolve(directory);
+    if (process.platform === "win32") ensurePrivateDirectorySync(root);
+    else await mkdir(root, { recursive: true, mode: 0o700 });
     const info = await lstat(root);
     if (!info.isDirectory() || info.isSymbolicLink()) throw new RuntimeImageError("FENCED", "image storage must be a private regular directory");
-    await chmod(root, 0o700);
-    const parent = await open(dirname(root), constants.O_RDONLY | constants.O_DIRECTORY);
-    try { await parent.sync(); } finally { await parent.close(); }
+    if (process.platform === "win32") {
+      // Windows users normally bypass directory traversal checks. An existing
+      // broad file ACL cannot be made private merely by protecting its parent.
+      assertPrivateFilesSync((await readdir(root)).map((name) => join(root, name)));
+    }
+    if (process.platform !== "win32") {
+      await chmod(root, 0o700);
+      const parent = await open(dirname(root), constants.O_RDONLY | constants.O_DIRECTORY);
+      try { await parent.sync(); } finally { await parent.close(); }
+    }
     return realpath(root);
   }
 
   async #path(imageId: string): Promise<string> { return join(await this.#root, `${imageId}.blob`); }
   async #syncDirectory(): Promise<void> {
+    // Node cannot open/fsync directory handles on Windows. File contents still
+    // use FileHandle.sync before SQLite commits; directory-entry durability
+    // after power loss remains a documented Windows filesystem limitation.
+    if (process.platform === "win32") return;
     const directory = await open(await this.#root, constants.O_RDONLY | constants.O_DIRECTORY);
     try { await directory.sync(); } finally { await directory.close(); }
   }

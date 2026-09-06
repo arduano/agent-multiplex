@@ -139,6 +139,17 @@ SQLite backup API alone does not copy image files. Stop the runtime for a
 consistent complete filesystem backup unless the embedding supplies its own
 coordinated snapshot mechanism.
 
+On Windows, image storage validates protected directory and existing-file DACLs;
+new files inherit access only for the current user, SYSTEM, and Administrators.
+File contents are flushed before the SQLite progress/commit record. Node does
+not expose usable Windows directory handles for directory-entry fsync, so that
+additional POSIX durability barrier is unavailable: the Windows startup smoke
+proves process restart retention, not directory-entry survival after sudden
+power loss. Missing bytes after a storage failure remain unavailable and are
+never silently reconstructed. Confined native/Markdown file snapshots currently
+require Linux opened-file identity and explicitly return unsupported on Windows;
+ordinary uploaded Copilot blob attachments do not require a native path read.
+
 ## Upgrade boundary
 
 Protocol v5 rejects v4 peers; update controls, runtimes, gateways, and clients in

@@ -237,7 +237,11 @@ failed image trial into passing final-source image evidence. The retained
 - Codex app-server transport is upstream-experimental. Copilot's hidden stock-
   TUI server is more experimental and remains disabled by default.
 - Linux x86-64 Docker is qualified. Native Windows is not supported by the
-  current Unix-socket Codex supervisor; other platforms remain unqualified.
+  current Unix-socket Codex supervisor. The Copilot Windows x64 startup path now
+  has explicit DACL validation and a separate no-model Windows CI smoke; it is
+  not part of the released Linux qualification. Corporate auth/network behavior
+  still requires laptop UAT, and Windows native output-image paths remain
+  unsupported. See [Windows embedding](Install-and-Authenticate.md#windows-copilot-embedding).
 - Bespoke launch providers need their own validation, crash-boundary,
   idempotent cleanup, resume/history/archive, and end-to-end tests.
 - General file attachments remain deferred; the v5 attachment surface currently

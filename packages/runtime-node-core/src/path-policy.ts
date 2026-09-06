@@ -45,7 +45,7 @@ export class AllowedPathPolicy {
     }
     const allowed = (await this.roots()).some((root) => {
       const child = relative(root, canonical);
-      return child === "" || (!child.startsWith(`..${sep}`) && child !== "..");
+      return child === "" || (!isAbsolute(child) && !child.startsWith(`..${sep}`) && child !== "..");
     });
     if (!allowed) {
       throw new PathPolicyError(

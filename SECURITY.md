@@ -78,6 +78,11 @@ disclosure.
   UI-server.
 - Protect SQLite databases, WAL/SHM files, endpoint identities, backups, logs,
   retained image directories, and native histories as sensitive data.
+- On Windows, create private state with protected inheritable DACLs restricted
+  to the current user, SYSTEM, and Administrators. Validate existing file ACLs
+  too; restricting a parent does not remove a child's broader Windows access.
+  Unsupported ACL inspection and unsafe restored state must fail closed. Do
+  not bypass managed execution policy to run the ACL helper or native harness.
 - Never store secrets, transcripts, terminal bytes, or provider checkpoints in
   session metadata.
 - Reconcile `outcomeUnknown` by its stable operation/resource identity; do not

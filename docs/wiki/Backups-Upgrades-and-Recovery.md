@@ -41,7 +41,9 @@ reachability material and should not appear in shareable receipts.
 ## Restore drill
 
 1. Restore into a new isolated directory and network.
-2. Preserve file modes and the role's matching endpoint identity.
+2. Preserve private file modes (protected directory/file DACLs on Windows) and
+   the role's matching endpoint identity. Broader restored Windows ACLs fail
+   startup validation; the application does not silently repair them.
 3. Start exactly one writer and let startup run application-ID, migration-ledger,
    integrity, and foreign-key checks.
 4. Verify logical and endpoint identities before allowing peers to connect.

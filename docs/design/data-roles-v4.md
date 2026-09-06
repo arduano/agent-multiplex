@@ -353,6 +353,17 @@ journals, provider-private checkpoints, archived-binding tombstones, and
 metadata outboxes. Managed PTYs, replay buffers, and keyboard leases are
 explicitly excluded.
 
+Private SQLite state uses POSIX directory mode 0700 and regular files at 0600.
+On Windows, where those mode bits cannot represent privacy, a protected
+inheritable directory DACL and regular-file DACLs must admit only the current
+user, SYSTEM, and Administrators. New directories receive that DACL at creation;
+existing directories/files with broader access fail closed without repair.
+The installed Windows PowerShell/.NET ACL API is the platform implementation;
+validation neither changes execution policy nor exposes native subprocess
+diagnostics. Embeddings establish private directories before writing identity
+files. SQLite's OS writer lock remains authoritative on both platforms, with
+no change to released migrations or role ownership.
+
 Runtime shutdown closes admission before draining all previously admitted
 native/provider operations, including commands, history, inventory, and
 interaction responses. Dependencies stay open until that work settles. It

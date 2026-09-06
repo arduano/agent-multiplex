@@ -59,6 +59,11 @@ dependencies are not intentionally included in runtime packages, but their
 licenses still apply wherever a release pipeline redistributes them or their
 assets.
 
+Windows private-state validation invokes the operating system's installed
+Windows PowerShell and .NET ACL APIs. No PowerShell binary or additional npm
+security/native dependency is bundled by this change; operating-system terms
+continue to govern those installed components.
+
 Before publishing a binary, container, web bundle, or npm package, generate an
 SBOM from the exact lockfile/artifact, inspect every `UNKNOWN` or custom license,
 and ship all license/NOTICE files required by that artifact. This summary is a
