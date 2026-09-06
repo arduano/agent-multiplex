@@ -48,6 +48,8 @@ export interface ControlNodeReadyInfo {
   readonly endpointId: string;
   readonly ticket: string;
   readonly httpUrl: string;
+  /** Fresh signed reachability for this running endpoint; never exposes its key. */
+  createTicket(): Promise<string>;
 }
 
 export interface ControlNodeAppOptions {
@@ -80,6 +82,14 @@ export async function runControlNode(
   let staleSweep: NodeJS.Timeout | undefined;
   const upstreamController = new AbortController();
   let upstreamSupervisor: Promise<void> = Promise.resolve();
+  let closing = false;
+  const createTicket = async (): Promise<string> => {
+    if (closing || signal.aborted || !p2pNode) throw new Error("control node is not running");
+    const ticket = await p2pNode.createTicket();
+    if (closing || signal.aborted) throw new Error("control node is not running");
+    currentP2PTicket = ticket;
+    return ticket;
+  };
 
   const currentDesiredUpstream = () => {
     const value = catalog.desiredUpstream();
@@ -248,17 +258,15 @@ export async function runControlNode(
       onError: (error) => console.error("p2prpc:", error.message),
     });
 
-    currentP2PTicket = await p2pNode.createTicket();
+    currentP2PTicket = await createTicket();
     catalog.setLocalEndpointId(p2pNode.id);
     if (desiredUpstream?.endpointId === p2pNode.id) {
       throw new Error("a control node cannot dial its own p2prpc endpoint as upstream");
     }
     const startupTicket = currentP2PTicket;
     ticketRefresh = setInterval(() => {
-      const node = p2pNode;
-      if (!node) return;
-      void node.createTicket()
-        .then((ticket) => { currentP2PTicket = ticket; })
+      if (closing || signal.aborted) return;
+      void createTicket()
         .catch((error: unknown) => console.error("refreshing p2prpc ticket:", error));
     }, 10 * 60_000);
     ticketRefresh.unref();
@@ -313,6 +321,7 @@ export async function runControlNode(
       endpointId: p2pNode.id,
       ticket: startupTicket,
       httpUrl: `http://${config.bindAddress}:${port}`,
+      createTicket,
     });
     console.log(`Agent Multiplex control node ${instanceId}`);
     console.log(`Control node ID: ${local.controlNodeId}`);
@@ -326,6 +335,7 @@ export async function runControlNode(
 
     await aborted(signal);
   } finally {
+    closing = true;
     if (staleSweep !== undefined) clearInterval(staleSweep);
     if (ticketRefresh !== undefined) clearInterval(ticketRefresh);
     upstreamController.abort();

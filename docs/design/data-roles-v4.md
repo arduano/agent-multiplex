@@ -445,6 +445,13 @@ shared deployments should not use this convenience bootstrap.
 
 ### Static external authentication composition
 
+An embedded control daemon may expose a lifetime-bound `createTicket()`
+capability to its trusted composition. It refreshes only signed endpoint
+reachability and the ticket returned on subsequent enrollment, without exporting
+the endpoint key or changing authority, enrollment, or scopes. The composition
+owns private local publication and refresh cadence; gateways continue to pin
+endpoint identity independently of every refreshed locator.
+
 A bespoke gateway may supply its own HTTP/WebSocket surface to the reference
 gateway supervisor. That surface must explicitly declare external authentication
 and build an authenticated, scoped request context before invoking the exported
