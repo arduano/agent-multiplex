@@ -3,7 +3,7 @@
  * reloads its subscription. Replays across reset boundaries are expected;
  * duplicates within one segment, conflicting replay bytes, and gaps are not.
  */
-export function nativeStreamSummaryPassed(streams, expectedNativeEvents) {
+export function nativeStreamSummaryPassed(streams, expectedNativeEvents, { requireReplay = true } = {}) {
   if (streams === null || typeof streams !== "object") return false;
 
   const counts = [
@@ -26,8 +26,7 @@ export function nativeStreamSummaryPassed(streams, expectedNativeEvents) {
     streams.replayCount !==
       streams.rawNativeEventCount - streams.uniqueNativeEventCount ||
     streams.crossSegmentReplayCount !== streams.replayCount ||
-    streams.replayCount < 1 ||
-    streams.streamResetCount < 1
+    (requireReplay && (streams.replayCount < 1 || streams.streamResetCount < 1))
   ) {
     return false;
   }

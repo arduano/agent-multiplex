@@ -7,6 +7,25 @@ describe("native qualification replay evidence", () => {
     expect(nativeStreamSummaryPassed(summary(), 640)).toBe(true);
   });
 
+  it("allows a continuous short-soak stream only with an explicit replay exception", () => {
+    const continuous = summary({ rawNativeEventCount: 380, replayCount: 0,
+      crossSegmentReplayCount: 0, streamResetCount: 0,
+      segments: [{ segmentIndex: 0, nativeEventCount: 380, sequenceGroupCount: 2 }],
+    });
+    expect(nativeStreamSummaryPassed(continuous, 380)).toBe(false);
+    expect(nativeStreamSummaryPassed(continuous, 380, { requireReplay: false })).toBe(true);
+    for (const override of [
+      { withinSegmentDuplicateKeys: ["duplicate"] },
+      { conflictingReplays: ["conflict"] },
+      { noncontiguousGroups: [{ expected: 1, actual: 2 }] },
+      { crossSegmentReplayCount: 1 },
+      { rawNativeEventCount: 379 },
+    ]) {
+      expect(nativeStreamSummaryPassed({ ...continuous, ...override }, 380, { requireReplay: false })).toBe(false);
+    }
+    expect(nativeStreamSummaryPassed(summary(), 640, { requireReplay: false })).toBe(true);
+  });
+
   it.each([
     ["raw count mismatch", { rawNativeEventCount: 639 }],
     ["zero unique events", { uniqueNativeEventCount: 0, replayCount: 640 }],

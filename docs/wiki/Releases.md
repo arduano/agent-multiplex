@@ -70,6 +70,10 @@ implicitly receive access to the independently published p2prpc package.
    Windows installation, with subsequent laptop UAT. This patch qualification
    does not cross or requalify p2prpc's 15-minute authenticated-session renewal
    boundary; later versions retain the 930-second release minimum.
+   A short `0.2.1` run may have no transport reset/replay. The recorder still
+   rejects gaps, same-segment duplicates, conflicting replay and inconsistent
+   counts; it requires positive reset/replay evidence for longer soaks and all
+   other releases.
 8. Independently validate the successful receipt and record the owner-attested
    exact-commit status consumed by publication:
 

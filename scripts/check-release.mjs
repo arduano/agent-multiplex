@@ -158,6 +158,10 @@ const nativeQualificationRecorder = readFileSync(
   "utf8",
 );
 assert(
+  nativeQualificationRecorder.includes('requireReplay: releaseVersion !== "0.2.1" || manifest.livenessSoak.requestedMs >= 930_000'),
+  "native replay evidence may be optional only for the short 0.2.1 soak",
+);
+assert(
   artifactCreator.includes("outputDirectory === fixedOutputDirectory") &&
     artifactCreator.indexOf("outputDirectory === fixedOutputDirectory") <
       artifactCreator.indexOf("rmSync(outputDirectory"),
