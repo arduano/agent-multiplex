@@ -98,6 +98,7 @@ try {
         /^(?:COPILOT_CLI_PATH|COPILOT_CONNECTION_TOKEN|COPILOT_SDK_AUTH_TOKEN|COPILOT_GITHUB_TOKEN|GH_TOKEN|GITHUB_TOKEN|NODE_AUTH_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|COPILOT_OFFLINE)$/i.test(key)) delete env[key];
   }
   const binary = require.resolve("@github/copilot-win32-x64");
+  assert.match(execFileSync(binary, ["--version"], { env, encoding: "utf8", timeout: 30_000 }), /GitHub Copilot CLI 1\.0\.81\./);
   const client = new CopilotClient({
     mode: "copilot-cli", useLoggedInUser: false, baseDirectory: copilotHome, env, logLevel: "none",
     connection: RuntimeConnection.forStdio({ path: binary }),
@@ -105,7 +106,8 @@ try {
   adapter = new CopilotAdapter({ clientFactory: () => client });
   const status = await adapter.describe();
   assert.equal(status.available, true, "Copilot SDK/native startup must succeed");
-  assert.equal(status.runtimeVersion, "1.0.81");
+  assert.equal(typeof status.runtimeVersion, "string");
+  assert.ok(status.runtimeVersion.length > 0, "SDK runtime status has its own version, separate from the CLI package version");
   assert.equal((await client.getAuthStatus()).isAuthenticated, false, "smoke must not inherit an authenticated account");
   await adapter.close(); adapter = undefined;
   checks.push("Copilot SDK 1.0.11 / CLI 1.0.81 structured startup, unauthenticated status, graceful shutdown; no sessions or prompts");
