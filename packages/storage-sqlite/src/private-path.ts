@@ -78,21 +78,22 @@ try {
     if ($item.PSIsContainer -ne $directory) { throw 'wrong path type' }
     $stage = 'acl'
     $acl = if ($directory) { [System.IO.Directory]::GetAccessControl($path) } else { [System.IO.File]::GetAccessControl($path) }
-    if ($trusted -notcontains $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value) { throw 'untrusted owner' }
-    if ($directory -and -not $acl.AreAccessRulesProtected) { throw 'directory inherits access' }
+    if ($trusted -notcontains $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value) { $stage = 'owner'; throw 'untrusted owner' }
+    if ($directory -and -not $acl.AreAccessRulesProtected) { $stage = 'inherited'; throw 'directory inherits access' }
     $stage = 'rules'
     $userAccess = $false
     foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
-      if ($trusted -notcontains $rule.IdentityReference.Value -or $rule.AccessControlType -ne 'Allow') { throw 'untrusted access rule' }
+      if ($trusted -notcontains $rule.IdentityReference.Value -or $rule.AccessControlType -ne 'Allow') { $stage = 'untrusted'; throw 'untrusted access rule' }
+      $required = if ($directory) { [System.Security.AccessControl.FileSystemRights]::FullControl } else { [System.Security.AccessControl.FileSystemRights]::Modify }
       if ($rule.IdentityReference.Value -eq $user.Value -and
           ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -eq 0 -and
-          ($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq [System.Security.AccessControl.FileSystemRights]::FullControl) {
+          ($rule.FileSystemRights -band $required) -eq $required) {
         if (-not $directory -or
             ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ContainerInherit) -ne 0 -and
             ($rule.InheritanceFlags -band [System.Security.AccessControl.InheritanceFlags]::ObjectInherit) -ne 0) { $userAccess = $true }
       }
     }
-    if (-not $userAccess) { throw 'missing owner access' }
+    if (-not $userAccess) { $stage = 'useraccess'; throw 'missing owner access' }
   }
   [Console]::Out.Write('private-path-ok')
 } catch { [Console]::Out.Write('private-path-failure:' + $stage + ':' + $_.Exception.GetType().Name); exit 1 }
@@ -109,7 +110,7 @@ function windowsPrivatePaths(operation: "directory" | "files", paths: readonly s
       encoding: "utf8", windowsHide: true, timeout: 30_000, maxBuffer: 16_384,
     });
   if (result.error || result.status !== 0 || result.stdout !== "private-path-ok") {
-    const stage = /^private-path-failure:(request|create|inspect|acl|rules):([A-Za-z]+Exception)$/.exec(result.stdout ?? "");
+    const stage = /^private-path-failure:(request|create|inspect|acl|rules|owner|inherited|untrusted|useraccess):([A-Za-z]+Exception)$/.exec(result.stdout ?? "");
     throw new PrivatePathError("Windows private state requires a regular path with access restricted to the current user, SYSTEM and Administrators; existing directory ACLs must be protected and inherit to children" + (stage ? ` (${stage[1]}: ${stage[2]})` : ""));
   }
 }
