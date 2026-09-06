@@ -37,8 +37,9 @@ import {
   type AdapterEvent,
   type AdapterSession,
   type AgentAdapter,
+  type RuntimePathPolicy,
 } from "@arduano/agent-multiplex-runtime-node-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const fixture = () => {
   const base = mkdtempSync(join(tmpdir(), "agent-multiplex-native-paths-"));
@@ -59,6 +60,51 @@ const fixture = () => {
 };
 
 describe("NativePathPolicy", () => {
+  it("requires explicit policy injection for empty roots and shares custom admission across launch, resume and native commands", async () => {
+    const paths = fixture();
+    const store = new RuntimeNodeStore(":memory:");
+    const runtimeNodeId = newRuntimeNodeId();
+    const adapter = new RecordingCodexAdapter();
+    const defaults = { store, runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(), name: "custom path runtime", allowedRoots: [], adapters: [adapter] };
+    expect(() => new RuntimeNodeService(defaults)).toThrow("at least one allowed root");
+    // Custom policy uses actual filesystem paths outside the configured root;
+    // advertised roots do not replace its authoritative admission method.
+    const delegate = new AllowedPathPolicy([paths.outside]);
+    const pathPolicy: RuntimePathPolicy = {
+      roots: vi.fn(async () => []),
+      validate: vi.fn(path => delegate.validate(path)),
+      validatePath: vi.fn((path, description) => delegate.validatePath(path, description)),
+    };
+    const service = new RuntimeNodeService({ ...defaults, allowedRoots: [paths.root], pathPolicy });
+    try {
+      expect((await service.describe()).allowedRoots).toEqual([]);
+      const sessionId = newSessionId();
+      const launch = await launchSession(service, {
+        launchId: newLaunchId(), payloadHash: "custom-policy-launch", sessionId, runtimeNodeId,
+        request: { harness: "codex", cwd: paths.outside, native: { runtimeWorkspaceRoots: [paths.outside] } },
+      });
+      expect(launch.state).toBe("succeeded");
+      expect(adapter.spawnOptions[0]).toMatchObject({ cwd: realpathSync(paths.outside), native: { runtimeWorkspaceRoots: [realpathSync(paths.outside)] } });
+      expect(await service.execute({
+        commandId: newCommandId(), payloadHash: "custom-policy-command", sessionId, runtimeNodeId, bindingRevision: 1,
+        request: { harness: "codex", command: { type: "send", input: [{ type: "localAudio", path: paths.outsideAsset }] } },
+      })).toMatchObject({ state: "succeeded" });
+      expect(adapter.session?.requests[0]).toMatchObject({ command: { input: [{ path: realpathSync(paths.outsideAsset) }] } });
+      expect(await service.execute({
+        commandId: newCommandId(), payloadHash: "custom-policy-reject", sessionId, runtimeNodeId, bindingRevision: 1,
+        request: { harness: "codex", command: { type: "send", input: [{ type: "localAudio", path: paths.asset }] } },
+      })).toMatchObject({ state: "failed" });
+      expect(adapter.session?.requests).toHaveLength(1);
+      expect(await service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "custom-stop", sessionId, runtimeNodeId, bindingRevision: 1 })).toMatchObject({ state: "succeeded" });
+      expect(await service.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "custom-resume", sessionId, runtimeNodeId, bindingRevision: 1 })).toMatchObject({ state: "succeeded" });
+      expect(adapter.resumeOptions[0]).toMatchObject({ cwd: realpathSync(paths.outside) });
+      expect(pathPolicy.validate).toHaveBeenCalledWith(paths.outside);
+      expect(pathPolicy.validatePath).toHaveBeenCalledWith(paths.outsideAsset, "Codex localAudio input path");
+      // A custom filesystem policy cannot replace the bound thread via native fields.
+      await expect(new NativePathPolicy(pathPolicy).resume({ harness: "codex", vendorSessionId: "bound", native: { path: paths.outsideAsset } })).rejects.toThrow("cannot select a rollout");
+    } finally { await service.close(); store.close(); }
+  });
+
   it("fences Codex native session, turn, sandbox, and local-input paths", async () => {
     const paths = fixture();
     const policy = new NativePathPolicy(new AllowedPathPolicy([paths.root]));

@@ -8,7 +8,15 @@ export class PathPolicyError extends Error {
   }
 }
 
-export class AllowedPathPolicy {
+/** Trusted runtime-local admission and canonicalization for native filesystem paths. */
+export interface RuntimePathPolicy {
+  /** Advisory roots advertised to clients; admission always uses the methods below. */
+  roots(): Promise<readonly string[]>;
+  validate(path: string): Promise<string>;
+  validatePath(path: string, description?: string): Promise<string>;
+}
+
+export class AllowedPathPolicy implements RuntimePathPolicy {
   readonly #configuredRoots: readonly string[];
   #resolvedRoots: readonly string[] | undefined;
 

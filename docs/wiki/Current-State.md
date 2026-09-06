@@ -272,8 +272,11 @@ The Windows installation handoff is preparing a lockstep `0.2.1` patch release
 from the Windows Copilot candidate. It preserves protocol v5, native/transport
 pins and existing SQLite migration identities. `0.2.0` remains the public
 release until the exact-source prerequisites and signed publication complete.
-The release includes Windows private-state/DACL support needed by the personal
-Windows installer; it does not add Windows Codex supervision or Windows native
+The release includes Windows private-state/DACL support and a static runtime
+path-policy hook needed by the personal Windows installer. The personal app can
+allow operator-selected directories across drives and UNC shares without
+changing the default framework root fence. See
+[embedded policy guidance](Paired-Launch-Extensions.md). It does not add Windows Codex supervision or Windows native
 output-image path support. The live four-container release qualification still
 requires the owner's explicit model-credit allowance. See
 [release prerequisites](Releases.md#candidate-checklist).

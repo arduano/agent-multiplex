@@ -52,6 +52,10 @@ disclosure.
   their sources and route powerful actions.
 - Gateway plugins, runtime providers/backends, and adapters are trusted
   in-process modules. They are not tenant sandboxes.
+- A statically injected runtime path policy is also trusted application code
+  and may broaden filesystem admission beyond configured roots. Remote requests
+  cannot install one. Default root fencing, native identity/provider guards and
+  separate image snapshot confinement remain enforced by their owning layers.
 - p2prpc endpoint IDs are independently pinned; tickets and discovery data are
   locators, not identity.
 - Terminal output is opaque and unredacted. `terminal-control` is equivalent to
