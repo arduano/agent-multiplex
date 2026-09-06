@@ -8,6 +8,44 @@ architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
+
+## Copilot permissions release — 2026-09-07
+
+Signed tag `v0.2.2` (tag object `c9c4f6e57a56d45cfe69589de663780963a93b8a`)
+peels to `1baacd49d44f9fe3d10f52b5fab0a8175d35a508`. All 16 lockstep packages
+are published at `0.2.2`; transport remains `@arduano/p2prpc-core@0.2.1`.
+Copilot SDK is `1.0.13`, CLI remains `1.0.81`, and Codex remains `0.152.0`.
+
+Exact-source evidence:
+
+- [CI](https://github.com/arduano/agent-multiplex/actions/runs/34039392228):
+  typecheck, 625 tests, release/docs/checkpoint checks, package consumers and
+  isolated native Copilot permission RPC smoke with zero model calls.
+- [Windows startup](https://github.com/arduano/agent-multiplex/actions/runs/34039392216):
+  private-state/SDK startup and isolated native permission RPC checks.
+- [CodeQL](https://github.com/arduano/agent-multiplex/actions/runs/34039392202).
+- [Docker tree and 100-agent mock qualification](https://github.com/arduano/agent-multiplex/actions/runs/34039392270).
+- [Immutable package publication](https://github.com/arduano/agent-multiplex/actions/runs/34039674529):
+  signed tag, exact prerequisites, packed and registry consumer verification,
+  artifact attestation, public package visibility and release asset checks.
+
+The owner explicitly requested skipping model-using release qualification to
+unblock laptop deployment. Owner-created status **Agent Multiplex / Owner-approved
+native-model waiver** succeeds on this exact source with description
+`WAIVED for v0.2.2 by owner; native permission RPC checks passed without model calls`.
+The release workflow accepts that exception only for `v0.2.2`; no passing native
+four-container receipt or soak result was fabricated. Native provider-driven
+permission workflows remain subsequent device/model UAT.
+
+The [public release](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.2)
+retains all tarballs, checksums, manifest, SBOM and publication receipt. The
+pack-manifest SHA-256 is
+`e6f8b6bf59a3616225a22dda59fcbb93e82d4bc15685ce84d65057071bf36fbb`.
+The local downloaded inventory verifies all 16 tarballs, and the adapter-Copilot
+artifact's GitHub attestation verifies against this repository. The personal
+consumer separately verifies every lockfile integrity against that manifest.
+
+
 ## Windows patch release qualification (2026-09-06)
 
 | Evidence | Identity |
