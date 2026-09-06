@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-gateway",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Reference zero-authority HTTP and WebSocket access gateway for Agent Multiplex.",
   "private": false,
   "type": "module",
@@ -28,10 +28,10 @@
   },
   "dependencies": {
     "@arduano/agent-multiplex-client-p2prpc": "0.2.0",
-    "@arduano/agent-multiplex-gateway-core": "0.2.0",
-    "@arduano/agent-multiplex-protocol": "0.2.0",
+    "@arduano/agent-multiplex-gateway-core": "0.2.1",
+    "@arduano/agent-multiplex-protocol": "0.2.1",
     "@arduano/agent-multiplex-transport-p2prpc": "0.2.0",
-    "@arduano/agent-multiplex-web": "0.2.0",
+    "@arduano/agent-multiplex-web": "0.2.1",
     "@trpc/server": "11.18.0",
     "@types/node": "24.3.0",
     "@types/ws": "8.18.1",

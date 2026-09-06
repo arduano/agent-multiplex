@@ -268,6 +268,16 @@ second detailed contract into this page.
 
 ## Personal application consumer
 
+The Windows installation handoff is preparing a lockstep `0.2.1` patch release
+from the Windows Copilot candidate. It preserves protocol v5, native/transport
+pins and existing SQLite migration identities. `0.2.0` remains the public
+release until the exact-source prerequisites and signed publication complete.
+The release includes Windows private-state/DACL support needed by the personal
+Windows installer; it does not add Windows Codex supervision or Windows native
+output-image path support. The live four-container release qualification still
+requires the owner's explicit model-credit allowance. See
+[release prerequisites](Releases.md#candidate-checklist).
+
 Native Windows Copilot startup is prepared in
 [PR #22](https://github.com/arduano/agent-multiplex/pull/22). Source
 `96e2d3e165d7448dbf9cca41658a8467893fd5e7` passed
