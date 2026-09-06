@@ -85,9 +85,9 @@
     "@types/ws": "8.18.1",
     "playwright-core": "^1.62.1",
     "publint": "0.3.24",
-    "tsx": "4.20.5",
-    "typescript": "5.9.2",
-    "vitest": "3.2.7",
+    "tsx": "4.23.13",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
     "ws": "8.21.3"
   },
   "overrides": {
