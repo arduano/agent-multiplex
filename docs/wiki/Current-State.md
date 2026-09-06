@@ -30,7 +30,10 @@ Suggested first prompt for a new session:
 The unreleased `0.2.2` candidate adds native Copilot permission controls and
 updates the SDK to `1.0.13`, whose `permissions.getMode/setMode` methods match
 the retained CLI `1.0.81`. The released baseline above remains `0.2.1` until the
-candidate passes its release prerequisites and is published.
+candidate passes its release prerequisites and is published. The owner explicitly
+waived model-using qualification for this release to unblock laptop YOLO use;
+the native permission RPC checks use no model calls. See the
+[release exception](Releases.md#tag-and-publication-flow).
 
 The signed `v0.2.1` Windows patch passed exact-commit release prerequisites and
 publication. The [checkpoint](../checkpoint-v4.md#windows-patch-release-qualification-2026-09-06)
