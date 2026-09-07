@@ -147,6 +147,15 @@ than define a common transcript model. See [images and native payloads](Images-a
 
 ## Custom application edges
 
+An embedded control process receives `ControlNodeReadyInfo.createTicket()` in
+`runControlNode`'s `onReady` callback. It obtains fresh signed reachability from
+the running endpoint without exposing its private key, and rejects after
+shutdown. A local application may periodically publish that locator through a
+private rendezvous directory so an independent gateway can reconnect after
+network changes or ticket expiry. Pin the control identity separately; the
+locator never grants enrollment or action scopes. Publication cadence and local
+file protection belong to the embedding application.
+
 The reference gateway exports `createAccessGatewayRouter` and accepts an optional
 `runGateway(config, signal, { httpSurface })` composition. A custom surface declares
 `authentication: "external"` and owns all HTTP and WebSocket authentication before

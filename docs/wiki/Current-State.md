@@ -5,12 +5,23 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-06.
+Last reconciled: 2026-09-07.
+
+## Pending patch: embedded locator refresh
+
+The `0.2.3` candidate adds a lifetime-fenced `createTicket()` accessor to
+`ControlNodeReadyInfo`, so trusted application composition can publish fresh
+reachability locally while retaining the running control's identity. The method
+exposes no key and is unavailable after shutdown. Wire protocol, native pins,
+transport and migrations remain unchanged. See
+[gateway embedding](Clients-and-Gateway-Embedding.md#embedding-a-gateway).
+This is candidate source, not a published or native-model-qualified release;
+the latest publication remains `0.2.2` below.
 
 Suggested first prompt for a new session:
 
 > Read `AGENTS.md` and `docs/wiki/Current-State.md`, inspect the current Git
-> status and commits since `v0.2.1`, then summarize the relevant maintained
+> status and commits since `v0.2.2`, then summarize the relevant maintained
 > boundary before changing anything. Use the topical guide and deep design only
 > for the package you will touch, and preserve unrelated worktree changes.
 
@@ -19,28 +30,28 @@ Suggested first prompt for a new session:
 | Boundary | Current value |
 | --- | --- |
 | Wire protocol | `5`; coordinated upgrade required from v4 |
-| Latest release | [`v0.2.1`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.1) |
-| Signed release commit | `a6b4b1ecc474ae819ab7609486d0978fe0bc4957` |
-| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.1` |
+| Latest release | [`v0.2.2`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.2) |
+| Signed release commit | `1baacd49d44f9fe3d10f52b5fab0a8175d35a508` |
+| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.2` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Exact public `@arduano/p2prpc-core@0.2.1` from the separate [`arduano/p2prpc`](https://github.com/arduano/p2prpc) repository |
-| Qualified native boundaries | Codex CLI `0.152.0`; Copilot SDK `1.0.11` and optional CLI `1.0.81` |
+| Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.13` and optional CLI `1.0.81`; model qualification waived for this patch |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
-The unreleased `0.2.2` candidate adds native Copilot permission controls and
-updates the SDK to `1.0.13`, whose `permissions.getMode/setMode` methods match
-the retained CLI `1.0.81`. The released baseline above remains `0.2.1` until the
-candidate passes its release prerequisites and is published. The owner explicitly
-waived model-using qualification for this release to unblock laptop YOLO use;
-the native permission RPC checks use no model calls. See the
+The signed `v0.2.2` release is published. It adds native Copilot permission
+controls and uses SDK `1.0.13`, whose `permissions.getMode/setMode` methods match
+the retained CLI `1.0.81`. The owner explicitly waived model-using qualification
+to unblock laptop YOLO use. Linux and Windows native permission RPC checks,
+CI, CodeQL, deterministic Docker checks and artifact publication passed without
+model prompts; this is not a passing model-qualification claim. The
+[checkpoint](../checkpoint-v4.md#copilot-permissions-release-2026-09-07) owns exact
+release identities and workflow evidence. See the
 [release exception](Releases.md#tag-and-publication-flow).
 
-The signed `v0.2.1` Windows patch passed exact-commit release prerequisites and
-publication. The [checkpoint](../checkpoint-v4.md#windows-patch-release-qualification-2026-09-06)
-records its workflows, artifact identity and native receipt. The owner authorized
-a five-minute soak for this patch; it does not requalify the 15-minute transport
-renewal boundary. Protocol v5, transport/native pins and released migrations
-remain unchanged. Earlier `v0.2.0` and `v0.1.0` evidence stays historical.
+Protocol v5, transport, native CLI pins and released migrations are unchanged.
+The prior `v0.2.1` Windows patch had an owner-authorized five-minute native soak;
+that evidence remains historical and does not requalify `v0.2.2` or the transport
+renewal boundary.
 GitHub Packages requires an authenticated client with `read:packages`, even for
 public packages.
 
@@ -221,20 +232,18 @@ updated behavior, and [images](Images-and-Native-Payloads.md) for the image API.
 ## Current qualification evidence
 
 The signed release passed exact-SHA CI, CodeQL, deterministic control-tree and
-100-agent mock qualification, Windows Copilot startup, and owner-recorded native
-four-container qualification. The native run completed the authorized 300-second
-soak, obtained fresh streamed replies from both Codex and Copilot, and removed
-its disposable containers, relay and private state. It records no retained
-credentials. This short patch run does not qualify authenticated-session renewal;
-other release versions retain the full 930-second soak policy.
+100-agent mock qualification, Windows startup, and native Copilot permission
+RPC checks on Linux and Windows. The latter use isolated state, no credentials
+and no model prompts. The owner-created exact-commit status explicitly waives
+the model-using native four-container run for `v0.2.2`; it does not claim a
+passing native-model receipt. Other releases retain the usual qualification
+policy unless separately authorized.
 
-The [0.2.1 checkpoint](../checkpoint-v4.md#windows-patch-release-qualification-2026-09-06)
-owns exact source/tag identities, workflow links, receipt digests and publication.
-Windows checks cover private DACLs, SQLite ownership/reopen, retained image
-uploads, Iroh and unauthenticated Copilot SDK startup; corporate login, network,
-share access and laptop suspend/recovery remain device UAT. The 100-session result
-uses mock agents. This run adds no external-model image-prompt qualification.
-`receipts/` remains local and gitignored.
+The [0.2.2 checkpoint](../checkpoint-v4.md#copilot-permissions-release-2026-09-07)
+owns source/tag identities, workflow links and artifact digests. Earlier native
+soak evidence remains scoped to its original source. Corporate login, network,
+share access and laptop suspend/recovery remain device UAT; the 100-session
+result uses mock agents. `receipts/` remains local and gitignored.
 
 ## Deliberate limitations and likely next work
 
@@ -281,7 +290,7 @@ second detailed contract into this page.
 ## Personal application consumer
 
 [`arduano/leo-multiplex`](https://github.com/arduano/leo-multiplex) is the separate
-personal application. Its Windows/WSL installer consumes the published `0.2.1`
+personal application. Its Windows/WSL installer consumes the published `0.2.2`
 artifact graph. The framework now supplies Windows private-state/DACL support
 and a trusted static runtime path-policy hook. The personal host can admit
 operator-selected directories across C:, D: and UNC shares without broadening
@@ -291,6 +300,7 @@ Native Windows Codex supervision and output-image paths remain unsupported.
 Published-artifact Windows installation, saved launcher/rerun, host registration,
 restart and work-command qualification belong to the consumer's runbook and CI.
 Corporate Copilot auth/network and physical laptop behavior remain operator UAT.
-Existing main-pc/NAS hosts and sessions were not restarted for this patch. Host
+The consumer records its laptop and NAS gateway deployment separately. Personal
+Codex hosts and sessions were not restarted for this Copilot patch. Host
 catalogs remain local; the NAS personal web/gateway has no metadata authority.
 Provider, UI, authentication and deployment policy remain in the personal repo.
