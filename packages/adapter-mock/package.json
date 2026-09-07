@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-adapter-mock",
-  "version": "0.2.4-hotfix.1",
+  "version": "0.2.4-hotfix.2",
   "description": "Deterministic in-memory harness adapter for Agent Multiplex integration and scale testing.",
   "private": false,
   "type": "module",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.1",
-    "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.1"
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.2",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.2"
   }
 }

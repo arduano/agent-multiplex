@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-gateway-core",
-  "version": "0.2.4-hotfix.1",
+  "version": "0.2.4-hotfix.2",
   "description": "Zero-authority multi-source validation, selection, routing, and plugin core for Agent Multiplex.",
   "private": false,
   "type": "module",
@@ -33,7 +33,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.1",
-    "@arduano/agent-multiplex-storage-sqlite": "0.2.4-hotfix.1"
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.2",
+    "@arduano/agent-multiplex-storage-sqlite": "0.2.4-hotfix.2"
   }
 }

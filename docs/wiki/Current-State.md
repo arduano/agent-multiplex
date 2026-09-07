@@ -11,9 +11,10 @@ Last reconciled: 2026-09-07.
 
 The owner requested incremental hotfix deployments with focused checks, followed
 by one full release gate after the urgent fixes are complete. Source version
-`0.2.4-hotfix.1` fixes runtime liveness after restart and adds bounded newest-first
-native history reads with explicit unavailable-item markers. Its temporary
-GitHub prerelease uses the signed tag `hotfix-2026-09-07.1`; the ordinary `v*`
+`0.2.4-hotfix.2` fixes runtime liveness after restart and adds bounded newest-first
+native history reads with explicit unavailable-item markers. It also permits an
+explicit runtime listener address on hosts with many network interfaces. Its temporary
+GitHub prerelease uses the signed tag `hotfix-2026-09-07.2`; the ordinary `v*`
 release workflow and registry stable tags are unchanged. This is an explicitly
 unqualified deployment candidate, not a replacement for the stable release
 evidence below. Installed consumer facts belong to the personal repository.

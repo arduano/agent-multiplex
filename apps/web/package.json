@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-web",
-  "version": "0.2.4-hotfix.1",
+  "version": "0.2.4-hotfix.2",
   "description": "Reference React operator interface and static-asset helper for Agent Multiplex.",
   "private": false,
   "type": "module",
@@ -44,8 +44,8 @@
     "@types/node": "24.3.0"
   },
   "devDependencies": {
-    "@arduano/agent-multiplex-client": "0.2.4-hotfix.1",
-    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.1",
+    "@arduano/agent-multiplex-client": "0.2.4-hotfix.2",
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.2",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@radix-ui/react-dialog": "^1.1.23",
