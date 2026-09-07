@@ -75,21 +75,21 @@ jobs:
           git diff --exit-code -- package.json package-lock.json
       - name: Upload optional composition receipt
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-leo-consumer-${{ inputs.consumer_ref }}
           path: .cache/leo-consumer/receipts/windows-host/
           if-no-files-found: error
           retention-days: 14
       - name: Upload scrubbed passing receipt
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-copilot-${{ github.sha }}
           path: receipts/windows-copilot/
           if-no-files-found: error
           retention-days: 14
       - name: Upload native permission receipt
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-copilot-permissions-${{ github.sha }}
           path: receipts/copilot-permissions/
