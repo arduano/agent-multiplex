@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
-  newCommandId, newOperationId, newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId,
+  newCommandId, newOperationId, newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId, packNativePayload,
   type AdapterScopeId, type ControlNodeAttachmentRequest, type CommandEnvelope,
+  type SourceId,
 } from "@arduano/agent-multiplex-protocol";
 import { describe, expect, it, vi } from "vitest";
-import { ControlNodeCatalog, ControlNodeService, type RuntimeNodeConnection } from "../src/index.js";
+import { ControlNodeCatalog, ControlNodeEventHub, ControlNodeService, type RuntimeNodeConnection } from "../src/index.js";
+import { AccessGatewayProjection, type ControlNodeSourceClient } from "../../gateway-core/src/index.js";
 
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), "multiplex-handoff-"));
@@ -60,6 +62,73 @@ function attach(parent: ControlNodeCatalog, child: ControlNodeCatalog) {
 }
 
 describe("standalone authority receipt handoff", () => {
+  it.each([false, true])("immediately resets session-filtered streams before new-authority native output (selected=%s)", selected => {
+    const { parent, child } = fixture();
+    const { session } = populate(child);
+    const hub = new ControlNodeEventHub({ catalog: child, heartbeatMs: 60_000 });
+    const controller = new AbortController();
+    return (async () => {
+      try {
+        const previous = child.feedCheckpoint();
+        const native = { kind: "native" as const, sessionId: session.sessionId, harness: "codex" as const, runtimeEpoch: session.runtimeEpoch!,
+          sequence: 0, nativeType: "test/native", payload: packNativePayload({ text: "Before attachment" }), ephemeral: false,
+          provenance: { originControlNodeId: child.localControlNode().controlNodeId, authority: child.authority() } };
+        hub.publish(native);
+        const iterator = hub.attach({ sessions: selected ? [session.sessionId] : [], includeNative: true }, controller.signal)[Symbol.asyncIterator]();
+        const next = iterator.next();
+        const admission = parent.attachChild(request(parent, child));
+        child.applyParentAttachment(admission.attachment, "fixture-parent-endpoint");
+        hub.publish({ kind: "native", sessionId: session.sessionId, harness: "codex", runtimeEpoch: session.runtimeEpoch!,
+          sequence: 1, nativeType: "test/native", payload: packNativePayload({ text: "After attachment" }), ephemeral: false,
+          provenance: { originControlNodeId: child.localControlNode().controlNodeId, authority: child.authority() } });
+        await expect(next).resolves.toEqual({ done: false, value: {
+          kind: "streamReset", previousFeedId: previous.feedId, ...child.feedCheckpoint(),
+          authorityRefs: [parent.authority()], reason: "feedChanged", recovery: "snapshot",
+        } });
+        await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+        const reattached = hub.attach({ sessions: [session.sessionId], includeNative: true,
+          cursor: { ...child.feedCheckpoint(), native: {} } }, controller.signal)[Symbol.asyncIterator]();
+        // The pre-attachment event must not survive in the native replay ring.
+        // A gap in the same runtime epoch points the observer to native history.
+        await expect(reattached.next()).resolves.toMatchObject({ done: false, value: {
+          kind: "nativeGap", sessionId: session.sessionId, recovery: "readNativeHistory",
+          provenance: { authority: parent.authority() },
+        } });
+        await reattached.return?.();
+      } finally { controller.abort(); hub.close(); child.close(); parent.close(); }
+    })();
+  });
+
+  it("publishes imported historical receipts to an already watching root gateway", async () => {
+    const { parent, child } = fixture();
+    let unsubscribe: (() => void) | undefined;
+    try {
+      const { session, first, second } = populate(child);
+      const admission = parent.attachChild(request(parent, child));
+      const sourceId = "handoff-root" as SourceId;
+      const loadSnapshot = vi.fn(async () => {
+        const snapshot = parent.accessSnapshot();
+        return { ...snapshot, ...snapshot.source };
+      });
+      const client = { loadSnapshot } as unknown as ControlNodeSourceClient;
+      const gateway = new AccessGatewayProjection([{ sourceId, displayName: "root", endpointId: "fixture-root", client }]);
+      await gateway.refreshSource(sourceId);
+      expect(gateway.getMetadataOperation(first.operationId)).toBeNull();
+      const events: string[] = [];
+      unsubscribe = parent.onControl(item => { events.push(item.change.type); gateway.ingest(sourceId, item); });
+      child.applyParentAttachment(admission.attachment, "fixture-parent-endpoint");
+      parent.replaceChildSnapshot(child.localControlNode().controlNodeId, admission.attachment.attachmentId, child.accessSnapshot());
+      expect(loadSnapshot).toHaveBeenCalledOnce();
+      expect(gateway.listSessions().map(record => record.sessionId)).toEqual([session.sessionId]);
+      expect(gateway.getMetadataOperation(first.operationId)).toEqual(first);
+      expect(gateway.getMetadataOperation(second.operationId)).toEqual(second);
+      expect(events.indexOf("session.upsert")).toBeLessThan(events.indexOf("metadata.operation"));
+      parent.replaceChildSnapshot(child.localControlNode().controlNodeId, admission.attachment.attachmentId, child.accessSnapshot());
+      expect(gateway.listMetadataOperations()).toHaveLength(2);
+      expect(gateway.getMetadataOperation(first.operationId)).toEqual(first);
+    } finally { unsubscribe?.(); child.close(); parent.close(); }
+  });
+
   it("reconciles a lost initial reply across both control restarts without replacing the admission", () => {
     const f = fixture();
     let parent = f.parent;

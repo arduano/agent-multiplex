@@ -18,7 +18,7 @@ Queued work and receipt deliveries must drain first; formed subtree moves and
 populated attachment under an intermediate branch remain explicitly rejected.
 See [architecture guidance](Architecture-and-Data-Roles.md#attaching-an-existing-host-catalog).
 Publication and deployment are pending separately; no native-model qualification
-is claimed for this source candidate. Typecheck, **765 tests**, documentation,
+is claimed for this source candidate. Typecheck, **768 tests**, documentation,
 checkpoint and release metadata checks pass; Docker topology qualification and
 artifact validation remain separate release work.
 

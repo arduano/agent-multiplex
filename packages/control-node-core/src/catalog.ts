@@ -1094,6 +1094,12 @@ export class ControlNodeCatalog {
           session.metadataAuthority.controlNodeId,
         );
       }
+      // A gateway may already be watching after attachment admission but before
+      // this first snapshot. Publish receipts after their sessions so that its
+      // live projection receives the same immutable ledger as a fresh snapshot.
+      for (const { operation } of canonicalMetadataOperations) {
+        this.#appendControl({ type: "metadata.operation", operation }, childControlNodeId);
+      }
       for (const interaction of canonicalInteractions) {
         this.#appendControl({ type: "interaction.changed", interaction }, childControlNodeId);
       }

@@ -183,7 +183,11 @@ queued proposal is silently retargeted or applied twice. A lost initial attach
 reply can recover the same admission while its first snapshot is uncommitted,
 including a new child boot with the same endpoint, role, feed and request proof.
 The child rotates its control feed when it commits the new authority so existing
-observers must re-read a complete snapshot. Native bindings and runtime epochs
+observers must re-read a complete snapshot. Session-filtered streams receive the
+feed boundary immediately, and transient native replay with prior-authority
+provenance is discarded for explicit history/gap recovery. Imported receipts
+are published after their session records so an already-watching root gateway
+receives the same ledger as a fresh snapshot. Native bindings and runtime epochs
 remain runtime-owned and do not change for attachment.
 
 Root hot-session search reads the durable projection while a child is offline;
