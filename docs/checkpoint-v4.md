@@ -1,6 +1,6 @@
 # Release qualification checkpoint
 
-Status: signed `v0.2.1` Windows patch qualified and published as of 2026-09-06.
+Status: signed `v0.2.3` published on 2026-09-07 with an explicit native-model waiver.
 
 This document records release qualification and separately scoped development
 evidence. Its filename remains stable for existing links. It is not a second
@@ -8,6 +8,39 @@ architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
+
+## Embedded locator release — 2026-09-07
+
+Signed tag `v0.2.3` peels to `7b9d3e383fceb299cf3c1f1404358466abe7be23`.
+All 16 lockstep packages are published at `0.2.3`. The only runtime code addition
+is lifetime-fenced control-ticket access; protocol, migrations, transport and
+native package pins are unchanged from `0.2.2`.
+
+Exact-source evidence:
+
+- [CI](https://github.com/arduano/agent-multiplex/actions/runs/34073277454).
+- [Windows startup](https://github.com/arduano/agent-multiplex/actions/runs/34073277447).
+- [CodeQL](https://github.com/arduano/agent-multiplex/actions/runs/34073277444).
+- [Docker tree/mock scale](https://github.com/arduano/agent-multiplex/actions/runs/34073277410).
+- [Immutable publication](https://github.com/arduano/agent-multiplex/actions/runs/34073552897)
+  succeeded; the [release](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3)
+  contains 21 assets and was published at `2026-09-07T01:44:01Z`.
+
+The owner separately authorized skipping model-using qualification. Exact-commit
+status `53645081986`, created by owner numeric identity `13347712`, records
+`WAIVED for v0.2.3 by owner; local ticket accessor only; native and transport pins unchanged`
+in context `Agent Multiplex / Owner-approved native-model waiver`. This is an
+explicit release exception, not a passing native-model receipt.
+
+All 16 independently downloaded tarballs passed SHA-256 and GitHub build-provenance
+attestation verification. The consumer lockfile's 16 npm SHA-512 integrities match
+the release manifest. Artifact inventory SHA-256:
+`786396d6df5827fd4a715e0d1d42b491addfd2e2f2a10a66599dd8b46c05c5b7`;
+`pack-manifest.json` SHA-256:
+`7f1f8e35e65b87263e05df5c64e1131044a8228d6cfb4d468f4fa185fdcf9d0a`.
+The consumer retains its downloaded artifacts under local
+`receipts/framework-0.2.3-release/`. Laptop installation and outage checks belong
+to the consumer; this release does not claim those deployment results.
 
 ## Copilot permissions release — 2026-09-07
 
