@@ -7,6 +7,17 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
+## Urgent session fixes in progress
+
+The owner requested incremental hotfix deployments with focused checks, followed
+by one full release gate after the urgent fixes are complete. Source version
+`0.2.4-hotfix.1` fixes runtime liveness after restart and adds bounded newest-first
+native history reads with explicit unavailable-item markers. Its temporary
+GitHub prerelease uses the signed tag `hotfix-2026-09-07.1`; the ordinary `v*`
+release workflow and registry stable tags are unchanged. This is an explicitly
+unqualified deployment candidate, not a replacement for the stable release
+evidence below. Installed consumer facts belong to the personal repository.
+
 ## Embedded locator refresh release
 
 The published `0.2.3` patch adds a lifetime-fenced `createTicket()` accessor to

@@ -1,19 +1,26 @@
 {
   "name": "@arduano/agent-multiplex-control-node",
-  "version": "0.2.3",
+  "version": "0.2.4-hotfix.1",
   "description": "Reference durable control-node daemon for Agent Multiplex protocol v5.",
   "private": false,
   "type": "module",
   "main": "./dist/main.js",
   "types": "./dist/main.d.ts",
   "exports": {
-    ".": { "types": "./dist/main.d.ts", "import": "./dist/main.js" }
+    ".": {
+      "types": "./dist/main.d.ts",
+      "import": "./dist/main.js"
+    }
   },
   "bin": {
     "agent-multiplex-control-node": "./dist/main.js"
   },
-  "files": ["dist"],
-  "engines": { "node": ">=24.0.0" },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,17 +28,19 @@
     "directory": "apps/control-node"
   },
   "homepage": "https://github.com/arduano/agent-multiplex#readme",
-  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
+  "bugs": {
+    "url": "https://github.com/arduano/agent-multiplex/issues"
+  },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-control-node-core": "0.2.3",
-    "@arduano/agent-multiplex-protocol": "0.2.3",
-    "@arduano/agent-multiplex-runtime-node-core": "0.2.3",
-    "@arduano/agent-multiplex-transport-p2prpc": "0.2.3",
-    "@arduano/agent-multiplex-web": "0.2.3",
+    "@arduano/agent-multiplex-control-node-core": "0.2.4-hotfix.1",
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.1",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.1",
+    "@arduano/agent-multiplex-transport-p2prpc": "0.2.4-hotfix.1",
+    "@arduano/agent-multiplex-web": "0.2.4-hotfix.1",
     "@trpc/server": "11.18.0",
     "@types/node": "24.3.0",
     "@types/ws": "8.18.1",

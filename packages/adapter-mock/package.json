@@ -1,14 +1,23 @@
 {
   "name": "@arduano/agent-multiplex-adapter-mock",
-  "version": "0.2.3",
+  "version": "0.2.4-hotfix.1",
   "description": "Deterministic in-memory harness adapter for Agent Multiplex integration and scale testing.",
   "private": false,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "files": ["dist"],
-  "engines": { "node": ">=24.0.0" },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,10 +25,15 @@
     "directory": "packages/adapter-mock"
   },
   "homepage": "https://github.com/arduano/agent-multiplex#readme",
-  "bugs": { "url": "https://github.com/arduano/agent-multiplex/issues" },
-  "publishConfig": { "registry": "https://npm.pkg.github.com", "access": "public" },
+  "bugs": {
+    "url": "https://github.com/arduano/agent-multiplex/issues"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
   "dependencies": {
-    "@arduano/agent-multiplex-protocol": "0.2.3",
-    "@arduano/agent-multiplex-runtime-node-core": "0.2.3"
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.1",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.1"
   }
 }
