@@ -7,25 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
-## Pending patch: embedded locator refresh
+## Embedded locator refresh release
 
-The `0.2.3` candidate adds a lifetime-fenced `createTicket()` accessor to
+The published `0.2.3` patch adds a lifetime-fenced `createTicket()` accessor to
 `ControlNodeReadyInfo`, so trusted application composition can publish fresh
 reachability locally while retaining the running control's identity. The method
 exposes no key and is unavailable after shutdown. Wire protocol, native pins,
 transport and migrations remain unchanged. See
 [gateway embedding](Clients-and-Gateway-Embedding.md#embedding-a-gateway).
-This is candidate source, not a published or native-model-qualified release;
-the latest publication remains `0.2.2` below.
-The owner has explicitly waived model-using qualification for `0.2.3` to deploy
-the laptop fallback. Publication still requires the exact-source non-model gates,
-signed tag, artifact verification and a separate owner-created waiver status;
-see the [release exception](Releases.md#tag-and-publication-flow).
+The owner explicitly waived model-using qualification for `0.2.3`. Exact-source
+non-model gates, signed-tag validation, artifact verification and publication
+passed. See the [checkpoint](../checkpoint-v4.md#embedded-locator-release-2026-09-07)
+for immutable evidence and the [release exception](Releases.md#tag-and-publication-flow).
 
 Suggested first prompt for a new session:
 
 > Read `AGENTS.md` and `docs/wiki/Current-State.md`, inspect the current Git
-> status and commits since `v0.2.2`, then summarize the relevant maintained
+> status and commits since `v0.2.3`, then summarize the relevant maintained
 > boundary before changing anything. Use the topical guide and deep design only
 > for the package you will touch, and preserve unrelated worktree changes.
 
@@ -34,27 +32,25 @@ Suggested first prompt for a new session:
 | Boundary | Current value |
 | --- | --- |
 | Wire protocol | `5`; coordinated upgrade required from v4 |
-| Latest release | [`v0.2.2`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.2) |
-| Signed release commit | `1baacd49d44f9fe3d10f52b5fab0a8175d35a508` |
-| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.2` |
+| Latest release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3) |
+| Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
+| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.3` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Exact public `@arduano/p2prpc-core@0.2.1` from the separate [`arduano/p2prpc`](https://github.com/arduano/p2prpc) repository |
 | Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.13` and optional CLI `1.0.81`; model qualification waived for this patch |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
-The signed `v0.2.2` release is published. It adds native Copilot permission
-controls and uses SDK `1.0.13`, whose `permissions.getMode/setMode` methods match
-the retained CLI `1.0.81`. The owner explicitly waived model-using qualification
-to unblock laptop YOLO use. Linux and Windows native permission RPC checks,
-CI, CodeQL, deterministic Docker checks and artifact publication passed without
-model prompts; this is not a passing model-qualification claim. The
-[checkpoint](../checkpoint-v4.md#copilot-permissions-release-2026-09-07) owns exact
-release identities and workflow evidence. See the
-[release exception](Releases.md#tag-and-publication-flow).
+The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains
+the Copilot permission controls introduced in `v0.2.2` and its exact native pins.
+CI, Windows startup, CodeQL, deterministic Docker checks, independent package
+consumers and artifact publication passed without model prompts. The owner waiver
+is separate from a passing native-model receipt. The
+[checkpoint](../checkpoint-v4.md#embedded-locator-release-2026-09-07) owns release
+identities, workflow links and artifact verification.
 
 Protocol v5, transport, native CLI pins and released migrations are unchanged.
 The prior `v0.2.1` Windows patch had an owner-authorized five-minute native soak;
-that evidence remains historical and does not requalify `v0.2.2` or the transport
+that evidence remains historical and does not requalify later patches or the transport
 renewal boundary.
 GitHub Packages requires an authenticated client with `read:packages`, even for
 public packages.
@@ -235,19 +231,16 @@ updated behavior, and [images](Images-and-Native-Payloads.md) for the image API.
 
 ## Current qualification evidence
 
-The signed release passed exact-SHA CI, CodeQL, deterministic control-tree and
-100-agent mock qualification, Windows startup, and native Copilot permission
-RPC checks on Linux and Windows. The latter use isolated state, no credentials
-and no model prompts. The owner-created exact-commit status explicitly waives
-the model-using native four-container run for `v0.2.2`; it does not claim a
-passing native-model receipt. Other releases retain the usual qualification
-policy unless separately authorized.
+The exact `v0.2.3` signed source passed CI, Windows startup, CodeQL, deterministic
+Docker tree/mock scale and immutable publication. All 16 downloaded tarballs
+match the release checksums and build-provenance attestations. The owner-created
+exact-commit status separately waives native-model qualification for this patch.
+No native-model receipt is claimed; earlier evidence retains its original scope.
 
-The [0.2.2 checkpoint](../checkpoint-v4.md#copilot-permissions-release-2026-09-07)
-owns source/tag identities, workflow links and artifact digests. Earlier native
-soak evidence remains scoped to its original source. Corporate login, network,
-share access and laptop suspend/recovery remain device UAT; the 100-session
-result uses mock agents. `receipts/` remains local and gitignored.
+The [0.2.3 checkpoint](../checkpoint-v4.md#embedded-locator-release-2026-09-07)
+owns exact identities and digests. Corporate auth/network and physical laptop
+outage behavior remain consumer device verification. `receipts/` remains local
+and gitignored.
 
 ## Deliberate limitations and likely next work
 
@@ -294,8 +287,8 @@ second detailed contract into this page.
 ## Personal application consumer
 
 [`arduano/leo-multiplex`](https://github.com/arduano/leo-multiplex) is the separate
-personal application. Its Windows/WSL installer consumes the published `0.2.2`
-artifact graph. The framework now supplies Windows private-state/DACL support
+personal application. Its laptop fallback candidate consumes the published `0.2.3`
+artifact graph; installed consumer status belongs to that repository. The framework now supplies Windows private-state/DACL support
 and a trusted static runtime path-policy hook. The personal host can admit
 operator-selected directories across C:, D: and UNC shares without broadening
 the default framework root fence; see [embedded policy guidance](Paired-Launch-Extensions.md).
