@@ -26,6 +26,8 @@ export interface AdapterNativeHistoryResult {
   payload: JsonValue;
   complete?: boolean;
   nextCursor?: string;
+  sortDirection?: "asc" | "desc";
+  unavailableItem?: { reason: "exceedsWireLimit"; nativeItemId?: string; nativeType?: string };
 }
 
 export interface NativeImageSink {

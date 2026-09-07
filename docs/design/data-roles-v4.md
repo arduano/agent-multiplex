@@ -48,6 +48,14 @@ remain resumable until installed in the runtime's active binding map. This
 prevents an old durable row or concurrent history read from undoing the control
 node's restart fence.
 
+Native history responses keep the native payload separate from bounded transfer
+availability. Descending reads permit a client to open a recent window without
+scanning the full transcript. The opt-in `unavailableItem` result advances past
+one oversized item only with the harness's actual next cursor (or Copilot SDK
+event index). It describes an omission, never synthetic native output. Clients
+must show that gap explicitly. The original item remains in harness-owned history;
+this has no retention, archive, or image-store effect.
+
 ### Access gateway
 
 An access gateway has `dataAuthority: none`. It is a p2prpc client of one or

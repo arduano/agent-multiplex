@@ -21,6 +21,26 @@ provider, profile, implementation, backend, adapter scope, vendor session ID,
 and binding revision. Resume, history, stop, and archive use that provenance
 instead of guessing from `harness`.
 
+### Bounded native history
+
+Codex and Copilot history reads default to ascending order. Clients can select
+`request.native.sortDirection: "desc"` to open at the latest native items and
+follow opaque continuation cursors toward older history. The response echoes
+`sortDirection`, allowing clients to reject an older host that ignored this
+request instead of mislabelling the first page as the latest. Codex delegates the
+direction to `thread/items/list`; Copilot pages the supported SDK `getEvents()`
+result with direction-specific cursors. Copilot still retrieves the SDK's whole
+event list inside the runtime; the gateway and browser receive one bounded page.
+
+An individual native item may exceed the wire envelope even at page size one.
+By default this is an error. Clients opting into
+`request.native.omitOversizedItems: true` instead receive an empty native page,
+an explicit `unavailableItem` descriptor, and the native continuation cursor.
+They must display the omission; no truncated text is presented as the native
+item. `complete` means pagination is exhausted, not that an explicitly unavailable
+item was transferred. Native history remains intact and can be inspected in a
+supported native terminal. This mechanism does not fetch, convert, or alter images.
+
 ## Codex
 
 The runtime supervises one worker-local `codex app-server` on an owner-only
