@@ -274,6 +274,15 @@ the interactive/plan/autopilot mode. Reads on attachment/resume never mutate
 permissions, and newer root permission events fence delayed read/mutation
 snapshots. Missing, malformed or unsupported state does not imply off or on.
 
+Copilot model projection likewise reads the native current model on each
+attachment/resume and observes root model-change events. Native model IDs remain
+unchanged, including explicit auto selection; absence does not imply a default.
+Newer native changes or acknowledged selections fence delayed reads, and newer
+native changes also fence delayed mutation acknowledgements. Descendant model
+changes do not alter the root settings. Its assistant-loop idle signal does not
+end whole-session work: attached commands or background agents may remain active
+until root session idle, and pending root interactions retain waiting status.
+
 Native permission requests/completions carry the exact pending request ID. An
 external native completion retires only that matching interaction, fenced by
 the current runtime binding and child provenance. A local resolution already

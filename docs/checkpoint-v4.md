@@ -8,6 +8,20 @@ architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
+## Copilot observation hotfix candidate — 2026-09-07
+
+The `0.2.4-hotfix.3` candidate fixes model observation after native attachment
+and keeps attached/background work running until Copilot's whole-session idle
+signal. Model API reads and root changes retain native IDs and fence late
+observations; no model selection is replayed on resume. Twenty-two new adapter
+regressions cover these boundaries and pending interactions.
+
+Local typecheck, all **655 tests**, checkpoint, documentation and release checks
+pass. The 16-package graph retains protocol 5, Copilot SDK `1.0.13` / CLI
+`1.0.81`, Codex `0.152.0`, p2prpc `0.2.1` and released migrations. No real
+model calls, soak, native qualification or stable promotion is claimed.
+Publication and consumer installation are recorded separately after completion.
+
 ## Urgent session hotfix evidence — 2026-09-07
 
 The owner authorized focused-check prerelease deployment followed by broad

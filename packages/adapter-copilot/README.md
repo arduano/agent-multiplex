@@ -16,6 +16,11 @@ Key behavior:
   so startup events are buffered until runtime-node-core subscribes.
 - prompts use native `enqueue`/`immediate` delivery; models and
   interactive/plan/autopilot modes use the SDK's native APIs.
+- the selected model is read through native `model.getCurrent` on each attachment
+  and updated by root model-change events. Delayed reads cannot replace newer
+  choices, and missing native state never implies a default selection.
+- `assistant.idle` leaves ongoing commands, background agents and pending root
+  interactions active; root `session.idle` marks whole-session work complete.
 - permission requests use native request/completion events and the SDK's pending
   permission RPC, preserving their exact request identities. Questions,
   elicitation and exit-plan callbacks remain separate pending interactions.

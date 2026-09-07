@@ -36,6 +36,9 @@ export interface CopilotSessionRpc {
   mode: {
     set(input: { mode: "interactive" | "plan" | "autopilot" }): Promise<void>;
   };
+  model?: {
+    getCurrent(): Promise<unknown>;
+  };
   permissions?: {
     getMode(): Promise<unknown>;
     setMode(input: { mode: "manual" | "allow-all" }): Promise<unknown>;
@@ -87,6 +90,10 @@ export class CopilotSessionBridge {
   #permissionMode: CopilotPermissionsSettings | undefined;
   #permissionRevision = 0;
   #permissionsChanged: (() => void) | undefined;
+  #model: string | undefined;
+  #modelRevision = 0;
+  #modelChangeRevision = 0;
+  #modelChanged: (() => void) | undefined;
   #closed = false;
   #status: SessionRuntimeStatus = "idle";
 
@@ -116,14 +123,41 @@ export class CopilotSessionBridge {
     if (event.type === "permission.requested") { this.permissionRequested(event); return; }
     if (event.type === "permission.completed") this.permissionCompleted(event);
     // Descendant events remain in native history, but cannot change the root's
-    // permission setting or runtime status through a shared SDK stream.
+    // settings or runtime status through a shared SDK stream.
     if (child) return;
     if (event.type === "session.permissions_changed") {
       const data: Record<string, unknown> = isObject(event.data) ? event.data : {};
       this.observePermissions({ mode: data.mode });
     }
+    if (event.type === "session.model_change") {
+      this.observeModel(isObject(event.data) ? event.data.newModel : undefined);
+    }
     const status = statusForNativeEvent(event.type);
-    if (status) this.setStatus(status === "running" && this.waitingForInput() ? "waitingForInput" : status);
+    if (status) this.setStatus((status === "running" || status === "idle") && this.waitingForInput() ? "waitingForInput" : status);
+  }
+
+  public attachModel(initialModel: string | undefined, onChanged: () => void): void {
+    if (this.#modelRevision === 0) this.#model = initialModel;
+    this.#modelChanged = onChanged;
+  }
+  public get modelRevision(): number { return this.#modelRevision; }
+  public get modelChangeRevision(): number { return this.#modelChangeRevision; }
+  public model(): string | undefined { return this.#model; }
+  public observeModel(value: unknown, expectedChangeRevision?: number): void {
+    if (this.#closed || expectedChangeRevision !== undefined && expectedChangeRevision !== this.#modelChangeRevision) return;
+    this.#modelChangeRevision += 1;
+    this.updateModel(value);
+  }
+  public observeModelRead(value: unknown, expectedRevision: number): void {
+    if (this.#closed || expectedRevision !== this.#modelRevision) return;
+    // Reads fence older reads, but cannot supersede a mutation acknowledged
+    // afterward. Only native changes and acknowledgements fence that reply.
+    this.updateModel(value);
+  }
+  private updateModel(value: unknown): void {
+    this.#model = typeof value === "string" && value.length > 0 ? value : undefined;
+    this.#modelRevision += 1;
+    this.#modelChanged?.();
   }
 
   public attachPermissions(rpc: CopilotSessionRpc["permissions"], onChanged: () => void): void {
@@ -198,6 +232,7 @@ export class CopilotSessionBridge {
     this.#permissions.clear();
     this.#completedPermissions.clear();
     this.#permissionsChanged = undefined;
+    this.#modelChanged = undefined;
     this.#permissionRpc = undefined;
     this.#listeners.clear();
     this.#buffer.splice(0);
@@ -306,6 +341,7 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#settings = options.settings;
     this.#onStopped = options.onStopped;
     this.vendorSessionId = options.native.sessionId;
+    this.#bridge.attachModel(options.settings.model, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachPermissions(this.#native.rpc.permissions, () => this.#bridge.settings(this.settings()));
   }
 
@@ -320,9 +356,25 @@ export class CopilotAdapterSession implements AdapterSession {
 
   public settings(): HarnessSessionSettings {
     const copilotPermissions = this.#bridge.permissionMode();
+    const model = this.#bridge.model();
     const settings = { ...this.#settings };
     delete settings.copilotPermissions;
-    return { ...settings, ...(copilotPermissions === undefined ? {} : { copilotPermissions }) };
+    delete settings.model;
+    return { ...settings, ...(model === undefined ? {} : { model }), ...(copilotPermissions === undefined ? {} : { copilotPermissions }) };
+  }
+
+  /** Read the native selection on every attachment, including a resume with no
+   * model argument. An absent modelId is unknown, not an inferred auto/default. */
+  public async readModel(): Promise<void> {
+    const read = this.#native.rpc.model?.getCurrent;
+    if (typeof read !== "function") return;
+    const generation = this.#bridge.modelRevision;
+    try {
+      const result = await read.call(this.#native.rpc.model);
+      this.#bridge.observeModelRead(isObject(result) ? result.modelId : undefined, generation);
+    } catch {
+      this.#bridge.observeModelRead(undefined, generation);
+    }
   }
 
   /** Permission state is native-owned. Read it on each fresh SDK attachment;
@@ -369,11 +421,17 @@ export class CopilotAdapterSession implements AdapterSession {
       case "interrupt":
         await this.mutation("interrupt Copilot session", () => this.#native.abort());
         return undefined;
-      case "setModel":
-        await this.mutation("change Copilot model", () => this.#native.setModel(command.model));
-        this.#settings = { ...this.#settings, model: command.model };
-        this.#bridge.settings(this.settings());
+      case "setModel": {
+        const generation = this.#bridge.modelChangeRevision;
+        try {
+          await this.mutation("change Copilot model", () => this.#native.setModel(command.model));
+        } catch (error) {
+          this.#bridge.observeModel(undefined, generation);
+          throw error;
+        }
+        this.#bridge.observeModel(command.model, generation);
         return { model: command.model };
+      }
       case "setMode":
         await this.mutation("change Copilot mode", () =>
           this.#native.rpc.mode.set({ mode: command.mode }),
@@ -590,8 +648,11 @@ function statusForNativeEvent(nativeType: string): SessionRuntimeStatus | undefi
     case "session.start":
     case "session.resume":
     case "session.idle":
-    case "assistant.idle":
       return "idle";
+    case "assistant.idle":
+      // The main loop paused, but attached shell commands or background agents
+      // may still be running; only session.idle ends the whole session's work.
+      return undefined;
     case "user.message":
     case "assistant.turn_start":
       return "running";

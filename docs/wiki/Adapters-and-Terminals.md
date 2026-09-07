@@ -76,6 +76,18 @@ is runtime-local. An OpenAI-compatible BYOK provider can use the Responses wire
 API and a runtime-local API-key or bearer-token file; its secret is never
 projected.
 
+The selected model is read from native `session.model.getCurrent` on every SDK
+attachment, including resume without a model argument. Root `session.model_change`
+events update the same acknowledged setting; child model choices remain native
+child events. Missing or failed native reads stay unknown, and delayed replies
+cannot replace newer native choices or acknowledged commands. Native model IDs,
+including an explicit `auto`, are preserved without inferring a default.
+
+Copilot's `assistant.idle` only means its main processing loop paused. Attached
+shell commands and background agents can still be running, so it does not mark
+the session done. Root `session.idle` supplies the whole-session idle signal;
+unresolved root interactions continue to report waiting for input.
+
 Copilot's native allow-all setting is separate from interactive/plan/autopilot.
 The `permissions.mode` capability advertises the fenced `setPermissionMode`
 command; it selects native `manual` or `allow-all` for tool, path and URL

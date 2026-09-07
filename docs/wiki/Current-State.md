@@ -7,6 +7,16 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
+## Copilot observation follow-up
+
+The `0.2.4-hotfix.3` candidate restores Copilot's retained model through its
+read-only native model snapshot on attachment and observes later root model
+changes. It also keeps a session working across `assistant.idle`, which may
+still have background agents or attached shell commands, until `session.idle`.
+No wire, native dependency, transport or migration boundary changes. Model
+qualification remains excluded; candidate checks and publication are recorded
+in the checkpoint when complete.
+
 ## Urgent session hotfix
 
 The owner authorized incremental hotfix deployment, followed by broad checks

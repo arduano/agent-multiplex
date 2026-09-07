@@ -268,7 +268,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await session.readPermissions();
+    await Promise.all([session.readPermissions(), session.readModel()]);
     return session;
   }
 
@@ -335,7 +335,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await session.readPermissions();
+    await Promise.all([session.readPermissions(), session.readModel()]);
     return session;
   }
 
