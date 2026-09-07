@@ -135,8 +135,10 @@ implicitly receive access to the independently published p2prpc package.
 ## Tag and publication flow
 
 All workspace versions move together and must exactly match the root version.
-For `v0.2.2` only, the owner explicitly requested deployment without the
-model-using four-container qualification. Publication accepts a separate,
+For `v0.2.2` and separately `v0.2.3`, the owner explicitly requested deployment
+without the model-using four-container qualification. The latter release adds
+only local control-ticket access; native and transport pins are unchanged.
+Publication accepts a separate,
 owner-created native-model waiver status tied to the exact signed source commit.
 This is a recorded exception, not a passing native-model receipt. Native Copilot
 permission RPC checks still run on Linux and Windows without credentials or
