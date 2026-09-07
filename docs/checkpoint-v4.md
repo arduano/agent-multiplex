@@ -8,6 +8,26 @@ architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
+## Copilot pending messages hotfix — 2026-09-07
+
+Signed tag `hotfix-2026-09-07.4` identifies source
+`fea5cedc1cdd8f61002f108203e2a4d23cab202e`. The
+[immutable prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.4)
+contains 16 `0.2.4-hotfix.4` packages, `pack-manifest.json` and `SHA256SUMS`.
+It adds live Copilot pending-message reads and atomic queue-to-steering commands;
+new procedures are optional and capability-gated. Protocol version 5, native
+pins, p2prpc `0.2.1` and migrations remain unchanged.
+
+Typechecking, **678 tests**, docs/checkpoint/release gates and all 16 isolated
+packed consumers pass. Packed checks use the same verifier with the transport
+resolved from its independently published public tarball; no registry-auth
+qualification is claimed. The separate p2prpc worktree also passes typechecking
+and **401 tests**, without changes. Framework dependencies were reinstalled from
+the lock before testing, and the actual loaded Copilot SDK is `1.0.13`.
+No model calls, native soak, stable promotion or installed-host qualification
+is claimed. Consumer rollout and deferred Windows restart belong to the
+personal repository's handoff.
+
 ## Copilot observation hotfix — 2026-09-07
 
 The published `0.2.4-hotfix.3` fixes model observation after native attachment
