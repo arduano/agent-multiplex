@@ -422,7 +422,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
           authority: parentCatalog.authority(),
           projectionRootControlNodeId: child.controlNodeId,
           coveredControlNodeIds: [child.controlNodeId],
-          feedId: child.feedId,
+          feedId: childCatalog.localControlNode().feedId,
           controlCursor: 7,
           generatedAt: now,
           capabilities: [],

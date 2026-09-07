@@ -46,6 +46,11 @@ disclosure.
 ## Security boundaries
 
 - Control nodes are trusted canonical metadata/catalog authorities.
+- Initial receipt handoff trusts the authenticated standalone child's prior
+  authority only during its first complete snapshot. The parent persists this
+  admission and accepts no later invented historical receipt or changed terminal
+  result. Existing subtree moves and undrained metadata work are rejected; a
+  network outage never invokes handoff or promotes an attached branch.
 - Runtimes are trusted with allowed workspaces, native harness credentials,
   provider secrets, app-server output, and the runtime account's OS authority.
 - Gateways are zero-authority protocol actors but can observe all data granted by

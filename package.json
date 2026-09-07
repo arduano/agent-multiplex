@@ -1,6 +1,6 @@
 {
   "name": "agent-multiplex",
-  "version": "0.2.4-hotfix.6",
+  "version": "0.2.4-hotfix.7",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.17.0",

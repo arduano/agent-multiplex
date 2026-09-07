@@ -230,6 +230,11 @@ export class ControlNodeCatalog {
           name: "control-node-v5-native-image-envelope",
           apply: ControlNodeCatalog.#migrateV5,
         },
+        {
+          version: 6,
+          name: "control-node-v5-authority-receipt-handoff",
+          apply: ControlNodeCatalog.#migrateAuthorityReceiptHandoff,
+        },
       ],
       ...(options.now === undefined ? {} : { now: options.now }),
     });
@@ -265,7 +270,14 @@ export class ControlNodeCatalog {
   public localControlNode(): ControlNodeDescriptor {
     const descriptor = this.getControlNode(this.#controlNodeId);
     if (!descriptor) throw new ControlNodeCoreError("NOT_FOUND", "local control-node descriptor is missing");
-    return { ...descriptor, dataRole: this.dataRole() };
+    const dataRole = this.dataRole();
+    const capabilities = descriptor.capabilities.filter((value) =>
+      value !== "authority.receipts.require-root-v1" && value !== "authority.receipts.handoff-blocked-v1");
+    if (dataRole.role === "authority" && this.#hasMetadataReceipts()) {
+      capabilities.push("authority.receipts.require-root-v1");
+      if (this.#hasPendingMetadata()) capabilities.push("authority.receipts.handoff-blocked-v1");
+    }
+    return { ...descriptor, capabilities, dataRole };
   }
 
   public setLocalEndpointId(endpointId: string): ControlNodeDescriptor {
@@ -480,6 +492,32 @@ export class ControlNodeCatalog {
       throw new ControlNodeCoreError("CONFLICT", "a control node cannot attach to itself");
     }
     const existing = this.getAttachment(request.controlNodeId);
+    const fresh = request.childProof.currentRole.role !== "branch" ||
+      request.childProof.currentRole.branch.lifecycle !== "attached";
+    if (fresh && request.capabilities.includes("authority.receipts.handoff-blocked-v1")) {
+      throw new ControlNodeCoreError("FENCED", "metadata work must be reconciled and delivered before changing authority");
+    }
+    if (fresh && request.capabilities.includes("authority.receipts.require-root-v1") && this.dataRole().role !== "authority") {
+      throw new ControlNodeCoreError("FENCED", "a populated authority must attach directly to an authority root");
+    }
+    // A lost attach reply must be reconciled against the original durable
+    // admission, before the child has committed its role or exposed a snapshot.
+    const pendingHandoff = existing === null ? undefined : this.#db.prepare(
+      "SELECT request_json, snapshot_imported FROM attachment_authority_handoffs WHERE attachment_id=?",
+    ).get(existing.attachmentId) as Row | undefined;
+    if (existing && request.resume === undefined && pendingHandoff &&
+      Number(pendingHandoff.snapshot_imported) === 0) {
+      const admitted = controlNodeAttachmentRequestSchema.parse(decode(pendingHandoff.request_json));
+      if (sameCanonicalJson({ ...admitted, controlNodeBootId: request.controlNodeBootId }, request)) {
+        const child = controlNodeDescriptorSchema.parse({ ...this.getControlNode(request.controlNodeId)!,
+          controlNodeBootId: request.controlNodeBootId, presence: "online", lastHeartbeatAt: this.#timestamp() });
+        this.#mutate(() => {
+          this.#putControlNode(child, request.controlNodeId);
+          this.#appendControl({ type: "controlNode.upsert", controlNode: child });
+        });
+        return { attachment: existing, child, reconnected: true };
+      }
+    }
     if (existing === null && request.resume !== undefined) {
       throw new ControlNodeCoreError(
         "FENCED",
@@ -516,6 +554,9 @@ export class ControlNodeCatalog {
         "CONFLICT",
         `child subtree overlaps control node ${controlNodeId} already owned by the parent tree`,
       );
+    }
+    if (fresh && request.childProof.coveredControlNodeIds.length !== 1) {
+      throw new ControlNodeCoreError("FENCED", "moving an existing control subtree requires a coordinated authority handoff");
     }
     const previousChild = this.getControlNode(request.controlNodeId);
     if (
@@ -575,6 +616,12 @@ export class ControlNodeCatalog {
           INSERT INTO attachments(attachment_id, child_control_node_id, state, record_json, updated_at)
           VALUES (?, ?, 'active', ?, ?)
         `).run(attachment.attachmentId, attachment.childControlNodeId, encode(attachment), timestamp);
+        if (request.childProof.currentRole.role === "authority") {
+          this.#db.prepare(`
+            INSERT INTO attachment_authority_handoffs(attachment_id, previous_authority_json, request_json, snapshot_imported)
+            VALUES (?, ?, ?, 0)
+          `).run(attachment.attachmentId, encode(request.childProof.currentRole.authority), encode(request));
+        }
       }
       this.#putControlNode(child, request.controlNodeId);
       this.#appendControl({ type: "controlNode.upsert", controlNode: child });
@@ -607,6 +654,12 @@ export class ControlNodeCatalog {
       );
     }
     const before = this.dataRole();
+    if (before.role !== "branch" || before.branch.lifecycle !== "attached") {
+      this.assertCanAttach();
+      if (this.#hasMetadataReceipts() && attachment.parentControlNodeId !== attachment.authority.controlNodeId) {
+        throw new ControlNodeCoreError("FENCED", "a populated authority must attach directly to an authority root");
+      }
+    }
     const after = controlNodeDataRoleSchema.parse({
       role: "branch",
       authority: attachment.authority,
@@ -645,7 +698,11 @@ export class ControlNodeCatalog {
       this.#setRole(after);
       this.#appendRoleTransition("attached", before, after, attachment, attachment.attachmentId);
       this.#rewriteSubtreeAuthority(after.authority);
-      const local = { ...this.localControlNode(), dataRole: after };
+      // Existing observers must obtain a new complete snapshot rather than
+      // interpreting old-fence events under the new authority manifest.
+      const nextFeedId = newFeedId();
+      this.#rotateControlFeed(nextFeedId);
+      const local = { ...this.localControlNode(), feedId: nextFeedId, dataRole: after };
       this.#putControlNode(local, null);
       this.#appendControl({ type: "controlNode.upsert", controlNode: local });
     });
@@ -920,6 +977,12 @@ export class ControlNodeCatalog {
       throw new ControlNodeCoreError("FENCED", "child snapshot has a foreign identity, root, boot, or authority fence");
     }
     const coverage = new Set(manifest.coveredControlNodeIds);
+    const handoff = this.#db.prepare(
+      "SELECT previous_authority_json, snapshot_imported FROM attachment_authority_handoffs WHERE attachment_id=?",
+    ).get(attachmentId) as Row | undefined;
+    const importHistorical = handoff && Number(handoff.snapshot_imported) === 0 && this.dataRole().role === "authority"
+      ? decode(handoff.previous_authority_json) as AuthorityRef
+      : undefined;
     this.#assertSnapshotOwnership(childControlNodeId, snapshot);
     const canonicalControlNodes = snapshot.controlNodes.map((node) => {
       if (node.controlNodeId !== childControlNodeId) return node;
@@ -949,12 +1012,16 @@ export class ControlNodeCatalog {
         operation: this.#mergeMetadataOperationImportedFromChild(
           childControlNodeId,
           operation,
+          importHistorical,
+          snapshot.sessions.find((session) => session.sessionId === operation.sessionId)?.metadata,
         ),
         // A receipt committed or settled at this control node is authority
         // state, not part of the child's replaceable projection. Preserve that
         // ownership so a later detach cannot delete the canonical receipt.
         projectionSource: previous === null
-          ? childControlNodeId
+          ? operation.status !== "queued" && !sameAuthority(operation.authority, this.authority())
+            ? null
+            : childControlNodeId
           : previous.status !== "queued"
             ? null
             : this.#projectionSource(
@@ -1017,6 +1084,8 @@ export class ControlNodeCatalog {
           attachment_id=excluded.attachment_id, feed_id=excluded.feed_id,
           control_cursor=excluded.control_cursor, updated_at=excluded.updated_at
       `).run(childControlNodeId, attachmentId, manifest.feedId, manifest.controlCursor, this.#timestamp());
+      this.#db.prepare("UPDATE attachment_authority_handoffs SET snapshot_imported=1 WHERE attachment_id=?")
+        .run(attachmentId);
       for (const node of canonicalControlNodes) this.#appendControl({ type: "controlNode.upsert", controlNode: node }, node.controlNodeId);
       for (const runtime of snapshot.runtimeNodes) this.#appendControl({ type: "runtimeNode.upsert", runtimeNode: runtime }, runtime.ownerControlNodeId);
       for (const session of canonicalSessions) {
@@ -1795,20 +1864,23 @@ export class ControlNodeCatalog {
     return session.metadata;
   }
 
-  public submitMetadataPatch(patchInput: MetadataPatch, originControlNodeId = this.#controlNodeId): MetadataOperationRecord {
+  public submitMetadataPatch(patchInput: MetadataPatch, originControlNodeId?: ControlNodeId): MetadataOperationRecord {
     const patch = metadataPatchSchema.parse(patchInput);
-    this.#assertAuthority(patch.expectedAuthority);
+    const origin = originControlNodeId ?? this.#controlNodeId;
     const existing = this.getMetadataOperation(patch.operationId);
     if (existing) {
       if (
         !sameMetadataPatch(existing.patch, patch) ||
-        existing.originControlNodeId !== originControlNodeId
+        (existing.originControlNodeId !== origin &&
+          (originControlNodeId !== undefined || sameAuthority(existing.authority, this.authority())))
       ) {
         throw new ControlNodeCoreError(
           "PAYLOAD_MISMATCH",
           "metadata operation ID was reused with another immutable identity",
         );
       }
+      if (existing.status !== "queued") return existing;
+      this.#assertAuthority(patch.expectedAuthority);
       const needsRelayAdoption = this.dataRole().role === "branch" &&
         existing.status === "queued" &&
         (
@@ -1837,6 +1909,7 @@ export class ControlNodeCatalog {
       }
       return existing;
     }
+    this.#assertAuthority(patch.expectedAuthority);
     const session = this.getSession(patch.sessionId);
     if (!session) throw new ControlNodeCoreError("NOT_FOUND", "metadata session is unknown");
     const timestamp = this.#timestamp();
@@ -1848,7 +1921,7 @@ export class ControlNodeCatalog {
         status: "queued",
         canonical: session.metadata,
         optimistic: optimisticMetadata(session.metadata, patch),
-        originControlNodeId,
+        originControlNodeId: origin,
         authority: this.authority(),
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -1861,18 +1934,18 @@ export class ControlNodeCatalog {
       });
       return operation;
     }
-    return this.#commitMetadataAtAuthority(patch, session, originControlNodeId, timestamp);
+    return this.#commitMetadataAtAuthority(patch, session, origin, timestamp);
   }
 
   public applyMetadataAtAuthority(operationInput: MetadataOperationRecord): MetadataOperationRecord {
     if (this.dataRole().role !== "authority") throw new ControlNodeCoreError("FENCED", "branch cannot commit canonical metadata");
     const incoming = metadataOperationRecordSchema.parse(operationInput);
-    this.#assertAuthority(incoming.authority);
     const existing = this.getMetadataOperation(incoming.operationId);
     if (existing) {
       assertSameMetadataOperationIdentity(existing, incoming);
       if (existing.status !== "queued") return existing;
     }
+    this.#assertAuthority(incoming.authority);
     const session = this.getSession(incoming.sessionId);
     if (!session) throw new ControlNodeCoreError("NOT_FOUND", "metadata session is unknown");
     return this.#commitMetadataAtAuthority(incoming.patch, session, incoming.originControlNodeId, incoming.createdAt);
@@ -1889,7 +1962,6 @@ export class ControlNodeCatalog {
   ): MetadataOperationRecord {
     const operation = metadataOperationRecordSchema.parse(input);
     if (operation.status === "queued") throw new ControlNodeCoreError("CONFLICT", "settlement must be terminal");
-    this.#assertAuthority(operation.authority);
     const current = this.getMetadataOperation(operation.operationId);
     if (current) assertSameMetadataOperationIdentity(current, operation);
     if (current && current.status !== "queued") {
@@ -1898,6 +1970,7 @@ export class ControlNodeCatalog {
       }
       return current;
     }
+    this.#assertAuthority(operation.authority);
     const session = this.getSession(operation.sessionId);
     if (!session) throw new ControlNodeCoreError("NOT_FOUND", "metadata session is unknown");
     if (!sameAuthority(session.metadataAuthority, operation.authority)) {
@@ -2965,6 +3038,48 @@ export class ControlNodeCatalog {
     `).run(nextFeedId);
   }
 
+  static #migrateAuthorityReceiptHandoff(database: DatabaseSync): void {
+    database.exec(`
+      CREATE TABLE attachment_authority_handoffs (
+        attachment_id TEXT PRIMARY KEY,
+        previous_authority_json TEXT NOT NULL CHECK(json_valid(previous_authority_json)),
+        request_json TEXT NOT NULL CHECK(json_valid(request_json)),
+        snapshot_imported INTEGER NOT NULL CHECK(snapshot_imported IN (0,1))
+      ) STRICT;
+    `);
+  }
+
+  #hasMetadataReceipts(): boolean {
+    return this.#db.prepare("SELECT 1 FROM metadata_operations LIMIT 1").get() !== undefined;
+  }
+
+  #hasPendingMetadata(): boolean {
+    return this.#db.prepare("SELECT 1 FROM metadata_operations WHERE status='queued' LIMIT 1").get() !== undefined ||
+      this.#db.prepare("SELECT 1 FROM delivery_intents WHERE kind='metadata' LIMIT 1").get() !== undefined;
+  }
+
+  /** Preflight before dispatching an attachment; never changes the old ledger. */
+  public assertCanAttach(): void {
+    const role = this.dataRole();
+    if (role.role === "branch" && role.branch.lifecycle === "attached") return;
+    if (this.listControlNodes().length !== 1) {
+      throw new ControlNodeCoreError("FENCED", "moving an existing control subtree requires a coordinated authority handoff");
+    }
+    if (this.#db.prepare("SELECT 1 FROM metadata_operations WHERE status='queued' LIMIT 1").get()) {
+      throw new ControlNodeCoreError("FENCED", "queued metadata must be reconciled before changing authority");
+    }
+    if (this.#db.prepare("SELECT 1 FROM delivery_intents WHERE kind='metadata' LIMIT 1").get()) {
+      throw new ControlNodeCoreError("FENCED", "metadata receipts must be delivered before changing authority");
+    }
+    // Receipt transfer is intentionally scoped to a self-owned authority.
+    // Detached/promoted historical realms need a separate explicit merge.
+    const foreignReceipt = (this.#db.prepare("SELECT record_json FROM metadata_operations").all() as Row[])
+      .some((row) => !sameAuthority(parse(metadataOperationRecordSchema, row.record_json).authority, role.authority));
+    if (foreignReceipt || (role.role !== "authority" && this.#hasMetadataReceipts())) {
+      throw new ControlNodeCoreError("FENCED", "historical authority chains require an explicit metadata handoff");
+    }
+  }
+
   #loadOrCreateIdentity(expected?: ControlNodeId): {
     controlNodeId: ControlNodeId;
     feedId: FeedId;
@@ -3169,15 +3284,28 @@ export class ControlNodeCatalog {
   #mergeMetadataOperationImportedFromChild(
     source: ControlNodeId,
     operationInput: MetadataOperationRecord,
+    initialAuthority?: AuthorityRef,
+    initialMetadata?: MetadataSnapshot,
   ): MetadataOperationRecord {
     const incoming = metadataOperationRecordSchema.parse(operationInput);
+    const current = this.getMetadataOperation(incoming.operationId);
     if (!sameAuthority(incoming.authority, this.authority())) {
+      if (current && current.status !== "queued" && sameCanonicalJson(current, incoming)) {
+        const session = this.getSession(current.sessionId);
+        if (session && this.routeForRuntimeNode(session.runtimeNodeId)?.immediateChildControlNodeId === source) return current;
+      }
+      if (!current && initialAuthority && sameAuthority(incoming.authority, initialAuthority) &&
+        incoming.authority.controlNodeId === source && incoming.originControlNodeId === source &&
+        incoming.status !== "queued" && initialMetadata &&
+        incoming.canonical.revision <= initialMetadata.revision &&
+        (incoming.canonical.revision !== initialMetadata.revision || sameCanonicalJson(incoming.canonical, initialMetadata))) {
+        return incoming;
+      }
       throw new ControlNodeCoreError(
         "FENCED",
         "child metadata operation carries a stale authority fence",
       );
     }
-    const current = this.getMetadataOperation(incoming.operationId);
     if (!current) {
       if (incoming.status !== "queued") {
         throw new ControlNodeCoreError(
@@ -3430,10 +3558,10 @@ export class ControlNodeCatalog {
       case "metadata.operation":
         if (!owned("sessions", "session_id", change.operation.sessionId)) throw new ControlNodeCoreError("FENCED", "child metadata targets a foreign session");
         if (!sameAuthority(change.operation.authority, this.authority())) {
-          throw new ControlNodeCoreError(
-            "FENCED",
-            "child metadata operation carries a stale authority fence",
-          );
+          const existing = this.getMetadataOperation(change.operation.operationId);
+          if (!existing || existing.status === "queued" || !sameCanonicalJson(existing, change.operation)) {
+            throw new ControlNodeCoreError("FENCED", "child metadata operation carries a stale authority fence");
+          }
         }
         break;
       case "interaction.changed":

@@ -45,6 +45,24 @@ pin expected endpoints, verify the topology, then close the aperture and restart
 the control if configuration requires it. Defaults are read-only. Keep ordinary
 UI credentials separate from topology/authority recovery credentials.
 
+For initial standalone-authority attachment to a new root, first inspect and
+drain metadata outboxes, pending receipt deliveries and in-flight metadata or
+archive operations. Include runtime outboxes in this check: old unknown patches
+are deliberately not retargeted to a different authority. Back up each stopped
+control and its identity before changing the desired parent. Stop only the
+control service when the runtime is independently supervised; control outages
+do not require stopping native agents. Run the control catalog's
+`assertCanAttach()` preflight before dispatching the first attachment.
+
+The appended control migration records the old authority's immutable receipt
+handoff. Upgrade both attaching controls and their new root together; previous
+binaries cannot open the new control-store migration. Runtime schema and wire
+protocol stay unchanged. After attachment, verify unchanged runtime/native
+identities, complete root open-session search, historical receipt reconciliation,
+and root-offline operation through any local branch gateway. Cold archived
+search may still require an online child; this is not an archive replication
+feature. See [architecture guidance](Architecture-and-Data-Roles.md#attaching-an-existing-host-catalog).
+
 ## Monitor
 
 At minimum alert on:

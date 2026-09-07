@@ -137,6 +137,7 @@ function attachmentRequest(
   catalog: ControlNodeCatalog,
   desired: DesiredControlNodeUpstream,
 ): ControlNodeAttachmentRequest {
+  catalog.assertCanAttach();
   const local = catalog.localControlNode();
   const role = catalog.dataRole();
   return {

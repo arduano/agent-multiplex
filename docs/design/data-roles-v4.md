@@ -153,6 +153,46 @@ claim by the child inside the internal p2prpc trust domain; mutually malicious
 or simultaneously attaching peers would require a multi-party reservation
 protocol, which is outside the current single-writer MVP.
 
+### Initial attachment of an existing standalone authority
+
+A standalone authority with existing metadata receipts can attach directly to an
+authority root after its queued metadata work and downstream receipt deliveries
+have drained. The child advertises this requirement through the existing
+attachment capabilities; the supervisor calls the catalog preflight before
+dispatch, and both sides reject unsupported transitions before committing them.
+Moving an already formed control subtree, attaching historical receipts beneath
+an intermediate branch, or merging receipts from earlier authority chains
+requires a coordinated handoff which this implementation does not provide.
+Empty controls can still form ordinary trees from the root downward.
+
+The parent persists the authenticated prior authority and exact attachment
+admission in the appended `control-node-v5-authority-receipt-handoff` migration.
+Only the first complete, validated child snapshot may import terminal receipts
+from that prior standalone authority. Their operation IDs, patches, authority
+fences, timestamps and results remain byte-equivalent protocol records. Receipt
+canonical revisions must not exceed the transferred session metadata; equal
+revisions must agree. The snapshot and closure of this admission window commit
+atomically. Later snapshots and events can replay those exact historical
+receipts, but cannot invent or change them. The parent keeps imported terminal
+receipts outside the replaceable child projection, so resnapshot cannot erase
+its idempotency evidence.
+
+An exact terminal metadata operation can be reconciled after its authority
+changes; an unknown request with an old authority fence remains rejected. No old
+queued proposal is silently retargeted or applied twice. A lost initial attach
+reply can recover the same admission while its first snapshot is uncommitted,
+including a new child boot with the same endpoint, role, feed and request proof.
+The child rotates its control feed when it commits the new authority so existing
+observers must re-read a complete snapshot. Native bindings and runtime epochs
+remain runtime-owned and do not change for attachment.
+
+Root hot-session search reads the durable projection while a child is offline;
+archived search can still require the owning child. A local gateway connected
+directly to an attached branch can route native commands through its local
+runtime while the root is unreachable. Metadata proposals remain queued under
+the root's unchanged authority and settle after reconnect. This does not promote
+the branch or grant local canonical metadata authority.
+
 ## Launch extension roles
 
 Launch extensions are trusted modules inside a gateway or runtime process. They
