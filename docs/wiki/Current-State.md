@@ -17,6 +17,10 @@ transport and migrations remain unchanged. See
 [gateway embedding](Clients-and-Gateway-Embedding.md#embedding-a-gateway).
 This is candidate source, not a published or native-model-qualified release;
 the latest publication remains `0.2.2` below.
+The owner has explicitly waived model-using qualification for `0.2.3` to deploy
+the laptop fallback. Publication still requires the exact-source non-model gates,
+signed tag, artifact verification and a separate owner-created waiver status;
+see the [release exception](Releases.md#tag-and-publication-flow).
 
 Suggested first prompt for a new session:
 

@@ -125,9 +125,13 @@ jobs:
               ($tag == "v0.2.2" and
                 ($statuses | [.[][] | select(.context == $waiverContext)] |
                   sort_by(.created_at, .id) | last |
-                  owned and .description == "WAIVED for v0.2.2 by owner; native permission RPC checks passed without model calls"))
+                  owned and .description == "WAIVED for v0.2.2 by owner; native permission RPC checks passed without model calls")) or
+              ($tag == "v0.2.3" and
+                ($statuses | [.[][] | select(.context == $waiverContext)] |
+                  sort_by(.created_at, .id) | last |
+                  owned and .description == "WAIVED for v0.2.3 by owner; local ticket accessor only; native and transport pins unchanged"))
             ' <<< "$native_statuses" >/dev/null || {
-              echo "No native qualification or explicit v0.2.2 owner waiver exists for $GITHUB_SHA" >&2
+              echo "No native qualification or explicit release-specific owner waiver exists for $GITHUB_SHA" >&2
               exit 1
             }
       - name: Set up Node.js and GitHub Packages
