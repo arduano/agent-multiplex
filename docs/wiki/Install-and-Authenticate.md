@@ -68,6 +68,14 @@ packages locally in an embedding application instead of globally. Package
 versions are lockstep; do not compose different Agent Multiplex versions unless
 that exact mixed graph was qualified.
 
+Runtime listeners can be restricted with
+`AGENT_MULTIPLEX_RUNTIME_NODE_P2P_BIND` (for example `127.0.0.1:0` for a colocated
+control). Embedded applications pass `RuntimeNodeAppConfig.p2pBindAddress`.
+The default remains automatic interface discovery. Hosts with many Docker or
+virtual-network addresses should choose a reachable interface so discovery does
+not exceed the transport's bounded ticket address count. Endpoint pins and relay
+policy are unchanged by the bind address.
+
 ## Create credentials
 
 Use independent credentials for different layers:

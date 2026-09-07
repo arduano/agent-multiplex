@@ -127,5 +127,11 @@ export const nativeHistoryResultSchema = z.object({
   payload: nativePayloadSchema,
   nextCursor: z.string().optional(),
   complete: z.boolean().optional(),
+  sortDirection: z.enum(["asc", "desc"]).optional(),
+  unavailableItem: z.object({
+    reason: z.literal("exceedsWireLimit"),
+    nativeItemId: z.string().max(1_024).optional(),
+    nativeType: z.string().max(256).optional(),
+  }).optional(),
 });
 export type NativeHistoryResult = z.infer<typeof nativeHistoryResultSchema>;

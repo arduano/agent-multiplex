@@ -20,6 +20,11 @@ Stop preserves the logical ID, vendor binding, launch provenance, and provider
 resources required for resume. Archive is never automatic and is not the same
 as Codex's own native thread-archive concept.
 
+Runtime restart clears the old process's active status before durable bindings
+are replayed to the control node. Resuming remains explicit. A temporary native
+attachment used to read stopped history does not make a session active or
+command-ready; only a handle installed in the runtime's active bindings does.
+
 ## Launch lifecycle
 
 `launches.create` durably admits work before asynchronous provisioning:

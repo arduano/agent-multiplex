@@ -67,7 +67,7 @@ const DEFAULT_INVENTORY_REFRESH_MS = 60_000;
 const DEFAULT_METADATA_FLUSH_MS = 5_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const DEFAULT_MAX_RUNNING_TERMINALS = 32;
-const VERSION = "0.2.3";
+const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 /** Embedded consumers can fail closed when their published daemon lacks this hook. */
 export const runtimePathPolicyInjectionVersion = 1 as const;
@@ -83,6 +83,8 @@ export interface RuntimeNodeAppConfig {
   readonly adapterMode: AdapterMode;
   readonly sharedSecret: string;
   readonly controlNode: PinnedPeerTarget;
+  /** Narrow native discovery on machines with many virtual network interfaces. */
+  readonly p2pBindAddress?: string;
   readonly heartbeatMs: number;
   readonly inventoryRefreshMs: number;
   readonly metadataFlushMs: number;
@@ -208,6 +210,7 @@ export async function runRuntimeNode(
       createContext: createRuntimeNodeRouterContext,
       iroh: {
         secretKey: identity.irohSecretKey,
+        ...(config.p2pBindAddress === undefined ? {} : { bindAddress: config.p2pBindAddress }),
         relay: { mode: "default" },
         // The locator is explicitly provisioned configuration and the remote
         // endpoint key is pinned independently. Deployments with stricter
@@ -587,6 +590,9 @@ export function configFromEnvironment(
     imageMaximumRuntimeBytes: positiveIntegerEnvironment(environment, "AGENT_MULTIPLEX_RUNTIME_NODE_IMAGE_RUNTIME_BYTES", 10 * 1_024 * 1_024 * 1_024),
     adapterMode,
     sharedSecret,
+    ...(environment.AGENT_MULTIPLEX_RUNTIME_NODE_P2P_BIND === undefined ? {} : {
+      p2pBindAddress: environment.AGENT_MULTIPLEX_RUNTIME_NODE_P2P_BIND,
+    }),
     controlNode: {
       endpointId: requiredEnvironment(
         environment,

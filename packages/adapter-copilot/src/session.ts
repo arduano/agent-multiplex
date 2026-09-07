@@ -30,6 +30,7 @@ import { copilotJson, jsonRecord, requiredString } from "./json.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 
 const HISTORY_CURSOR_PREFIX = "copilot:event-index:";
+const REVERSE_HISTORY_CURSOR_PREFIX = "copilot:event-before:";
 
 export interface CopilotSessionRpc {
   mode: {
@@ -414,30 +415,48 @@ export class CopilotAdapterSession implements AdapterSession {
     // getEvents() is Copilot's supported history API. The adapter only pages the
     // returned opaque events; it never opens or interprets Copilot's session store.
     const events = await this.#native.getEvents();
-    const start = decodeHistoryCursor(request.cursor);
-    const requestedEnd = Math.min(start + request.limit, events.length);
-    let end = start;
+    const sortDirection = request.native?.sortDirection ?? "asc";
+    if (sortDirection !== "asc" && sortDirection !== "desc") throw new TypeError("Invalid Copilot history sort direction");
+    const descending = sortDirection === "desc";
+    const boundary = request.cursor === undefined ? descending ? events.length : 0
+      : decodeHistoryCursor(request.cursor, descending ? REVERSE_HISTORY_CURSOR_PREFIX : HISTORY_CURSOR_PREFIX);
+    if (boundary > events.length) throw new TypeError("Copilot history cursor exceeds the current history");
+    const payload: JsonValue[] = [];
+    let position = boundary;
     let bytes = 128;
     let images = 0;
-    while (end < requestedEnd) {
-      const event = copilotJson(events[end]);
-      const itemBytes = copilotHistoryEventBytes(event, end - start);
+    while (payload.length < request.limit && (descending ? position > 0 : position < events.length)) {
+      const event = copilotJson(events[descending ? position - 1 : position]);
+      const itemBytes = copilotHistoryEventBytes(event, payload.length);
       const itemImages = copilotImageLeaves(event).length;
       if (bytes + itemBytes > NATIVE_PAYLOAD_MAX_BYTES || images + itemImages > 256) {
-        if (end === start) throw new Error("One native Copilot history event exceeds the bounded wire envelope");
+        if (!payload.length) {
+          if (request.native?.omitOversizedItems !== true) throw new Error("One native Copilot history event exceeds the bounded wire envelope");
+          const omitted = jsonRecord(event, "Copilot history event");
+          position += descending ? -1 : 1;
+          const complete = descending ? position === 0 : position >= events.length;
+          return {
+            harness: "copilot", vendorSessionId: this.vendorSessionId, payload: [], complete, sortDirection,
+            ...(complete ? {} : { nextCursor: `${descending ? REVERSE_HISTORY_CURSOR_PREFIX : HISTORY_CURSOR_PREFIX}${position}` }),
+            unavailableItem: { reason: "exceedsWireLimit",
+              ...(typeof omitted?.id === "string" && omitted.id.length <= 1_024 ? { nativeItemId: omitted.id } : {}),
+              ...(typeof omitted?.type === "string" && omitted.type.length <= 256 ? { nativeType: omitted.type } : {}),
+            },
+          };
+        }
         break;
       }
       bytes += itemBytes;
       images += itemImages;
-      end += 1;
+      payload.push(event);
+      position += descending ? -1 : 1;
     }
-    const payload = copilotJson(events.slice(start, end));
-    const complete = end >= events.length;
+    const complete = descending ? position === 0 : position >= events.length;
     return {
       harness: "copilot",
       vendorSessionId: this.vendorSessionId,
-      payload,
-      ...(complete ? {} : { nextCursor: `${HISTORY_CURSOR_PREFIX}${end}` }),
+      payload, sortDirection,
+      ...(complete ? {} : { nextCursor: `${descending ? REVERSE_HISTORY_CURSOR_PREFIX : HISTORY_CURSOR_PREFIX}${position}` }),
       complete,
     };
   }
@@ -553,12 +572,11 @@ function messageOptions(
   } as unknown as MessageOptions;
 }
 
-function decodeHistoryCursor(cursor: string | undefined): number {
-  if (cursor === undefined) return 0;
-  if (!cursor.startsWith(HISTORY_CURSOR_PREFIX)) {
+function decodeHistoryCursor(cursor: string, prefix = HISTORY_CURSOR_PREFIX): number {
+  if (!cursor.startsWith(prefix)) {
     throw new TypeError("Invalid Copilot history cursor");
   }
-  const value = cursor.slice(HISTORY_CURSOR_PREFIX.length);
+  const value = cursor.slice(prefix.length);
   if (!/^(0|[1-9][0-9]*)$/.test(value)) {
     throw new TypeError("Invalid Copilot history cursor");
   }

@@ -8,6 +8,84 @@ architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
+## Urgent session hotfix evidence — 2026-09-07
+
+The owner authorized focused-check prerelease deployment followed by broad
+non-model checks. This evidence does not promote a stable release or assert a
+passing native-model qualification. Wire protocol remains `5`, transport remains
+exact public `@arduano/p2prpc-core@0.2.1`, and native pins remain Codex `0.152.0`,
+Copilot SDK `1.0.13` and CLI `1.0.81`.
+
+### Immutable deployed package boundary
+
+Signed tag `hotfix-2026-09-07.2` peels to
+`564f166ebe579eefa749c9682400628d68af63ce`. Its
+[GitHub prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.2)
+was published at `2026-09-07T03:45:02Z`, with 16 lockstep `0.2.4-hotfix.2`
+tarballs. The `pack-manifest.json` SHA-256 is
+`78075b77456f0688b176cfd21fa8c59252bbc4fad738b9e513ac5a1f4840b7ca`;
+the `SHA256SUMS` file SHA-256 is
+`8f5381559ad1459cbf44c8f4a3b77e063e8da0c87b39f2fb00d0466d9503d037`.
+No artifact or signed tag was replaced during final validation.
+
+[Docker qualification run 34082871111](https://github.com/arduano/agent-multiplex/actions/runs/34082871111)
+checked out that exact commit and passed both deterministic suites. Downloaded
+artifact `10004313224` contains the following successful, scrubbed receipts;
+independent SHA-256 verification passed all 48 inventory entries in each:
+
+| Receipt | SHA-256 of its `SHA256SUMS` |
+| --- | --- |
+| `protocol-v4-control-tree/20260907T042344Z-4ee2f6401bae` | `f15c19833b4607637b6df2583ae31c2ddc02aa6aaacc03a3d40dcb3349102553` |
+| `protocol-v4-mock-docker-scale/20260907T042605Z-11cc549a3bc9` | `18d61bcaa1ee000c2cd5b4c2a7c3b0810657cfa49f2730b612a107f00ea04777` |
+
+The tree run exercised authority/branch failover and recovery, queued metadata,
+native event reassembly and immutable image transfer. The scale run exercised
+10 runtimes/100 concurrent mock sessions, client and runtime reconnect recovery,
+zero native event gaps/duplicates and responsive dashboard checks. Its receipt
+records Node `24.19.0`, Docker `28.0.4`, zero real agent processes and zero inference
+requests. Both runners removed disposable state; they did not alter installed
+hosts or existing sessions. Receipt directory names retain their historical `v4`
+spelling; their manifests explicitly record protocol `5`.
+
+### Final reviewed source checks
+
+Review head `15e27abc9f7ec0d4e6fa93514fb69c7175c3b31f` passed these PR workflows:
+
+- [CI 34085039526](https://github.com/arduano/agent-multiplex/actions/runs/34085039526):
+  typecheck, 633 tests across 81 files, docs/checkpoint/release gates, build,
+  no-model native Copilot permission smoke, audit, all 16 independent packed
+  consumers, SBOM and tracked-source credential scan.
+- [Windows 34085039485](https://github.com/arduano/agent-multiplex/actions/runs/34085039485):
+  x64 private-state/storage/native startup and isolated Copilot permission RPCs,
+  with zero model calls or retained credentials.
+- [CodeQL 34085039503](https://github.com/arduano/agent-multiplex/actions/runs/34085039503)
+  and [dependency review 34085039508](https://github.com/arduano/agent-multiplex/actions/runs/34085039508).
+
+These workflows checked out GitHub's synthetic PR merge commit
+`093c43828a42a535c7f4576c47c44431fa21fd79`. Its complete Git tree is byte-identical
+to the review head: `1dcd16b986b6fb258c5e0b63385d1358e06c8a57`, including the
+lockfile. The downloaded pack manifest names that merge commit; its SHA-256 is
+`c61dab0d50db28be4eae01c1556f8997b9f5e51a1cfa56440c7833efe0b5a0cf`.
+All 16 downloaded package checksums passed. The `SHA256SUMS` SHA-256 is
+`27e149e5c4b207ae7a20e915fec36156d53df3750a2b7e1bda7bc8d9715e278a`.
+These CI candidates are separate from the immutable prerelease bytes above.
+
+Windows receipt inventories also passed independent checksums. Startup receipt
+`2026-09-07T04-59-52.643Z` has inventory SHA-256
+`ee327f3cb96991f08ee62b24dde85940e0491ee10b667ec4ae6c06a5788c9621`;
+permission receipt `2026-09-07T04-59-54.797Z` has inventory SHA-256
+`7775646813d5efedfe77396647c9fd29400ecd14c60b4351e899c9863b4ed6fd`.
+Downloaded evidence is retained locally under `receipts/urgent-final-ci/`;
+credential-pattern scans found no raw credentials in its textual receipt files.
+
+The published hotfix reference CLI/control/runtime/gateway executables still
+print the stale hardcoded `0.2.3` for `--version`, although package manifests and
+consumer locks correctly identify `0.2.4-hotfix.2`. Final source commit `15e27ab`
+reads the installed package manifest instead; this fixed the packed executable
+verification failure without changing the immutable release. Installed bespoke
+hosts, corporate OAuth and laptop fallback/outage UAT remain consumer-owned
+evidence, not outcomes implied by these framework checks.
+
 
 ## Embedded locator release — 2026-09-07
 

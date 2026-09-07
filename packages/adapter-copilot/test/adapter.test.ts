@@ -316,6 +316,38 @@ describe("CopilotAgentAdapter", () => {
     await adapter.close();
   });
 
+  it("pages newest events first and keeps the older cursor stable as new events arrive", async () => {
+    const client = new Client();
+    const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    native.events.push(...Array.from({ length: 1_100 }, (_, index) => ({ ...event("assistant.message"), id: String(index) })));
+    const newest = await session.readNativeHistory({ harness: "copilot", limit: 100, native: { sortDirection: "desc" } });
+    expect((newest.payload as Array<{ id: string }>).map(value => value.id)).toEqual(Array.from({ length: 100 }, (_, index) => String(1099 - index)));
+    expect(newest.nextCursor).toBe("copilot:event-before:1000");
+    native.events.push({ ...event("assistant.message"), id: "new" });
+    const older = await session.readNativeHistory({ harness: "copilot", limit: 100, native: { sortDirection: "desc" }, cursor: newest.nextCursor });
+    expect((older.payload as Array<{ id: string }>)[0]?.id).toBe("999");
+    const first = await session.readNativeHistory({ harness: "copilot", limit: 100, native: { sortDirection: "desc" }, cursor: "copilot:event-before:50" });
+    expect(first.complete).toBe(true);
+    expect((first.payload as Array<{ id: string }>).at(-1)?.id).toBe("0");
+    await expect(session.readNativeHistory({ harness: "copilot", limit: 100, cursor: newest.nextCursor })).rejects.toThrow("Invalid Copilot history cursor");
+    await adapter.close();
+  });
+
+  it("reports a single oversized event without blocking subsequent older history", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    native.events.push({ ...event("assistant.message"), id: "older" }, { ...event("assistant.message"), id: "oversized", data: { content: "x".repeat(2_000_000) } } as SessionEvent);
+    const request = { harness: "copilot" as const, limit: 100, native: { sortDirection: "desc", omitOversizedItems: true } };
+    const skipped = await session.readNativeHistory(request);
+    expect(skipped).toMatchObject({ payload: [], complete: false, nextCursor: "copilot:event-before:1", unavailableItem: { reason: "exceedsWireLimit", nativeItemId: "oversized" } });
+    const older = await session.readNativeHistory({ ...request, cursor: skipped.nextCursor });
+    expect(older).toMatchObject({ complete: true, payload: [{ id: "older" }] });
+    await adapter.close();
+  });
+
   it("preserves early native events, native modes, steering, and SDK history", async () => {
     const client = new Client();
     const adapter = adapterFor(client);

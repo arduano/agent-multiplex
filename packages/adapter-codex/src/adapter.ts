@@ -768,26 +768,43 @@ class CodexSession implements AdapterSession {
   public async readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
     if (request.harness !== "codex") throw new Error("history request harness mismatch");
     if (request.includeTurns) {
+      const sortDirection = request.native?.sortDirection ?? "asc";
+      if (sortDirection !== "asc" && sortDirection !== "desc") throw new TypeError("Invalid Codex history sort direction");
       let limit = Math.min(request.limit ?? 100, 100);
       let response: ThreadItemsListResponse;
       for (;;) {
         response = await this.#rpc.request<ThreadItemsListResponse>("thread/items/list", {
-          ...(request.native ?? {}),
+          ...Object.fromEntries(Object.entries(request.native ?? {}).filter(([key]) => key !== "omitOversizedItems")),
           threadId: this.vendorSessionId,
           limit,
-          sortDirection: "asc",
+          sortDirection,
           cursor: request.cursor ?? null,
           turnId: null,
         });
         const page = json(response);
         if (codexHistoryPageBytes(page) <= NATIVE_PAYLOAD_MAX_BYTES && codexImageLeaves(page).length <= 256) break;
-        if (limit === 1) throw new Error("One native Codex history item exceeds the bounded wire envelope");
+        if (limit === 1) {
+          if (request.native?.omitOversizedItems !== true) throw new Error("One native Codex history item exceeds the bounded wire envelope");
+          const item = response.data[0]?.item;
+          // Advance only with the real native single-item cursor, preserving a
+          // visible omission instead of truncating or inventing native output.
+          return {
+            harness: "codex", vendorSessionId: this.vendorSessionId, sortDirection,
+            payload: json({ ...response, data: [] }),
+            complete: response.nextCursor === null,
+            ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
+            unavailableItem: { reason: "exceedsWireLimit",
+              ...(item && "id" in item && typeof item.id === "string" && item.id.length <= 1_024 ? { nativeItemId: item.id } : {}),
+              ...(item?.type && item.type.length <= 256 ? { nativeType: item.type } : {}),
+            },
+          };
+        }
         // Re-read the same native cursor with a smaller page; never invent a
         // cursor or silently discard native items after the server advanced it.
         limit = Math.max(1, Math.floor(limit / 2));
       }
       return {
-        harness: "codex", vendorSessionId: this.vendorSessionId, payload: json(response),
+        harness: "codex", vendorSessionId: this.vendorSessionId, payload: json(response), sortDirection,
         complete: response.nextCursor === null,
         ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
       };
