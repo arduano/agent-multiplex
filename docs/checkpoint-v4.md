@@ -617,3 +617,41 @@ tarball at the unchanged declared dependency boundary. This uses the prior
 public-transport verifier after the known registry token-scope failure; it is
 separate from registry-authentication evidence. No `latest` promotion or native
 model-credit gate was performed.
+
+## Standalone authority handoff hotfix — 2026-09-07
+
+Published [`hotfix-2026-09-07.7`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.7),
+version `0.2.4-hotfix.7`, from SSH-signed source
+`b2b708b01386b086f52d0c3931e29846fc81b14a` under the existing owner exception.
+The 16 exact-toolchain artifacts retain immutable manifests, SHA-256/SHA-512
+inventories and the 507-component SBOM. The pack manifest digest is
+`26cb1a6bd7a7bd570aac143bf4c892ddf8cc282f6a77f8c779293ae7f8626d1d`.
+All published assets were independently downloaded through GitHub CLI and all
+16 tarballs passed their released checksum inventory.
+
+Typecheck, production build, **768 tests**, checkpoint, docs, release metadata,
+secret scan and all 16 role-isolated packed consumers pass. Final-source
+deterministic Docker evidence:
+
+- Tree: `receipts/protocol-v4-control-tree/20260907T140142Z-480c110dbc72/`.
+- 10-runtime/100-session scale: `receipts/protocol-v4-mock-docker-scale/20260907T140142Z-579c7b38691c/`.
+
+Earlier `c80f8b0` Docker runs are historical, preceding the final observer fixes.
+A direct vitest attempt without regenerated dashboard assets had three HTTP
+fixture failures; the final standard `npm test` rebuild passed all 768 tests.
+Direct urllib downloads encountered gateway timeouts; GitHub CLI independently
+downloaded and verified the complete final public asset set.
+
+Control-only migration 6 records authenticated prior authority, original
+attachment admission and atomic first-snapshot receipt admission closure.
+Historical results stay immutable and reconcile by their original IDs.
+Already-watching root gateways receive imported receipts; session-filtered
+streams immediately reset on feed change and discard prior-authority native
+replay for explicit history/gap recovery. Undrained metadata, populated attachment
+beneath a branch, and formed-subtree transfers fail closed. Root and attaching
+controls need this update; runtime storage/native bindings and transport/native
+pins are unchanged. Older controls require a stopped-state backup for rollback.
+
+No model prompts, native qualification claim, registry `latest` promotion or
+production session mutation were used for qualification. Installed source and
+NAS/laptop rollout facts belong to the personal repository.

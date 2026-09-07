@@ -7,9 +7,9 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
-## Standalone authority attachment candidate
+## Standalone authority attachment hotfix
 
-Current source repairs attachment of an existing standalone catalog directly to
+The published [`0.2.4-hotfix.7` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.7) repairs attachment of an existing standalone catalog directly to
 an authority root. Its first complete snapshot transfers immutable historical
 metadata receipts; later replays cannot invent or change those results.
 The new control-only migration is `control-node-v5-authority-receipt-handoff`
@@ -17,10 +17,12 @@ The new control-only migration is `control-node-v5-authority-receipt-handoff`
 Queued work and receipt deliveries must drain first; formed subtree moves and
 populated attachment under an intermediate branch remain explicitly rejected.
 See [architecture guidance](Architecture-and-Data-Roles.md#attaching-an-existing-host-catalog).
-Publication and deployment are pending separately; no native-model qualification
-is claimed for this source candidate. Typecheck, **768 tests**, documentation,
-checkpoint and release metadata checks pass; Docker topology qualification and
-artifact validation remain separate release work.
+Typecheck, **768 tests**, documentation, checkpoint, release metadata, all 16
+isolated packed consumers and deterministic Docker tree/100-session scale checks
+pass for the signed source. Published tarballs were independently downloaded and
+checksum-verified. No native-model qualification or stable promotion is claimed;
+installed rollout remains in the personal consumer repository. See the
+[checkpoint](../checkpoint-v4.md#standalone-authority-handoff-hotfix--2026-09-07).
 
 ## Codex goals and unavailable Copilot recovery
 
