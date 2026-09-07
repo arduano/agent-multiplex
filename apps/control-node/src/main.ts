@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { chmod, link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -41,7 +41,7 @@ import {
 import { createControlNodeHttpSurface } from "./http.js";
 import { superviseUpstreamControlNode } from "./upstream.js";
 
-const VERSION = "0.2.3";
+const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 export interface ControlNodeReadyInfo {
   readonly controlNodeId: ControlNodeId;

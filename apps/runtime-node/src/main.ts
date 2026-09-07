@@ -67,7 +67,7 @@ const DEFAULT_INVENTORY_REFRESH_MS = 60_000;
 const DEFAULT_METADATA_FLUSH_MS = 5_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const DEFAULT_MAX_RUNNING_TERMINALS = 32;
-const VERSION = "0.2.3";
+const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 /** Embedded consumers can fail closed when their published daemon lacks this hook. */
 export const runtimePathPolicyInjectionVersion = 1 as const;
