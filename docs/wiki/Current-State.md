@@ -7,6 +7,21 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
+## Codex goals and unavailable Copilot recovery
+
+The `0.2.4-hotfix.6` candidate adds capability-gated native Codex goal reads and
+durable goal set/clear commands. Objectives, statuses, optional token budgets,
+usage and notifications retain their pinned native semantics. It also classifies
+Copilot's exact missing-saved-session resume refusal as a definite failure,
+keeping Stop/Archive recovery usable. Untouched empty Copilot sessions can still
+be absent after restart in CLI 1.0.81; there is no silent recreation or synthetic
+history. See [adapter guidance](Adapters-and-Terminals.md).
+
+Typecheck, production build, **758 tests**, checkpoint, documentation and release
+metadata checks pass. The owner waived model-using qualification for this batch.
+Protocol v5, native/transport pins and migrations are unchanged. Publication and
+installed rollout are recorded separately in the checkpoint and consumer repo.
+
 ## Copilot lifecycle audit follow-up
 
 The published [`0.2.4-hotfix.5` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.5) repairs send/resume/permission/shutdown observation

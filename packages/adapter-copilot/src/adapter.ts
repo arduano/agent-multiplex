@@ -318,6 +318,17 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native = await this.#client.resumeSession(options.vendorSessionId, config);
     } catch (cause) {
       bridge.close();
+      // CLI 1.0.81 deliberately keeps a never-used session in memory only.
+      // Its explicit load refusal means no resume effect occurred; retaining
+      // outcomeUnknown here would unnecessarily wedge the durable lifecycle.
+      // Keep the predicate exact: timeouts, transport failures and unrelated
+      // native errors remain ambiguous and must not be blindly retried.
+      if (isMissingNativeSession(cause, options.vendorSessionId)) {
+        throw new Error(
+          "Copilot has no saved history for this session. An empty session may not survive a host restart. Stop and archive this entry, then create a new session.",
+          { cause },
+        );
+      }
       throw new AdapterOutcomeUnknownError(
         `Copilot session ${options.vendorSessionId} may have resumed, but resume was not acknowledged`,
         { cause },
@@ -484,6 +495,11 @@ export class CopilotAgentAdapter implements AgentAdapter {
   private assertOpen(): void {
     if (this.#closed) throw new Error("Copilot adapter is closed");
   }
+}
+
+function isMissingNativeSession(error: unknown, sessionId: string): boolean {
+  return error instanceof Error && "code" in error && error.code === -32603 &&
+    error.message === `Request session.resume failed with message: Failed to load session events: Session not found: ${sessionId}`;
 }
 
 function bundledCopilotExecutable(): string | undefined {

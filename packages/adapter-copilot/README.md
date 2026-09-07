@@ -1,5 +1,20 @@
 # Copilot adapter
 
+## Empty sessions and restart
+
+Pinned Copilot CLI `1.0.81` does not durably save a session that has never received
+a user message. Its public native save operation does not force those empty
+events to disk. The session remains controllable while its native handle exists,
+but may be missing after native shutdown or a host restart. Multiplex does not
+insert a dummy message, parse vendor files, or recreate that session silently.
+
+The exact native missing-session load refusal is a failed resume with a recovery
+message, rather than an ambiguous operation that blocks lifecycle recovery.
+Stop and archive that catalog entry explicitly, then create a replacement.
+Transport loss and unrecognized native failures still remain `outcomeUnknown`
+under the original operation ID; absence from an inventory page is never proof
+that a resume failed or permission to retry it.
+
 `CopilotAdapter` hosts one SDK-managed Copilot CLI runtime and exposes it through
 the runtime-node-core `AgentAdapter` contract. Multiple active sessions share that
 runtime and its configured Copilot home/account scope.

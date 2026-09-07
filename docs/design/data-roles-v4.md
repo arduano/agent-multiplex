@@ -66,7 +66,8 @@ and requires client window reset; it must not silently repeat the fresh tail as
 older history. Gateways add no transcript or history-cursor authority.
 
 Live native state is a separate read-only observation via
-`sessions.readNativeState`, currently Copilot's `pendingMessages` view. It routes
+`sessions.readNativeState`, including Copilot's `pendingMessages` and Codex's
+`goal` views. It routes
 through the owning control tree under read access and the runtime boot fence,
 serializes with binding lifecycle, and requires an active matching harness
 handle. It never attaches a temporary history handle, resumes a stopped binding,
@@ -81,6 +82,18 @@ or removes/resends a prompt. A false native acknowledgement preserves the queued
 item; missing or malformed acknowledgements remain outcome unknown and may only
 be reconciled under the original command identity. Queue observations do not
 themselves imply a mutation outcome or retry authorization.
+
+Codex goal state belongs exclusively to the native app server. Its read view
+preserves a native goal or explicit absence; unsupported, malformed, oversized
+and stale-binding observations fail instead of reporting no goal. Root native
+goal updates/clears invalidate a client's observation, while descendant goal
+events keep their original thread ownership. There is no goal authority in
+catalog metadata or gateways, and goal status never substitutes for turn
+liveness. `setGoal` and `clearGoal` use the existing fenced durable command path.
+Only supplied native setter fields are forwarded; omitted versus explicitly
+cleared budgets remain distinct. Native refusals are failures; missing/malformed
+mutation replies are outcome unknown and must be reconciled with the original
+command identity. Read snapshots never constitute permission to retry a mutation.
 
 ### Access gateway
 
@@ -290,6 +303,14 @@ UI-server builds cannot authenticate that SDK connection with
 `COPILOT_CONNECTION_TOKEN`, so the port must never be published and the
 runtime's OS/container boundary is part of the experiment's trust boundary.
 Probe failure falls back to structured Copilot with no terminal capability.
+
+Copilot may retain an empty new native session only in memory. After restart,
+only its exact missing-session load refusal establishes that resume had no
+external effect; the adapter reports that as a failed operation with explicit
+stop/archive recovery. Inventory absence alone does not establish missing native
+history or permit a replacement. Unrecognized/transport resume errors remain
+outcome unknown. No layer fabricates native history or silently recreates a
+session to repair its catalog entry.
 
 Copilot permission policy remains native session state. `setPermissionMode` travels
 through the ordinary fenced command journal under `agent-control`; the adapter

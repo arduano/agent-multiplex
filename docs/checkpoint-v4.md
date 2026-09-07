@@ -1,5 +1,20 @@
 # Release qualification checkpoint
 
+## Codex goals and unavailable Copilot recovery — 2026-09-07
+
+Candidate `0.2.4-hotfix.6` adds native Codex goal observation/set/clear and
+recognizes Copilot's exact missing-history resume refusal as a known failure.
+The pinned goal schemas match the installed Codex 0.153.4 contracts; no generated
+source, native dependency, transport, migration or protocol-version changes.
+
+Node 24.19.0/npm 11.17.0 typecheck, production build, all **758 tests**, checkpoint,
+docs and release metadata checks pass. The owner waived model-using qualification.
+Disposable CLI 1.0.81 probes reproduced empty-session loss and verified the known
+failed resume with no user message or replacement. The scrubbed local receipt is
+`receipts/copilot-empty-session-recovery/2026-09-07-no-model/`; it does not claim
+Windows or native-model release qualification. Publication and consumer rollout
+remain separate facts.
+
 Status: signed `v0.2.3` published on 2026-09-07 with an explicit native-model waiver.
 
 This document records release qualification and separately scoped development

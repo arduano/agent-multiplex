@@ -87,7 +87,38 @@ The maintained adapter is pinned to Codex CLI `0.152.0`. OpenAI classifies the
 app-server command and WebSocket transport as experimental; re-run adapter and
 live qualifications for every upgrade.
 
+### Codex goals
+
+The experimental `thread.goal` v2 capability advertises the native goal view and
+durable goal commands. `sessions.readNativeState` accepts
+`{ harness: "codex", view: "goal" }` and preserves native `{ goal }`, including
+`null` for no goal. Refresh on attachment/selection, reconnect and root
+`thread/goal/updated` or `thread/goal/cleared` notifications. Descendant events
+retain their native ownership; they do not replace the root objective. Reads
+require an active binding and never attach or resume stopped sessions.
+
+`setGoal` passes only supplied objective/status/token-budget fields to native
+`thread/goal/set`, while `clearGoal` calls `thread/goal/clear`. Clients can offer
+the native `/goal` view, objective/edit, pause, resume and clear interactions.
+No model prompt or synthetic user turn implements these controls. Objectives
+have a 4,000-character limit. Omitted budgets remain omitted; explicit `null`
+removes the limit. Active, paused, blocked, usage-limited, budget-limited and
+complete states, usage counters and timestamps remain Codex's native values.
+An active goal is distinct from a currently running turn; goal changes do not
+invent session liveness. Native refusals remain visible errors, while malformed
+or lost mutation acknowledgements remain `outcomeUnknown` under the original
+stable command ID. See the [adapter reference](../../packages/adapter-codex/README.md#native-goals)
+and [command schemas](../../packages/protocol/src/command.ts).
+
 ## Copilot
+
+Pinned CLI `1.0.81` keeps a never-used session in memory without durable native
+history. It can disappear from native inventory after a host restart even when
+`sessions.save` acknowledged; that operation does not force empty sessions to
+disk. An exact native missing-session resume refusal reports a known failure
+with an explicit stop/archive-and-replace recovery path. Network failures remain
+ambiguous. The adapter never creates fake history or silently replaces a missing
+session. See [empty sessions](../../packages/adapter-copilot/README.md#empty-sessions-and-restart).
 
 The supported path uses the Copilot SDK for session creation, native modes,
 prompts, interrupts, interactions, events, and history. Provider/model selection

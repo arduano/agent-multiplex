@@ -65,6 +65,10 @@ disclosure.
   queue text in the catalog. Moving a queued message into a running turn requires
   `agent-control` and the durable command fence; unknown results must not be
   replaced by remove/resend.
+- Native Codex goal observations use the same live-binding `read` boundary.
+  Setting or clearing goals requires `agent-control` and a durable command ID;
+  setting an active goal may cause Codex to continue work under its native
+  behavior. Goal reads never resume a session or grant tool permissions.
 - Copilot's `setPermissionMode` command uses `agent-control` and changes the native
   session's tool, path and URL permission mode. Native managed policy remains
   enforced by Copilot. The adapter never substitutes unconditional approval

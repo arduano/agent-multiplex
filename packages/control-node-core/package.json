@@ -1,6 +1,6 @@
 {
   "name": "@arduano/agent-multiplex-control-node-core",
-  "version": "0.2.4-hotfix.5",
+  "version": "0.2.4-hotfix.6",
   "description": "Transport-neutral catalog, metadata authority, tree routing, and feeds for Agent Multiplex.",
   "private": false,
   "type": "module",
@@ -33,8 +33,8 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.5",
-    "@arduano/agent-multiplex-storage-sqlite": "0.2.4-hotfix.5",
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.6",
+    "@arduano/agent-multiplex-storage-sqlite": "0.2.4-hotfix.6",
     "@trpc/server": "11.18.0",
     "@types/ws": "8.18.1",
     "zod": "4.1.5"

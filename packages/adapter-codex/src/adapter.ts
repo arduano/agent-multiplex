@@ -1,6 +1,8 @@
-import type { AdapterNativeHistoryResult } from "@arduano/agent-multiplex-runtime-node-core";
+import type { AdapterNativeHistoryResult, AdapterNativeStateResult } from "@arduano/agent-multiplex-runtime-node-core";
 import {
   adapterScopeIdSchema,
+  codexCommandSchema,
+  jsonWireByteUpperBound,
   newRuntimeEpoch,
   NATIVE_PAYLOAD_MAX_BYTES,
   toJsonValue,
@@ -14,6 +16,7 @@ import {
   type NativeHistoryRequest,
   type NativeInventoryItem,
   type NativeModel,
+  type NativeStateRequest,
   type RuntimeEpoch,
   type SessionRuntimeStatus,
 } from "@arduano/agent-multiplex-protocol";
@@ -27,6 +30,10 @@ import {
 import type { Model } from "./generated/v2/Model.js";
 import type { ModelListResponse } from "./generated/v2/ModelListResponse.js";
 import type { Thread } from "./generated/v2/Thread.js";
+import type { ThreadGoal } from "./generated/v2/ThreadGoal.js";
+import type { ThreadGoalGetResponse } from "./generated/v2/ThreadGoalGetResponse.js";
+import type { ThreadGoalSetResponse } from "./generated/v2/ThreadGoalSetResponse.js";
+import type { ThreadGoalClearResponse } from "./generated/v2/ThreadGoalClearResponse.js";
 import { codexImageCodec, codexHistoryPageBytes, codexImageLeaves } from "./images.js";
 import type { ThreadBackgroundTerminal } from "./generated/v2/ThreadBackgroundTerminal.js";
 import type { ThreadBackgroundTerminalsListResponse } from "./generated/v2/ThreadBackgroundTerminalsListResponse.js";
@@ -99,6 +106,29 @@ const recordOf = (value: unknown): Record<string, JsonValue> | undefined =>
   value !== null && !Array.isArray(value) && typeof value === "object"
     ? value as Record<string, JsonValue>
     : undefined;
+
+const GOAL_STATUSES = new Set<ThreadGoal["status"]>([
+  "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete",
+]);
+
+/** Validate the native observation without replacing unknown state with no goal. */
+const validateGoalResponse = (value: unknown, threadId: string, allowNull: boolean): void => {
+  const response = recordOf(value);
+  if (!response || !("goal" in response)) throw new TypeError("Unrecognized Codex goal snapshot");
+  const goal = recordOf(response.goal);
+  if (!(allowNull && response.goal === null) && (
+    !goal || goal.threadId !== threadId ||
+    typeof goal.objective !== "string" || !goal.objective.trim() || goal.objective.length > 4_000 ||
+    !GOAL_STATUSES.has(goal.status as ThreadGoal["status"]) ||
+    !(goal.tokenBudget === null || Number.isSafeInteger(goal.tokenBudget) && (goal.tokenBudget as number) >= 0) ||
+    [goal.tokensUsed, goal.timeUsedSeconds, goal.createdAt, goal.updatedAt].some(
+      (number) => !Number.isSafeInteger(number) || (number as number) < 0,
+    )
+  )) throw new TypeError("Unrecognized Codex goal snapshot");
+  if (jsonWireByteUpperBound(value) + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
+    throw new Error("Codex goal exceeds the bounded native state envelope");
+  }
+};
 
 const validateInteractionResponse = (method: string, response: JsonValue): void => {
   const record = recordOf(response);
@@ -218,6 +248,7 @@ export class CodexAdapter implements AgentAdapter {
           { name: "collaboration-mode", version: "v2", experimental: true },
           { name: "interactive-requests", version: "v2", experimental: false },
           { name: "turn.plan-stream", version: "v2", experimental: false },
+          { name: "thread.goal", version: "v2", experimental: true },
           { name: "command.visibility", version: "v2", experimental: false },
           { name: "subagent.visibility", version: "v2", experimental: false },
           { name: "subagent.descendant-stream", version: "v2", experimental: false },
@@ -565,6 +596,7 @@ class CodexSession implements AdapterSession {
   #turnStartsInFlight = 0;
   /** Root turns whose completion arrived before their turn/start continuation. */
   readonly #completedTurnIds = new Set<string>();
+  #closed = false;
 
   public constructor(
     rpc: CodexRpcClient,
@@ -722,6 +754,34 @@ class CodexSession implements AdapterSession {
         this.#emitSettings();
         return json(response);
       }
+      case "setGoal": {
+        this.#assertActive();
+        codexCommandSchema.parse(command);
+        const response = await this.#rpc.request<ThreadGoalSetResponse>("thread/goal/set", {
+          threadId: this.vendorSessionId,
+          ...(command.objective !== undefined ? { objective: command.objective } : {}),
+          ...(command.status !== undefined ? { status: command.status } : {}),
+          ...(command.tokenBudget !== undefined ? { tokenBudget: command.tokenBudget } : {}),
+        });
+        try {
+          this.#assertActive();
+          validateGoalResponse(response, this.vendorSessionId, false);
+        } catch (cause) {
+          throw new AdapterOutcomeUnknownError("Codex goal update was not acknowledged with a valid active-session goal", { cause });
+        }
+        return json(response);
+      }
+      case "clearGoal": {
+        this.#assertActive();
+        codexCommandSchema.parse(command);
+        const response = await this.#rpc.request<ThreadGoalClearResponse>("thread/goal/clear", {
+          threadId: this.vendorSessionId,
+        });
+        if (this.#closed || typeof recordOf(response)?.cleared !== "boolean") {
+          throw new AdapterOutcomeUnknownError("Codex goal clear was not acknowledged with a valid active-session result");
+        }
+        return json(response);
+      }
       case "updateTurnSettings": {
         const turnId = command.turnId ?? this.#state.currentTurnId;
         if (!turnId) throw new Error("Codex turn/settings/update requires an active turn id");
@@ -822,7 +882,19 @@ class CodexSession implements AdapterSession {
     };
   }
 
+  public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
+    this.#assertActive();
+    if (request.harness !== "codex" || request.view !== "goal") throw new TypeError("Unsupported Codex native state view");
+    const response = await this.#rpc.request<ThreadGoalGetResponse>("thread/goal/get", {
+      threadId: this.vendorSessionId,
+    });
+    this.#assertActive();
+    validateGoalResponse(response, this.vendorSessionId, true);
+    return { harness: "codex", vendorSessionId: this.vendorSessionId, payload: json(response) };
+  }
+
   public async stop(): Promise<void> {
+    this.#closed = true;
     try {
       await this.#rpc.request("thread/unsubscribe", { threadId: this.vendorSessionId });
     } finally {
@@ -972,6 +1044,7 @@ class CodexSession implements AdapterSession {
   }
 
   public runtimeExited(error: Error): void {
+    this.#closed = true;
     this.#setStatus("error");
     this.#emit({
       kind: "native",
@@ -992,8 +1065,13 @@ class CodexSession implements AdapterSession {
   }
 
   public closed(): void {
+    this.#closed = true;
     this.#pendingRequests.clear();
     this.#setStatus("stopped");
+  }
+
+  #assertActive(): void {
+    if (this.#closed) throw new Error(`Codex session ${this.vendorSessionId} is stopped`);
   }
 
   #collaborationMode(mode: JsonValue): JsonValue {

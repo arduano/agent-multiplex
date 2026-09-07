@@ -85,6 +85,41 @@ class Client implements CopilotAdapterClient {
 }
 
 describe("CopilotAgentAdapter", () => {
+  it("reports a confirmed missing saved session as a recoverable failure without recreating it", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const nativeError = Object.assign(new Error(
+      "Request session.resume failed with message: Failed to load session events: Session not found: empty-before-restart",
+    ), { code: -32603 });
+    const resume = vi.spyOn(client, "resumeSession").mockRejectedValue(nativeError);
+    const create = vi.spyOn(client, "createSession");
+    const failure = await adapter.resume({ harness: "copilot", vendorSessionId: "empty-before-restart", continuePendingWork: false })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect((failure as Error).message).toContain("Stop and archive this entry");
+    expect((failure as Error).cause).toBe(nativeError);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+    await expect(adapter.listSessions()).resolves.toEqual([]);
+    await adapter.close();
+  });
+
+  it.each([
+    { message: "Request session.resume failed with message: Failed to load session events: Session not found: another-session", code: -32603 },
+    { message: "Request session.resume failed with message: Failed to load session events: Session not found: missing", code: -32001 },
+    { message: "Request session.resume failed with message: Failed to load session events: Session not found: missing", code: undefined },
+    { message: "Connection ended while session was resuming", code: -32603 },
+    { message: "Native tool reports Session not found: missing", code: -32603 },
+  ])("keeps unproven resume outcomes unknown: %j", async native => {
+    const client = new Client(); const adapter = adapterFor(client);
+    vi.spyOn(client, "resumeSession").mockRejectedValue(Object.assign(new Error(native.message), { code: native.code }));
+    const create = vi.spyOn(client, "createSession");
+    await expect(adapter.resume({ harness: "copilot", vendorSessionId: "missing", continuePendingWork: false }))
+      .rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(create).not.toHaveBeenCalled();
+    await adapter.close();
+  });
+
   it.each(["spawn", "resume"] as const)("detaches a native handle when %s completes after adapter shutdown", async operation => {
     const client = new Client(); const adapter = adapterFor(client);
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
