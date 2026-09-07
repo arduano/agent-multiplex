@@ -10,6 +10,7 @@ import type {
   JsonValue,
   LaunchBackendId,
   NativeHistoryRequest,
+  NativeStateRequest,
   NativePayload,
   NativeImageSlot,
   NativeInventoryItem,
@@ -29,6 +30,8 @@ export interface AdapterNativeHistoryResult {
   sortDirection?: "asc" | "desc";
   unavailableItem?: { reason: "exceedsWireLimit"; nativeItemId?: string; nativeType?: string };
 }
+
+export type AdapterNativeStateResult = Pick<AdapterNativeHistoryResult, "harness" | "vendorSessionId" | "payload">;
 
 export interface NativeImageSink {
   storeBase64(input: { dataBase64: string; mediaType: string }): Promise<NativeImageSlot["image"]>;
@@ -104,6 +107,8 @@ export interface AdapterSession {
   subscribe(listener: (event: AdapterEvent) => void): () => void;
   execute(command: HarnessCommand): Promise<JsonValue | undefined>;
   readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult>;
+  /** Optional active-session observation; does not mutate the native session. */
+  readNativeState?(request: NativeStateRequest): Promise<AdapterNativeStateResult>;
   stop(): Promise<void>;
 }
 

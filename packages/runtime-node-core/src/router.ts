@@ -159,6 +159,13 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
             toTRPC(error);
           }
         }),
+      readNativeState: t.procedure
+        .input(runtimeNodeContract.sessions.readNativeState.input)
+        .output(runtimeNodeContract.sessions.readNativeState.output)
+        .query(async ({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.readNativeState(input.sessionId, input.request).catch(toTRPC);
+        }),
       readNativeHistory: t.procedure
         .input(runtimeNodeContract.sessions.readNativeHistory.input)
         .output(runtimeNodeContract.sessions.readNativeHistory.output)

@@ -121,6 +121,20 @@ export const nativeHistoryRequestSchema = z.discriminatedUnion("harness", [
 ]);
 export type NativeHistoryRequest = z.infer<typeof nativeHistoryRequestSchema>;
 
+/** A live harness-owned observation. Never attaches or resumes an inactive binding. */
+export const nativeStateRequestSchema = z.object({
+  harness: z.literal("copilot"),
+  view: z.literal("pendingMessages"),
+}).strict();
+export type NativeStateRequest = z.infer<typeof nativeStateRequestSchema>;
+
+export const nativeStateResultSchema = z.object({
+  harness: harnessSchema,
+  vendorSessionId: z.string().min(1),
+  payload: nativePayloadSchema,
+});
+export type NativeStateResult = z.infer<typeof nativeStateResultSchema>;
+
 export const nativeHistoryResultSchema = z.object({
   harness: harnessSchema,
   vendorSessionId: z.string().min(1),

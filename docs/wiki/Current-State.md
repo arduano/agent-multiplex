@@ -7,6 +7,17 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
+## Copilot queue visibility follow-up
+
+The `0.2.4-hotfix.4` candidate adds capability-gated, read-only
+`sessions.readNativeState` for Copilot pending messages and the durable
+`steerQueuedMessage` command. Queue reads require a live binding and never resume
+sessions. Conversion uses native `queue.sendNow` atomically, preserving the
+existing message and attachments. See [pending messages](Adapters-and-Terminals.md#copilot-pending-messages).
+Protocol version, transport dependency, native pins and migrations remain
+unchanged. Older hosts remain usable without the new capabilities. No native
+model calls or host restart are part of this source validation.
+
 ## Copilot observation follow-up
 
 The published [`0.2.4-hotfix.3` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.3) restores Copilot's retained model through its

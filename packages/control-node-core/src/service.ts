@@ -79,6 +79,8 @@ import {
   type LineageId,
   type MetadataOperationRecord,
   type MetadataPatch,
+  type NativeStateRequest,
+  type NativeStateResult,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeModel,
@@ -1137,6 +1139,17 @@ export class ControlNodeService {
     return route.immediateChildControlNodeId
       ? this.#child(route).readNativeHistory(sessionId, request)
       : this.#runtime(session.runtimeNodeId).readNativeHistory(sessionId, request);
+  }
+
+  public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    const session = this.catalog.getSession(sessionId);
+    if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
+    if (session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "archived session resources have been released");
+    if (session.harness !== request.harness) throw new ControlNodeCoreError("FENCED", "native state request harness does not match binding");
+    const route = this.#route(session.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+    if (!owner.readNativeState) throw new ControlNodeCoreError("UNSUPPORTED", "native state observation is unavailable");
+    return owner.readNativeState(sessionId, request);
   }
 
   public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {

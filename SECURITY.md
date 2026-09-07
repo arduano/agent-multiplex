@@ -60,6 +60,11 @@ disclosure.
   locators, not identity.
 - Terminal output is opaque and unredacted. `terminal-control` is equivalent to
   typing at a native agent under the runtime account.
+- Live queue observations use `read` and may contain operator prompt text. They
+  require an active binding and neither activate stopped sessions nor persist
+  queue text in the catalog. Moving a queued message into a running turn requires
+  `agent-control` and the durable command fence; unknown results must not be
+  replaced by remove/resend.
 - Copilot's `setPermissionMode` command uses `agent-control` and changes the native
   session's tool, path and URL permission mode. Native managed policy remains
   enforced by Copilot. The adapter never substitutes unconditional approval

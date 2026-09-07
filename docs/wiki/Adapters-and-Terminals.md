@@ -14,6 +14,7 @@ An adapter owns one `harness` and `adapterScopeId` and implements:
 - native command execution and interaction responses;
 - ordered native event subscription;
 - native history reads;
+- optional read-only native state views for an already active binding;
 - stop and optional idempotent session release.
 
 The runtime wraps adapters in named backends. A successful launch records the
@@ -87,6 +88,30 @@ Copilot's `assistant.idle` only means its main processing loop paused. Attached
 shell commands and background agents can still be running, so it does not mark
 the session done. Root `session.idle` supplies the whole-session idle signal;
 unresolved root interactions continue to report waiting for input.
+
+### Copilot pending messages
+
+`queue.pending` v1 advertises `sessions.readNativeState` with
+`{ harness: "copilot", view: "pendingMessages" }`. The native payload preserves
+the SDK's `queue.pendingItems()` snapshot: queued item IDs, optional logical
+message IDs, displayed text, native kinds/modes, steering messages and optional
+in-flight steering count. Refresh on root `pending_messages.modified`, selection,
+and reconnect. A send acknowledgement means accepted; matching `user.message`
+`data.messageId` identifies delivery into the native conversation. Older native
+snapshots may omit correlation IDs or the in-flight count; absence stays unknown.
+
+This read requires an active runtime binding and `read` access. It never resumes
+a stopped session, scans history, creates command receipts or persists pending
+text in the canonical catalog. Responses are bounded to the native envelope and
+1,000 combined queue/steering entries; an oversized or unavailable snapshot fails
+explicitly instead of reporting an empty or silently truncated queue.
+
+`queue.sendNow` v1 advertises the `steerQueuedMessage` Copilot command with the
+exact queued item `id`. The normal durable command journal calls native
+`queue.sendNow({ id })` atomically. `{ steered: false }` means there was no live
+main turn and leaves the item queued; it is not permission to remove and resend
+its text. A lost or unrecognized acknowledgement remains `outcomeUnknown` under
+the original command identity. Native notifications/snapshots reconcile the queue.
 
 Copilot's native allow-all setting is separate from interactive/plan/autopilot.
 The `permissions.mode` capability advertises the fenced `setPermissionMode`

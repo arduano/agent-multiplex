@@ -1,5 +1,6 @@
 import type { ResumeSessionConfig, SessionConfig, SessionEvent } from "@github/copilot-sdk";
 import { AdapterOutcomeUnknownError, type AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
+import { copilotCommandSchema, nativeStateRequestSchema, NATIVE_PAYLOAD_MAX_BYTES } from "@arduano/agent-multiplex-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CopilotAgentAdapter, type CopilotAdapterClient } from "../src/adapter.js";
 import { CopilotAdapterSession, type CopilotNativeSession, type CopilotSessionRpc } from "../src/session.js";
@@ -27,8 +28,10 @@ async function fixture(options: {
     getMode: async () => ({ mode: "manual" }), setMode: async () => ({ success: true, mode: "manual" }),
     handlePendingPermissionRequest: async () => ({ success: true }),
   } };
+  const send = vi.fn(async () => "message");
+  const getEvents = vi.fn(async (): Promise<SessionEvent[]> => []);
   const native = (sessionId: string): CopilotNativeSession => ({ sessionId, rpc, setModel,
-    send: async () => "message", abort: async () => {}, getEvents: async () => [], disconnect: async () => {},
+    send, abort: async () => {}, getEvents, disconnect: async () => {},
   });
   const client: CopilotAdapterClient = {
     start: async () => {}, stop: async () => [], forceStop: async () => {},
@@ -48,8 +51,90 @@ async function fixture(options: {
   const received: AdapterEvent[] = [];
   session.subscribe(item => received.push(item));
   const emit = (type: string, data?: unknown, agentId?: string) => configuration.onEvent?.(event(type, data, agentId));
-  return { adapter, session, getCurrent, setModel, rpc, emit, received, configuration: () => configuration };
+  return { adapter, session, getCurrent, setModel, send, getEvents, rpc, emit, received, configuration: () => configuration };
 }
+
+describe("Copilot native pending queue", () => {
+  const request = { harness: "copilot", view: "pendingMessages" } as const;
+  const command = { harness: "copilot", command: { type: "steerQueuedMessage", id: "queue-item" } } as const;
+  const snapshot = { items: [{ id: "queue-item", messageId: "message-id", kind: "message", displayText: "Same prompt", agentMode: "interactive" },
+    { id: "model-change", kind: "command", displayText: "/model native-model", agentMode: "plan" }],
+    steeringMessages: ["already consumed", "waiting steer"], inFlightSteeringCount: 1 };
+
+  it("advertises native observations and atomic queue steering with strict request shapes", async () => {
+    const f = await fixture(); const capabilities = (await f.adapter.describe()).capabilities;
+    expect(capabilities).toContainEqual(expect.objectContaining({ name: "queue.pending", version: "v1" }));
+    expect(capabilities).toContainEqual(expect.objectContaining({ name: "queue.sendNow", version: "v1" }));
+    expect(nativeStateRequestSchema.parse(request)).toEqual(request);
+    expect(nativeStateRequestSchema.safeParse({ ...request, view: "arbitraryRpc" }).success).toBe(false);
+    expect(copilotCommandSchema.parse(command.command)).toEqual(command.command);
+    expect(copilotCommandSchema.safeParse({ ...command.command, id: "" }).success).toBe(false);
+    expect(copilotCommandSchema.safeParse({ ...command.command, prompt: "replacement" }).success).toBe(false);
+  });
+
+  it("reads an unchanged native snapshot and IDs without scanning history or sending messages", async () => {
+    const f = await fixture(); const pendingItems = vi.fn(async () => snapshot);
+    f.rpc.queue = { pendingItems, sendNow: vi.fn(async () => ({ steered: true })) };
+    expect(await f.session.readNativeState(request)).toEqual({ harness: "copilot", vendorSessionId: f.session.vendorSessionId, payload: snapshot });
+    expect(pendingItems).toHaveBeenCalledOnce();
+    expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+    expect(f.rpc.queue.sendNow).not.toHaveBeenCalled();
+    f.emit("pending_messages.modified");
+    expect(f.received).toContainEqual(expect.objectContaining({ kind: "native", nativeType: "pending_messages.modified" }));
+  });
+
+  it.each([true, false])("uses the atomic native transition and preserves its steered=%s acknowledgement", async steered => {
+    const f = await fixture(); const sendNow = vi.fn(async () => ({ steered }));
+    f.rpc.queue = { pendingItems: vi.fn(async () => snapshot), sendNow };
+    expect(await f.session.execute(command)).toEqual({ steered });
+    expect(sendNow).toHaveBeenCalledExactlyOnceWith({ id: "queue-item" });
+    expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+    expect(f.rpc.queue.pendingItems).not.toHaveBeenCalled();
+  });
+
+  it("reports missing APIs as unavailable without dispatching", async () => {
+    const f = await fixture();
+    await expect(f.session.readNativeState(request)).rejects.toThrow("unavailable");
+    await expect(f.session.execute(command)).rejects.toThrow("unavailable");
+    expect(f.session.status()).not.toBe("unknown"); expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, { success: true }, { steered: "yes" }])("keeps malformed mutation acknowledgements outcome unknown (%j)", async result => {
+    const f = await fixture(); const sendNow = vi.fn(async () => result);
+    f.rpc.queue = { pendingItems: async () => snapshot, sendNow };
+    await expect(f.session.execute(command)).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(sendNow).toHaveBeenCalledOnce(); expect(f.send).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a lost native transition reply", async () => {
+    const f = await fixture(); const sendNow = vi.fn(async () => { throw new Error("reply lost"); });
+    f.rpc.queue = { pendingItems: async () => snapshot, sendNow };
+    await expect(f.session.execute(command)).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(sendNow).toHaveBeenCalledOnce();
+  });
+
+  it.each([{}, { items: [], steeringMessages: [null] }, { ...snapshot, inFlightSteeringCount: 3 },
+    { ...snapshot, items: [{ id: "invalid" }] }])("rejects malformed snapshots without representing them as an empty queue", async value => {
+    const f = await fixture(); f.rpc.queue = { pendingItems: async () => value, sendNow: async () => ({ steered: true }) };
+    await expect(f.session.readNativeState(request)).rejects.toThrow("Unrecognized");
+  });
+
+  it("fails explicitly for oversized queues instead of truncating or scanning history", async () => {
+    const f = await fixture(); f.rpc.queue = { pendingItems: async () => ({ items: [], steeringMessages: ["a".repeat(NATIVE_PAYLOAD_MAX_BYTES)] }), sendNow: async () => ({ steered: true }) };
+    await expect(f.session.readNativeState(request)).rejects.toThrow("bounded");
+    f.rpc.queue.pendingItems = async () => ({ items: [], steeringMessages: Array(1_001).fill("a") });
+    await expect(f.session.readNativeState(request)).rejects.toThrow("bounded");
+    expect(f.getEvents).not.toHaveBeenCalled();
+  });
+
+  it("rejects reads when an attachment closes during the native reply", async () => {
+    const f = await fixture(); const pending = deferred<unknown>();
+    f.rpc.queue = { pendingItems: async () => pending.promise, sendNow: async () => ({ steered: true }) };
+    const read = f.session.readNativeState(request);
+    await f.session.stop(); pending.resolve(snapshot);
+    await expect(read).rejects.toThrow("stopped");
+  });
+});
 
 describe("Copilot native model observations", () => {
   it("reads the authoritative model on create and resume without reapplying a model", async () => {

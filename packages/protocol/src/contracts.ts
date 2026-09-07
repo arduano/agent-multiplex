@@ -27,6 +27,8 @@ import {
 import {
   harnessCatalogEntrySchema,
   harnessSchema,
+  nativeStateRequestSchema,
+  nativeStateResultSchema,
   nativeHistoryRequestSchema,
   nativeHistoryResultSchema,
   nativeModelSchema,
@@ -255,6 +257,13 @@ export const accessContract = {
     stop: { input: stopCommandSchema, output: commandRecordSchema },
     archive: { input: archiveRequestSchema, output: archiveRecordSchema },
     execute: { input: commandEnvelopeSchema, output: commandRecordSchema },
+    readNativeState: {
+      input: z.object({
+        sessionId: sessionIdSchema,
+        request: nativeStateRequestSchema,
+      }),
+      output: nativeStateResultSchema,
+    },
     readNativeHistory: {
       input: z.object({
         sessionId: sessionIdSchema,
@@ -433,6 +442,14 @@ export const runtimeNodeContract = {
         request: archiveRequestSchema,
       }),
       output: archiveRecordSchema,
+    },
+    readNativeState: {
+      input: z.object({
+        runtimeNodeBootId: runtimeNodeBootIdSchema,
+        sessionId: sessionIdSchema,
+        request: nativeStateRequestSchema,
+      }),
+      output: nativeStateResultSchema,
     },
     readNativeHistory: {
       input: z.object({
@@ -766,6 +783,13 @@ export const controlNodeLinkContract = {
     archive: {
       input: controlNodeLinkFenceSchema.extend({ request: archiveRequestSchema }),
       output: archiveRecordSchema,
+    },
+    readNativeState: {
+      input: controlNodeLinkFenceSchema.extend({
+        sessionId: sessionIdSchema,
+        request: nativeStateRequestSchema,
+      }),
+      output: nativeStateResultSchema,
     },
     readNativeHistory: {
       input: controlNodeLinkFenceSchema.extend({

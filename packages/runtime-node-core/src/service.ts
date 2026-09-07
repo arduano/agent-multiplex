@@ -45,6 +45,8 @@ import {
   type MetadataOperationRecord,
   type MetadataPatch,
   type MetadataSnapshot,
+  type NativeStateRequest,
+  type NativeStateResult,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeInventoryItem,
@@ -874,6 +876,24 @@ export class RuntimeNodeService {
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
     return this.#admit(() => this.#readNativeHistory(sessionId, request));
+  }
+
+  public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    return this.#admit(() => this.#serialize(sessionId, async () => {
+      const record = this.#store.getSession(sessionId);
+      if (!record) throw new RuntimeNodeProtocolError("NOT_FOUND", "session binding not found");
+      if (record.harness !== request.harness) throw new RuntimeNodeProtocolError("FENCED", "native state request harness does not match binding");
+      const active = this.#active.get(sessionId);
+      if (!active || record.availability !== "active") throw new RuntimeNodeProtocolError("CONFLICT", "native state requires an active session binding");
+      if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");
+      const result = await active.session.readNativeState(request);
+      if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
+        throw new RuntimeNodeProtocolError("FENCED", "native state response does not match binding");
+      }
+      // Queue views carry display text, not image attachments or retained history.
+      // The ordinary native envelope enforces the bounded response without storage.
+      return { ...result, payload: packNativePayload(result.payload) };
+    }));
   }
 
   async #readNativeHistory(

@@ -696,6 +696,8 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "reasoning-effort.create-resume", version, experimental: false },
     { name: "mode.native", version, experimental: true },
     { name: "permissions.mode", version: "v1", experimental: true },
+    { name: "queue.pending", version: "v1", experimental: true },
+    { name: "queue.sendNow", version: "v1", experimental: true },
     { name: "interactions.permission", version, experimental: false },
     { name: "interactions.userInput", version, experimental: false },
     { name: "interactions.elicitation", version, experimental: true },

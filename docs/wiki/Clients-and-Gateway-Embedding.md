@@ -4,6 +4,13 @@ The reusable client boundary is the protocol-v5 access router. The same shape is
 served by a trusted-local control node and by the authenticated multi-source
 gateway; applications do not need separate data models for the two.
 
+For an active Copilot session, `sessions.readNativeState` observes the native
+pending queue separately from transcript history. Gate UI controls using the
+`queue.pending` and `queue.sendNow` v1 harness capabilities; older peers can omit
+these surfaces. Reads use ordinary `read` access and never resume stopped
+sessions. See [pending-message semantics](Adapters-and-Terminals.md#copilot-pending-messages)
+for refresh events, message identity and atomic steering.
+
 ## HTTP and WebSocket client
 
 Use `@arduano/agent-multiplex-client` instead of constructing untyped URLs. Queries and

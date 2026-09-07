@@ -45,6 +45,8 @@ import {
   type MetadataOperationRecord,
   type MetadataPatch,
   type OperationId,
+  type NativeStateRequest,
+  type NativeStateResult,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeModel,
@@ -145,6 +147,10 @@ export interface ControlNodeSourceClient extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
+  readNativeState?(
+    sessionId: SessionId,
+    request: NativeStateRequest,
+  ): Promise<NativeStateResult>;
   readNativeHistory(
     sessionId: SessionId,
     request: NativeHistoryRequest,
@@ -851,6 +857,12 @@ export class AccessGatewayProjection {
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
     return this.#ownerForSession(sessionId).definition.client.readNativeHistory(sessionId, request);
+  }
+
+  public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    const owner = this.#ownerForSession(sessionId).definition.client;
+    if (!owner.readNativeState) throw new GatewayRoutingError("UNSUPPORTED", "native state observation is unavailable");
+    return owner.readNativeState(sessionId, request);
   }
 
   public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {

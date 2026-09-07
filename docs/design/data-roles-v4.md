@@ -56,6 +56,23 @@ event index). It describes an omission, never synthetic native output. Clients
 must show that gap explicitly. The original item remains in harness-owned history;
 this has no retention, archive, or image-store effect.
 
+Live native state is a separate read-only observation via
+`sessions.readNativeState`, currently Copilot's `pendingMessages` view. It routes
+through the owning control tree under read access and the runtime boot fence,
+serializes with binding lifecycle, and requires an active matching harness
+handle. It never attaches a temporary history handle, resumes a stopped binding,
+or writes a command/catalog record. Native queue shapes and stable IDs remain
+unchanged inside the bounded native envelope. Unavailable/oversized reads fail
+explicitly; they do not fabricate an empty queue. The queue-change native event
+invalidates observations; gateways retain no independent queue authority.
+
+Copilot `steerQueuedMessage` is a separate durable mutation using the native
+atomic queued-item-to-steering transition and exact item ID. It never reconstructs
+or removes/resends a prompt. A false native acknowledgement preserves the queued
+item; missing or malformed acknowledgements remain outcome unknown and may only
+be reconciled under the original command identity. Queue observations do not
+themselves imply a mutation outcome or retry authorization.
+
 ### Access gateway
 
 An access gateway has `dataAuthority: none`. It is a p2prpc client of one or

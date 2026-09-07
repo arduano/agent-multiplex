@@ -50,6 +50,7 @@ const timestamp = "2026-09-03T01:00:00.000Z";
 class FakeSource implements ControlNodeSourceClient {
   public dispatches = 0;
   public commandReads = 0;
+  public stateReads = 0;
   public executeError: Error | undefined;
   public getCommandError: Error | undefined;
   public recoveredCommand: CommandRecord | null = null;
@@ -128,6 +129,10 @@ class FakeSource implements ControlNodeSourceClient {
     });
   }
   public readNativeHistory(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public readNativeState(): Promise<import("@arduano/agent-multiplex-protocol").NativeStateResult> {
+    this.stateReads += 1;
+    return Promise.resolve({ harness: "copilot", vendorSessionId: "native-1", payload: packNativePayload({ items: [], steeringMessages: [] }) });
+  }
   public beginImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
   public writeImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
   public commitImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
@@ -589,6 +594,22 @@ describe("AccessGatewayProjection source selection", () => {
 });
 
 describe("AccessGatewayProjection routing and feed", () => {
+  it("observes native state only through the selected source without durable dispatch", async () => {
+    const root = newControlNodeId(); const child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor); const descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([descendant, ancestor]);
+    await gateway.refreshAll();
+    const sessionId = views.descendant.sessions[0]!.sessionId;
+    const request = { harness: "copilot", view: "pendingMessages" } as const;
+    expect(await gateway.readNativeState(sessionId, request)).toMatchObject({ payload: packNativePayload({ items: [], steeringMessages: [] }) });
+    expect(ancestor.client.stateReads).toBe(1); expect(descendant.client.stateReads).toBe(0);
+    expect(ancestor.client.dispatches).toBe(0); expect(descendant.client.dispatches).toBe(0);
+    gateway.markUnavailable("ancestor" as SourceId);
+    await gateway.readNativeState(sessionId, request);
+    expect(descendant.client.stateReads).toBe(1);
+  });
+
   it("routes a launch exactly once through the selected ancestor", async () => {
     const root = newControlNodeId();
     const child = newControlNodeId();

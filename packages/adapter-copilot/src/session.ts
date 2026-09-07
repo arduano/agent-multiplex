@@ -1,4 +1,4 @@
-import type { AdapterNativeHistoryResult } from "@arduano/agent-multiplex-runtime-node-core";
+import type { AdapterNativeHistoryResult, AdapterNativeStateResult } from "@arduano/agent-multiplex-runtime-node-core";
 import type {
   ElicitationResult,
   ExitPlanModeResult,
@@ -15,6 +15,7 @@ import {
 import {
   NATIVE_PAYLOAD_MAX_BYTES,
   copilotPermissionsSettingsSchema,
+  jsonWireByteUpperBound,
   type AdapterScopeId,
   type CopilotPermissionsSettings,
   type HarnessCommand,
@@ -22,6 +23,7 @@ import {
   type JsonObject,
   type JsonValue,
   type NativeHistoryRequest,
+  type NativeStateRequest,
   type RuntimeEpoch,
   type SessionRuntimeStatus,
 } from "@arduano/agent-multiplex-protocol";
@@ -38,6 +40,10 @@ export interface CopilotSessionRpc {
   };
   model?: {
     getCurrent(): Promise<unknown>;
+  };
+  queue?: {
+    pendingItems(): Promise<unknown>;
+    sendNow(input: { id: string }): Promise<unknown>;
   };
   permissions?: {
     getMode(): Promise<unknown>;
@@ -421,6 +427,17 @@ export class CopilotAdapterSession implements AdapterSession {
       case "interrupt":
         await this.mutation("interrupt Copilot session", () => this.#native.abort());
         return undefined;
+      case "steerQueuedMessage": {
+        const queue = this.#native.rpc.queue;
+        if (typeof queue?.sendNow !== "function") throw new Error("Copilot queued-message steering is unavailable");
+        return this.mutation("steer queued Copilot message", async () => {
+          const result = await queue.sendNow({ id: command.id });
+          if (!isObject(result) || typeof result.steered !== "boolean") throw new TypeError("Unrecognized Copilot queued-message steering acknowledgement");
+          // Native sendNow owns the atomic queue-to-steering transition. False
+          // leaves the native item queued; never remove and resend its text.
+          return { steered: result.steered };
+        });
+      }
       case "setModel": {
         const generation = this.#bridge.modelChangeRevision;
         try {
@@ -517,6 +534,26 @@ export class CopilotAdapterSession implements AdapterSession {
       ...(complete ? {} : { nextCursor: `${descending ? REVERSE_HISTORY_CURSOR_PREFIX : HISTORY_CURSOR_PREFIX}${position}` }),
       complete,
     };
+  }
+
+  public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
+    this.assertActive();
+    if (request.harness !== "copilot" || request.view !== "pendingMessages") throw new TypeError("Unsupported Copilot native state view");
+    const queue = this.#native.rpc.queue;
+    if (typeof queue?.pendingItems !== "function") throw new Error("Copilot pending queue observation is unavailable");
+    const value = await queue.pendingItems();
+    this.assertActive();
+    if (!isObject(value) || !Array.isArray(value.items) || !Array.isArray(value.steeringMessages) ||
+      value.items.some(item => !isObject(item) || typeof item.id !== "string" || !item.id || typeof item.kind !== "string" ||
+        typeof item.displayText !== "string" || typeof item.agentMode !== "string" || item.messageId !== undefined && typeof item.messageId !== "string") ||
+      value.steeringMessages.some(item => typeof item !== "string") || value.inFlightSteeringCount !== undefined &&
+        (!Number.isInteger(value.inFlightSteeringCount) || (value.inFlightSteeringCount as number) < 0 || (value.inFlightSteeringCount as number) > value.steeringMessages.length)) {
+      throw new TypeError("Unrecognized Copilot pending queue snapshot");
+    }
+    if (value.items.length + value.steeringMessages.length > 1_000 || jsonWireByteUpperBound(value) + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
+      throw new Error("Copilot pending queue exceeds the bounded native state envelope");
+    }
+    return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: copilotJson(value) };
   }
 
   public async stop(): Promise<void> {
