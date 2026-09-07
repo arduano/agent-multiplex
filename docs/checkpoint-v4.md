@@ -8,9 +8,9 @@ architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
 
-## Copilot observation hotfix candidate — 2026-09-07
+## Copilot observation hotfix — 2026-09-07
 
-The `0.2.4-hotfix.3` candidate fixes model observation after native attachment
+The published `0.2.4-hotfix.3` fixes model observation after native attachment
 and keeps attached/background work running until Copilot's whole-session idle
 signal. Model API reads and root changes retain native IDs and fence late
 observations; no model selection is replayed on resume. Twenty-two new adapter
@@ -20,7 +20,19 @@ Local typecheck, all **655 tests**, checkpoint, documentation and release checks
 pass. The 16-package graph retains protocol 5, Copilot SDK `1.0.13` / CLI
 `1.0.81`, Codex `0.152.0`, p2prpc `0.2.1` and released migrations. No real
 model calls, soak, native qualification or stable promotion is claimed.
-Publication and consumer installation are recorded separately after completion.
+Signed tag `hotfix-2026-09-07.3` identifies source
+`0eaf6ae20538e461ab37730d7b2f267c5b912aaa`; the
+[GitHub prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.3)
+contains all 16 packages and their manifest/checksums. The personal consumer's
+installed tarball integrities match all 16 manifest entries.
+
+All packages pass publint, applicable type/export checks and 16 isolated
+consumers using the public `p2prpc@0.2.1` release tarball, matching the personal
+consumer's transport dependency. The stock registry consumer check was blocked
+by the available GitHub token's missing package-read scope. No registry consumer
+qualification is claimed. The fallback retained the same verifier and replaced
+only transport discovery with its public release URL. Consumer deployment facts
+belong to the personal repository.
 
 ## Urgent session hotfix evidence — 2026-09-07
 

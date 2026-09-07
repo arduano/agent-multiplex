@@ -9,13 +9,12 @@ Last reconciled: 2026-09-07.
 
 ## Copilot observation follow-up
 
-The `0.2.4-hotfix.3` candidate restores Copilot's retained model through its
+The published [`0.2.4-hotfix.3` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.3) restores Copilot's retained model through its
 read-only native model snapshot on attachment and observes later root model
 changes. It also keeps a session working across `assistant.idle`, which may
 still have background agents or attached shell commands, until `session.idle`.
-No wire, native dependency, transport or migration boundary changes. Model
-qualification remains excluded; candidate checks and publication are recorded
-in the checkpoint when complete.
+No wire, native dependency, transport or migration boundary changes. The source passes all 655 tests and packed-consumer checks; no native-model
+qualification is claimed. See the [checkpoint](../checkpoint-v4.md#copilot-observation-hotfix--2026-09-07) for the exact artifact and test boundaries.
 
 ## Urgent session hotfix
 
