@@ -2,7 +2,11 @@
 
 ## Codex goals and unavailable Copilot recovery — 2026-09-07
 
-Candidate `0.2.4-hotfix.6` adds native Codex goal observation/set/clear and
+Signed tag `hotfix-2026-09-07.6` identifies source
+`cbb37c222865fc194f17577d75fea3d330551c27`. The
+[published prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.6)
+contains 16 `0.2.4-hotfix.6` packages, `pack-manifest.json` and `SHA256SUMS`.
+It adds native Codex goal observation/set/clear and
 recognizes Copilot's exact missing-history resume refusal as a known failure.
 The pinned goal schemas match the installed Codex 0.153.4 contracts; no generated
 source, native dependency, transport, migration or protocol-version changes.
@@ -12,8 +16,11 @@ docs and release metadata checks pass. The owner waived model-using qualificatio
 Disposable CLI 1.0.81 probes reproduced empty-session loss and verified the known
 failed resume with no user message or replacement. The scrubbed local receipt is
 `receipts/copilot-empty-session-recovery/2026-09-07-no-model/`; it does not claim
-Windows or native-model release qualification. Publication and consumer rollout
-remain separate facts.
+Windows or native-model release qualification. All 16 isolated packed consumers
+also pass with the exact independently published transport tarball. The registry
+path could not authenticate with this machine's GitHub Packages scope, so no
+registry-auth verification is claimed. Installed rollout belongs to the personal
+consumer's implementation status; no stable promotion or native soak is claimed.
 
 Status: signed `v0.2.3` published on 2026-09-07 with an explicit native-model waiver.
 
