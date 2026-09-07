@@ -582,3 +582,16 @@ protocol version, native pin or migration changed. Consumer UI findings and
 installed rollout facts belong to the personal repository. This is a model-free,
 unqualified prerelease under the existing owner exception, not a stable or
 native-model qualification claim.
+
+Published all16 immutable GitHub prerelease tarballs from signed source
+`ea05e78c4f9cc892c1b99b4cd403a3ba17bb0dbe` under
+[`hotfix-2026-09-07.5`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.5).
+The release retains its source-bound pack manifest, tarballs, checksum inventory
+and507-component release-build SBOM. `SHA256SUMS` digest:
+`cc5e8b096b834a982433d4b19a9b4bebfa000247cdcd55f28e34dac303717e34`.
+
+All16 isolated packed-consumer checks pass using the exact public p2prpc0.2.1
+tarball at the unchanged declared dependency boundary. This uses the prior
+public-transport verifier after the known registry token-scope failure; it is
+separate from registry-authentication evidence. No `latest` promotion or native
+model-credit gate was performed.

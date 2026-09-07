@@ -9,7 +9,7 @@ Last reconciled: 2026-09-07.
 
 ## Copilot lifecycle audit follow-up
 
-The `0.2.4-hotfix.5` candidate repairs send/resume/permission/shutdown observation
+The published [`0.2.4-hotfix.5` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.5) repairs send/resume/permission/shutdown observation
 races and adds optional `history.native.primary` v1. Primary reads delegate to
 Copilot's native ownership-filtered event log with opaque cursors; children no
 longer consume a main-conversation page. Default all-events history stays
