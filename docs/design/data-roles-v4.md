@@ -40,6 +40,14 @@ the native Codex or Copilot app server; Agent Multiplex never parses history
 files. It is also the sole owner of any managed PTY and its bounded in-memory
 terminal broker.
 
+Active native handles are process-local. At startup, the runtime normalizes
+persisted active rows to resumable/stopped with no runtime epoch before its
+reverse feed can replay them. Adapter inventory alone cannot advertise command
+readiness: temporary history attachments and other discovered native handles
+remain resumable until installed in the runtime's active binding map. This
+prevents an old durable row or concurrent history read from undoing the control
+node's restart fence.
+
 ### Access gateway
 
 An access gateway has `dataAuthority: none`. It is a p2prpc client of one or

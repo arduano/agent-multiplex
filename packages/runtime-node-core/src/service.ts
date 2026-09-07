@@ -264,6 +264,14 @@ export class RuntimeNodeService {
         : { providers: options.terminalProviders }),
       ...options.terminalBrokerOptions,
     });
+    // Native handles belong to one runtime process. Persisted active rows are
+    // resume bindings after startup, never evidence that this boot can execute
+    // commands. Normalize before the reverse feed can replay durable bindings.
+    for (const record of this.#store.listSessions()) {
+      if (record.availability === "active" || record.runtimeEpoch !== null) {
+        this.#persistStopped(record);
+      }
+    }
     queueMicrotask(() => this.#recoverDurableOperations());
   }
 
@@ -456,6 +464,12 @@ export class RuntimeNodeService {
         }),
       )
     ).filter((item): item is NativeInventoryItem => item !== null)
+      // Adapter discovery also sees temporary history attachments and handles
+      // outside this runtime's installed bindings. Only #active below proves
+      // that commands can reach an owned handle.
+      .map((item): NativeInventoryItem => item.availability === "active"
+        ? { ...item, availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null }
+        : item)
       .filter((item) => !this.#store.isNativeBindingArchived(item));
     for (const [sessionId, binding] of this.#active) {
       const record = this.#store.getSession(sessionId);
