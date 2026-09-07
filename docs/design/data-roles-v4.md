@@ -56,6 +56,15 @@ event index). It describes an omission, never synthetic native output. Clients
 must show that gap explicitly. The original item remains in harness-owned history;
 this has no retention, archive, or image-store effect.
 
+Copilot's opt-in primary history view delegates ownership selection to native
+`eventLog.read` before applying its page limit. It preserves native root events
+and subagent lifecycle markers, leaving the default full-history view intact.
+The native cursor advances over the entire returned batch: an oversized batch
+must be re-read at the same input cursor with a smaller limit, never locally
+truncated with the original next cursor. Native cursor expiry fails explicitly
+and requires client window reset; it must not silently repeat the fresh tail as
+older history. Gateways add no transcript or history-cursor authority.
+
 Live native state is a separate read-only observation via
 `sessions.readNativeState`, currently Copilot's `pendingMessages` view. It routes
 through the owning control tree under read access and the runtime boot fence,
@@ -299,6 +308,17 @@ native changes also fence delayed mutation acknowledgements. Descendant model
 changes do not alter the root settings. Its assistant-loop idle signal does not
 end whole-session work: attached commands or background agents may remain active
 until root session idle, and pending root interactions retain waiting status.
+Attachment reads the supported native activity snapshot to recover turns that
+started before event subscription. New native lifecycle transitions, including
+ones that leave the status unchanged, fence delayed activity snapshots. Resume
+flags preserve already-running or continued work when the activity API is absent.
+Command uncertainty cannot replace a newer native activity observation, and a
+late permission acknowledgement cannot revive a subsequently idle session.
+Modern envelope and legacy data ownership markers both fence child events; the
+chronological parentId chain is never child provenance.
+Sending/steering, including uncertain command outcomes, never downgrades an
+unresolved root interaction to working/unknown. Closed adapter handles reject
+late status changes, and adapter shutdown detaches late attachment results.
 
 Native permission requests/completions carry the exact pending request ID. An
 external native completion retires only that matching interaction, fenced by

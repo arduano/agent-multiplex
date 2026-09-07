@@ -245,6 +245,81 @@ describe("Copilot native model observations", () => {
 });
 
 describe("Copilot whole-session working status", () => {
+  it.each(["send", "steer"] as const)("keeps a pending question visible through an acknowledged or uncertain %s", async type => {
+    const f = await fixture();
+    const answer = f.configuration().onUserInputRequest?.({ question: "Pick one" }, { sessionId: f.session.vendorSessionId });
+    const command = type === "send" ? { type, prompt: "next task", mode: "enqueue" as const }
+      : { type, prompt: "change focus", mode: "immediate" as const };
+    await f.session.execute({ harness: "copilot", command });
+    expect(f.session.status()).toBe("waitingForInput");
+    f.send.mockRejectedValueOnce(new Error("reply lost"));
+    await expect(f.session.execute({ harness: "copilot", command })).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(f.session.status()).toBe("waitingForInput");
+    await f.session.stop(); await answer;
+  });
+
+  it("does not revive finished work when an already settled permission completes again", async () => {
+    const f = await fixture();
+    f.emit("permission.requested", { requestId: "permission", permissionRequest: { kind: "read", fileName: "/repo" } });
+    f.emit("permission.completed", { requestId: "permission", result: { kind: "approved" } });
+    f.emit("session.idle");
+    f.emit("permission.completed", { requestId: "permission", result: { kind: "approved" } });
+    f.emit("permission.completed", { requestId: "another-client", result: { kind: "approved" } });
+    expect(f.session.status()).toBe("idle");
+  });
+
+  it.each([{ sessionWasActive: true }, { continuePendingWork: true }])("keeps native resumed work active (%j)", async data => {
+    const f = await fixture(); f.emit("session.resume", data);
+    expect(f.session.status()).toBe("running");
+    f.emit("session.idle"); expect(f.session.status()).toBe("idle");
+  });
+
+  it("reads native activity on attachment/resume without scanning transcript or changing work", async () => {
+    const activity = vi.fn(async () => ({ abortable: true, hasActiveWork: true }));
+    const f = await fixture({ beforeAttach: rpc => { rpc.metadata = { activity }; } });
+    expect(f.session.status()).toBe("running");
+    const resumed = await f.adapter.resume({ harness: "copilot", vendorSessionId: f.session.vendorSessionId, continuePendingWork: true });
+    expect(resumed.status()).toBe("running"); expect(activity).toHaveBeenCalledTimes(2);
+    expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+  });
+
+  it("fences a delayed activity read behind newer native lifecycle and interactions", async () => {
+    const f = await fixture(); const first = deferred<unknown>();
+    f.rpc.metadata = { activity: async () => first.promise };
+    const read = f.session.readActivity();
+    f.emit("assistant.turn_start", { turnId: "native-turn" });
+    first.resolve({ hasActiveWork: false, abortable: false }); await read;
+    expect(f.session.status()).toBe("running");
+    const second = deferred<unknown>(); f.rpc.metadata.activity = async () => second.promise;
+    const nextRead = f.session.readActivity();
+    f.emit("permission.requested", { requestId: "waiting", permissionRequest: { kind: "read", fileName: "/repo" } });
+    second.resolve({ hasActiveWork: false, abortable: false }); await nextRead;
+    expect(f.session.status()).toBe("waitingForInput");
+  });
+
+  it("does not declare idle after unavailable or malformed activity reads", async () => {
+    const f = await fixture(); f.emit("assistant.turn_start", { turnId: "turn" });
+    f.rpc.metadata = { activity: async () => { throw new Error("unsupported"); } };
+    await f.session.readActivity(); expect(f.session.status()).toBe("running");
+    f.rpc.metadata.activity = async () => ({ processing: false });
+    await f.session.readActivity(); expect(f.session.status()).toBe("running");
+  });
+
+  it("keeps a stopped handle stopped when a dispatched send fails afterward", async () => {
+    const f = await fixture(); const response = deferred<string>();
+    f.send.mockImplementationOnce(async () => { await response.promise; throw new Error("late reply lost"); });
+    const sending = f.session.execute({ harness: "copilot", command: { type: "send", prompt: "test", mode: "enqueue" } });
+    await f.session.stop(); response.resolve("release");
+    await expect(sending).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(f.session.status()).toBe("stopped");
+  });
+
+  it("does not acknowledge a send without its native logical message ID", async () => {
+    const f = await fixture(); f.send.mockResolvedValueOnce("");
+    await expect(f.session.execute({ harness: "copilot", command: { type: "send", prompt: "test", mode: "enqueue" } })).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(f.send).toHaveBeenCalledOnce();
+  });
+
   it("keeps working while an attached shell command outlives the assistant loop", async () => {
     const f = await fixture();
     f.emit("assistant.turn_start", { turnId: "turn" });

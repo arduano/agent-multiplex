@@ -7,6 +7,22 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
+## Copilot lifecycle audit follow-up
+
+The `0.2.4-hotfix.5` candidate repairs send/resume/permission/shutdown observation
+races and adds optional `history.native.primary` v1. Primary reads delegate to
+Copilot's native ownership-filtered event log with opaque cursors; children no
+longer consume a main-conversation page. Default all-events history stays
+available. See [native history](Adapters-and-Terminals.md#bounded-native-history).
+
+Typecheck, **716 tests**, checkpoint, documentation and release-metadata gates
+pass. A disposable CLI 1.0.81 / SDK 1.0.13 session verified native primary paging
+and continuation across append without any model prompt. No production session
+was used for qualification. Wire protocol, transport/native pins and migrations
+are unchanged. This remains an unqualified incremental prerelease under the
+existing owner exception; artifact and publication evidence belongs to the
+[checkpoint](../checkpoint-v4.md#copilot-lifecycle-audit-hotfix--2026-09-07).
+
 ## Copilot queue visibility follow-up
 
 The published [`0.2.4-hotfix.4` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.4) adds capability-gated, read-only

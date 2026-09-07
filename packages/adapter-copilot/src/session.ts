@@ -30,6 +30,7 @@ import {
 
 import { copilotJson, jsonRecord, requiredString } from "./json.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
+import { readPrimaryHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 
 const HISTORY_CURSOR_PREFIX = "copilot:event-index:";
 const REVERSE_HISTORY_CURSOR_PREFIX = "copilot:event-before:";
@@ -44,6 +45,12 @@ export interface CopilotSessionRpc {
   queue?: {
     pendingItems(): Promise<unknown>;
     sendNow(input: { id: string }): Promise<unknown>;
+  };
+  metadata?: {
+    activity(): Promise<unknown>;
+  };
+  eventLog?: {
+    read(input: CopilotEventLogReadRequest): Promise<unknown>;
   };
   permissions?: {
     getMode(): Promise<unknown>;
@@ -102,6 +109,7 @@ export class CopilotSessionBridge {
   #modelChanged: (() => void) | undefined;
   #closed = false;
   #status: SessionRuntimeStatus = "idle";
+  #activityRevision = 0;
 
   public status(): SessionRuntimeStatus {
     return this.#status;
@@ -125,9 +133,9 @@ export class CopilotSessionBridge {
       payload: copilotJson(event),
       ephemeral: event.ephemeral === true,
     });
-    const child = event.agentId !== undefined;
+    const child = eventOwner(event) !== undefined;
     if (event.type === "permission.requested") { this.permissionRequested(event); return; }
-    if (event.type === "permission.completed") this.permissionCompleted(event);
+    if (event.type === "permission.completed" && !this.permissionCompleted(event)) return;
     // Descendant events remain in native history, but cannot change the root's
     // settings or runtime status through a shared SDK stream.
     if (child) return;
@@ -138,7 +146,9 @@ export class CopilotSessionBridge {
     if (event.type === "session.model_change") {
       this.observeModel(isObject(event.data) ? event.data.newModel : undefined);
     }
-    const status = statusForNativeEvent(event.type);
+    const status = event.type === "session.resume"
+      ? event.data.sessionWasActive === true || event.data.continuePendingWork === true ? "running" : "idle"
+      : statusForNativeEvent(event.type);
     if (status) this.setStatus((status === "running" || status === "idle") && this.waitingForInput() ? "waitingForInput" : status);
   }
 
@@ -181,9 +191,24 @@ export class CopilotSessionBridge {
   }
 
   public setStatus(status: SessionRuntimeStatus): void {
+    if (this.#closed) return;
+    this.#activityRevision += 1;
     if (this.#status === status) return;
     this.#status = status;
     this.emit({ kind: "status", status });
+  }
+
+  public get activityRevision(): number { return this.#activityRevision; }
+  public beginMessage(): void {
+    this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
+  }
+  public uncertainMutation(expectedRevision: number): void {
+    if (expectedRevision !== this.#activityRevision) return;
+    this.setStatus(this.waitingForInput() ? "waitingForInput" : "unknown");
+  }
+  public observeActivity(value: unknown, expectedRevision: number): void {
+    if (this.#closed || expectedRevision !== this.#activityRevision || !isObject(value) || typeof value.hasActiveWork !== "boolean") return;
+    this.setStatus(this.waitingForInput() ? "waitingForInput" : value.hasActiveWork ? "running" : "idle");
   }
 
   public settings(settings: HarnessSessionSettings): void {
@@ -247,13 +272,14 @@ export class CopilotSessionBridge {
   private permissionRequested(event: Extract<SessionEvent, { type: "permission.requested" }>): void {
     const { requestId, permissionRequest, resolvedByHook } = event.data;
     if (resolvedByHook || typeof requestId !== "string" || !requestId || !permissionRequest || typeof permissionRequest !== "object") return;
-    const nativeRequestId = permissionIdentity(requestId, event.agentId);
+    const owner = eventOwner(event);
+    const nativeRequestId = permissionIdentity(requestId, owner);
     if (this.#permissions.has(nativeRequestId) || this.#completedPermissions.has(nativeRequestId)) return;
-    const pending: PendingPermission = { requestId, nativeRequestId, child: event.agentId !== undefined, resolving: false, completed: false };
+    const pending: PendingPermission = { requestId, nativeRequestId, child: owner !== undefined, resolving: false, completed: false };
     this.#permissions.set(nativeRequestId, pending);
     if (!pending.child) this.setStatus("waitingForInput");
     this.emit({ kind: "interaction", requestType: "permission", nativeRequestId, ephemeral: false,
-      payload: copilotJson({ permissionRequest, requestId, ...(event.agentId === undefined ? {} : { agentId: event.agentId }) }),
+      payload: copilotJson({ permissionRequest, requestId, ...(owner === undefined ? {} : { agentId: owner }) }),
       resolve: async (response) => {
         if (this.#closed || pending.completed || this.#permissions.get(nativeRequestId) !== pending) throw new Error("Copilot permission request is no longer pending");
         if (pending.resolving) throw new Error("Copilot permission request is already resolving");
@@ -262,6 +288,7 @@ export class CopilotSessionBridge {
         const decision = permissionResponse(response);
         if (decision.kind === "no-result") throw new TypeError("A permission decision is required");
         pending.resolving = true;
+        const activityRevision = this.#activityRevision;
         let result: unknown;
         try {
           result = await rpc.handlePendingPermissionRequest({ requestId, result: decision });
@@ -281,22 +308,23 @@ export class CopilotSessionBridge {
         }
         this.#permissions.delete(nativeRequestId);
         this.rememberCompletedPermission(nativeRequestId);
-        if (!pending.child) this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
+        if (!pending.child && activityRevision === this.#activityRevision) this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
       },
     });
   }
 
-  private permissionCompleted(event: Extract<SessionEvent, { type: "permission.completed" }>): void {
+  private permissionCompleted(event: Extract<SessionEvent, { type: "permission.completed" }>): boolean {
     const requestId = event.data.requestId;
-    if (typeof requestId !== "string" || !requestId) return;
-    const nativeRequestId = permissionIdentity(requestId, event.agentId);
+    if (typeof requestId !== "string" || !requestId) return false;
+    const nativeRequestId = permissionIdentity(requestId, eventOwner(event));
     this.rememberCompletedPermission(nativeRequestId);
     const pending = this.#permissions.get(nativeRequestId);
-    if (!pending) return;
+    if (!pending) return false;
     pending.completed = true;
     // A controller's successful decision has its own durable resolution. Let
     // its acknowledgement finish; an external decision retires the prompt now.
     if (!pending.resolving) this.retirePermission(pending);
+    return true;
   }
   private retirePermission(pending: PendingPermission): void {
     if (this.#permissions.get(pending.nativeRequestId) !== pending) return;
@@ -383,6 +411,20 @@ export class CopilotAdapterSession implements AdapterSession {
     }
   }
 
+  /** Resume may join live work without replaying its earlier turn-start event. */
+  public async readActivity(): Promise<void> {
+    const metadata = this.#native.rpc.metadata;
+    if (typeof metadata?.activity !== "function") return;
+    const revision = this.#bridge.activityRevision;
+    try {
+      const result = await metadata.activity();
+      this.#bridge.observeActivity(result, revision);
+    } catch {
+      // Missing/failed observation cannot declare an observed running or waiting
+      // session idle; later native lifecycle events remain authoritative.
+    }
+  }
+
   /** Permission state is native-owned. Read it on each fresh SDK attachment;
    * absence/unknown versions remain unknown and never default to enabled. */
   public async readPermissions(): Promise<void> {
@@ -410,17 +452,17 @@ export class CopilotAdapterSession implements AdapterSession {
     switch (command.type) {
       case "send": {
         const options = messageOptions(command.prompt, command.native, "enqueue");
-        this.#bridge.setStatus("running");
-        const messageId = await this.mutation("enqueue Copilot prompt", () =>
-          this.#native.send(options),
+        this.#bridge.beginMessage();
+        const messageId = await this.mutation("enqueue Copilot prompt", async () =>
+          acknowledgedMessageId(await this.#native.send(options)),
         );
         return { messageId };
       }
       case "steer": {
         const options = messageOptions(command.prompt, command.native, "immediate");
-        this.#bridge.setStatus("running");
-        const messageId = await this.mutation("steer Copilot session", () =>
-          this.#native.send(options),
+        this.#bridge.beginMessage();
+        const messageId = await this.mutation("steer Copilot session", async () =>
+          acknowledgedMessageId(await this.#native.send(options)),
         );
         return { messageId };
       }
@@ -486,6 +528,16 @@ export class CopilotAdapterSession implements AdapterSession {
     if (request.harness !== "copilot") {
       throw new TypeError(`Copilot session cannot read ${request.harness} history`);
     }
+    if (request.native?.view === "primary") {
+      const eventLog = this.#native.rpc.eventLog;
+      if (typeof eventLog?.read !== "function") throw new Error("Copilot primary history is unavailable on this native session");
+      return readPrimaryHistory(this.vendorSessionId, request, async input => {
+        const result = await eventLog.read(input);
+        this.assertActive();
+        return result;
+      });
+    }
+    if (request.native?.view !== undefined) throw new TypeError("Unsupported Copilot native history view");
 
     // getEvents() is Copilot's supported history API. The adapter only pages the
     // returned opaque events; it never opens or interprets Copilot's session store.
@@ -577,10 +629,13 @@ export class CopilotAdapterSession implements AdapterSession {
   }
 
   private async mutation<T>(description: string, operation: () => Promise<T>): Promise<T> {
+    const activityRevision = this.#bridge.activityRevision;
     try {
       return await operation();
     } catch (cause) {
-      this.#bridge.setStatus("unknown");
+      // A lost acknowledgement makes this command uncertain; it cannot undo
+      // newer native evidence that the session is working, waiting, or idle.
+      this.#bridge.uncertainMutation(activityRevision);
       throw new AdapterOutcomeUnknownError(
         `${description} failed after dispatch; native outcome is unknown`,
         { cause },
@@ -714,6 +769,16 @@ function statusForNativeEvent(nativeType: string): SessionRuntimeStatus | undefi
 
 function permissionIdentity(requestId: string, agentId: string | undefined): string {
   return agentId === undefined ? requestId : `copilot:child:${JSON.stringify([agentId, requestId])}`;
+}
+/** Older native events keep child provenance in data. parentId is the event
+ * chain, so it must never be interpreted as ownership. */
+function eventOwner(event: SessionEvent): string | undefined {
+  const data: Record<string, unknown> = isObject(event.data) ? event.data : {};
+  return [event.agentId, data.agentId, data.parentToolCallId].find((value): value is string => typeof value === "string" && value.length > 0);
+}
+function acknowledgedMessageId(value: unknown): string {
+  if (typeof value !== "string" || !value) throw new TypeError("Copilot send returned no acknowledged message identity");
+  return value;
 }
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

@@ -216,6 +216,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError(`Copilot adapter cannot spawn ${options.harness}`);
     }
     await this.ensureStarted();
+    this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
     const vendorSessionId = nativeSessionId(options.native) ?? randomUUID();
@@ -251,6 +252,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         { cause },
       );
     }
+    if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
       native,
       options.cwd,
@@ -268,7 +270,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await Promise.all([session.readPermissions(), session.readModel()]);
+    await Promise.all([session.readPermissions(), session.readModel(), session.readActivity()]);
+    if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the created session could be returned");
     return session;
   }
 
@@ -278,11 +281,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError(`Copilot adapter cannot resume ${options.harness}`);
     }
     await this.ensureStarted();
+    this.assertOpen();
 
     // One SDK handle is the sole upstream controller. An explicit resume is
     // also the recovery path after a runtime failure, so replace stale handles.
     const prior = this.#active.get(options.vendorSessionId);
     if (prior) await prior.stop();
+    this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
     const cwd = options.cwd ?? null;
@@ -318,6 +323,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         { cause },
       );
     }
+    if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
       native,
       cwd,
@@ -335,8 +341,19 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await Promise.all([session.readPermissions(), session.readModel()]);
+    await Promise.all([session.readPermissions(), session.readModel(), session.readActivity()]);
+    if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the resumed session could be returned");
     return session;
+  }
+
+  private async rejectLateAttachment(native: CopilotNativeSession, bridge: CopilotSessionBridge): Promise<never> {
+    bridge.close();
+    try {
+      await native.disconnect();
+    } catch (cause) {
+      throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; native detachment was not acknowledged", { cause });
+    }
+    throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; the late native handle was detached");
   }
 
   public async close(): Promise<void> {
@@ -688,6 +705,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "session.create", version, experimental: false },
     { name: "session.resume", version, experimental: false },
     { name: "history.native", version, experimental: false },
+    { name: "history.native.primary", version: "v1", experimental: true },
     { name: "prompt.enqueue", version, experimental: false },
     { name: "prompt.steer.immediate", version, experimental: false },
     { name: "interrupt", version, experimental: false },

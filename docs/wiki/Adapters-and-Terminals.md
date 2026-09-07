@@ -33,6 +33,24 @@ direction to `thread/items/list`; Copilot pages the supported SDK `getEvents()`
 result with direction-specific cursors. Copilot still retrieves the SDK's whole
 event list inside the runtime; the gateway and browser receive one bounded page.
 
+Copilot clients with `history.native.primary` v1 can instead select
+`request.native.view: "primary"`. This uses bounded native `eventLog.read`
+with `agentScope: "primary"`, retaining root events and native `subagent.*`
+lifecycle events while child chatter stays in full native history. Filtering
+happens in Copilot before the page limit, so child-heavy work cannot consume the
+main conversation's page. Native events remain unchanged; the page follows the
+requested ascending/descending order. These cursors are opaque and incompatible
+with the full-history index cursors. The omitted view keeps the existing full
+history behavior. Unsupported native methods fail explicitly.
+
+Primary pages that exceed the wire envelope are re-read at the same native input
+cursor with a smaller limit. The adapter never truncates a page while advancing
+past the untransferred events. A single oversized item uses the explicit omission
+mechanism below. An expired native cursor fails with
+`Copilot history cursor expired; reload the conversation`; clients must reset
+their history window instead of appending the native fallback as older messages.
+The primary view counts native events, not rendered conversation messages.
+
 An individual native item may exceed the wire envelope even at page size one.
 By default this is an error. Clients opting into
 `request.native.omitOversizedItems: true` instead receive an empty native page,
@@ -89,6 +107,14 @@ shell commands and background agents can still be running, so it does not mark
 the session done. Root `session.idle` supplies the whole-session idle signal;
 unresolved root interactions continue to report waiting for input.
 
+Attachment also reads native `metadata.activity()` when supported. This restores
+working status after joining a running turn whose start event predates the
+attachment. Resume's `sessionWasActive`/`continuePendingWork` flags remain visible
+when that observation is unavailable. Newer lifecycle events or pending root
+interactions fence delayed activity reads. Sending another prompt cannot hide an
+unresolved question or permission, and a duplicate completion for a retired
+permission cannot restart the displayed working state.
+
 ### Copilot pending messages
 
 `queue.pending` v1 advertises `sessions.readNativeState` with
@@ -112,6 +138,11 @@ exact queued item `id`. The normal durable command journal calls native
 main turn and leaves the item queued; it is not permission to remove and resend
 its text. A lost or unrecognized acknowledgement remains `outcomeUnknown` under
 the original command identity. Native notifications/snapshots reconcile the queue.
+
+An acknowledged send must contain the native logical message ID; missing IDs are
+an unknown command outcome, never an indication that a message was consumed.
+Adapter shutdown fences in-flight attachments and detaches handles returned
+after shutdown rather than publishing them as controllable sessions.
 
 Copilot's native allow-all setting is separate from interactive/plan/autopilot.
 The `permissions.mode` capability advertises the fenced `setPermissionMode`

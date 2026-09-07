@@ -553,3 +553,32 @@ external-model image-prompt suite.
   upgrade, and failure behavior.
 - [Release guide](wiki/Releases.md) — versioning, publication, recovery, and
   downstream verification procedure.
+
+
+## Copilot lifecycle audit hotfix — 2026-09-07
+
+The owner requested a deeper Copilot delivery/event audit and roughly100 useful
+conversation messages on initial load. The `0.2.4-hotfix.5` source repairs:
+
+- Waiting-input, already-active resume and shutdown observation races.
+- Late failed command acknowledgements or successful permission replies replacing
+  newer native lifecycle state, and legacy child provenance changing root state.
+- Missing native send IDs reported as success rather than outcome unknown.
+- Child-heavy history starvation via optional `history.native.primary` v1,
+  native primary filtering and direction-fenced opaque continuation cursors.
+
+Local exact-toolchain gates pass: typecheck, **716 tests across85 files**,
+checkpoint, documentation and release metadata. Primary history has15 deterministic
+cases covering ordering, view/direction/cursor fences, expiry, bounded image and
+byte transfer, and oversized-page retries without cursor skips. Nine lifecycle
+race cases cover late acknowledgements and legacy ownership, in addition to the
+existing adapter suites.
+
+A disposable exact CLI1.0.81 / SDK1.0.13 session verified the native primary
+backward method and opaque continuation across appends, without model prompts
+or production state. Native expiry was not exercised; its failure behavior is
+covered against the exact schema with deterministic fixtures. No transport,
+protocol version, native pin or migration changed. Consumer UI findings and
+installed rollout facts belong to the personal repository. This is a model-free,
+unqualified prerelease under the existing owner exception, not a stable or
+native-model qualification claim.
