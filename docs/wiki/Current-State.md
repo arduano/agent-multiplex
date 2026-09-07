@@ -7,17 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-07.
 
-## Urgent session fixes in progress
+## Urgent session hotfix
 
-The owner requested incremental hotfix deployments with focused checks, followed
-by one full release gate after the urgent fixes are complete. Source version
-`0.2.4-hotfix.2` fixes runtime liveness after restart and adds bounded newest-first
-native history reads with explicit unavailable-item markers. It also permits an
-explicit runtime listener address on hosts with many network interfaces. Its temporary
-GitHub prerelease uses the signed tag `hotfix-2026-09-07.2`; the ordinary `v*`
-release workflow and registry stable tags are unchanged. This is an explicitly
-unqualified deployment candidate, not a replacement for the stable release
-evidence below. Installed consumer facts belong to the personal repository.
+The owner authorized incremental hotfix deployment, followed by broad checks
+without model calls. The immutable `0.2.4-hotfix.2` GitHub prerelease fixes runtime
+liveness after restart and adds bounded newest-first native history reads with
+explicit unavailable-item markers. It also permits an explicit runtime listener
+address on hosts with many network interfaces.
+
+Deterministic Docker tree/100-session checks passed on the published source.
+Current review source additionally passes CI, Windows startup, CodeQL and all
+16 independent packed consumers. The
+[checkpoint](../checkpoint-v4.md#urgent-session-hotfix-evidence-2026-09-07) records
+the separate immutable artifact and tested-source identities. Published reference
+executables still print `0.2.3` for `--version`; their package manifests correctly
+identify the hotfix. Current source fixes that reporting issue, without replacing
+the published bytes. This prerelease has no native-model qualification or stable
+promotion. Installed consumer facts and laptop UAT belong to the personal repository.
 
 ## Embedded locator refresh release
 
@@ -167,9 +173,8 @@ state machines and extension contracts.
 - Copilot SDK spawn/resume, history, prompts, modes, interrupts, interactions,
   events, and runtime-local OpenAI-compatible BYOK configuration. Its stock TUI
   bridge is opt-in and experimental.
-- Current source also exposes Copilot native `permissions.mode` and its
-  acknowledged setting separately from agent mode. The published baseline above
-  does not yet include this additive command; see the
+- Copilot native `permissions.mode`, published since `0.2.2`, exposes its
+  acknowledged setting separately from agent mode; see the
   [adapter guide](Adapters-and-Terminals.md#copilot) for semantics.
 - Bounded image upload/read/path resolution across the control tree, immutable
   runtime retention, native image references, browser/CLI attachments, and
