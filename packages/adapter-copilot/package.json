@@ -21,9 +21,9 @@
   "dependencies": {
     "@arduano/agent-multiplex-protocol": "0.2.3",
     "@arduano/agent-multiplex-runtime-node-core": "0.2.3",
-    "@github/copilot": "1.0.81",
+    "@github/copilot": "1.0.82",
     "@github/copilot-sdk": "1.0.13",
-    "@types/node": "24.3.0",
+    "@types/node": "26.4.1",
     "node-pty": "1.1.0"
   }
 }
