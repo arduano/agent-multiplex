@@ -7,6 +7,25 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-08.
 
+## Copilot stalled-read and presence recovery hotfix
+
+The `0.2.4-hotfix.9` candidate bounds read-only Copilot SDK requests and retains
+stalled calls until native settlement, preventing refresh/reconnect request piles.
+Inventory observes whole-session activity through existing native handles. A failed
+observation reports unknown while newer lifecycle events, errors and actionable
+input remain authoritative. Runtime presence heartbeats proceed independently of
+native inventory and metadata maintenance. Native mode reads/events also keep
+acknowledged mode current after plan approval. See [adapter recovery](Adapters-and-Terminals.md#stalled-copilot-reads)
+and [process supervision](Operations.md#process-supervision).
+
+Typecheck/build, **826 deterministic tests**, documentation, checkpoint and
+release metadata checks pass. This remains an incremental prerelease under the owner's native-model
+qualification waiver. Protocol v5, transport/native pins and migrations are
+unchanged; mutation ambiguity and stable operation IDs retain their existing
+semantics. No native-model or installed-rollout qualification is claimed. The
+[checkpoint](../checkpoint-v4.md#copilot-stalled-read-recovery-hotfix--2026-09-08)
+owns release evidence; installed activation belongs to the personal consumer.
+
 ## Bounded Codex failed-turn detail hotfix
 
 The published [`0.2.4-hotfix.8` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.1) adds optional `history.native.turns` v1. A client

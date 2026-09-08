@@ -34,17 +34,32 @@ Key behavior:
 - the selected model is read through native `model.getCurrent` on each attachment
   and updated by root model-change events. Delayed reads cannot replace newer
   choices, and missing native state never implies a default selection.
+- mode is read through native `mode.get` on attachment and mirrored from root
+  `session.mode_changed`, including native transitions out of plan mode. Newer
+  native modes fence delayed reads and command acknowledgements.
 - `assistant.idle` leaves ongoing commands, background agents and pending root
-  interactions active; root `session.idle` marks whole-session work complete.
+  interactions active; root `session.idle` marks whole-session work idle. Native
+  `metadata.activity` reads on attachment and inventory reconcile missed lifecycle
+  events using existing active handles, without resuming sessions.
+  Failed activity reads mark unchanged running/idle observations unknown while
+  retaining newer native events, errors and actionable pending input.
 - permission requests use native request/completion events and the SDK's pending
   permission RPC, preserving their exact request identities. Questions,
   elicitation and exit-plan callbacks remain separate pending interactions.
-- history is read exclusively through `CopilotSession.getEvents()`. The adapter
-  never reads Copilot files. The opaque pagination cursor has the form
+- full history is read through `CopilotSession.getEvents()`; the opt-in primary
+  view uses native `eventLog.read`. The adapter never reads Copilot files.
+  The full-history opaque pagination cursor has the form
   `copilot:event-index:<n>` and pages the native event array without interpreting
   event content.
 - `stop` disconnects the SDK handle but preserves the vendor session for native
   resume. `close` gracefully disconnects all handles and stops the shared CLI.
+
+Read-only native requests have a 15-second caller deadline and coalesce identical
+in-flight reads. A timed-out request retains its native slot until settlement;
+late results are discarded, and repeated polling cannot issue replacements while
+it is stalled. The adapter caps retained pending reads across session handles at
+256. Primary-history page-size reductions share one deadline. Mutations are never
+timed out or retried by this helper. See [stalled reads and recovery limits](../../docs/wiki/Adapters-and-Terminals.md#stalled-copilot-reads).
 
 The implementation is pinned and tested against `@github/copilot-sdk@1.0.13`.
 The optional stock-TUI integration additionally pins

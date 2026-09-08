@@ -48,6 +48,24 @@ remain resumable until installed in the runtime's active binding map. This
 prevents an old durable row or concurrent history read from undoing the control
 node's restart fence.
 
+Runtime presence heartbeats are independent of native inventory and metadata
+maintenance. Each maintenance lane retains one pending job across connection
+epochs, with a 30-second result acceptance deadline. Connection retirement and
+expiry fence later submissions and local application of late responses; they
+cannot undo a control request already dispatched. Remote boot/authority and
+stable operation-ID fences remain authoritative. Pending requests retain their
+slots until settlement, including after a deadline, and shutdown still drains
+admitted service work.
+
+Copilot's read-only SDK calls have a 15-second caller deadline; native primary
+history size-reduction retries share one deadline. Identical requests coalesce
+per native handle and read method, while cursor and observation-revision changes
+cannot join an older snapshot. Expired calls release their runtime read callers
+but retain their native slots until settlement, discarding late responses. A
+shared adapter cap of 256 pending native reads bounds retained state across
+handle churn. No timeout unlocks or retries an ambiguous native mutation, and
+no read deadline implies cancellation, agent completion or a recovered server.
+
 Native history responses keep the native payload separate from bounded transfer
 availability. Descending reads permit a client to open a recent window without
 scanning the full transcript. The opt-in `unavailableItem` result advances past
@@ -384,14 +402,25 @@ native changes also fence delayed mutation acknowledgements. Descendant model
 changes do not alter the root settings. Its assistant-loop idle signal does not
 end whole-session work: attached commands or background agents may remain active
 until root session idle, and pending root interactions retain waiting status.
-Attachment reads the supported native activity snapshot to recover turns that
-started before event subscription. New native lifecycle transitions, including
+Attachment and inventory refresh read the supported native activity snapshot
+through the existing active handle to recover turns that started before event
+subscription and missed root idle events. Failed or malformed reads mark the
+unchanged running/idle observation unknown; newer native activity, existing
+errors and actionable pending input remain authoritative. Read failure cannot
+declare completion or name an unobserved task.
+New native lifecycle transitions, including
 ones that leave the status unchanged, fence delayed activity snapshots. Resume
 flags preserve already-running or continued work when the activity API is absent.
 Command uncertainty cannot replace a newer native activity observation, and a
 late permission acknowledgement cannot revive a subsequently idle session.
 Modern envelope and legacy data ownership markers both fence child events; the
 chronological parentId chain is never child provenance.
+Native mode follows the same root ownership and revision rules: attachment reads
+supported `session.mode.get`, and `session.mode_changed` mirrors native transitions
+such as leaving plan mode. Reads cannot overwrite newer native changes or command
+acknowledgements, and later native transitions fence delayed mutation replies.
+Unavailable/malformed observations remain unknown; no UI action infers a native
+mode transition without observation or acknowledgement.
 Sending/steering, including uncertain command outcomes, never downgrades an
 unresolved root interaction to working/unknown. Closed adapter handles reject
 late status changes, and adapter shutdown detaches late attachment results.

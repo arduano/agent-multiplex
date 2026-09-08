@@ -37,6 +37,7 @@ import {
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import { copilotJson } from "./json.js";
+import { CopilotReadRequests } from "./reads.js";
 import {
   CopilotAdapterSession,
   CopilotSessionBridge,
@@ -95,6 +96,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #providerModels: readonly string[];
   readonly #providerModelCapabilities: Readonly<Record<string, ModelCapabilities>>;
   readonly #active = new Map<string, CopilotAdapterSession>();
+  readonly #reads = new CopilotReadRequests();
   #startPromise: Promise<void> | undefined;
   #started = false;
   #closed = false;
@@ -179,7 +181,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
       }));
     }
     await this.ensureStarted();
-    const models = await this.#client.listModels();
+    const models = await this.#reads.read("adapter:models", "", () => this.#client.listModels());
+    this.assertOpen();
     return models.map((model) => ({
       harness: "copilot",
       id: model.id,
@@ -190,7 +193,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
 
   public async listSessions(): Promise<NativeInventoryItem[]> {
     await this.ensureStarted();
-    const metadata = await this.#client.listSessions();
+    // Reconcile missed root lifecycle events from the existing native handle.
+    // This is observation only: never resume/replace a handle to query activity.
+    const [metadata] = await Promise.all([
+      this.#reads.read("adapter:sessions", "", () => this.#client.listSessions()),
+      Promise.all([...this.#active.values()].map(session => session.readActivity())),
+    ]);
+    this.assertOpen();
     const byId = new Map(metadata.map((entry) => [entry.sessionId, entry]));
     const result = metadata.map((entry) => this.inventoryItem(entry));
     for (const session of this.#active.values()) {
@@ -270,7 +279,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await Promise.all([session.readPermissions(), session.readModel(), session.readActivity()]);
+    await Promise.all([session.readPermissions(), session.readModel(), session.readMode(), session.readActivity()]);
     if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the created session could be returned");
     return session;
   }
@@ -352,7 +361,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await Promise.all([session.readPermissions(), session.readModel(), session.readActivity()]);
+    await Promise.all([session.readPermissions(), session.readModel(), session.readMode(), session.readActivity()]);
     if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the resumed session could be returned");
     return session;
   }
@@ -407,6 +416,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native,
       bridge,
       settings,
+      reads: this.#reads,
       onStopped: () => {
         if (this.#active.get(native.sessionId) === session) {
           this.#active.delete(native.sessionId);
@@ -489,7 +499,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
   }
 
   private async runtimeStatus(): Promise<CopilotRuntimeStatus> {
-    return this.#client.getStatus();
+    const status = await this.#reads.read("adapter:status", "", () => this.#client.getStatus());
+    this.assertOpen();
+    return status;
   }
 
   private assertOpen(): void {

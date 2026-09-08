@@ -65,6 +65,7 @@ const DATABASE_FILENAME = "runtime-node.sqlite";
 const DEFAULT_HEARTBEAT_MS = 10_000;
 const DEFAULT_INVENTORY_REFRESH_MS = 60_000;
 const DEFAULT_METADATA_FLUSH_MS = 5_000;
+const MAINTENANCE_RESULT_DEADLINE_MS = 30_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const DEFAULT_MAX_RUNNING_TERMINALS = 32;
 const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -248,15 +249,27 @@ export async function runRuntimeNode(
   }
 }
 
-async function superviseControlNodeConnection(
-  node: RuntimeNodeP2PNode,
-  service: RuntimeNodeService,
+type MaintenanceService = Pick<RuntimeNodeService,
+  "runtimeNodeId" | "describe" | "refreshInventory" | "applyCanonicalSessions" |
+  "metadataOutbox" | "settleMetadataOutbox"
+>;
+type MaintenanceConfig = Pick<RuntimeNodeAppConfig,
+  "heartbeatMs" | "inventoryRefreshMs" | "metadataFlushMs" | "reconnectMaxMs"
+>;
+type MaintenanceJobs = Partial<Record<"inventory" | "metadata", Promise<void>>>;
+
+export async function superviseControlNodeConnection(
+  node: Pick<RuntimeNodeP2PNode, "connect">,
+  service: MaintenanceService,
   runtimeNodeBootId: RuntimeNodeBootId,
   controlNodeLocator: PersistentControlNodeLocator,
-  config: RuntimeNodeAppConfig,
+  config: MaintenanceConfig,
   signal: AbortSignal,
 ): Promise<void> {
   let attempt = 0;
+  // Keep the slots across connection epochs. Expiring a read does not cancel
+  // native work, so a reconnect must not start another unresolved discovery.
+  const jobs: MaintenanceJobs = {};
   while (!signal.aborted) {
     try {
       const peer = await connectWithBootstrapFallback({
@@ -269,11 +282,9 @@ async function superviseControlNodeConnection(
           );
         },
       });
+      if (signal.aborted) return;
       await register(peer, service);
-      await refreshAndReconcile(peer, service, runtimeNodeBootId);
-      await flushMetadataOutbox(peer, service, runtimeNodeBootId).catch((error: unknown) => {
-        logError("initial metadata flush", error);
-      });
+      if (signal.aborted) return;
       console.log(`Connected to control node ${controlNodeLocator.endpointId}`);
       attempt = 0;
       await maintainControlNodeConnection(
@@ -284,6 +295,7 @@ async function superviseControlNodeConnection(
         controlNodeLocator,
         config,
         signal,
+        jobs,
       );
     } catch (error) {
       if (signal.aborted) return;
@@ -296,51 +308,101 @@ async function superviseControlNodeConnection(
 
 async function maintainControlNodeConnection(
   peer: ControlNodePeer,
-  service: RuntimeNodeService,
+  service: MaintenanceService,
   runtimeNodeBootId: RuntimeNodeBootId,
-  node: RuntimeNodeP2PNode,
+  node: Pick<RuntimeNodeP2PNode, "connect">,
   controlNodeLocator: PersistentControlNodeLocator,
-  config: RuntimeNodeAppConfig,
+  config: MaintenanceConfig,
   signal: AbortSignal,
+  jobs: MaintenanceJobs,
 ): Promise<void> {
+  const connection = new AbortController();
+  const abortConnection = (): void => connection.abort();
+  signal.addEventListener("abort", abortConnection, { once: true });
+  if (signal.aborted) connection.abort();
+  let backgroundFailure: { error: unknown } | undefined;
   let heartbeatDue = Date.now() + config.heartbeatMs;
-  let inventoryDue = Date.now() + config.inventoryRefreshMs;
-  let metadataDue = Date.now() + config.metadataFlushMs;
+  // Registration is enough to start heartbeats; initial native discovery and
+  // outbox delivery must not delay presence any more than periodic work does.
+  let inventoryDue = Date.now();
+  let metadataDue = Date.now();
 
-  while (!signal.aborted) {
-    const nextDue = Math.min(heartbeatDue, inventoryDue, metadataDue);
-    await abortableDelay(Math.max(1, nextDue - Date.now()), signal);
-    if (signal.aborted) return;
-
-    const timestamp = Date.now();
-    if (timestamp >= heartbeatDue) {
-      heartbeatDue = timestamp + config.heartbeatMs;
-      const heartbeat = await sendHeartbeat(peer, service, runtimeNodeBootId);
-      if (!heartbeat.accepted) {
-        throw new Error(
-          "control node rejected this runtime-node boot; registration must be renewed",
-        );
-      }
-      if (
-        heartbeat.p2pTicket !== undefined &&
-        controlNodeLocator.acceptRenewedTicket(heartbeat.p2pTicket)
-      ) {
-        // Update p2prpc's retained outbound target while this epoch is live so
-        // its own subscription/RPC reconnections use the renewed locator too.
-        await node.connect(controlNodeLocator.currentTarget());
-      }
-    }
-    if (timestamp >= inventoryDue) {
-      inventoryDue = timestamp + config.inventoryRefreshMs;
-      await refreshAndReconcile(peer, service, runtimeNodeBootId);
-    }
-    if (timestamp >= metadataDue) {
-      metadataDue = timestamp + config.metadataFlushMs;
-      await flushMetadataOutbox(peer, service, runtimeNodeBootId).catch((error: unknown) => {
-        // The outbox stays durable and will be retried after this error.
+  const startJob = (
+    kind: keyof MaintenanceJobs,
+    run: (jobSignal: AbortSignal) => Promise<void>,
+  ): void => {
+    if (jobs[kind] || connection.signal.aborted) return;
+    const job = new AbortController();
+    const retire = (): void => {
+      clearTimeout(deadline);
+      job.abort();
+    };
+    const deadline = setTimeout(() => {
+      job.abort();
+      logError(`${kind} maintenance`, new Error(
+        "result deadline exceeded; retaining the in-flight slot until the request settles",
+      ));
+    }, MAINTENANCE_RESULT_DEADLINE_MS);
+    deadline.unref();
+    connection.signal.addEventListener("abort", retire, { once: true });
+    jobs[kind] = Promise.resolve().then(() => run(job.signal)).catch((error: unknown) => {
+      if (job.signal.aborted) return;
+      if (kind === "metadata") {
+        // Durable outbox operations retain their IDs and retry on a later tick.
         logError("metadata outbox flush", error);
-      });
+      } else {
+        // Native discovery errors are handled by refreshAndReconcile. A live
+        // reconciliation/authority failure still renews the control connection.
+        backgroundFailure = { error };
+        connection.abort();
+      }
+    }).finally(() => {
+      retire();
+      connection.signal.removeEventListener("abort", retire);
+      delete jobs[kind];
+    });
+  };
+
+  try {
+    while (!connection.signal.aborted) {
+      const nextDue = Math.min(heartbeatDue, inventoryDue, metadataDue);
+      await abortableDelay(Math.max(1, nextDue - Date.now()), connection.signal);
+      if (connection.signal.aborted) break;
+
+      const timestamp = Date.now();
+      if (timestamp >= heartbeatDue) {
+        heartbeatDue = timestamp + config.heartbeatMs;
+        const heartbeat = await sendHeartbeat(peer, service, runtimeNodeBootId);
+        if (connection.signal.aborted) break;
+        if (!heartbeat.accepted) {
+          throw new Error(
+            "control node rejected this runtime-node boot; registration must be renewed",
+          );
+        }
+        if (
+          heartbeat.p2pTicket !== undefined &&
+          controlNodeLocator.acceptRenewedTicket(heartbeat.p2pTicket)
+        ) {
+          // Update p2prpc's retained outbound target while this epoch is live so
+          // its own subscription/RPC reconnections use the renewed locator too.
+          await node.connect(controlNodeLocator.currentTarget());
+        }
+      }
+      if (timestamp >= inventoryDue) {
+        inventoryDue = timestamp + config.inventoryRefreshMs;
+        startJob("inventory", (jobSignal) =>
+          refreshAndReconcile(peer, service, runtimeNodeBootId, jobSignal));
+      }
+      if (timestamp >= metadataDue) {
+        metadataDue = timestamp + config.metadataFlushMs;
+        startJob("metadata", (jobSignal) =>
+          flushMetadataOutbox(peer, service, runtimeNodeBootId, jobSignal));
+      }
     }
+    if (backgroundFailure) throw backgroundFailure.error;
+  } finally {
+    connection.abort();
+    signal.removeEventListener("abort", abortConnection);
   }
 }
 
@@ -370,21 +432,25 @@ export async function refreshAndReconcile(
   peer: ControlNodePeer,
   service: Pick<RuntimeNodeService, "refreshInventory" | "applyCanonicalSessions">,
   runtimeNodeBootId: RuntimeNodeBootId,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) return;
   let inventory;
   try {
     inventory = await service.refreshInventory();
   } catch (error) {
     // A harness discovery failure is local and must not disconnect other
     // active runtimes. Control-node RPC failures below still escape and reconnect.
-    logError("inventory refresh", error);
+    if (!signal?.aborted) logError("inventory refresh", error);
     return;
   }
+  if (signal?.aborted) return;
   const result = await peer.rpc.ingress.runtimeNodes.reconcile.mutate({
     runtimeNodeId: inventory.runtimeNodeId,
     runtimeNodeBootId,
     snapshot: inventory,
   });
+  if (signal?.aborted) return;
   assertReconciliationMatchesInventory(inventory.runtimeNodeId, inventory.sessions, result.sessions);
   service.applyCanonicalSessions(result.sessions);
 }
@@ -438,17 +504,19 @@ export async function flushMetadataOutbox(
     "metadataOutbox" | "runtimeNodeId" | "settleMetadataOutbox"
   >,
   runtimeNodeBootId: RuntimeNodeBootId,
+  signal?: AbortSignal,
 ): Promise<void> {
+  if (signal?.aborted) return;
   const patches = service.metadataOutbox();
   if (patches.length === 0) return;
 
-  const results = metadataOperationRecordSchema.array().parse(
-    await peer.rpc.ingress.metadata.pushOutbox.mutate({
-      runtimeNodeId: service.runtimeNodeId,
-      runtimeNodeBootId,
-      patches,
-    }),
-  );
+  const response = await peer.rpc.ingress.metadata.pushOutbox.mutate({
+    runtimeNodeId: service.runtimeNodeId,
+    runtimeNodeBootId,
+    patches,
+  });
+  if (signal?.aborted) return;
+  const results = metadataOperationRecordSchema.array().parse(response);
   service.settleMetadataOutbox(results);
 }
 

@@ -38,6 +38,17 @@ individual failures and reports an aggregate error after all attempts finish.
 Embedding applications must close their SQLite store in `finally`, after
 awaiting service shutdown, including when shutdown rejects.
 
+Runtime registration starts presence heartbeats without waiting for initial
+native inventory or metadata delivery. Both maintenance lanes run independently
+and retain one in-flight job across reconnects. Results arriving after connection
+retirement or the 30-second acceptance deadline are discarded; a deadline does
+not cancel the underlying request or free its slot for duplicate work. Already
+dispatched control mutations remain governed by their boot, authority and stable
+operation-ID fences. Metadata retries retain those IDs. Presence therefore
+reports daemon connectivity independently of a stalled native harness; it does
+not prove that agent commands are responsive. Copilot read deadlines and recovery
+limits are described in the [adapter guide](Adapters-and-Terminals.md#stalled-copilot-reads).
+
 ## Bootstrap discipline
 
 Enrollment flags are temporary apertures. Open one role at a time, enroll and

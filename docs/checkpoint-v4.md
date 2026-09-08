@@ -1,5 +1,22 @@
 # Release qualification checkpoint
 
+## Copilot stalled-read recovery hotfix — 2026-09-08
+
+The `0.2.4-hotfix.9` candidate contains bounded/coalesced Copilot read-only calls,
+native activity reconciliation, mode observation and independent runtime presence
+maintenance. Timeouts discard late read results while retaining unresolved native
+slots; they never retry ambiguous mutations or imply native completion. Runtime
+maintenance retains one job per lane across reconnects and fences late results.
+No protocol, transport/native dependency or migration boundary changed.
+
+Typecheck/build, **826 deterministic tests across 89 files**, documentation,
+checkpoint and release metadata checks pass for this implementation. Private
+source/log checksums belong to `receipts/copilot-read-recovery/2026-09-08/`.
+Packed-consumer verification and immutable artifact identities will be recorded
+after those checks complete. Native-model qualification is waived under the
+owner's incremental hotfix exception; this entry claims no live model
+qualification or installed host activation.
+
 ## Bounded Codex turn detail hotfix — 2026-09-08
 
 Signed tag [`hotfix-2026-09-08.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.1) identifies source

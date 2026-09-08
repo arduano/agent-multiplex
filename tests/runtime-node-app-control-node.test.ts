@@ -14,15 +14,241 @@ import {
   type MetadataPatch,
   type RuntimeNodeRegistration,
 } from "@arduano/agent-multiplex-protocol";
-import { describe, expect, it, vi } from "vitest";
+import type { RuntimeNodeStore } from "@arduano/agent-multiplex-runtime-node-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   flushMetadataOutbox,
   refreshAndReconcile,
   register,
   sendHeartbeat,
+  superviseControlNodeConnection,
   type RuntimeNodeControlNodePeer,
 } from "../apps/runtime-node/src/main.js";
+import { PersistentControlNodeLocator } from "../apps/runtime-node/src/control-node-locator.js";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function maintenanceFixture() {
+  const runtimeNodeId = newRuntimeNodeId();
+  const runtimeNodeBootId = newRuntimeNodeBootId();
+  const inventory: InventorySnapshot = {
+    runtimeNodeId,
+    generation: newRuntimeEpoch(),
+    complete: true,
+    capturedAt: new Date().toISOString(),
+    sessions: [],
+  };
+  const registration: RuntimeNodeRegistration = {
+    runtimeNodeId,
+    runtimeNodeBootId,
+    name: "maintenance test",
+    allowedRoots: ["/tmp"],
+    harnesses: [],
+    launchProfiles: [],
+    protocolVersion: 5,
+  };
+  const patch: MetadataPatch = {
+    operationId: newOperationId(),
+    sessionId: newSessionId(),
+    expectedAuthority: {
+      realmId: newRealmId(),
+      controlNodeId: newControlNodeId(),
+      epochId: newAuthorityEpochId(),
+    },
+    set: { "agent.state": "queued" },
+  };
+  const service = {
+    runtimeNodeId,
+    describe: vi.fn(async () => registration),
+    refreshInventory: vi.fn(async () => inventory),
+    applyCanonicalSessions: vi.fn(),
+    metadataOutbox: vi.fn(() => [patch]),
+    settleMetadataOutbox: vi.fn(),
+  };
+  const makePeer = () => {
+    const register = vi.fn(async () => ({ accepted: true }));
+    const heartbeat = vi.fn(async () => ({ accepted: true }));
+    const reconcile = vi.fn(async () => ({ sessions: [], controlCursor: 1 }));
+    const pushOutbox = vi.fn(async (): Promise<MetadataOperationRecord[]> => []);
+    const peer = {
+      rpc: { ingress: {
+        runtimeNodes: {
+          register: { mutate: register },
+          heartbeat: { mutate: heartbeat },
+          reconcile: { mutate: reconcile },
+        },
+        metadata: { pushOutbox: { mutate: pushOutbox } },
+      } },
+    } as unknown as RuntimeNodeControlNodePeer;
+    return { peer, register, heartbeat, reconcile, pushOutbox };
+  };
+  const first = makePeer();
+  const second = makePeer();
+  const node = { connect: vi.fn(async () => first.peer) };
+  const locator = new PersistentControlNodeLocator({
+    getSetting: () => undefined,
+    setSetting: vi.fn(),
+  } as unknown as RuntimeNodeStore, {
+    endpointId: "disposable-maintenance-endpoint",
+    locator: { kind: "ticket", ticket: "disposable-maintenance-locator" },
+  });
+  const abort = new AbortController();
+  const start = () => superviseControlNodeConnection(
+    node, service, runtimeNodeBootId, locator,
+    { heartbeatMs: 1_000, inventoryRefreshMs: 2_000, metadataFlushMs: 1_000, reconnectMaxMs: 1 },
+    abort.signal,
+  );
+  return { inventory, patch, service, first, second, node, abort, start };
+}
+
+describe("runtime-node independent maintenance", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps heartbeats independent of initial stalled inventory and metadata, with bounded in-flight slots", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    const inventoryRead = deferred<InventorySnapshot>();
+    const metadataDelivery = deferred<MetadataOperationRecord[]>();
+    fixture.service.refreshInventory.mockImplementationOnce(() => inventoryRead.promise);
+    fixture.first.pushOutbox.mockImplementationOnce(() => metadataDelivery.promise);
+    const running = fixture.start();
+    await vi.advanceTimersByTimeAsync(35_000);
+    expect(fixture.first.heartbeat).toHaveBeenCalledTimes(35);
+    expect(fixture.service.refreshInventory).toHaveBeenCalledTimes(1);
+    expect(fixture.first.pushOutbox).toHaveBeenCalledTimes(1);
+    expect(errors).toHaveBeenCalledTimes(2);
+    inventoryRead.resolve(fixture.inventory);
+    metadataDelivery.resolve([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.first.reconcile).not.toHaveBeenCalled();
+    expect(fixture.service.applyCanonicalSessions).not.toHaveBeenCalled();
+    expect(fixture.service.settleMetadataOutbox).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(fixture.service.refreshInventory).toHaveBeenCalledTimes(2);
+    expect(fixture.first.reconcile).toHaveBeenCalledTimes(1);
+    expect(fixture.first.pushOutbox.mock.calls[1]).toEqual(fixture.first.pushOutbox.mock.calls[0]);
+    fixture.abort.abort();
+    await running;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("coalesces discovery across reconnects and never submits the retired connection's result", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    const inventoryRead = deferred<InventorySnapshot>();
+    fixture.service.refreshInventory.mockImplementationOnce(() => inventoryRead.promise);
+    fixture.first.heartbeat.mockResolvedValueOnce({ accepted: false });
+    fixture.node.connect.mockResolvedValueOnce(fixture.first.peer).mockResolvedValue(fixture.second.peer);
+    const running = fixture.start();
+    await vi.advanceTimersByTimeAsync(1_005);
+    expect(fixture.second.register).toHaveBeenCalledTimes(1);
+    expect(fixture.service.refreshInventory).toHaveBeenCalledTimes(1);
+    inventoryRead.resolve(fixture.inventory);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.first.reconcile).not.toHaveBeenCalled();
+    expect(fixture.second.reconcile).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fixture.service.refreshInventory).toHaveBeenCalledTimes(2);
+    expect(fixture.second.reconcile).toHaveBeenCalledTimes(1);
+    fixture.abort.abort();
+    await running;
+  });
+
+  it("does not apply late reconciliation or metadata acknowledgements after reconnect", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    const reconcile = deferred<{ sessions: []; controlCursor: number }>();
+    const metadataDelivery = deferred<MetadataOperationRecord[]>();
+    fixture.first.reconcile.mockImplementationOnce(() => reconcile.promise);
+    fixture.first.pushOutbox.mockImplementationOnce(() => metadataDelivery.promise);
+    fixture.first.heartbeat.mockRejectedValueOnce(new Error("connection lost"));
+    fixture.node.connect.mockResolvedValueOnce(fixture.first.peer).mockResolvedValue(fixture.second.peer);
+    const running = fixture.start();
+    await vi.advanceTimersByTimeAsync(1_005);
+    expect(fixture.first.reconcile).toHaveBeenCalledTimes(1);
+    expect(fixture.second.register).toHaveBeenCalledTimes(1);
+    expect(fixture.second.reconcile).not.toHaveBeenCalled();
+    expect(fixture.second.pushOutbox).not.toHaveBeenCalled();
+    reconcile.resolve({ sessions: [], controlCursor: 1 });
+    metadataDelivery.resolve([]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.service.applyCanonicalSessions).not.toHaveBeenCalled();
+    expect(fixture.service.settleMetadataOutbox).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fixture.service.applyCanonicalSessions).toHaveBeenCalledTimes(1);
+    expect(fixture.second.pushOutbox.mock.calls[0]).toEqual(fixture.first.pushOutbox.mock.calls[0]);
+    fixture.abort.abort();
+    await running;
+  });
+
+  it("returns promptly on abort and discards a late native discovery result", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    const inventoryRead = deferred<InventorySnapshot>();
+    fixture.service.refreshInventory.mockImplementationOnce(() => inventoryRead.promise);
+    const running = fixture.start();
+    await vi.advanceTimersByTimeAsync(1);
+    fixture.abort.abort();
+    await running;
+    inventoryRead.resolve(fixture.inventory);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fixture.first.reconcile).not.toHaveBeenCalled();
+    expect(fixture.service.applyCanonicalSessions).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("renews registration after a live reconciliation rejection", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    fixture.first.reconcile.mockRejectedValueOnce(new Error("stale registration"));
+    fixture.node.connect.mockResolvedValueOnce(fixture.first.peer).mockResolvedValue(fixture.second.peer);
+    const running = fixture.start();
+    await vi.advanceTimersByTimeAsync(5);
+    expect(fixture.second.register).toHaveBeenCalledTimes(1);
+    expect(fixture.second.reconcile).toHaveBeenCalledTimes(1);
+    fixture.abort.abort();
+    await running;
+  });
+
+  it("retries local discovery and durable outbox failures without disconnecting the heartbeat", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    fixture.service.refreshInventory.mockRejectedValueOnce(new Error("native discovery unavailable"));
+    fixture.first.pushOutbox.mockRejectedValueOnce(new Error("metadata acknowledgement unavailable"));
+    const running = fixture.start();
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(fixture.node.connect).toHaveBeenCalledTimes(1);
+    expect(fixture.first.heartbeat).toHaveBeenCalledTimes(2);
+    expect(fixture.service.refreshInventory).toHaveBeenCalledTimes(2);
+    expect(fixture.first.reconcile).toHaveBeenCalledTimes(1);
+    expect(fixture.first.pushOutbox.mock.calls[1]).toEqual(fixture.first.pushOutbox.mock.calls[0]);
+    fixture.abort.abort();
+    await running;
+  });
+});
 
 describe("runtime-node control-node RPC path", () => {
   it("uses ingress for registration, heartbeat, reconciliation, and metadata", async () => {

@@ -150,18 +150,46 @@ child events. Missing or failed native reads stay unknown, and delayed replies
 cannot replace newer native choices or acknowledged commands. Native model IDs,
 including an explicit `auto`, are preserved without inferring a default.
 
+Native mode is similarly read through `session.mode.get` on attachment and
+mirrored from root `session.mode_changed` events. Approving a native plan can
+therefore update the acknowledged mode without a Multiplex `setMode` command.
+Children cannot change the root mode; newer native transitions fence delayed
+reads and command acknowledgements. Missing or failed native observations remain
+unknown, while an SDK without the optional read keeps its acknowledged mode.
+
 Copilot's `assistant.idle` only means its main processing loop paused. Attached
 shell commands and background agents can still be running, so it does not mark
 the session done. Root `session.idle` supplies the whole-session idle signal;
 unresolved root interactions continue to report waiting for input.
 
-Attachment also reads native `metadata.activity()` when supported. This restores
-working status after joining a running turn whose start event predates the
-attachment. Resume's `sessionWasActive`/`continuePendingWork` flags remain visible
-when that observation is unavailable. Newer lifecycle events or pending root
+Attachment and ordinary inventory refresh also read native `metadata.activity()`
+when supported, using the existing active SDK handle. This restores working status
+after joining a running turn and reconciles missed whole-session idle events.
+The native observation supplies `hasActiveWork` and `abortable`, not a breakdown
+of tools or subagents. Resume's `sessionWasActive`/`continuePendingWork` flags remain visible
+when that observation API is absent. Newer lifecycle events or pending root
 interactions fence delayed activity reads. Sending another prompt cannot hide an
 unresolved question or permission, and a duplicate completion for a retired
 permission cannot restart the displayed working state.
+
+### Stalled Copilot reads
+
+Native history, queue, activity, model, mode, permissions and adapter discovery reads
+have a 15-second caller deadline. Primary-history page-size reductions share the
+same deadline. Identical in-flight reads coalesce; a different cursor or observation
+revision cannot reuse an older response. A timeout releases the runtime read's
+caller, but the underlying native request keeps its slot until it settles. Its
+late result is discarded. Repeated refreshes therefore fail promptly without
+piling up new native requests; at most 256 unresolved read calls are retained
+across the adapter's session handles. A failed activity read marks an unchanged
+running/idle observation unknown. Newer native events, errors and pending input
+remain authoritative; no read failure invents completion.
+
+These deadlines do not cancel native work, repair a stalled shared SDK server,
+resume sessions or retry commands. Sends, steering, settings, interrupts and
+lifecycle mutations keep their existing acknowledgement/unknown-outcome rules.
+The runtime daemon's presence heartbeat remains independent of inventory and
+metadata maintenance; see [process supervision](Operations.md#process-supervision).
 
 ### Copilot pending messages
 
