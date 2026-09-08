@@ -56,6 +56,17 @@ event index). It describes an omission, never synthetic native output. Clients
 must show that gap explicitly. The original item remains in harness-owned history;
 this has no retention, archive, or image-store effect.
 
+Codex's capability-gated `history.native.turns` view reads bounded native
+`thread/turns/list` pages independently of item history. It preserves turn
+status, error, timestamps and cursors; a client can request the newest turn
+without scanning earlier conversation items or mistaking an older failure for
+the current outcome. Oversized pages are re-read at the same native input cursor
+with smaller limits. One oversized summary is re-read with native
+`itemsView: "notLoaded"`, which preserves metadata and explicitly describes the
+absent item detail. If that metadata is still oversized, failure or the opt-in
+omission remains explicit. This observation adds no catalog authority or lifecycle
+mutation; idle status alone does not prove success or error recovery.
+
 Copilot's opt-in primary history view delegates ownership selection to native
 `eventLog.read` before applying its page limit. It preserves native root events
 and subagent lifecycle markers, leaving the default full-history view intact.

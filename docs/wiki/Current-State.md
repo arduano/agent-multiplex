@@ -5,7 +5,24 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-07.
+Last reconciled: 2026-09-08.
+
+## Bounded Codex failed-turn detail candidate
+
+The `0.2.4-hotfix.8` candidate adds optional `history.native.turns` v1. A client
+can request one newest native turn to recover its exact status/error after a
+reload; existing item history and metadata reads retain their behavior. Native
+summary pages stay bounded, falling back to the pinned native `notLoaded` view
+for a single oversized summary. No provider decisions are reclassified by the
+adapter, and history reads issue no command or automatic retry of agent work.
+See [native history](Adapters-and-Terminals.md#bounded-native-history).
+
+The source passes typecheck/build, **783 deterministic tests**, checkpoint,
+documentation and release metadata checks. Native-model qualification is waived
+under the existing incremental hotfix exception; no live qualification or
+installed rollout is claimed here. Protocol v5, transport/native dependencies
+and migrations are unchanged. Publication evidence belongs to the checkpoint;
+installed runtime activation belongs to the personal consumer repository.
 
 ## Standalone authority attachment hotfix
 

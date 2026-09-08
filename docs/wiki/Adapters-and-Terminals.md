@@ -51,6 +51,22 @@ mechanism below. An expired native cursor fails with
 their history window instead of appending the native fallback as older messages.
 The primary view counts native events, not rendered conversation messages.
 
+Codex clients with `history.native.turns` v1 can select
+`includeTurns: true, native: { view: "turns", sortDirection: "desc" }`, usually
+with `limit: 1`, to read the latest turn's status/error after reconnect. This
+delegates to native `thread/turns/list` with `itemsView: "summary"`; the payload
+keeps native `{ data, nextCursor, backwardsCursor }` and unmodified turn fields.
+These turn cursors are separate from item-history cursors. Pages are capped at
+100 turns and re-read at the same cursor with smaller limits when oversized.
+A single oversized summary first falls back to native `itemsView: "notLoaded"`,
+preserving turn metadata and explicitly reporting absent item details. If that
+metadata is also oversized, the ordinary explicit-omission rule below applies.
+There is no full-history fallback or scan for an older failure; idle status alone
+cannot establish the latest turn's outcome. Existing runtime history attachment
+policy applies, and temporary history handles do not activate a stopped catalog
+binding. An omitted view
+retains existing item history. Unknown explicit views fail.
+
 An individual native item may exceed the wire envelope even at page size one.
 By default this is an error. Clients opting into
 `request.native.omitOversizedItems: true` instead receive an empty native page,
@@ -66,7 +82,8 @@ The runtime supervises one worker-local `codex app-server` on an owner-only
 Unix-socket directory. Structured adapter connections and managed stock TUIs
 address the same server and vendor session. The adapter supports native model,
 collaboration mode, reasoning effort, turn settings, prompts/steering,
-interrupts, approvals and `request_user_input`, events, bounded `thread/items/list` history pages,
+interrupts, approvals and `request_user_input`, events, bounded `thread/items/list`
+history and optional `thread/turns/list` status/error pages,
 and metadata-only `thread/read` reads according to the pinned Codex version.
 
 A managed TUI runs conceptually as:

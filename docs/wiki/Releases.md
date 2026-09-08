@@ -139,7 +139,7 @@ implicitly receive access to the independently published p2prpc package.
 The owner requested rapid incremental deployments with focused checks and a
 single full release gate at the end. The `0.2.4-hotfix.*` candidates may therefore
 be distributed as explicitly unqualified GitHub prerelease tarballs under signed
-`hotfix-2026-09-07.*` tags. These use the exact release toolchain, clean committed
+`hotfix-YYYY-MM-DD.*` tags. These use the exact release toolchain, clean committed
 source, normal artifact manifests/checksums, focused tests and a production
 build. Consumers still pin exact published tarball URLs and integrities. No
 local dependency, registry `latest` promotion, native-model qualification claim,

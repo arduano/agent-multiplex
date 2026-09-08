@@ -40,6 +40,8 @@ import type { ThreadBackgroundTerminalsListResponse } from "./generated/v2/Threa
 import type { ThreadListResponse } from "./generated/v2/ThreadListResponse.js";
 import type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
 import type { ThreadItemsListResponse } from "./generated/v2/ThreadItemsListResponse.js";
+import type { ThreadTurnsListParams } from "./generated/v2/ThreadTurnsListParams.js";
+import type { ThreadTurnsListResponse } from "./generated/v2/ThreadTurnsListResponse.js";
 import type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.js";
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
@@ -239,6 +241,7 @@ export class CodexAdapter implements AgentAdapter {
           { name: "thread.resume", version: "v2", experimental: false },
           { name: "thread.loaded.list", version: "v2", experimental: false },
           { name: "thread.read-native-history", version: "v2", experimental: false },
+          { name: "history.native.turns", version: "v1", experimental: false },
           { name: "turn.steer", version: "v2", experimental: false },
           { name: "turn.interrupt", version: "v2", experimental: false },
           { name: "turn.settings.update", version: "v2", experimental: true },
@@ -827,6 +830,11 @@ class CodexSession implements AdapterSession {
 
   public async readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
     if (request.harness !== "codex") throw new Error("history request harness mismatch");
+    if (request.native?.view !== undefined && request.native.view !== "turns") throw new TypeError("Unsupported Codex native history view");
+    if (request.native?.view === "turns") {
+      if (!request.includeTurns) throw new TypeError("Codex turns history requires includeTurns");
+      return this.#readNativeTurns(request);
+    }
     if (request.includeTurns) {
       const sortDirection = request.native?.sortDirection ?? "asc";
       if (sortDirection !== "asc" && sortDirection !== "desc") throw new TypeError("Invalid Codex history sort direction");
@@ -880,6 +888,54 @@ class CodexSession implements AdapterSession {
       payload: json(response),
       complete: true,
     };
+  }
+
+  async #readNativeTurns(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
+    const sortDirection = request.native?.sortDirection ?? "asc";
+    if (sortDirection !== "asc" && sortDirection !== "desc") throw new TypeError("Invalid Codex history sort direction");
+    let limit = Math.min(request.limit ?? 100, 100);
+    let itemsView: ThreadTurnsListParams["itemsView"] = "summary";
+    for (;;) {
+      const response = await this.#rpc.request<ThreadTurnsListResponse>("thread/turns/list", {
+        threadId: this.vendorSessionId, cursor: request.cursor ?? null, limit, sortDirection, itemsView,
+      } satisfies ThreadTurnsListParams);
+      if (!Array.isArray(response?.data) || response.data.length > limit ||
+        !(response.nextCursor === null || typeof response.nextCursor === "string") ||
+        !(response.backwardsCursor === null || typeof response.backwardsCursor === "string")) {
+        throw new TypeError("Unrecognized Codex turns history page");
+      }
+      const page = json(response);
+      if (codexHistoryPageBytes(page) <= NATIVE_PAYLOAD_MAX_BYTES && codexImageLeaves(page).length <= 256) {
+        return {
+          harness: "codex", vendorSessionId: this.vendorSessionId, payload: page, sortDirection,
+          complete: response.nextCursor === null,
+          ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
+        };
+      }
+      if (limit > 1) {
+        // Keep the native input cursor fixed until its whole page fits.
+        limit = Math.max(1, Math.floor(limit / 2));
+        continue;
+      }
+      if (itemsView === "summary") {
+        // Native summary can contain an oversized last item. The pinned native
+        // metadata view preserves error/status without inventing truncated items.
+        itemsView = "notLoaded";
+        continue;
+      }
+      if (request.native?.omitOversizedItems !== true) throw new Error("One native Codex history turn exceeds the bounded wire envelope");
+      const omitted = json({ ...response, data: [] });
+      if (codexHistoryPageBytes(omitted) > NATIVE_PAYLOAD_MAX_BYTES) throw new Error("Codex turns history cursors exceed the bounded wire envelope");
+      const turn = response.data[0];
+      return {
+        harness: "codex", vendorSessionId: this.vendorSessionId, payload: omitted, sortDirection,
+        complete: response.nextCursor === null,
+        ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
+        unavailableItem: { reason: "exceedsWireLimit",
+          ...(typeof turn?.id === "string" && turn.id.length <= 1_024 ? { nativeItemId: turn.id } : {}),
+        },
+      };
+    }
   }
 
   public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
