@@ -7,9 +7,9 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-08.
 
-## Bounded Codex failed-turn detail candidate
+## Bounded Codex failed-turn detail hotfix
 
-The `0.2.4-hotfix.8` candidate adds optional `history.native.turns` v1. A client
+The published [`0.2.4-hotfix.8` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.1) adds optional `history.native.turns` v1. A client
 can request one newest native turn to recover its exact status/error after a
 reload; existing item history and metadata reads retain their behavior. Native
 summary pages stay bounded, falling back to the pinned native `notLoaded` view
@@ -18,7 +18,9 @@ adapter, and history reads issue no command or automatic retry of agent work.
 See [native history](Adapters-and-Terminals.md#bounded-native-history).
 
 The source passes typecheck/build, **783 deterministic tests**, checkpoint,
-documentation and release metadata checks. Native-model qualification is waived
+documentation, release metadata and all 16 isolated packed-consumer checks.
+Published artifacts were independently downloaded and checksum-verified.
+Native-model qualification is waived
 under the existing incremental hotfix exception; no live qualification or
 installed rollout is claimed here. Protocol v5, transport/native dependencies
 and migrations are unchanged. Publication evidence belongs to the checkpoint;

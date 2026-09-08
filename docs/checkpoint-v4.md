@@ -2,7 +2,9 @@
 
 ## Bounded Codex turn detail hotfix — 2026-09-08
 
-Candidate `0.2.4-hotfix.8` adds capability-gated native turn status/error paging.
+Signed tag [`hotfix-2026-09-08.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.1) identifies source
+`a4c69378ac16adc4f00adcd071e2efe65f537514` and all 16 `0.2.4-hotfix.8` package
+artifacts. It adds capability-gated native turn status/error paging.
 The adapter preserves native errors, timestamps and cursors, with bounded
 summary reads and native `notLoaded` fallback. Native decisions and ordinary
 item history remain unchanged. No wire, transport/native dependency or
@@ -12,9 +14,13 @@ Typecheck/build, **783 deterministic tests across 88 files**, checkpoint,
 documentation and release metadata checks passed on the implementation source.
 Private source/log checksums are recorded in
 `receipts/codex-turn-detail/2026-09-08/source-checks.json`. This is deterministic
-source evidence, not native-model qualification. Artifact publication and
-installed rollout remain separate; the owner has waived model-using release
-qualification for these incremental hotfixes.
+source evidence, not native-model qualification. All 16 isolated packed consumers
+also passed using the configured GitHub Packages credential. An initial attempt
+using the GitHub CLI token failed with insufficient registry scopes; that failure
+is diagnostic only. All 19 published assets were independently downloaded and
+verified against the local artifacts. Installed rollout remains in the consumer
+repository; the owner has waived model-using release qualification for these
+incremental hotfixes.
 
 ## Codex goals and unavailable Copilot recovery — 2026-09-07
 
