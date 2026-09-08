@@ -9,7 +9,7 @@ Last reconciled: 2026-09-08.
 
 ## Copilot stalled-read and presence recovery hotfix
 
-The `0.2.4-hotfix.9` candidate bounds read-only Copilot SDK requests and retains
+The published [`0.2.4-hotfix.9` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.2) bounds read-only Copilot SDK requests and retains
 stalled calls until native settlement, preventing refresh/reconnect request piles.
 Inventory observes whole-session activity through existing native handles. A failed
 observation reports unknown while newer lifecycle events, errors and actionable
@@ -18,8 +18,10 @@ native inventory and metadata maintenance. Native mode reads/events also keep
 acknowledged mode current after plan approval. See [adapter recovery](Adapters-and-Terminals.md#stalled-copilot-reads)
 and [process supervision](Operations.md#process-supervision).
 
-Typecheck/build, **826 deterministic tests**, documentation, checkpoint and
-release metadata checks pass. This remains an incremental prerelease under the owner's native-model
+Typecheck/build, **826 deterministic tests**, documentation, checkpoint, release
+metadata and all 16 isolated packed-consumer checks pass. The release-build SBOM
+contains all packages and bundled web identities; all 19 published assets were
+independently downloaded and checksum-verified. This remains an incremental prerelease under the owner's native-model
 qualification waiver. Protocol v5, transport/native pins and migrations are
 unchanged; mutation ambiguity and stable operation IDs retain their existing
 semantics. No native-model or installed-rollout qualification is claimed. The

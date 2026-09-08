@@ -2,7 +2,9 @@
 
 ## Copilot stalled-read recovery hotfix — 2026-09-08
 
-The `0.2.4-hotfix.9` candidate contains bounded/coalesced Copilot read-only calls,
+Signed tag [`hotfix-2026-09-08.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.2) identifies source
+`77a3898254a367c81ba43c69293aab4c62f8ff98` and all 16 `0.2.4-hotfix.9` packages.
+The release contains bounded/coalesced Copilot read-only calls,
 native activity reconciliation, mode observation and independent runtime presence
 maintenance. Timeouts discard late read results while retaining unresolved native
 slots; they never retry ambiguous mutations or imply native completion. Runtime
@@ -12,10 +14,14 @@ No protocol, transport/native dependency or migration boundary changed.
 Typecheck/build, **826 deterministic tests across 89 files**, documentation,
 checkpoint and release metadata checks pass for this implementation. Private
 source/log checksums belong to `receipts/copilot-read-recovery/2026-09-08/`.
-Packed-consumer verification and immutable artifact identities will be recorded
-after those checks complete. Native-model qualification is waived under the
-owner's incremental hotfix exception; this entry claims no live model
-qualification or installed host activation.
+All 16 isolated packed consumers pass using the configured GitHub Packages read
+credential. The release-build SBOM contains 507 components, including all 16
+packages and 125 bundled web identities. Published at `2026-09-08T11:46:09Z`,
+all 19 assets were independently downloaded and compared with local artifacts;
+all tarball SHA256 and SHA512 integrities match the manifest. Both source commit
+and tag signatures verify against the tracked release signers. Native-model
+qualification is waived under the owner's incremental hotfix exception; this
+entry claims no live model qualification or installed host activation.
 
 ## Bounded Codex turn detail hotfix — 2026-09-08
 
