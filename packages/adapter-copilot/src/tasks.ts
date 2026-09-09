@@ -38,7 +38,7 @@ const schemas = {
   currentPromotableTask: z.object({ task: task.optional() }).passthrough(),
 };
 
-export type CopilotTaskView = keyof typeof schemas;
+export type CopilotTaskView = "tasks" | "taskProgress" | "currentPromotableTask";
 export function taskId(value: unknown): string { return id.parse(value); }
 export function taskSnapshot(view: CopilotTaskView, value: unknown): JsonValue {
   if (jsonWireByteUpperBound(value) + 256 > NATIVE_PAYLOAD_MAX_BYTES) {

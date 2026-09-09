@@ -6,8 +6,9 @@ The `0.2.4-hotfix.10` candidate adds native Copilot task observation, progress,
 exact-ID promotion and cancellation. Read lanes retain stalled calls, metadata
 refresh cannot outlive its list deadline, and mutation ambiguity preserves the
 original durable operation. Security/notices review covers read versus
-agent-control authorization; no dependency, migration or protocol-version change
-is included.
+agent-control authorization. The adapter directly declares the already locked
+Zod validator; no new third-party package, migration, native/transport pin or
+protocol-version change is included.
 
 Source validation passed: typecheck/build, **848 deterministic tests across 90
 files**, checkpoint, documentation, release metadata and source-secret checks.

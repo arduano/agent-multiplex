@@ -32,8 +32,9 @@ embed that text itself.
   <https://github.com/microsoft/node-pty>.
 
 Native Copilot task observation and control call the existing pinned SDK APIs.
-They add no dependency, copied vendor source, bundled executable or process-control
-library; the SDK and CLI terms above continue to apply to those components.
+They use the already locked MIT-licensed Zod validation library and add no new
+third-party package, copied vendor source, bundled executable or process-control
+library. The SDK and CLI terms above continue to apply to those components.
 
 ## Web client code and assets
 
