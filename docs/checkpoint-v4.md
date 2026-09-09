@@ -1,5 +1,34 @@
 # Release qualification checkpoint
 
+## Native context compaction hotfix — 2026-09-09
+
+Signed tag [`hotfix-2026-09-09.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.2) identifies source
+`e5846a5e068ef01d37a82e893291bad19671c9f1` and all 16 `0.2.4-hotfix.11` packages.
+The release adds explicit native Codex/Copilot compaction through the existing
+stable command and active-binding fences. Codex preserves its start
+acknowledgement, while Copilot preserves completion counters and false results.
+Malformed, oversized, lost or retired-binding acknowledgements remain unknown
+without replay. Security/notices review records agent-control authorization and
+potential provider/model calls. No new third-party package, migration,
+native/transport pin, generated declaration or protocol-version change is included.
+
+Source validation passed: typecheck/build, **874 deterministic tests across 92
+files**, checkpoint, documentation, release metadata and source-secret checks.
+The exact release toolchain is Node `24.19.0` and npm `11.17.0`. The high-severity
+npm audit passes; two existing moderate Vitest development-tool advisories remain
+outside this change. All 16 role-isolated packed consumers pass. The SBOM contains
+507 release-build components, including all 16 packages and 125 bundled web
+identities.
+
+Published at `2026-09-09T05:46:47Z`, all 19 assets were independently downloaded
+and byte-compared with the validated artifact set. Tarball SHA1/SHA256/SHA512,
+sizes, source commit and exact toolchain match the public manifest. Source commit
+and tag signatures verify against the tracked release signers. Scrubbed and
+checksummed evidence belongs to `receipts/native-compaction/2026-09-09/`.
+This is the owner-authorized incremental prerelease exception; native-model
+qualification is waived. Native compaction itself may make model requests, so no
+live compaction, Windows qualification or installed-host activation is claimed.
+
 ## Copilot native task controls hotfix — 2026-09-09
 
 Signed tag [`hotfix-2026-09-09.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.1) identifies source
