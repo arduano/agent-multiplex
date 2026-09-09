@@ -46,6 +46,9 @@ disclosure.
 ## Security boundaries
 
 - Control nodes are trusted canonical metadata/catalog authorities.
+- Answering or expiring an imported interaction preserves its admitted child
+  ownership. It does not authorize identity transfer or weaken snapshot and
+  terminal-response conflict checks.
 - Initial receipt handoff trusts the authenticated standalone child's prior
   authority only during its first complete snapshot. The parent persists this
   admission and accepts no later invented historical receipt or changed terminal

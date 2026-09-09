@@ -7,6 +7,21 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-09.
 
+## Imported interaction ownership hotfix
+
+Candidate `0.2.4-hotfix.12` preserves child projection ownership when an
+interaction is resolved, expires, is republished or becomes stale. Previously an
+authority-side lifecycle update could clear that marker, causing a later valid
+child snapshot to be rejected as an identity takeover. Existing snapshot and
+terminal-answer conflict checks remain intact. No migration, protocol or native
+dependency change is involved; an existing damaged marker requires a separately
+reviewed, backed-up repair. See [interaction guidance](Lifecycle-Metadata-and-Search.md#history-and-interactions).
+
+Typecheck/build, **879 deterministic tests**, checkpoint, documentation,
+release metadata and source-secret checks pass. Artifact verification is in
+progress. Native-model qualification remains waived for this incremental
+prerelease. Installed repair and activation belong to the personal consumer handoff.
+
 ## Native context compaction hotfix
 
 The published [`0.2.4-hotfix.11` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.2) adds `context.compact` v1 for native Codex and

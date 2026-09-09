@@ -2234,7 +2234,9 @@ export class ControlNodeCatalog {
       : interaction;
     if (current && sameCanonicalJson(current, merged)) return current;
     this.#mutate(() => {
-      this.#putInteraction(merged, null);
+      this.#putInteraction(merged, current
+        ? this.#projectionSource("interactions", "interaction_id", current.interactionId)
+        : this.#projectionSource("sessions", "session_id", session.sessionId));
       this.#appendControl({ type: "interaction.changed", interaction: merged });
     });
     return merged;
@@ -2260,7 +2262,12 @@ export class ControlNodeCatalog {
     const merged = mergeInteractionRecord(current, interaction);
     if (sameCanonicalJson(current, merged)) return current;
     this.#mutate(() => {
-      this.#putInteraction(merged, null);
+      // Resolving or expiring an imported interaction changes its lifecycle,
+      // not the child projection that owns it. Clearing this marker makes the
+      // next child snapshot look like a foreign identity takeover.
+      this.#putInteraction(merged, this.#projectionSource(
+        "interactions", "interaction_id", current.interactionId,
+      ));
       this.#appendControl({ type: "interaction.changed", interaction: merged });
     });
     return merged;
@@ -3961,7 +3968,9 @@ export class ControlNodeCatalog {
         state: "stale",
         resolvedAt: timestamp,
       });
-      this.#putInteraction(stale, null);
+      this.#putInteraction(stale, this.#projectionSource(
+        "interactions", "interaction_id", interaction.interactionId,
+      ));
       this.#appendControl({ type: "interaction.changed", interaction: stale });
     }
   }

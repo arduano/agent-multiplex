@@ -126,6 +126,13 @@ sibling subtrees is a conflict, not a deduplication opportunity.
 
 ## History and interactions
 
+Resolving, expiring or retiring an imported interaction preserves its child
+projection ownership. A terminal answer does not make the record local to the
+authority. Otherwise the next child reconnect would reject its valid snapshot
+as an identity takeover. Snapshot ownership and terminal-answer conflict checks
+continue to fail closed. Existing damaged ownership markers require a backed-up,
+fenced catalog repair; restarting the native agent does not repair them.
+
 `sessions.readNativeHistory` always routes to the recorded provider/backend and
 harness adapter. Multiplex does not read `.codex`, Copilot session files, or
 terminal scrollback. Preserve native payloads and pagination semantics.

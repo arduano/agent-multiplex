@@ -237,6 +237,15 @@ receipts, but cannot invent or change them. The parent keeps imported terminal
 receipts outside the replaceable child projection, so resnapshot cannot erase
 its idempotency evidence.
 
+Interaction records retain their admitted child projection across local
+resolution, expiry and retirement. These lifecycle changes never transfer
+ownership to the authority or to another child. Repeated native publication
+preserves an existing interaction's projection; first publication follows its
+owning session. Resnapshot still rejects foreign identities and conflicting
+terminal responses. Repair of an older missing projection marker must establish
+the exact session/runtime/attachment provenance before restoring that marker;
+it must not change the native interaction payload or response.
+
 An exact terminal metadata operation can be reconciled after its authority
 changes; an unknown request with an old authority fence remains rejected. No old
 queued proposal is silently retargeted or applied twice. A lost initial attach
