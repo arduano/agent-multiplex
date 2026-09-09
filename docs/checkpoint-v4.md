@@ -1,5 +1,33 @@
 # Release qualification checkpoint
 
+## Imported interaction ownership hotfix — 2026-09-09
+
+Signed tag [`hotfix-2026-09-09.3`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.3)
+identifies source `a5a6ef8d77e528c40728353560b9d8299c07a8af` and 16 packages at
+`0.2.4-hotfix.12`. Interaction resolution, expiry, republication and retirement
+preserve imported child projection ownership. Snapshot takeover and conflicting
+terminal-answer checks remain enforced. No migration, native/transport pin,
+protocol, or third-party dependency changes are included. Existing corrupt
+markers require a separately fenced, backed-up repair.
+
+Typecheck/build, **879 tests across 93 files**, docs/checkpoint/release and
+source-secret checks pass. All 16 role-isolated packed consumers pass using the
+exact published transport tarball resolver; the release-build SBOM verifies
+507 components and 125 bundled web identities. All 19 published assets were
+independently downloaded, byte-compared and SHA256/SHA512-verified; signed source
+and tag signatures verify against the tracked signer list. The exact toolchain
+is Node `24.19.0` and npm `11.17.0`.
+
+The deterministic Docker control-tree suite passes at
+`receipts/protocol-v4-control-tree/20260909T060834Z-6954053c7b0f/`.
+The 10-runtime/100-session Docker scale suite passes at
+`receipts/protocol-v4-mock-docker-scale/20260909T061400Z-dde54c610e37/`.
+Scrubbed checksummed release evidence is in
+`receipts/interaction-ownership/2026-09-09/`. These are deterministic qualifications,
+with no native model calls. This uses the existing incremental prerelease
+exception and native-model waiver; stable registry promotion and installed-host
+qualification are not claimed.
+
 ## Native context compaction hotfix — 2026-09-09
 
 Signed tag [`hotfix-2026-09-09.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.2) identifies source

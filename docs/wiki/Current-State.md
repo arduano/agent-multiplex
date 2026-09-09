@@ -9,7 +9,7 @@ Last reconciled: 2026-09-09.
 
 ## Imported interaction ownership hotfix
 
-Candidate `0.2.4-hotfix.12` preserves child projection ownership when an
+The published [`0.2.4-hotfix.12` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.3) preserves child projection ownership when an
 interaction is resolved, expires, is republished or becomes stale. Previously an
 authority-side lifecycle update could clear that marker, causing a later valid
 child snapshot to be rejected as an identity takeover. Existing snapshot and
@@ -18,9 +18,12 @@ dependency change is involved; an existing damaged marker requires a separately
 reviewed, backed-up repair. See [interaction guidance](Lifecycle-Metadata-and-Search.md#history-and-interactions).
 
 Typecheck/build, **879 deterministic tests**, checkpoint, documentation,
-release metadata and source-secret checks pass. Artifact verification is in
-progress. Native-model qualification remains waived for this incremental
-prerelease. Installed repair and activation belong to the personal consumer handoff.
+release metadata and source-secret checks pass. All 16 isolated packed consumers,
+the SBOM, deterministic Docker control tree and 100-session/10-runtime scale suite
+pass. All 19 published assets were independently downloaded and verified.
+Native-model qualification remains waived for this incremental prerelease. The
+[checkpoint](../checkpoint-v4.md#imported-interaction-ownership-hotfix--2026-09-09)
+records release evidence; installed repair and activation belong to the consumer.
 
 ## Native context compaction hotfix
 
