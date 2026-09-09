@@ -2,7 +2,9 @@
 
 ## Copilot native task controls hotfix — 2026-09-09
 
-The `0.2.4-hotfix.10` candidate adds native Copilot task observation, progress,
+Signed tag [`hotfix-2026-09-09.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.1) identifies source
+`37816aa9a217bfbfd301825e6369d8f599ee85df` and all 16 `0.2.4-hotfix.10` packages.
+The release adds native Copilot task observation, progress,
 exact-ID promotion and cancellation. Read lanes retain stalled calls, metadata
 refresh cannot outlive its list deadline, and mutation ambiguity preserves the
 original durable operation. Security/notices review covers read versus
@@ -16,10 +18,21 @@ Codex regeneration from the exact pinned CLI is byte-identical after the tracked
 ESM normalization. The high-severity npm audit passes; two existing moderate
 Vitest development-tool advisories remain outside this API hotfix.
 
-This candidate follows the owner-authorized incremental prerelease exception.
-Native-model qualification is waived; disposable Linux shell API checks do not
-qualify Windows or model-driven agent/client behavior. Artifact and exact-source
-validation evidence will be recorded after the clean candidate is built.
+All 16 isolated packed consumers pass. The SBOM contains 507 release-build
+components, including all 16 published packages and 125 bundled web identities.
+The prerelease was published at `2026-09-09T03:16:07Z`; all 19 assets were
+independently downloaded and byte-compared, and tarball SHA256/SHA512 integrities
+match the artifact manifest. Source commit and tag signatures both verify against
+the tracked release signers. Local scrubbed/checksummed evidence belongs to
+`receipts/copilot-task-controls/2026-09-09/`.
+
+A disposable native Linux smoke on that exact clean source verified synchronous
+shell promotion, synchronous/background cancellation, progress, absent-ID no-ops
+and task-change events with **zero model/provider requests**. Its receipt is
+`receipts/copilot-native-tasks/2026-09-09T03-13-35.586Z/`.
+This follows the owner-authorized incremental prerelease exception; native-model
+qualification is waived. These checks do not qualify Windows or model-driven
+agent/client behavior, and no installed-host activation is claimed.
 
 ## Copilot stalled-read recovery hotfix — 2026-09-08
 

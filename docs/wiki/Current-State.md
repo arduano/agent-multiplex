@@ -9,14 +9,16 @@ Last reconciled: 2026-09-09.
 
 ## Copilot native task controls hotfix
 
-The `0.2.4-hotfix.10` incremental candidate adds capability-gated native Copilot
+The published [`0.2.4-hotfix.10` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.1) adds capability-gated native Copilot
 task lists/progress and durable exact-ID background-promotion/cancellation.
 Bounded active-binding reads preserve native task/model/owner fields without
 loading history; controls preserve definite no-ops and unknown mutation outcomes.
 See [tracked tasks](Adapters-and-Terminals.md#copilot-tracked-tasks).
 
 Typecheck/build, **848 deterministic tests across 90 files**, documentation,
-checkpoint, release metadata and high-severity dependency audit gates pass.
+checkpoint, release metadata and high-severity dependency audit gates pass. All
+16 isolated packed consumers and the release-build SBOM pass; all 19 published
+assets were independently downloaded and checksum-verified.
 The owner waived native-model qualification for incremental prerelease publication.
 Disposable Linux native shell checks make no model/provider requests; Windows and
 model-driven agent/client behavior remain UAT. Protocol v5, native/transport pins
