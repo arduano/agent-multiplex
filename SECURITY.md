@@ -70,6 +70,12 @@ disclosure.
   queue text in the catalog. Moving a queued message into a running turn requires
   `agent-control` and the durable command fence; unknown results must not be
   replaced by remove/resend.
+- Native Copilot task lists/progress use the active-binding `read` boundary
+  and can include commands, paths, prompt text and recent output. They never
+  resume stopped sessions or grant arbitrary shell/process access. Exact-ID
+  task promotion and cancellation require `agent-control` and the durable
+  command fence. False acknowledgements remain no-ops; an unknown result cannot
+  authorize another mutation, alternate task or process-termination fallback.
 - Native Codex goal observations use the same live-binding `read` boundary.
   Setting or clearing goals requires `agent-control` and a durable command ID;
   setting an active goal may cause Codex to continue work under its native

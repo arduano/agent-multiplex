@@ -159,3 +159,20 @@ include the provider object.
 See GitHub's pinned
 [custom-provider documentation](https://github.com/github/copilot-sdk/blob/v1.0.13/nodejs/README.md#custom-providers)
 for the upstream `ProviderConfig` surface.
+
+
+## Native tracked tasks
+
+Experimental `tasks.list`, `tasks.progress`, `tasks.promoteToBackground` and
+`tasks.cancel` v1 capabilities expose native task observations and exact-ID
+controls. Synchronous shell waits, background tasks and native model/owner
+attribution remain intact. Lists refresh detached-shell metadata and share a
+bounded read lane/deadline; they never load history or resume a stopped session.
+False mutation acknowledgements remain no-ops; uncertain acknowledgements use
+the existing durable command identity without retry or shell fallbacks.
+
+See [task operation guidance](../../docs/wiki/Adapters-and-Terminals.md#copilot-tracked-tasks)
+for view/command names, read limits, native caveats and client behavior. The
+[disposable native smoke](test/native-tasks-smoke.mjs) proves sync-shell
+promotion/cancellation without model requests; Windows and model-driven
+agent/client behavior remain separate UAT.

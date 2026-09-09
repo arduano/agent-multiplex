@@ -5,7 +5,23 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-08.
+Last reconciled: 2026-09-09.
+
+## Copilot native task controls hotfix
+
+The `0.2.4-hotfix.10` incremental candidate adds capability-gated native Copilot
+task lists/progress and durable exact-ID background-promotion/cancellation.
+Bounded active-binding reads preserve native task/model/owner fields without
+loading history; controls preserve definite no-ops and unknown mutation outcomes.
+See [tracked tasks](Adapters-and-Terminals.md#copilot-tracked-tasks).
+
+Typecheck/build, **848 deterministic tests across 90 files**, documentation,
+checkpoint, release metadata and high-severity dependency audit gates pass.
+The owner waived native-model qualification for incremental prerelease publication.
+Disposable Linux native shell checks make no model/provider requests; Windows and
+model-driven agent/client behavior remain UAT. Protocol v5, native/transport pins
+and migrations are unchanged. The [checkpoint](../checkpoint-v4.md#copilot-native-task-controls-hotfix--2026-09-09)
+records the source and artifact evidence; installed activation belongs to the consumer.
 
 ## Copilot stalled-read and presence recovery hotfix
 

@@ -112,6 +112,25 @@ item; missing or malformed acknowledgements remain outcome unknown and may only
 be reconciled under the original command identity. Queue observations do not
 themselves imply a mutation outcome or retry authorization.
 
+Copilot tracked task observations use the same active-binding read surface. The
+`tasks` view performs only native detached-shell metadata refresh and listing;
+its entire two-step read shares a caller deadline and retains an unresolved
+native read lane after timeout. An expired refresh never dispatches a later list.
+Task/progress snapshots preserve native sync/background execution, eligibility,
+owner/model attribution, and explicit absence. No gateway task authority, native
+history scan, process discovery, or implicit session activation is introduced.
+The complete snapshot is bounded; unsupported, malformed or oversized native
+responses fail rather than masquerading as an empty task list.
+
+`promoteTaskToBackground` and `cancelTask` use the ordinary durable harness
+command journal and exact native task ID, not a PID, display name or tool-call
+ID. Promotion releases only the native eligible sync waiter; cancellation uses
+only the native task API. False acknowledgements remain definite no-ops. Missing
+or lost acknowledgements retain the original unknown outcome and never trigger
+a second task mutation or a shell/process fallback. Native task-change events
+invalidate observations without overriding whole-session liveness. A task read
+or changed status does not authorize replay of an uncertain mutation.
+
 Codex goal state belongs exclusively to the native app server. Its read view
 preserves a native goal or explicit absence; unsupported, malformed, oversized
 and stale-binding observations fail instead of reporting no goal. Root native

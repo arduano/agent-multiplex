@@ -1,5 +1,25 @@
 # Release qualification checkpoint
 
+## Copilot native task controls hotfix — 2026-09-09
+
+The `0.2.4-hotfix.10` candidate adds native Copilot task observation, progress,
+exact-ID promotion and cancellation. Read lanes retain stalled calls, metadata
+refresh cannot outlive its list deadline, and mutation ambiguity preserves the
+original durable operation. Security/notices review covers read versus
+agent-control authorization; no dependency, migration or protocol-version change
+is included.
+
+Source validation passed: typecheck/build, **848 deterministic tests across 90
+files**, checkpoint, documentation, release metadata and source-secret checks.
+Codex regeneration from the exact pinned CLI is byte-identical after the tracked
+ESM normalization. The high-severity npm audit passes; two existing moderate
+Vitest development-tool advisories remain outside this API hotfix.
+
+This candidate follows the owner-authorized incremental prerelease exception.
+Native-model qualification is waived; disposable Linux shell API checks do not
+qualify Windows or model-driven agent/client behavior. Artifact and exact-source
+validation evidence will be recorded after the clean candidate is built.
+
 ## Copilot stalled-read recovery hotfix — 2026-09-08
 
 Signed tag [`hotfix-2026-09-08.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.2) identifies source

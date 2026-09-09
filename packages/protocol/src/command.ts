@@ -93,6 +93,8 @@ export const copilotCommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("setPermissionMode"), mode: z.enum(["manual", "allow-all"]) }).strict(),
   z.object({ type: z.literal("steerQueuedMessage"), id: z.string().min(1).max(4_096) }).strict(),
+  z.object({ type: z.literal("promoteTaskToBackground"), id: z.string().min(1).max(4_096) }).strict(),
+  z.object({ type: z.literal("cancelTask"), id: z.string().min(1).max(4_096) }).strict(),
 ]);
 
 export const harnessCommandSchema = z.discriminatedUnion("harness", [

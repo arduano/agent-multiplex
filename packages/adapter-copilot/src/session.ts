@@ -29,6 +29,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 import { copilotJson, jsonRecord, requiredString } from "./json.js";
+import { taskId, taskSnapshot } from "./tasks.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
@@ -47,6 +48,14 @@ export interface CopilotSessionRpc {
   queue?: {
     pendingItems(): Promise<unknown>;
     sendNow(input: { id: string }): Promise<unknown>;
+  };
+  tasks?: {
+    list(): Promise<unknown>;
+    refresh(): Promise<unknown>;
+    getProgress(input: { id: string }): Promise<unknown>;
+    getCurrentPromotable(): Promise<unknown>;
+    promoteToBackground(input: { id: string }): Promise<unknown>;
+    cancel(input: { id: string }): Promise<unknown>;
   };
   metadata?: {
     activity(): Promise<unknown>;
@@ -537,6 +546,21 @@ export class CopilotAdapterSession implements AdapterSession {
           return { steered: result.steered };
         });
       }
+      case "promoteTaskToBackground":
+      case "cancelTask": {
+        const tasks = this.#native.rpc.tasks;
+        const action = command.type === "cancelTask" ? tasks?.cancel : tasks?.promoteToBackground;
+        if (typeof action !== "function") throw new Error("Copilot native task control is unavailable");
+        const field = command.type === "cancelTask" ? "cancelled" : "promoted";
+        const validatedId = taskId(command.id);
+        return this.mutation(`${command.type} Copilot task`, async () => {
+          const result = await action.call(tasks, { id: validatedId });
+          if (!isObject(result) || typeof result[field] !== "boolean") throw new TypeError("Unrecognized Copilot task acknowledgement");
+          // False is a definite native refusal/no-op. Never fall back to another
+          // task, a process ID, a shell command, or replay of its prompt.
+          return { [field]: result[field] };
+        });
+      }
       case "setModel": {
         const generation = this.#bridge.modelChangeRevision;
         try {
@@ -655,7 +679,36 @@ export class CopilotAdapterSession implements AdapterSession {
 
   public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
     this.assertActive();
-    if (request.harness !== "copilot" || request.view !== "pendingMessages") throw new TypeError("Unsupported Copilot native state view");
+    if (request.harness !== "copilot") throw new TypeError("Unsupported Copilot native state view");
+    if (request.view !== "pendingMessages") {
+      const tasks = this.#native.rpc.tasks;
+      let value: unknown;
+      switch (request.view) {
+        case "tasks": {
+          if (typeof tasks?.list !== "function" || typeof tasks.refresh !== "function") throw new Error("Copilot task observation is unavailable");
+          const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
+          value = await this.read("tasks", "", async () => {
+            await tasks.refresh();
+            this.assertActive();
+            if (Date.now() >= deadlineAt) throw new Error("Copilot task observation timed out before listing refreshed tasks");
+            return tasks.list();
+          }, deadlineAt);
+          break;
+        }
+        case "taskProgress":
+          if (typeof tasks?.getProgress !== "function") throw new Error("Copilot task progress is unavailable");
+          taskId(request.id);
+          value = await this.read("taskProgress", request.id, () => tasks.getProgress({ id: request.id }));
+          break;
+        case "currentPromotableTask":
+          if (typeof tasks?.getCurrentPromotable !== "function") throw new Error("Copilot promotable task observation is unavailable");
+          value = await this.read("currentPromotableTask", "", () => tasks.getCurrentPromotable());
+          break;
+        default: throw new TypeError("Unsupported Copilot native state view");
+      }
+      this.assertActive();
+      return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: taskSnapshot(request.view, value) };
+    }
     const queue = this.#native.rpc.queue;
     if (typeof queue?.pendingItems !== "function") throw new Error("Copilot pending queue observation is unavailable");
     const value = await this.read("pendingMessages", "", () => queue.pendingItems());

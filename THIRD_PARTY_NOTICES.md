@@ -31,6 +31,10 @@ embed that text itself.
   Imms, Microsoft Corporation, and contributors,
   <https://github.com/microsoft/node-pty>.
 
+Native Copilot task observation and control call the existing pinned SDK APIs.
+They add no dependency, copied vendor source, bundled executable or process-control
+library; the SDK and CLI terms above continue to apply to those components.
+
 ## Web client code and assets
 
 The built dashboard includes declared packages and assets including:

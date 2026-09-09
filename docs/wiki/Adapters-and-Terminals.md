@@ -191,6 +191,55 @@ lifecycle mutations keep their existing acknowledgement/unknown-outcome rules.
 The runtime daemon's presence heartbeat remains independent of inventory and
 metadata maintenance; see [process supervision](Operations.md#process-supervision).
 
+
+### Copilot tracked tasks
+
+Experimental `tasks.list` v1 advertises `sessions.readNativeState` with
+`{ harness: "copilot", view: "tasks" }`. It refreshes detached shell metadata
+then lists the native task snapshot. This includes synchronously awaited shells
+and agents, background work, and client-owned tasks; the native `executionMode`,
+`canPromoteToBackground`, status, owner, and requested/resolved model fields are
+preserved. Refresh on selection, reconnect and root
+`session.background_tasks_changed` events. Idle or completed native tasks are
+not evidence that the whole session is running.
+
+`tasks.progress` v1 adds `view: "taskProgress", id` for native recent shell output
+or agent/client progress. `tasks.promoteToBackground` v1 adds
+`view: "currentPromotableTask"` and the durable `promoteTaskToBackground` command
+with the exact native task `id`. The task-list eligibility flag is authoritative
+for that row; an empty current-task observation does not invalidate an eligible
+listed task. `tasks.cancel` v1 adds the durable `cancelTask` command with its exact
+`id`. IDs are opaque strings, bounded to 4,096 characters; PIDs, commands, names
+and tool-call IDs are never substituted. Clients offer promotion only when
+`canPromoteToBackground` is explicitly true, and respect `canCancel` for
+client-owned work.
+
+All views require an active binding and preserve native absence (`{}` or
+`{ progress: null }`). No view resumes sessions or scans native history. Lists
+are bounded to 1,000 entries and the native wire envelope; progress has the same
+wire bound. Oversized, malformed or unsupported snapshots fail explicitly.
+Refresh and list share one 15-second caller deadline and one coalesced read lane.
+A timed-out native request retains that lane until settlement, and an expired
+refresh cannot dispatch a later list. Progress reads similarly share a lane and
+cannot mix task IDs or accumulate behind a stalled request.
+
+Native `{ promoted: false }` and `{ cancelled: false }` are definite no-op
+acknowledgements. Missing/malformed replies or lost mutations are
+`outcomeUnknown`, reconciled by the original durable command identity. There is
+no automatic retry, alternate-task selection, arbitrary shell execution, or
+process termination fallback. Refresh can report a reaped shell as `completed`
+after a successful cancellation acknowledgement; preserve that native status
+rather than rewriting history. The client should re-read after an acknowledged
+action instead of predicting the resulting list.
+
+The disposable Linux native smoke at
+[`native-tasks-smoke.mjs`](../../packages/adapter-copilot/test/native-tasks-smoke.mjs)
+exercises sync-shell promotion, sync/background cancellation, absent-ID no-ops,
+progress, and native invalidation without model requests. It uses a disposable
+native tool only to create harmless fixture work; the public adapter exposes
+only the native task controls. Windows and model-driven agent/client behavior
+remain separate UAT.
+
 ### Copilot pending messages
 
 `queue.pending` v1 advertises `sessions.readNativeState` with
