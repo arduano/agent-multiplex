@@ -31,6 +31,7 @@ export const codexCommandSchema = z.discriminatedUnion("type", [
     native: jsonObjectSchema.optional(),
   }),
   z.object({ type: z.literal("interrupt"), turnId: z.string().optional() }),
+  z.object({ type: z.literal("compact") }).strict(),
   z.object({ type: z.literal("setModel"), model: z.string().min(1) }),
   z.object({ type: z.literal("setEffort"), effort: z.string().min(1) }),
   z.object({ type: z.literal("setMode"), mode: jsonValueSchema }),
@@ -86,6 +87,7 @@ export const copilotCommandSchema = z.discriminatedUnion("type", [
     native: jsonObjectSchema.optional(),
   }),
   z.object({ type: z.literal("interrupt") }),
+  z.object({ type: z.literal("compact") }).strict(),
   z.object({ type: z.literal("setModel"), model: z.string().min(1) }),
   z.object({
     type: z.literal("setMode"),

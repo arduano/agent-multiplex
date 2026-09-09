@@ -127,6 +127,28 @@ or lost mutation acknowledgements remain `outcomeUnknown` under the original
 stable command ID. See the [adapter reference](../../packages/adapter-codex/README.md#native-goals)
 and [command schemas](../../packages/protocol/src/command.ts).
 
+## Native context compaction
+
+Both adapters advertise `context.compact` v1 for the durable `compact` command.
+Clients may expose `/compact` without arguments when this capability is present.
+The command uses the current active native binding; it does not resume a stopped
+session, add a user prompt or parse native history. Native work and compaction
+notifications remain the source of progress and completion.
+
+Codex calls native `thread/compact/start` for the bound thread. Its empty response
+acknowledges starting compaction, not completed work. Native busy/refusal errors
+remain errors. Copilot calls the pinned experimental `session.history.compact`
+API with `trigger: "manual"`. Its result retains native `success`, token/message
+counts, optional summary and context-window fields. `success: false` is an
+acknowledged native outcome, not a successful compaction and not permission to
+retry. A zero-removal result remains zero.
+
+Requests with extra arguments or alternate native IDs are rejected. Malformed,
+oversized, lost or retired-binding acknowledgements remain `outcomeUnknown`
+under the original command ID. Do not infer a successful mutation from later
+history or automatically send another compaction request. See the
+[command schemas](../../packages/protocol/src/command.ts).
+
 ## Copilot
 
 Pinned CLI `1.0.81` keeps a never-used session in memory without durable native

@@ -34,6 +34,7 @@ import type { ThreadGoal } from "./generated/v2/ThreadGoal.js";
 import type { ThreadGoalGetResponse } from "./generated/v2/ThreadGoalGetResponse.js";
 import type { ThreadGoalSetResponse } from "./generated/v2/ThreadGoalSetResponse.js";
 import type { ThreadGoalClearResponse } from "./generated/v2/ThreadGoalClearResponse.js";
+import type { ThreadCompactStartResponse } from "./generated/v2/ThreadCompactStartResponse.js";
 import { codexImageCodec, codexHistoryPageBytes, codexImageLeaves } from "./images.js";
 import type { ThreadBackgroundTerminal } from "./generated/v2/ThreadBackgroundTerminal.js";
 import type { ThreadBackgroundTerminalsListResponse } from "./generated/v2/ThreadBackgroundTerminalsListResponse.js";
@@ -252,6 +253,7 @@ export class CodexAdapter implements AgentAdapter {
           { name: "interactive-requests", version: "v2", experimental: false },
           { name: "turn.plan-stream", version: "v2", experimental: false },
           { name: "thread.goal", version: "v2", experimental: true },
+          { name: "context.compact", version: "v1", experimental: false },
           { name: "command.visibility", version: "v2", experimental: false },
           { name: "subagent.visibility", version: "v2", experimental: false },
           { name: "subagent.descendant-stream", version: "v2", experimental: false },
@@ -755,6 +757,19 @@ class CodexSession implements AdapterSession {
         });
         this.#state.collaborationMode = collaborationMode;
         this.#emitSettings();
+        return json(response);
+      }
+      case "compact": {
+        this.#assertActive();
+        codexCommandSchema.parse(command);
+        const response = await this.#rpc.request<ThreadCompactStartResponse>("thread/compact/start", {
+          threadId: this.vendorSessionId,
+        });
+        // The pinned native response acknowledges starting compaction, not its
+        // completion. Turn/item notifications retain native progress semantics.
+        if (this.#closed || !recordOf(response) || Object.keys(response).length !== 0) {
+          throw new AdapterOutcomeUnknownError("Codex compaction start was not acknowledged with a valid active-session result");
+        }
         return json(response);
       }
       case "setGoal": {

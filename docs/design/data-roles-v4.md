@@ -143,6 +143,18 @@ cleared budgets remain distinct. Native refusals are failures; missing/malformed
 mutation replies are outcome unknown and must be reconciled with the original
 command identity. Read snapshots never constitute permission to retry a mutation.
 
+Native context compaction is a capability-gated durable harness command under
+the existing runtime boot/binding fences and stable operation identity. Codex
+acknowledges native `thread/compact/start`; Copilot preserves native
+`history.compact` completion results, including false/no-op outcomes and counters.
+These are different acknowledgements and must not be flattened into a shared
+"compaction complete" result. Neither adapter injects a synthetic prompt, resumes
+a stopped binding, or uses vendor history files. Native events retain their
+original progress/ownership semantics. Compaction does not create catalog
+authority, and a completed compaction alone does not finish other session work.
+Lost, malformed, oversized or retired-binding mutation acknowledgements remain
+unknown under their original stable command identity and are never auto-retried.
+
 ### Access gateway
 
 An access gateway has `dataAuthority: none`. It is a p2prpc client of one or

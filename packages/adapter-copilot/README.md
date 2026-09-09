@@ -1,5 +1,17 @@
 # Copilot adapter
 
+## Native context compaction
+
+Experimental `context.compact` v1 exposes the no-argument `compact` command using
+the pinned SDK's `session.history.compact({ trigger: "manual" })` method. It
+requires the current active binding and records the native result, including
+`success: false`, counters, optional summary and context-window breakdown.
+Compaction does not inject a user message, resume a stopped session or override
+whole-session status. Missing native support fails before dispatch; malformed,
+oversized, lost or retired-binding acknowledgements remain unknown under the
+original durable command ID. Native compaction events retain their original
+ownership and progress semantics. See [adapter guidance](../../docs/wiki/Adapters-and-Terminals.md#native-context-compaction).
+
 ## Empty sessions and restart
 
 Pinned Copilot CLI `1.0.81` does not durably save a session that has never received

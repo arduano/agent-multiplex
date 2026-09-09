@@ -14,6 +14,7 @@ import {
 } from "@arduano/agent-multiplex-runtime-node-core";
 import {
   NATIVE_PAYLOAD_MAX_BYTES,
+  copilotCommandSchema,
   copilotPermissionsSettingsSchema,
   jsonWireByteUpperBound,
   type AdapterScopeId,
@@ -30,6 +31,7 @@ import {
 
 import { copilotJson, jsonRecord, requiredString } from "./json.js";
 import { taskId, taskSnapshot } from "./tasks.js";
+import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
@@ -44,6 +46,9 @@ export interface CopilotSessionRpc {
   };
   model?: {
     getCurrent(): Promise<unknown>;
+  };
+  history?: {
+    compact(input: { trigger: "manual" }): Promise<unknown>;
   };
   queue?: {
     pendingItems(): Promise<unknown>;
@@ -535,6 +540,18 @@ export class CopilotAdapterSession implements AdapterSession {
       case "interrupt":
         await this.mutation("interrupt Copilot session", () => this.#native.abort());
         return undefined;
+      case "compact": {
+        copilotCommandSchema.parse(command);
+        const history = this.#native.rpc.history;
+        if (typeof history?.compact !== "function") throw new Error("Copilot native context compaction is unavailable");
+        return this.mutation("compact Copilot context", async () => {
+          const result = await history.compact({ trigger: "manual" });
+          this.assertActive();
+          // A native success:false is an acknowledged outcome, never a reason
+          // to replay the request or send a synthetic /compact user message.
+          return compactionResult(result);
+        });
+      }
       case "steerQueuedMessage": {
         const queue = this.#native.rpc.queue;
         if (typeof queue?.sendNow !== "function") throw new Error("Copilot queued-message steering is unavailable");

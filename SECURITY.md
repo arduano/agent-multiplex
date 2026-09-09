@@ -76,6 +76,12 @@ disclosure.
   task promotion and cancellation require `agent-control` and the durable
   command fence. False acknowledgements remain no-ops; an unknown result cannot
   authorize another mutation, alternate task or process-termination fallback.
+- Native context compaction requires `agent-control` and the existing durable
+  command/binding fence. It can make provider/model requests and changes native
+  context. It does not resume stopped sessions, grant tool permissions or add
+  a synthetic user prompt. Codex start acknowledgement is not completion; native
+  Copilot false results remain false. Unknown outcomes must retain their original
+  operation identity without automatic retry.
 - Native Codex goal observations use the same live-binding `read` boundary.
   Setting or clearing goals requires `agent-control` and a durable command ID;
   setting an active goal may cause Codex to continue work under its native

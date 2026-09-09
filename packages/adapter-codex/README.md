@@ -28,6 +28,15 @@ full-history `thread/read` fallback or model call. Existing runtime history
 attachment policy applies; temporary history handles never activate a stopped
 catalog binding. Consumers must check the capability before requesting this view.
 
+## Native context compaction
+
+`context.compact` v1 exposes the no-argument `compact` command through the ordinary
+durable command journal. It calls `thread/compact/start` for the exact active
+binding. The empty native result acknowledges the start; native turn/item events
+describe completion. Stopped sessions are not resumed, native refusals remain
+failures, and lost/malformed or retired-binding acknowledgements remain unknown
+without replay. No user message implements this operation.
+
 ## Native goals
 
 The experimental `thread.goal` v2 capability exposes Codex's native thread goal.

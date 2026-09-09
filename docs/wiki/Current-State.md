@@ -7,6 +7,20 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-09.
 
+## Native context compaction candidate
+
+The `0.2.4-hotfix.11` candidate adds `context.compact` v1 for native Codex and
+Copilot context compaction. Codex acknowledges starting native compaction;
+Copilot preserves its completion result, including false outcomes. Both use the
+existing durable command and active-binding fences without synthetic messages,
+implicit resume or automatic mutation retry. See [adapter guidance](Adapters-and-Terminals.md#native-context-compaction).
+
+The owner waived native-model qualification for this incremental prerelease.
+Compaction may itself call a model, so no live compaction is included in source
+validation. Protocol v5, native/transport dependency pins and migrations are
+unchanged. Publication evidence will be recorded in the checkpoint; installed
+activation remains consumer maintenance work.
+
 ## Copilot native task controls hotfix
 
 The published [`0.2.4-hotfix.10` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.1) adds capability-gated native Copilot

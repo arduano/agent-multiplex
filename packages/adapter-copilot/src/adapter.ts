@@ -742,6 +742,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "reasoning-effort.create-resume", version, experimental: false },
     { name: "mode.native", version, experimental: true },
     { name: "permissions.mode", version: "v1", experimental: true },
+    { name: "context.compact", version: "v1", experimental: true },
     { name: "queue.pending", version: "v1", experimental: true },
     { name: "queue.sendNow", version: "v1", experimental: true },
     { name: "tasks.list", version: "v1", experimental: true },

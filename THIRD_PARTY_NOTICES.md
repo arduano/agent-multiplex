@@ -36,6 +36,11 @@ They use the already locked MIT-licensed Zod validation library and add no new
 third-party package, copied vendor source, bundled executable or process-control
 library. The SDK and CLI terms above continue to apply to those components.
 
+Native context compaction uses the existing pinned Codex app-server and Copilot
+SDK interfaces, including the already generated Codex declarations and locked
+Zod validator. It adds no third-party dependency or copied vendor implementation.
+The native components retain their terms above.
+
 ## Web client code and assets
 
 The built dashboard includes declared packages and assets including:
