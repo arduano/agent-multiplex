@@ -2,7 +2,9 @@
 
 ## Independent access HTTP requests — 2026-09-10
 
-The `0.2.4-hotfix.13` candidate changes only the access client's HTTP request
+Signed tag [`hotfix-2026-09-10.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-10.1) identifies source
+`01ba00f4d3fddf0cc10f1c6c79b311fc92a21bc6` and all16 `0.2.4-hotfix.13` packages.
+The release changes only the access client's HTTP request
 construction: one independently completed/cancellable request per query or
 mutation. It preserves bearer/custom headers, WebSocket subscriptions and
 exact mutation bodies without replay. The unchanged p2prpc implementation already
@@ -15,8 +17,9 @@ Five real-loopback HTTP regressions cover held history/task reads, independent
 cancellation, authentication and failed mutation dispatch. An initial test run
 used a restrictive process umask that invalidated the existing unsafe-directory
 fixture; the complete rerun under the normal 022 umask passes. Native-model
-qualification remains waived for this incremental prerelease. Packed/published
-artifact results will be recorded after verification. Private evidence is under
+qualification remains waived for this incremental prerelease. All16 packed consumers and the507-component SBOM pass. All19 public assets
+were independently downloaded and byte-compared, including SHA256/SHA512
+integrities. Source and tag signatures verify against tracked release signers. Private evidence is under
 `receipts/independent-http/2026-09-10/`.
 
 ## Imported interaction ownership hotfix — 2026-09-09

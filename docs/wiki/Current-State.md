@@ -9,13 +9,14 @@ Last reconciled: 2026-09-10.
 
 ## Independent access HTTP requests
 
-The `0.2.4-hotfix.13` candidate removes non-streaming HTTP batching from
+The published [`0.2.4-hotfix.13` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-10.1) removes non-streaming HTTP batching from
 `createAccessClient`. Each query/mutation now has its own response and cancellation
 boundary, so a slow native history/task read cannot hold unrelated fleet reads in
 the same batch. p2prpc already uses one QUIC stream per RPC and is unchanged.
 Existing authentication, WebSocket subscriptions and mutation identities are
-preserved. Exact release evidence will be recorded in the checkpoint after
-verification; no installed-host or native-model qualification is claimed.
+preserved. **884 deterministic tests**, typecheck/build, documentation/release checks,
+all16 packed consumers and independently verified public artifacts pass. The
+[checkpoint](../checkpoint-v4.md#independent-access-http-requests--2026-09-10) owns the exact evidence; no installed-host or native-model qualification is claimed.
 
 ## Imported interaction ownership hotfix
 
