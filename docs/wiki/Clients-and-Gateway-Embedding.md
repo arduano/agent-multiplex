@@ -17,6 +17,13 @@ Use `@arduano/agent-multiplex-client` instead of constructing untyped URLs. Quer
 mutations use HTTP; subscriptions use a reconnecting WebSocket when `wsUrl` is
 provided.
 
+`createAccessClient` sends each query and mutation as an independent HTTP
+request. A slow native history or task read therefore cannot hold catalog,
+health, or another session's response in the same HTTP batch. Each operation's
+AbortSignal cancels only its request; it does not establish cancellation of
+remote native work. Mutations are never automatically retried, and subscriptions
+retain their separate WebSocket transport.
+
 ```ts
 import { createAccessClient, launchRequest } from "@arduano/agent-multiplex-client";
 

@@ -5,7 +5,17 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-09.
+Last reconciled: 2026-09-10.
+
+## Independent access HTTP requests
+
+The `0.2.4-hotfix.13` candidate removes non-streaming HTTP batching from
+`createAccessClient`. Each query/mutation now has its own response and cancellation
+boundary, so a slow native history/task read cannot hold unrelated fleet reads in
+the same batch. p2prpc already uses one QUIC stream per RPC and is unchanged.
+Existing authentication, WebSocket subscriptions and mutation identities are
+preserved. Exact release evidence will be recorded in the checkpoint after
+verification; no installed-host or native-model qualification is claimed.
 
 ## Imported interaction ownership hotfix
 

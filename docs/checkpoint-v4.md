@@ -1,5 +1,24 @@
 # Release qualification checkpoint
 
+## Independent access HTTP requests — 2026-09-10
+
+The `0.2.4-hotfix.13` candidate changes only the access client's HTTP request
+construction: one independently completed/cancellable request per query or
+mutation. It preserves bearer/custom headers, WebSocket subscriptions and
+exact mutation bodies without replay. The unchanged p2prpc implementation already
+opens one QUIC bidirectional stream per RPC. No migration, protocol version,
+native binary or transport dependency is changed.
+
+Typecheck/build, **884 tests across 94 files**, documentation, checkpoint,
+release metadata and source-secret checks pass on Node `24.19.0` / npm `11.17.0`.
+Five real-loopback HTTP regressions cover held history/task reads, independent
+cancellation, authentication and failed mutation dispatch. An initial test run
+used a restrictive process umask that invalidated the existing unsafe-directory
+fixture; the complete rerun under the normal 022 umask passes. Native-model
+qualification remains waived for this incremental prerelease. Packed/published
+artifact results will be recorded after verification. Private evidence is under
+`receipts/independent-http/2026-09-10/`.
+
 ## Imported interaction ownership hotfix — 2026-09-09
 
 Signed tag [`hotfix-2026-09-09.3`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.3)

@@ -532,6 +532,12 @@ Cursor-aware subscriptions reconnect and recover through the ordinary
 replay/gap rules. Bespoke HTTP edges must provide equivalent byte-bounded
 policies around both their tRPC HTTP and WebSocket adapters.
 
+The protocol access client uses one HTTP request per query or mutation. Native
+history and task observations must not delay unrelated responses through a
+shared non-streaming HTTP batch. Request cancellation remains scoped to that
+HTTP operation; it is not proof that a dispatched native action was cancelled.
+This transport isolation adds no automatic mutation replay or transcript cache.
+
 ## Mutation routing
 
 The gateway builds ownership indexes from selected, validated snapshots. A
