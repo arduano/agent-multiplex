@@ -852,12 +852,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
     releaseReplacementSnapshot.resolve(undefined);
     await expect(replacement).resolves.toBeUndefined();
     await newStreamSubscribed.promise;
-    for (
-      let attempt = 0;
-      attempt < 20 && !parentCatalog.getRuntimeNode(childRuntime.runtimeNodeId);
-      attempt += 1
-    ) await new Promise<void>((resolve) => setImmediate(resolve));
-    expect(parentCatalog.getRuntimeNode(childRuntime.runtimeNodeId)).toMatchObject({
+    await expect.poll(() => parentCatalog.getRuntimeNode(childRuntime.runtimeNodeId)).toMatchObject({
       runtimeNodeId: childRuntime.runtimeNodeId,
       ownerControlNodeId: request.controlNodeId,
     });

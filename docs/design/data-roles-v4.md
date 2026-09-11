@@ -672,3 +672,43 @@ access router. Native bearer configuration cannot be combined with this mode.
 The trusted application owns origin/CSRF defenses and authentication expiry for
 long-lived connections, and retains the maintained ingress/egress byte bounds.
 This embedding API changes no wire contract or data authority.
+
+## Storage progress, admission and projection recovery
+
+An authority-only reference composition can own its original catalog/service in
+one worker behind typed, allowlisted domain operations. This is an execution
+boundary within a trusted process, not a new data role or SQL service. The worker
+re-derives enrollment scopes from committed catalog state and executes the existing
+input/output, authority, endpoint, boot and operation-identity checks. Transport
+identity remains in the outer process. No cache has authorization authority.
+
+Success publication follows the FULL SQLite commit. Adjacent child control events
+may share one bounded commit (64 events, 1 MiB, 20 ms collection window); native
+events and resnapshot boundaries keep their original order. All event identities,
+payload comparisons, child checkpoints and projection changes commit atomically.
+A failed member rolls back the entire batch. Exact session replays avoid duplicate
+projection writes/feed events but still preserve child replay evidence. Unchanged
+metadata retains its index. Native binding-recovery replay remains supported.
+
+Same-boot heartbeat observations remain live in memory while unchanged durable
+timestamps are coalesced for 30 seconds; real presence/boot changes persist and
+restart reconstructs liveness conservatively. Only active/running activity ticks
+which differ solely in lastActivityAt/updatedAt may coalesce for 30 seconds of
+reported activity. Settings, binding, authority, last-seen, interactions and status
+transitions are never coalesced. Final status commits its complete timestamp.
+
+Feed retention runs in separate 1,000-event transactions after acknowledgment,
+with atomic deletion/minimum-cursor updates. It retries maintenance failures
+without changing the result of a committed operation. Normal headroom is one
+chunk; prolonged failure can exceed it and remains visible in metrics. The
+immutable imported-event identity ledger is unchanged and continues growing;
+pruning or changing its payload representation requires separate compatibility
+work. No durability weakening or filesystem migration is implicit.
+
+Gateway snapshot retention is distinct from routing eligibility. Failed sources
+remain ineligible through sibling refreshes. Deadlines fence late acceptance and
+retain outstanding underlying attempts. Explicit activation preserves conflict,
+identity, overlap and authority fences, and refuses to replace healthy selected
+child runtimes with an unavailable, different-boot or materially older replicated session
+projection. Consumers can require sustained fresh heartbeats before failback.
+This is route selection within the same authority tree, never branch promotion.

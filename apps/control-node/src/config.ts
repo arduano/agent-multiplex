@@ -56,6 +56,8 @@ export interface DesiredControlNodeUpstream extends Readonly<Record<string, unkn
 }
 
 export interface ControlNodeAppConfig {
+  /** Authority-only worker composition; attached controls use the normal owner. */
+  readonly storageOwner?: "inline" | "worker";
   readonly sharedSecret: string;
   readonly statePath: string;
   readonly identityPath: string;
@@ -146,7 +148,10 @@ export function controlNodeConfigFromEnvironment(
   const bindAddress =
     environment.AGENT_MULTIPLEX_CONTROL_NODE_HTTP_BIND ?? "127.0.0.1";
   validateTrustedLocalBindAddress(bindAddress);
+  const storageOwner = environment.AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER ?? "inline";
+  if (storageOwner !== "inline" && storageOwner !== "worker") throw new Error("AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER must be inline or worker");
   return {
+    storageOwner,
     sharedSecret,
     statePath,
     identityPath,

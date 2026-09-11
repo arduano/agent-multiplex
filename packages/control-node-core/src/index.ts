@@ -4,3 +4,4 @@ export * from "./event-hub.js";
 export * from "./router.js";
 export * from "./service.js";
 export * from "./types.js";
+export * from "./isolated-rpc.js";

@@ -5,7 +5,18 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-10.
+Last reconciled: 2026-09-11.
+
+## Storage reliability candidate
+
+The next incremental prerelease stages gateway recovery fencing, catalog no-op
+and group-commit reductions, and an optional authority-only storage worker.
+Protocol v5, migrations, native agent pins and p2prpc are unchanged. The filesystem
+environment and authoritative WAL/FULL durability remain unchanged. See
+[operations](Operations.md#storage-stalls-and-an-isolated-authority) and
+[the detailed boundary](../design/data-roles-v4.md#storage-progress-admission-and-projection-recovery).
+Source validation and installed activation are still in progress; this is not a
+published or native-model-qualified release claim.
 
 ## Independent access HTTP requests
 

@@ -132,3 +132,45 @@ isolated backend.
 
 See [Backups, upgrades, and recovery](Backups-Upgrades-and-Recovery.md) and the
 detailed [deployment runbook](../deployment-v4.md).
+
+## Storage stalls and an isolated authority
+
+The reference control supports `AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER=worker`
+(or `storageOwner: "worker"` when embedded). This composition is for an authority
+with child controls, no upstream and no locally owned runtimes. The existing
+catalog, domain service and validating router share one worker and one SQLite
+writer; HTTP and QUIC stay on the transport thread. Combined control/runtime
+hosts retain the normal composition and need their own maintenance window.
+
+The trusted loopback `/health` endpoint does no filesystem work. It reports the
+age of the worker's last progress message, fixed-category catalog timings and
+counters, bounded IPC queue count/bytes/age, child-feed failure count, and transport
+event-loop delay. Progress older than ten seconds returns 503. This distinguishes
+responsive transport from stalled storage; it neither declares native agents
+stopped nor grants a stale authority route. The counters describe attempted work,
+including rolled-back transactions; elapsed timings describe completed attempts.
+
+IPC admits at most 256 outstanding requests, 32 MiB of arguments and 8 MiB per
+payload. Response credits are released only after the receiving thread consumes
+them; buffered large replies are capped at 32 MiB with bounded small error replies.
+A queued request whose deadline expires is rejected before dispatch. A dispatched
+mutation timeout, owner exit or untransferable result is outcome unknown under its
+original operation ID. Read failures remain unavailable. Timed-out lanes stay
+occupied until settlement; no timer creates another writer or replays a mutation.
+Streams pull one item at a time and retain at most 128 handles. Idle pulls have no
+synthetic deadline; late stream opens are closed and cancellation retains its slot
+until native settlement.
+
+During a complete worker stall, fresh catalog snapshots and authority operations
+are unavailable. Gateways retain previously committed display observations and
+use validated direct child routes. They never label a cached root snapshot as a
+fresh snapshot to authorize failback. Root-only offline rows across a cold client
+reload remain a separate display-cache concern. Neither worker threads nor QUIC
+can repair a stalled kernel syscall, code page fault or machine-wide failure.
+
+Shutdown closes admission and child pumps, drains admitted domain operations and
+then closes the catalog. The transport caller has a bounded shutdown deadline;
+a missed drain remains a failure and does not release the SQLite writer lock.
+No watchdog starts a replacement worker. Verify the old process actually exited
+before restarting; never delete its lock as a timeout workaround. Ordinary runtime
+stores retain WAL/FULL durability and existing filesystem placement.

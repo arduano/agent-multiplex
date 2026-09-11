@@ -95,6 +95,20 @@ describe("P2PControlNodeSourceClient", () => {
     );
   });
 
+  it("forwards snapshot cancellation and does not dispatch an already cancelled read", async () => {
+    const query = vi.fn().mockImplementation((_input, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+    }));
+    const client = new P2PControlNodeSourceClient(sourceHandle({ sources: { snapshot: { query } } }));
+    const controller = new AbortController();
+    const pending = client.loadSnapshot(controller.signal);
+    const rejected = expect(pending).rejects.toThrow("cancelled snapshot");
+    await vi.waitFor(() => expect(query).toHaveBeenCalledWith(undefined, { signal: controller.signal }));
+    controller.abort(new Error("cancelled snapshot")); await rejected;
+    await expect(client.loadSnapshot(controller.signal)).rejects.toThrow("cancelled snapshot");
+    expect(query).toHaveBeenCalledOnce();
+  });
+
   it("distinguishes definitive remote rejections from p2prpc dispatch ambiguity", () => {
     const conflict = remoteError("CONFLICT", "stale authority");
     expect(classifyMutationFailure(conflict)).toMatchObject({

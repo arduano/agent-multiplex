@@ -89,3 +89,8 @@ service. Runtime code preserves image bytes. Native vendor image data and
 user-supplied images retain their owners' applicable terms; the project's MIT
 license does not relicense those contents. Regenerate the web license inventory
 and SBOM from the exact release artifact as usual.
+
+
+Storage-worker isolation uses built-in Node worker_threads, perf_hooks and v8
+APIs plus the existing SQLite/tRPC dependencies. It adds no third-party package,
+vendor code, filesystem driver or bundled supervisor executable.

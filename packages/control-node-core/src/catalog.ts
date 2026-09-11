@@ -135,6 +135,8 @@ export interface ControlNodeCatalogOptions {
   readonly endpointId?: string;
   readonly now?: () => Date;
   readonly eventRetentionLimit?: number;
+  /** Same-boot observations stay live while durable timestamps are coalesced. */
+  readonly heartbeatPersistMs?: number;
   /** Deterministic crash injection for transaction-boundary tests. */
   readonly failpoint?: ((point: ControlNodeCatalogFailpoint) => void) | undefined;
 }
@@ -143,7 +145,23 @@ export type ControlNodeCatalogFailpoint =
   | "metadata.authority.afterState"
   | "metadata.authority.afterEvents"
   | "metadata.authority.afterDeliveryIntent"
-  | "authority.promotion.afterFeedRotation";
+  | "authority.promotion.afterFeedRotation"
+  | "retention.beforeDelete";
+
+export type CatalogStorageTimingKind = "begin" | "body" | "commit" | "publication" | "compaction" | "checkpoint";
+export interface CatalogStorageTiming {
+  count: number;
+  failures: number;
+  totalMs: number;
+  maximumMs: number;
+  lastMs: number;
+}
+export interface CatalogStorageMetrics {
+  timings: Record<CatalogStorageTimingKind, CatalogStorageTiming>;
+  counters: Record<"sessionNoop" | "importedSessionNoop" | "activityCoalesced" | "metadataIndexSkipped" | "metadataIndexRebuilt" | "heartbeatCoalesced" | "sessionUpserts" | "compactionFailures", number>;
+  retentionPending: boolean;
+}
+const storageTiming = (): CatalogStorageTiming => ({ count: 0, failures: 0, totalMs: 0, maximumMs: 0, lastMs: 0 });
 
 export interface SessionFilter {
   readonly runtimeNodeId?: RuntimeNodeId;
@@ -202,11 +220,27 @@ export class ControlNodeCatalog {
   readonly #eventRetentionLimit: number;
   readonly #failpoint: ((point: ControlNodeCatalogFailpoint) => void) | undefined;
   #publishedCursor = 0;
+  #retentionFloor = 0;
+  #retentionTimer: ReturnType<typeof setTimeout> | undefined;
+  #closed = false;
+  readonly #retentionChunk = 1_000;
+  readonly #heartbeatPersistMs: number;
+  readonly #runtimeHeartbeats = new Map<string, { boot: string; observedAt: string }>();
+  readonly #childHeartbeats = new Map<string, { boot: string; observedAt: string }>();
+  readonly #storageMetrics: CatalogStorageMetrics = {
+    timings: { begin: storageTiming(), body: storageTiming(), commit: storageTiming(), publication: storageTiming(), compaction: storageTiming(), checkpoint: storageTiming() },
+    counters: { sessionNoop: 0, importedSessionNoop: 0, activityCoalesced: 0, metadataIndexSkipped: 0, metadataIndexRebuilt: 0, heartbeatCoalesced: 0, sessionUpserts: 0, compactionFailures: 0 },
+    retentionPending: false,
+  };
 
   public constructor(options: ControlNodeCatalogOptions) {
     this.#now = options.now ?? (() => new Date());
     this.#eventRetentionLimit = options.eventRetentionLimit ?? 100_000;
     this.#failpoint = options.failpoint;
+    this.#heartbeatPersistMs = options.heartbeatPersistMs ?? 30_000;
+    if (!Number.isSafeInteger(this.#heartbeatPersistMs) || this.#heartbeatPersistMs < 1 || this.#heartbeatPersistMs > 300_000) {
+      throw new RangeError("heartbeatPersistMs must be an integer between 1 and 300000");
+    }
     if (!Number.isSafeInteger(this.#eventRetentionLimit) || this.#eventRetentionLimit < 1_000) {
       throw new RangeError("eventRetentionLimit must be an integer of at least 1000");
     }
@@ -247,20 +281,32 @@ export class ControlNodeCatalog {
       this.#recoverInterruptedState();
       this.#retireArchivedMetadataDeliveryIntents();
       this.#publishedCursor = this.controlCursor();
+      this.#retentionFloor = this.minimumControlCursor();
     } catch (cause) {
+      this.#closed = true;
+      if (this.#retentionTimer) clearTimeout(this.#retentionTimer);
       this.#sqlite.close();
       throw cause;
     }
   }
 
   public close(): void {
+    this.#closed = true;
+    if (this.#retentionTimer) clearTimeout(this.#retentionTimer);
+    this.#retentionTimer = undefined;
+    this.#runtimeHeartbeats.clear(); this.#childHeartbeats.clear();
     this.#events.removeAllListeners();
     this.#sqlite.close();
   }
 
   public diagnostics(): SqliteDiagnostics { return this.#sqlite.diagnostics(); }
   public backup(destination: string): Promise<SqliteBackupResult> { return this.#sqlite.backup(destination); }
-  public checkpoint() { return this.#sqlite.checkpoint("PASSIVE"); }
+  public checkpoint() { return this.#measure("checkpoint", () => this.#sqlite.checkpoint("PASSIVE")); }
+
+  /** Fixed-size, process-local observations. No SQLite read or integrity scan. */
+  public storageMetrics(): CatalogStorageMetrics {
+    return structuredClone({ ...this.#storageMetrics, retentionPending: this.#retentionTimer !== undefined });
+  }
 
   public onControl(listener: (item: FeedControlItem) => void): () => void {
     this.#events.on("control", listener);
@@ -372,11 +418,14 @@ export class ControlNodeCatalog {
     }
     const previous = this.minimumControlCursor();
     if (throughCursor <= previous) return { deleted: 0, minimumControlCursor: previous };
-    return this.#transaction(() => {
+    const compacted = this.#measure("compaction", () => this.#transaction(() => {
+      this.#failpoint?.("retention.beforeDelete");
       const result = this.#db.prepare("DELETE FROM control_events WHERE cursor <= ?").run(throughCursor);
       this.#db.prepare("UPDATE control_feed_state SET minimum_cursor = ? WHERE singleton = 1").run(throughCursor);
       return { deleted: Number(result.changes), minimumControlCursor: throughCursor };
-    });
+    }));
+    this.#retentionFloor = compacted.minimumControlCursor;
+    return compacted;
   }
 
   public feedCheckpoint(): FeedCheckpoint {
@@ -753,6 +802,7 @@ export class ControlNodeCatalog {
       this.#appendControl({ type: "controlNode.detached", receipt });
       this.#dropProjection(input.childControlNodeId);
     });
+    this.#childHeartbeats.delete(input.childControlNodeId);
     return receipt;
   }
 
@@ -906,6 +956,7 @@ export class ControlNodeCatalog {
   public markChildDisconnected(controlNodeId: ControlNodeId, bootId?: ControlNodeBootId): boolean {
     const node = this.getControlNode(controlNodeId);
     if (!node || (bootId !== undefined && node.controlNodeBootId !== bootId)) return false;
+    this.#childHeartbeats.delete(controlNodeId);
     if (node.presence !== "online") return true;
     const stale = { ...node, presence: "stale" as const, connectedAt: null };
     this.#mutate(() => {
@@ -924,11 +975,17 @@ export class ControlNodeCatalog {
     const child = this.getControlNode(controlNodeId);
     if (!child || child.controlNodeBootId !== bootId || !this.getAttachment(controlNodeId)) return false;
     const wasDegraded = child.presence !== "online";
+    const observedAt = this.#timestamp();
+    this.#childHeartbeats.set(controlNodeId, { boot: bootId, observedAt });
+    if (!wasDegraded && child.lastHeartbeatAt !== null && Date.parse(observedAt) - Date.parse(child.lastHeartbeatAt) < this.#heartbeatPersistMs) {
+      this.#storageMetrics.counters.heartbeatCoalesced++;
+      return true;
+    }
     const updated = controlNodeDescriptorSchema.parse({
       ...child,
       presence: "online",
       connectedAt: child.connectedAt ?? this.#timestamp(),
-      lastHeartbeatAt: this.#timestamp(),
+      lastHeartbeatAt: observedAt,
     });
     this.#mutate(() => {
       this.#putControlNode(updated, controlNodeId);
@@ -953,7 +1010,13 @@ export class ControlNodeCatalog {
       WHERE a.state = 'active' AND n.projection_source = n.control_node_id
     `).all() as Row[];
     const stale = rows.map((row) => parse(controlNodeDescriptorSchema, row.record_json))
-      .filter((node) => node.presence === "online" && (node.lastHeartbeatAt === null || node.lastHeartbeatAt < cutoff));
+      .filter((node) => {
+        const live = this.#childHeartbeats.get(node.controlNodeId);
+        const last = live?.boot === node.controlNodeBootId &&
+          (node.lastHeartbeatAt === null || live.observedAt > node.lastHeartbeatAt)
+          ? live.observedAt : node.lastHeartbeatAt;
+        return node.presence === "online" && (last === null || last < cutoff);
+      });
     for (const node of stale) this.markChildDisconnected(node.controlNodeId, node.controlNodeBootId);
     return stale.map((node) => node.controlNodeId);
   }
@@ -1117,6 +1180,29 @@ export class ControlNodeCatalog {
     attachmentId: ControlNodeAttachment["attachmentId"],
     itemInput: FeedControlItem,
   ): { accepted: boolean; deduplicated: boolean; localCursor: number } {
+    return this.#importChildControl(childControlNodeId, attachmentId, itemInput, body => this.#mutate(body));
+  }
+
+  /** Adjacent events share one durable barrier. Each identity and contiguous
+   * checkpoint is checked inside that transaction; publication follows commit. */
+  public importChildControls(
+    childControlNodeId: ControlNodeId,
+    attachmentId: ControlNodeAttachment["attachmentId"],
+    items: readonly FeedControlItem[],
+  ): Array<{ accepted: boolean; deduplicated: boolean; localCursor: number }> {
+    if (items.length < 1 || items.length > 64 || (items.length > 1 && Buffer.byteLength(JSON.stringify(items)) > 1024 * 1024)) {
+      throw new ControlNodeCoreError("UNAVAILABLE", "child import batch exceeds admission capacity");
+    }
+    if (items.length === 1) return [this.importChildControl(childControlNodeId, attachmentId, items[0]!)];
+    return this.#mutate(() => items.map(item => this.#importChildControl(childControlNodeId, attachmentId, item, body => body())));
+  }
+
+  #importChildControl(
+    childControlNodeId: ControlNodeId,
+    attachmentId: ControlNodeAttachment["attachmentId"],
+    itemInput: FeedControlItem,
+    commit: (body: () => void) => void,
+  ): { accepted: boolean; deduplicated: boolean; localCursor: number } {
     const item = feedControlItemSchema.parse(itemInput);
     const attachment = this.getAttachment(childControlNodeId);
     if (!attachment || attachment.attachmentId !== attachmentId) throw new ControlNodeCoreError("FENCED", "stale child stream fence");
@@ -1133,10 +1219,13 @@ export class ControlNodeCatalog {
       throw new ControlNodeCoreError("CURSOR_EXPIRED", "child event is not the next checkpoint position");
     }
     let localCursor = 0;
-    this.#mutate(() => {
+    commit(() => {
       this.#assertImportedChangeOwnership(childControlNodeId, item);
       const canonicalChange = this.#applyImportedChange(childControlNodeId, item.change);
-      localCursor = this.#appendControl(canonicalChange, item.provenance.originControlNodeId, item.eventId);
+      // Even a redundant projection commits its immutable identity and child
+      // checkpoint, but it need not generate another full upstream projection.
+      localCursor = canonicalChange === null ? this.controlCursor()
+        : this.#appendControl(canonicalChange, item.provenance.originControlNodeId, item.eventId);
       this.#db.prepare(`
         INSERT INTO imported_events(event_id, child_control_node_id, payload_hash, local_cursor, imported_at)
         VALUES (?, ?, ?, ?, ?)
@@ -1191,7 +1280,13 @@ export class ControlNodeCatalog {
     const runtime = this.getRuntimeNode(runtimeNodeId);
     if (!runtime || runtime.runtimeNodeBootId !== bootId) return false;
     const changed = runtime.presence !== "online" || runtime.reachability !== "reachable";
-    const updated = { ...runtime, presence: "online" as const, reachability: "reachable" as const, connectedAt: runtime.connectedAt ?? this.#timestamp(), lastHeartbeatAt: this.#timestamp() };
+    const observedAt = this.#timestamp();
+    this.#runtimeHeartbeats.set(runtimeNodeId, { boot: bootId, observedAt });
+    if (!changed && runtime.lastHeartbeatAt !== null && Date.parse(observedAt) - Date.parse(runtime.lastHeartbeatAt) < this.#heartbeatPersistMs) {
+      this.#storageMetrics.counters.heartbeatCoalesced++;
+      return true;
+    }
+    const updated = { ...runtime, presence: "online" as const, reachability: "reachable" as const, connectedAt: runtime.connectedAt ?? observedAt, lastHeartbeatAt: observedAt };
     this.#mutate(() => {
       this.#putRuntimeNode(updated, null);
       if (changed) this.#appendControl({ type: "runtimeNode.upsert", runtimeNode: updated });
@@ -1202,6 +1297,7 @@ export class ControlNodeCatalog {
   public markRuntimeNodeDisconnected(runtimeNodeId: RuntimeNodeId, bootId?: string): boolean {
     const runtime = this.getRuntimeNode(runtimeNodeId);
     if (!runtime || (bootId !== undefined && runtime.runtimeNodeBootId !== bootId)) return false;
+    this.#runtimeHeartbeats.delete(runtimeNodeId);
     if (runtime.presence === "stale" && runtime.reachability === "stale") return true;
     const updated = { ...runtime, presence: "stale" as const, reachability: "stale" as const, connectedAt: null };
     this.#mutate(() => {
@@ -1217,7 +1313,13 @@ export class ControlNodeCatalog {
       "SELECT record_json FROM runtime_nodes WHERE projection_source IS NULL",
     ).all() as Row[];
     const stale = rows.map((row) => parse(runtimeNodeDescriptorSchema, row.record_json))
-      .filter((node) => node.presence === "online" && (node.lastHeartbeatAt === null || node.lastHeartbeatAt < cutoff));
+      .filter((node) => {
+        const live = this.#runtimeHeartbeats.get(node.runtimeNodeId);
+        const last = live?.boot === node.runtimeNodeBootId &&
+          (node.lastHeartbeatAt === null || live.observedAt > node.lastHeartbeatAt)
+          ? live.observedAt : node.lastHeartbeatAt;
+        return node.presence === "online" && (last === null || last < cutoff);
+      });
     for (const node of stale) this.markRuntimeNodeDisconnected(node.runtimeNodeId, node.runtimeNodeBootId);
     return stale.map((node) => node.runtimeNodeId);
   }
@@ -1532,13 +1634,26 @@ export class ControlNodeCatalog {
       archivedAt: current?.archivedAt ?? null,
       createdAt: current?.createdAt ?? incoming.createdAt,
     });
-    this.#mutate(() => {
+    const unchanged = current !== null && sameCanonicalJson(current, record);
+    if (unchanged) this.#storageMetrics.counters.sessionNoop++;
+    // Exact replay may still be the recovery trigger for a pending lifecycle
+    // intent or metadata proposal; only the redundant record/event is skipped.
+    const pendingLifecycle = this.#db.prepare(`SELECT 1 FROM lifecycle_intents
+      WHERE runtime_node_id=? AND harness=? AND vendor_session_id=?
+        AND ready=1 AND binding_state='pending' LIMIT 1`)
+      .get(record.runtimeNodeId, record.harness, record.vendorSessionId) !== undefined;
+    if (!pendingLifecycle && coalescibleActivity(current, record)) {
+      this.#storageMetrics.counters.activityCoalesced++;
+      this.applyPendingLifecycleMetadata(record.runtimeNodeId);
+      return this.getSession(record.sessionId)!;
+    }
+    if (!unchanged || pendingLifecycle) this.#mutate(() => {
       if (current && current.runtimeEpoch !== record.runtimeEpoch) {
         this.#stalePendingInteractionsForSession(current.sessionId, this.#timestamp());
       }
-      this.#putSession(record, null);
+      if (!unchanged) this.#putSession(record, null);
       this.#settleLifecycleForSession(record);
-      this.#appendControl({ type: "session.upsert", session: record });
+      if (!unchanged) this.#appendControl({ type: "session.upsert", session: record });
     });
     this.applyPendingLifecycleMetadata(record.runtimeNodeId);
     return this.getSession(record.sessionId)!;
@@ -3359,7 +3474,7 @@ export class ControlNodeCatalog {
     return current;
   }
 
-  #applyImportedChange(source: ControlNodeId, change: ControlChange): ControlChange {
+  #applyImportedChange(source: ControlNodeId, change: ControlChange): ControlChange | null {
     switch (change.type) {
       case "controlNode.upsert": this.#putControlNode(change.controlNode, source); break;
       case "controlNode.presence": {
@@ -3379,19 +3494,29 @@ export class ControlNodeCatalog {
           current?.catalogState === "archived" &&
           change.session.catalogState !== "archived"
         ) {
-          return { type: "session.upsert", session: current };
+          this.#storageMetrics.counters.importedSessionNoop++;
+          return null;
         }
         if (
           current !== null &&
           change.session.catalogRevision < current.catalogRevision
         ) {
-          return { type: "session.upsert", session: current };
+          this.#storageMetrics.counters.importedSessionNoop++;
+          return null;
         }
         const session = sessionRecordSchema.parse({
           ...change.session,
           metadata: this.#metadataImportedFromChild(current, change.session.metadata),
           metadataAuthority: this.authority(),
         });
+        if (current !== null && sameCanonicalJson(current, session)) {
+          this.#storageMetrics.counters.importedSessionNoop++;
+          return null;
+        }
+        if (coalescibleActivity(current, session)) {
+          this.#storageMetrics.counters.activityCoalesced++;
+          return null;
+        }
         this.#putSession(session, source);
         return { type: "session.upsert", session };
       }
@@ -3780,6 +3905,8 @@ export class ControlNodeCatalog {
 
   #putSession(session: SessionRecord, projectionSource: ControlNodeId | null): void {
     const value = sessionRecordSchema.parse(session);
+    const previous = this.getSession(value.sessionId);
+    const metadataUnchanged = previous !== null && sameCanonicalJson(previous.metadata.values, value.metadata.values);
     this.#db.prepare(`
       INSERT INTO sessions(
         session_id,runtime_node_id,harness,adapter_scope_id,vendor_session_id,
@@ -3798,6 +3925,8 @@ export class ControlNodeCatalog {
       value.availability, value.updatedAt, projectionSource, encode(value), value.catalogState,
       value.catalogRevision, value.archivedAt, value.lastActivityAt,
       value.launchProvenance?.providerId ?? null, value.launchProvenance?.profileId ?? null);
+    if (metadataUnchanged) { this.#storageMetrics.counters.metadataIndexSkipped++; return; }
+    this.#storageMetrics.counters.metadataIndexRebuilt++;
     this.#db.prepare("DELETE FROM session_metadata_index WHERE session_id=?")
       .run(value.sessionId);
     const putMetadata = this.#db.prepare(`
@@ -4012,6 +4141,7 @@ export class ControlNodeCatalog {
 
   #appendControl(changeInput: ControlChange, origin = this.#controlNodeId, eventId: string = randomUUID()): number {
     const change = controlChangeSchema.parse(changeInput);
+    if (change.type === "session.upsert") this.#storageMetrics.counters.sessionUpserts++;
     const cursor = this.controlCursor() + 1;
     const item = feedControlItemSchema.parse({
       kind: "control",
@@ -4041,22 +4171,24 @@ export class ControlNodeCatalog {
     ).run();
     this.#feedId = feedId;
     this.#publishedCursor = 0;
+    this.#retentionFloor = 0;
   }
 
   #mutate<T>(body: () => T): T {
     const result = this.#transaction(body);
-    this.#publishNewControls();
-    this.#compactToLimit();
+    this.#measure("publication", () => this.#publishNewControls());
+    this.#scheduleRetention();
     return result;
   }
 
   #transaction<T>(body: () => T): T {
     const previousFeedId = this.#feedId;
     const previousPublishedCursor = this.#publishedCursor;
-    this.#db.exec("BEGIN IMMEDIATE");
+    const previousRetentionFloor = this.#retentionFloor;
+    this.#measure("begin", () => this.#db.exec("BEGIN IMMEDIATE"));
     try {
-      const result = body();
-      this.#db.exec("COMMIT");
+      const result = this.#measure("body", body);
+      this.#measure("commit", () => this.#db.exec("COMMIT"));
       return result;
     } catch (cause) {
       try {
@@ -4066,6 +4198,7 @@ export class ControlNodeCatalog {
         // state. Restore it alongside SQLite if promotion does not commit.
         this.#feedId = previousFeedId;
         this.#publishedCursor = previousPublishedCursor;
+        this.#retentionFloor = previousRetentionFloor;
       }
       throw cause;
     }
@@ -4082,10 +4215,37 @@ export class ControlNodeCatalog {
     }
   }
 
-  #compactToLimit(): void {
-    const cursor = this.controlCursor();
-    const through = cursor - this.#eventRetentionLimit;
-    if (through > this.minimumControlCursor()) this.compactControlEvents(through);
+  #scheduleRetention(retry = false): void {
+    if (this.#closed || this.#retentionTimer !== undefined ||
+      this.#publishedCursor - this.#retentionFloor < this.#eventRetentionLimit + this.#retentionChunk) return;
+    // Only one bounded deletion per turn; never add a second durability barrier
+    // or surface retention failure after a successful domain commit.
+    this.#retentionTimer = setTimeout(() => {
+      this.#retentionTimer = undefined;
+      if (this.#closed) return;
+      let failed = false;
+      try {
+        const through = Math.min(this.controlCursor() - this.#eventRetentionLimit,
+          this.minimumControlCursor() + this.#retentionChunk);
+        if (through > this.minimumControlCursor()) this.compactControlEvents(through);
+      } catch {
+        failed = true;
+        this.#storageMetrics.counters.compactionFailures++;
+      }
+      this.#scheduleRetention(failed);
+    }, retry ? 1_000 : 0);
+    this.#retentionTimer.unref();
+  }
+
+  #measure<T>(kind: CatalogStorageTimingKind, work: () => T): T {
+    const start = performance.now(), metric = this.#storageMetrics.timings[kind];
+    try { return work(); }
+    catch (error) { metric.failures++; throw error; }
+    finally {
+      const elapsed = Math.max(0, performance.now() - start);
+      metric.count++; metric.totalMs += elapsed; metric.lastMs = elapsed;
+      metric.maximumMs = Math.max(metric.maximumMs, elapsed);
+    }
   }
 
   #timestamp(): string { return this.#now().toISOString(); }
@@ -4093,6 +4253,18 @@ export class ControlNodeCatalog {
 
 function sameAuthority(left: AuthorityRef, right: AuthorityRef): boolean {
   return left.realmId === right.realmId && left.controlNodeId === right.controlNodeId && left.epochId === right.epochId;
+}
+
+/** Only active/running timestamp ticks are lossy observations. Status, native
+ * settings, binding, last-seen and authority changes always commit immediately.
+ * A running timestamp can lag by at most 30 seconds of reported activity; the
+ * next status transition carries its complete native timestamp without delay. */
+function coalescibleActivity(current: SessionRecord | null, incoming: SessionRecord): boolean {
+  if (!current || current.availability !== "active" || current.runtimeStatus !== "running" ||
+      !current.lastActivityAt || !incoming.lastActivityAt) return false;
+  const delta = Date.parse(incoming.lastActivityAt) - Date.parse(current.lastActivityAt);
+  return delta > 0 && delta < 30_000 && Date.parse(incoming.updatedAt) >= Date.parse(current.updatedAt) &&
+    sameCanonicalJson(current, { ...incoming, lastActivityAt: current.lastActivityAt, updatedAt: current.updatedAt });
 }
 
 function sameMetadataPatch(left: MetadataPatch, right: MetadataPatch): boolean {

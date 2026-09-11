@@ -139,3 +139,12 @@ That trusted edge must verify credentials, assign action scopes, enforce origins
 and connection expiry, and retain the reference byte bounds. Declaring an external
 edge is not a remote or environment-controlled authentication bypass; the reference
 daemon retains its bearer/explicit-loopback policy.
+
+
+The optional authority storage worker is trusted code in the same OS process,
+not an isolation boundary for hostile plugins. Its private IPC accepts only
+allowlisted domain methods and authenticated endpoint context, then re-applies
+committed enrollment scopes and the original router validation. No SQL endpoint,
+stale authorization cache, remote worker configuration, lock deletion or automatic
+mutation replay is exposed. Loopback storage health contains fixed categories and
+aggregate timings only, with no native messages, SQL values or credentials.

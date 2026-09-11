@@ -1,3 +1,4 @@
+import { childImportBatches } from "./child-import-batches.js";
 import {
   assertImageResponseTarget,
   imageContract,
@@ -1938,10 +1939,11 @@ export class ControlNodeService {
         if (!attachment) return;
         const checkpoint = this.catalog.childCheckpoint(connection.controlNodeId);
         if (!checkpoint) return;
-        for await (const item of connection.subscribeAggregate({ ...checkpoint, native: {} }, controller.signal)) {
+        for await (const group of childImportBatches(connection.subscribeAggregate({ ...checkpoint, native: {} }, controller.signal), requiresChildResnapshot)) {
+          const item = Array.isArray(group) ? group.at(-1)! : group;
           if (controller.signal.aborted) return;
           if (item.kind === "control") {
-            this.catalog.importChildControl(connection.controlNodeId, attachment.attachmentId, item);
+            this.catalog.importChildControls(connection.controlNodeId, attachment.attachmentId, Array.isArray(group) ? group : [item]);
             if (requiresChildResnapshot(item)) {
               if (
                 this.#childPumps.get(connection.controlNodeId) !== pump ||

@@ -122,7 +122,7 @@ export interface LaunchProfileQuery {
  * a peer that identifies itself as another gateway.
  */
 export interface ControlNodeSourceClient extends ImagePort {
-  loadSnapshot(): Promise<GatewaySourceSnapshot>;
+  loadSnapshot(signal?: AbortSignal): Promise<GatewaySourceSnapshot>;
   watch(
     cursor: StreamCursor,
     signal?: AbortSignal,
@@ -192,6 +192,14 @@ type TerminalSourceClient = Required<Pick<
   | "terminateTerminal"
 >>;
 
+export interface SourceRefreshOptions {
+  readonly signal?: AbortSignal;
+  /** Deadline for acceptance; an uncooperative underlying read still owns its lane. */
+  readonly timeoutMs?: number;
+  /** Validate/retain a recovery snapshot without making it a routing candidate. */
+  readonly deferSelection?: boolean;
+}
+
 interface SourceState {
   readonly definition: GatewaySourceDefinition;
   snapshot: GatewaySourceSnapshot | null;
@@ -201,6 +209,10 @@ interface SourceState {
   lastError: string | undefined;
   updatedAt: string;
   generation: number;
+  eligible: boolean;
+  automaticAdmission: boolean;
+  refreshGeneration: number;
+  refreshLane: { readonly cancel: (cause: unknown) => void } | undefined;
 }
 
 interface GatewaySubscriber {
@@ -370,6 +382,10 @@ export class AccessGatewayProjection {
         lastError: undefined,
         updatedAt: this.#timestamp(),
         generation: 0,
+        eligible: false,
+        automaticAdmission: false,
+        refreshGeneration: 0,
+        refreshLane: undefined,
       });
     }
   }
@@ -396,33 +412,127 @@ export class AccessGatewayProjection {
       .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
   }
 
-  /** Load or replace one complete, internally consistent source projection. */
-  public async refreshSource(sourceId: SourceId): Promise<void> {
+  /** Load a validated snapshot with independently fenced routing eligibility. */
+  public refreshSource(sourceId: SourceId, options: SourceRefreshOptions = {}): Promise<void> {
     const source = this.#source(sourceId);
-    if (source.definition.enabled === false) return;
-    const previousSelection = this.#selectionSignature();
-    const failoverReference = this.#selected.has(sourceId)
-      ? source.snapshot
-      : null;
+    if (source.definition.enabled === false) return Promise.resolve();
+    if (options.signal?.aborted) return Promise.reject(options.signal.reason ?? new Error("source refresh cancelled"));
+    if (source.refreshLane) return Promise.reject(new GatewayRoutingError("UNAVAILABLE", "previous source snapshot is still settling"));
+    const timeoutMs = options.timeoutMs ?? 10_000;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 2_147_483_647) return Promise.reject(new RangeError("source snapshot deadline must be positive"));
+    const failoverReference = this.#selected.has(sourceId) ? source.snapshot : null;
+    const generation = ++source.refreshGeneration;
+    const deadline = performance.now() + timeoutMs;
+    const controller = new AbortController();
     source.state = "synchronizing";
+    source.automaticAdmission = false;
     source.updatedAt = this.#timestamp();
-    try {
-      const snapshot = await source.definition.client.loadSnapshot();
-      const manifest = sourceManifestSchema.parse(snapshot.manifest);
-      this.#validateSnapshot({ ...snapshot, manifest }, source);
-      source.snapshot = Object.freeze({ ...snapshot, manifest });
-      source.generation += 1;
-      source.lastError = undefined;
-      source.reason = undefined;
-      this.#reselect(previousSelection);
-    } catch (cause) {
-      source.state = "unavailable";
-      source.selectedBySourceId = undefined;
-      source.lastError = cause instanceof Error ? cause.message : String(cause);
-      source.updatedAt = this.#timestamp();
-      this.#reselect(previousSelection, failoverReference);
-      throw cause;
+    let active = true;
+    let cancel!: (cause: unknown) => void;
+    const result = new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const cleanup = () => { clearTimeout(timer); options.signal?.removeEventListener("abort", aborted); };
+      const fail = (cause: unknown) => {
+        if (!active) return;
+        active = false; cleanup(); controller.abort(cause);
+        // Invalidation never clears the underlying lane. Its late continuation
+        // cannot install a snapshot or resurrect this source during sibling refresh.
+        if (source.refreshGeneration === generation) {
+          source.eligible = false; source.automaticAdmission = false; source.state = "unavailable"; source.selectedBySourceId = undefined;
+          source.lastError = cause instanceof Error ? cause.message : String(cause); source.updatedAt = this.#timestamp();
+          this.#reselect(undefined, failoverReference);
+        }
+        reject(cause);
+      };
+      const aborted = () => fail(options.signal?.reason ?? new Error("source refresh cancelled"));
+      cancel = fail;
+      timer = setTimeout(() => fail(Object.assign(new Error("control source snapshot timed out"), { code: "TIMEOUT" })), timeoutMs);
+      timer.unref?.(); options.signal?.addEventListener("abort", aborted, { once: true });
+      // Defer dispatch until the lane is installed. This also catches synchronous throws.
+      const underlying = Promise.resolve().then(() => {
+        controller.signal.throwIfAborted();
+        return source.definition.client.loadSnapshot(controller.signal);
+      });
+      void underlying.then(snapshot => {
+        if (source.refreshLane?.cancel === cancel) source.refreshLane = undefined;
+        if (!active || source.refreshGeneration !== generation) return;
+        if (options.signal?.aborted) { fail(options.signal.reason ?? new Error("source refresh cancelled")); return; }
+        if (performance.now() >= deadline) { fail(Object.assign(new Error("control source snapshot timed out"), { code: "TIMEOUT" })); return; }
+        const manifest = sourceManifestSchema.parse(snapshot.manifest);
+        this.#validateSnapshot({ ...snapshot, manifest }, source);
+        if (source.snapshot && manifest.sourceControlNodeId !== source.snapshot.manifest.sourceControlNodeId) throw new GatewayRoutingError("CONFLICT", "source snapshot changed its pinned control identity");
+        if (performance.now() >= deadline) { fail(Object.assign(new Error("control source snapshot timed out"), { code: "TIMEOUT" })); return; }
+        // Other sources may have changed selection while this read was pending.
+        // Compare against current routing, immediately before replacing this view.
+        const previousSelection = this.#selectionSignature();
+        source.snapshot = Object.freeze({ ...snapshot, manifest }); source.generation += 1;
+        source.lastError = undefined; source.reason = undefined;
+        if (options.deferSelection) source.eligible = false;
+        else source.eligible = !this.#wouldReplaceHealthyChild(source);
+        source.automaticAdmission = !options.deferSelection && !source.eligible;
+        if (!source.eligible) source.reason = "recovery snapshot awaiting routing admission";
+        this.#reselect(previousSelection);
+        active = false; cleanup(); resolve();
+      }).catch(cause => {
+        if (source.refreshLane?.cancel === cancel) source.refreshLane = undefined;
+        fail(cause);
+      });
+    });
+    source.refreshLane = { cancel };
+    return result;
+  }
+
+  /** Admit a validated recovery after the embedding supervisor proves liveness.
+   * Incompatible source/authority claims still pass through normal fail-closed
+   * selection. A recovering ancestor cannot discard a healthy child route. */
+  public activateSource(sourceId: SourceId): boolean {
+    const source = this.#source(sourceId);
+    if (!source.snapshot || source.refreshLane || source.state === "unavailable" || source.definition.enabled === false || this.#wouldReplaceHealthyChild(source)) return false;
+    source.eligible = true;
+    source.automaticAdmission = false;
+    this.#reselect();
+    return source.state === "selected" || source.state === "suppressed";
+  }
+
+  #wouldReplaceHealthyChild(candidate: SourceState): boolean {
+    if (!candidate.snapshot) return false;
+    const snapshot = candidate.snapshot, manifest = snapshot.manifest;
+    // Health policy must not hide an incompatible durable claim. Admit it to
+    // ordinary conflict evaluation so the overlapping claims fail closed.
+    for (const other of this.#sources.values()) {
+      if (other === candidate || !other.eligible || !other.snapshot) continue;
+      const relation = coverageRelation(manifest, other.snapshot.manifest);
+      if (manifest.authority.realmId === other.snapshot.manifest.authority.realmId &&
+          !sameFence(manifest.authority, other.snapshot.manifest.authority)) return false;
+      if (relation === "partial" || relation !== "disjoint" &&
+          (!sameFence(manifest.authority, other.snapshot.manifest.authority) ||
+           overlappingRecordConflict(snapshot, other.snapshot) !== undefined)) return false;
+      if (relation === "disjoint" && sharedDomainIdentityConflict(snapshot, other.snapshot) !== undefined) return false;
     }
+    for (const sourceId of this.#selected) {
+      if (sourceId === candidate.definition.sourceId) continue;
+      const child = this.#source(sourceId).snapshot!;
+      if (!sameFence(manifest.authority, child.manifest.authority) ||
+          !isSuperset(manifest.coveredControlNodeIds, child.manifest.coveredControlNodeIds)) continue;
+      for (const runtime of child.runtimeNodes) {
+        if (runtime.presence !== "online" || runtime.reachability !== "reachable") continue;
+        const replacement = snapshot.runtimeNodes.find(item => item.runtimeNodeId === runtime.runtimeNodeId);
+        if (!replacement || replacement.presence !== "online" || replacement.reachability !== "reachable" || replacement.runtimeNodeBootId !== runtime.runtimeNodeBootId) return true;
+        // Same-status runtime heartbeat timestamps are deliberately not control
+        // events. An ancestor can therefore have an older timestamp while its
+        // child feed is fully caught up. Compare replicated session observations
+        // instead of using a non-replicated heartbeat as a failback barrier.
+        for (const session of child.sessions) {
+          if (session.runtimeNodeId !== runtime.runtimeNodeId || session.catalogState === "archived") continue;
+          const retained = snapshot.sessions.find(item => item.sessionId === session.sessionId);
+          if (!retained || retained.runtimeEpoch !== session.runtimeEpoch ||
+              Date.parse(session.updatedAt) - Date.parse(retained.updatedAt) > 30_000 ||
+              Date.parse(session.updatedAt) > Date.parse(retained.updatedAt) &&
+                (session.runtimeStatus !== retained.runtimeStatus || session.availability !== retained.availability)) return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -443,7 +553,7 @@ export class AccessGatewayProjection {
     let delayMs = minimumBackoffMs;
     while (!signal.aborted) {
       try {
-        await this.refreshSource(sourceId);
+        await this.refreshSource(sourceId, { signal });
         delayMs = minimumBackoffMs;
         const source = this.#source(sourceId);
         const snapshot = source.snapshot!;
@@ -456,12 +566,12 @@ export class AccessGatewayProjection {
         for await (const item of source.definition.client.watch(cursor, signal)) {
           if (signal.aborted || source.generation !== generation) break;
           if (item.kind === "streamReset") {
-            await this.refreshSource(sourceId);
+            await this.refreshSource(sourceId, { signal });
             break;
           }
           this.ingest(sourceId, item);
           if (item.kind === "control" && requiresSourceSnapshot(item)) {
-            await this.refreshSource(sourceId);
+            await this.refreshSource(sourceId, { signal });
             break;
           }
         }
@@ -487,6 +597,10 @@ export class AccessGatewayProjection {
   /** A transport disconnect changes availability only; it never changes authority. */
   public markUnavailable(sourceId: SourceId, cause?: unknown): void {
     const source = this.#source(sourceId);
+    source.refreshLane?.cancel(cause ?? new Error("source disconnected"));
+    source.refreshGeneration += 1;
+    source.eligible = false;
+    source.automaticAdmission = false;
     if (source.state === "unavailable") {
       source.lastError = cause === undefined
         ? source.lastError ?? "source disconnected"
@@ -1051,6 +1165,10 @@ export class AccessGatewayProjection {
       if (item.controlCursor > source.snapshot.manifest.controlCursor) {
         throw new GatewayRoutingError("CONFLICT", `source ${sourceId} heartbeat skipped control events`);
       }
+      // Default supervisors can finish admission after the newly validated
+      // snapshot catches up with its child streams. Explicitly deferred
+      // consumer probation still requires its own activateSource call.
+      if (source.automaticAdmission) this.activateSource(sourceId);
       if (!this.#selected.has(sourceId)) return false;
       this.#broadcast(this.#heartbeat());
       return true;
@@ -1251,7 +1369,7 @@ export class AccessGatewayProjection {
       else if (source.snapshot !== null && source.state !== "unavailable") source.state = "synchronizing";
     }
     const candidates = [...this.#sources.values()].filter(
-      (source) => source.snapshot !== null && source.state !== "unavailable" && source.state !== "disabled",
+      (source) => source.snapshot !== null && source.eligible && source.state !== "disabled",
     );
 
     // Conflicting authority claims or ambiguous partial overlaps fail closed.

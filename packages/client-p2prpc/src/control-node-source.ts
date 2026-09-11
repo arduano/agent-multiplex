@@ -74,11 +74,14 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
     return this.handle.reconnect();
   }
 
-  public async loadSnapshot(): Promise<GatewaySourceSnapshot> {
-    const access = await this.#access();
+  public async loadSnapshot(signal?: AbortSignal): Promise<GatewaySourceSnapshot> {
+    signal?.throwIfAborted();
+    const access = await this.#access(signal);
+    signal?.throwIfAborted();
     const snapshot = accessSnapshotSchema.nullable().parse(
-      await access.sources.snapshot.query(),
+      await access.sources.snapshot.query(undefined, signal === undefined ? undefined : { signal }),
     );
+    signal?.throwIfAborted();
     if (snapshot === null) {
       throw new Error("configured p2prpc source is an access gateway, not a control node");
     }
@@ -381,8 +384,9 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
     }
   }
 
-  async #access(): Promise<ConnectedControlNodeSource["access"]> {
+  async #access(signal?: AbortSignal): Promise<ConnectedControlNodeSource["access"]> {
     const connected = await this.handle.connect();
+    signal?.throwIfAborted();
     // Persist the locator that actually established this pinned connection.
     // This also clears an expired persisted renewal after bootstrap fallback
     // when the enrollment response does not include another renewal.
