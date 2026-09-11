@@ -50,4 +50,3 @@ function errorCode(error: unknown): string | undefined {
     ? String(Reflect.get(error, "code"))
     : undefined;
 }
-
