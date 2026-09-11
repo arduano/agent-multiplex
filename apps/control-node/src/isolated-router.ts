@@ -10,11 +10,11 @@ export function createIsolatedControlRouter(rpc: IsolatedRpc): CompositeControlN
   return forwardedControlRouter(rpc) as CompositeControlNodeRouter;
 }
 
-export function createIsolatedAccessRouter(rpc: IsolatedRpc): AccessRouter {
-  return forwardedControlRouter(rpc, "access.") as AccessRouter;
+export function createIsolatedAccessRouter(rpc: IsolatedRpc, ready: () => boolean = () => true): AccessRouter {
+  return forwardedControlRouter(rpc, "access.", ready) as AccessRouter;
 }
 
-function forwardedControlRouter(rpc: IsolatedRpc, prefix = ""): AnyTRPCRouter {
+function forwardedControlRouter(rpc: IsolatedRpc, prefix = "", ready: () => boolean = () => true): AnyTRPCRouter {
   // Router construction only registers closures. No service method runs here.
   const template = createCompositeControlNodeRouter(undefined as unknown as ControlNodeService);
   const t = initTRPC.context<ControlNodeRouterContext>().create();
@@ -23,12 +23,14 @@ function forwardedControlRouter(rpc: IsolatedRpc, prefix = ""): AnyTRPCRouter {
     if (!path.startsWith(prefix)) continue;
     const procedure = t.procedure.input((value: unknown) => value);
     const invoke = async (input: unknown, ctx: ControlNodeRouterContext) => {
+      if (!ready()) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "control storage is starting" });
       try { return await rpc.call("router", [path, input, context(ctx)], { mutation: original._def.type === "mutation" }); }
       catch (error) { throw error instanceof TRPCError ? error : asTrpcError(error); }
     };
     const forwarded = original._def.type === "query" ? procedure.query(({ input, ctx }) => invoke(input, ctx))
       : original._def.type === "mutation" ? procedure.mutation(({ input, ctx }) => invoke(input, ctx))
       : procedure.subscription(async function* ({ input, ctx, signal }) {
+        if (!ready()) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "control storage is starting" });
         try { yield* isolatedStream(rpc, "router", [path, input, context(ctx)], signal); }
         catch (error) { throw error instanceof TRPCError ? error : asTrpcError(error); }
       });

@@ -6,12 +6,34 @@ import { once } from "node:events";
 import { ControlNodeCatalog, ControlNodeService, type ChildControlNodeConnection } from "@arduano/agent-multiplex-control-node-core";
 import { newRuntimeNodeId, newRuntimeNodeBootId, newRuntimeEpoch, newCommandId, packNativePayload, type CommandRecord } from "@arduano/agent-multiplex-protocol";
 import { describe, it, expect } from "vitest";
-import { IsolatedControlOwner } from "../apps/control-node/src/isolated-control.js";
+import { IsolatedControlOwner, waitForIsolatedStorage } from "../apps/control-node/src/isolated-control.js";
 import { createIsolatedAccessRouter, createIsolatedControlRouter } from "../apps/control-node/src/isolated-router.js";
 import { createControlNodeHttpSurfaceFromRouter } from "../apps/control-node/src/http.js";
 
 const enrollment = { runtimeNodes: false, childControlNodes: true, accessGateways: true, accessGatewayScopes: ["read"] as const };
 describe("isolated authority control", () => {
+  it("keeps slow startup in one lane, serves health and rejects domain work before admission", async () => {
+    const memory = new SharedArrayBuffer(4);
+    const worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads'); parentPort.on('message', m => { if(m.kind !== 'request')return; Atomics.wait(new Int32Array(workerData),0,0); parentPort.postMessage({kind:'response',id:m.id,result:null}); });`, { eval: true, workerData: memory });
+    const owner = new IsolatedControlOwner({ statePath: "unused", name: "fixture", enrollment, childControlNodeStaleMs: 30_000 }, "fixture", () => { throw Error("unused"); }, { worker });
+    const controller = new AbortController();
+    const http = createControlNodeHttpSurfaceFromRouter(createIsolatedAccessRouter(owner.rpc, () => false), () => owner.health());
+    let settled = false;
+    const startup = waitForIsolatedStorage(owner.rpc, controller.signal).finally(() => { settled = true; });
+    try {
+      http.server.listen(0, "127.0.0.1"); await once(http.server, "listening");
+      const address = http.server.address(); if (!address || typeof address === "string") throw Error("missing port");
+      const url = `http://127.0.0.1:${address.port}`;
+      expect((await fetch(url + "/health")).status).toBe(503);
+      expect((await fetch(url + "/trpc/system.describe")).status).toBe(503);
+      expect(owner.health().queue.pending).toBe(1);
+      await new Promise(resolve => setTimeout(resolve, 11_000));
+      expect(settled).toBe(false);
+      expect(owner.health().queue).toMatchObject({ pending: 1, expired: 0 });
+      controller.abort(); await expect(startup).rejects.toThrow();
+      expect(owner.health().queue.pending).toBe(1);
+    } finally { Atomics.store(new Int32Array(memory), 0, 1); Atomics.notify(new Int32Array(memory), 0); await worker.terminate(); await http.close(); await owner.close().catch(() => {}); }
+  }, 20_000);
   it("runs original authorization and durable catalog in a worker with unchanged identities", async () => {
     const directory = await mkdtemp(join(tmpdir(), "multiplex-isolated-authority-"));
     const statePath = join(directory, "catalog.sqlite");

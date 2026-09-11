@@ -174,3 +174,10 @@ a missed drain remains a failure and does not release the SQLite writer lock.
 No watchdog starts a replacement worker. Verify the old process actually exited
 before restarting; never delete its lock as a timeout workaround. Ordinary runtime
 stores retain WAL/FULL durability and existing filesystem placement.
+
+During isolated-authority startup, loopback health is available while the sole
+storage worker opens/checks its catalog. Domain requests are rejected before
+admission until initialization completes. A slow open has no arbitrary read
+deadline that triggers replacement; an explicit shutdown still closes admission
+and waits for the existing worker. Compacted catalogs initialize publication at
+their persisted checkpoint, so reopening never requires retired cursor zero.

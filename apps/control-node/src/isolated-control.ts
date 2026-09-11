@@ -108,6 +108,7 @@ export async function runIsolatedAuthorityControlNode(config: ControlNodeAppConf
   let refresh: ReturnType<typeof setInterval> | undefined;
   let refreshing = false;
   let closing = false;
+  let initialized = false;
   let lastLogAt = 0;
   const diagnostic = () => {
     if (Date.now() - lastLogAt < 60_000 || process.stderr.writableLength > 64 * 1024) return;
@@ -116,7 +117,12 @@ export async function runIsolatedAuthorityControlNode(config: ControlNodeAppConf
   };
   const enrollment = (endpoint: string) => owner.rpc.call<Enrollment>("enrollment", [endpoint], { timeoutMs: 5_000 });
   try {
-    await owner.rpc.call("identity");
+    // SQLite open/integrity checks may spend minutes in the filesystem. Keep
+    // health responsive without turning a slow opener into a restart loop.
+    // Reject domain requests before admission until initialization completes.
+    http = createControlNodeHttpSurfaceFromRouter(createIsolatedAccessRouter(owner.rpc, () => initialized), () => ({ ...owner.health(), ready: initialized && owner.health().ready }));
+    await new Promise<void>((resolve, reject) => { http!.server.once("error", reject); http!.server.listen(config.port, config.bindAddress, () => { http!.server.off("error", reject); resolve(); }); });
+    await waitForIsolatedStorage(owner.rpc, signal);
     const router = createIsolatedControlRouter(owner.rpc);
     node = await createControlNodeP2PNode<CompositeControlNodeRouter, AnyTRPCRouter>({
       router,
@@ -144,10 +150,9 @@ export async function runIsolatedAuthorityControlNode(config: ControlNodeAppConf
     };
     const ticket = await node.createTicket();
     const local = await owner.rpc.call<ControlNodeDescriptor>("initialize", [node.id, ticket], { mutation: true });
-    http = createControlNodeHttpSurfaceFromRouter(createIsolatedAccessRouter(owner.rpc), () => owner.health());
-    await new Promise<void>((resolve, reject) => { http!.server.once("error", reject); http!.server.listen(config.port, config.bindAddress, () => { http!.server.off("error", reject); resolve(); }); });
     const address = http.server.address(); const port = address && typeof address === "object" ? address.port : config.port;
     await options.onReady?.({ controlNodeId: local.controlNodeId, endpointId: node.id, ticket, httpUrl: `http://${config.bindAddress}:${port}`, createTicket });
+    initialized = true;
     refresh = setInterval(() => {
       if (closing || refreshing || signal.aborted) return;
       refreshing = true;
@@ -163,4 +168,16 @@ export async function runIsolatedAuthorityControlNode(config: ControlNodeAppConf
     try { await http?.close(); }
     finally { try { await node?.close(); } finally { await owner.close(); } }
   }
+}
+
+/** Startup has one retained read, no storage deadline and explicit shutdown. */
+export async function waitForIsolatedStorage(rpc: IsolatedRpc, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  let stop!: () => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    stop = () => reject(signal.reason ?? new Error("control startup cancelled"));
+    signal.addEventListener("abort", stop, { once: true });
+  });
+  try { await Promise.race([rpc.call("identity", [], { timeoutMs: 0 }), aborted]); }
+  finally { signal.removeEventListener("abort", stop); }
 }

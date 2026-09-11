@@ -277,6 +277,11 @@ export class ControlNodeCatalog {
       const identity = this.#loadOrCreateIdentity(options.controlNodeId);
       this.#controlNodeId = identity.controlNodeId;
       this.#feedId = identity.feedId;
+      // Existing committed events predate this process's listeners. Initialize
+      // the publication barrier before bootstrap emits its new boot/recovery
+      // events; a compacted catalog may no longer contain cursor zero.
+      this.#publishedCursor = this.controlCursor();
+      this.#retentionFloor = this.minimumControlCursor();
       this.#startBoot(options);
       this.#recoverInterruptedState();
       this.#retireArchivedMetadataDeliveryIntents();

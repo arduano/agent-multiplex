@@ -222,4 +222,29 @@ describe("catalog storage reliability", () => {
     expect(catalog.canReplayControlCursor(1_000)).toBe(true);
     expect(catalog.storageMetrics().timings.compaction.failures).toBe(1);
   });
+  it("reopens a compacted catalog without replaying expired events or losing authority and receipts", () => {
+    let catalog = create();
+    const record = session(catalog), authority = catalog.authority();
+    const operationId = newOperationId();
+    const operation = catalog.submitMetadataPatch({ operationId, sessionId: record.sessionId,
+      expectedAuthority: authority, set: { "ui.title": "Preserved" } });
+    const feedId = catalog.feedCheckpoint().feedId, boundary = catalog.controlCursor();
+    catalog.compactControlEvents(boundary);
+    expect(catalog.canReplayControlCursor(0)).toBe(false);
+    catalog = reopen(catalog);
+    expect(catalog.authority()).toEqual(authority);
+    expect(catalog.feedCheckpoint().feedId).toBe(feedId);
+    expect(catalog.minimumControlCursor()).toBe(boundary);
+    expect(catalog.getMetadataOperation(operationId)).toEqual(operation);
+    expect(catalog.getSession(record.sessionId)?.vendorSessionId).toBe(record.vendorSessionId);
+    expect(catalog.getMetadata(record.sessionId).values).toEqual({ "ui.title": "Preserved" });
+    expect(() => catalog.controlEventsAfter(0)).toThrow("outside retained range");
+    expect(catalog.controlEventsAfter(boundary).length).toBeGreaterThan(0);
+    const observed: FeedControlItem[] = [];
+    catalog.onControl(item => observed.push(item));
+    catalog.registerRuntimeNode(catalog.getRuntimeNode(record.runtimeNodeId)!);
+    expect(observed.length).toBeGreaterThan(0);
+    expect(observed.every(item => item.cursor > boundary)).toBe(true);
+  });
+
 });

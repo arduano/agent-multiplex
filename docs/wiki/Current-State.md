@@ -7,6 +7,16 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-11.
 
+## Retained catalog startup correction
+
+The `.15` candidate corrects a latent restart defect when a catalog has compacted
+past cursor zero: publication initializes from its committed checkpoint before
+boot/recovery events. It also keeps slow authority initialization in one retained
+lane, exposes health during database open and rejects domain requests before
+initialization. Do not activate `.14` on retained roots; the previously published
+bytes remain immutable. Catalog, identities, receipts and durability are preserved.
+Validation/publication of the correction is in progress.
+
 ## Storage reliability prerelease
 
 Published [`0.2.4-hotfix.14`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)
