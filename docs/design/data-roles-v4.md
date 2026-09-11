@@ -712,3 +712,10 @@ identity, overlap and authority fences, and refuses to replace healthy selected
 child runtimes with an unavailable, different-boot or materially older replicated session
 projection. Consumers can require sustained fresh heartbeats before failback.
 This is route selection within the same authority tree, never branch promotion.
+
+An isolated authority exposes loopback health while its single catalog owner
+opens/checks retained state. Domain requests are rejected before admission until
+initialization completes. Slow startup retains the original open without the
+normal request timeout; explicit shutdown still closes that owner. Publication
+starts at the persisted checkpoint before boot/recovery commits, so retained
+startup does not require replay from a compacted-away cursor zero.

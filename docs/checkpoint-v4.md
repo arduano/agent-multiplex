@@ -1,5 +1,36 @@
 # Release qualification checkpoint
 
+## Retained catalog startup correction — 2026-09-11
+
+Signed tag [`hotfix-2026-09-11.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.2)
+identifies source `774fb8e762d465bd0e2ae3dea87e1e9bd03a80f6` and all 16
+`0.2.4-hotfix.15` packages. It supersedes `.14` for retained control activation.
+An installed-root attempt exposed a latent preexisting restart bug: boot
+publication began at zero even after retention had retired that cursor. The
+constructor now starts from its persisted checkpoint before new boot/recovery
+commits. It preserves authority, feed identity, metadata, native bindings and
+operation receipts; old cursors still correctly reject external replay.
+
+Isolated startup also keeps one pending database open without the ordinary
+request deadline, exposes health and rejects domain requests before admission
+until initialized. Explicit shutdown closes the existing owner without another
+writer. No migration, protocol/native/transport pin or durability change.
+
+Node 24.19.0 / npm 11.17.0 passed typecheck/build, **930 deterministic tests**,
+checkpoint/docs/release/secret checks, all 16 packed consumers and the
+507-component SBOM. New tests reopen a compacted catalog with retained receipts
+and hold startup beyond the ordinary request deadline with health available and
+no queued domain calls. A byte-verified retained catalog copy also opened through
+the real isolated worker with no production transport or native requests.
+
+All 19 downloaded published assets match the local bytes; all package
+SHA-256/SHA-512 values and signed source/tag identities verify. Evidence is
+retained under `receipts/storage-reliability/2026-09-11/`, including the correction
+assets and startup regression results. Earlier Docker runs retain their original
+source/image scope; no exact-correction Docker or native-model qualification is
+claimed. This is the same incremental prerelease waiver, not stable promotion.
+
+
 ## Storage stall containment — 2026-09-11
 
 Signed [`hotfix-2026-09-11.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)

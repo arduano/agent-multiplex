@@ -9,13 +9,15 @@ Last reconciled: 2026-09-11.
 
 ## Retained catalog startup correction
 
-The `.15` candidate corrects a latent restart defect when a catalog has compacted
+Published [`.15`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.2) corrects a latent restart defect when a catalog has compacted
 past cursor zero: publication initializes from its committed checkpoint before
 boot/recovery events. It also keeps slow authority initialization in one retained
 lane, exposes health during database open and rejects domain requests before
 initialization. Do not activate `.14` on retained roots; the previously published
 bytes remain immutable. Catalog, identities, receipts and durability are preserved.
-Validation/publication of the correction is in progress.
+All 930 deterministic tests, 16 packed consumers, typecheck/build and source
+gates pass; all 19 published artifacts are independently verified. Native-model
+qualification remains waived. See the [checkpoint](../checkpoint-v4.md#retained-catalog-startup-correction--2026-09-11).
 
 ## Storage reliability prerelease
 
