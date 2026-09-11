@@ -360,10 +360,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
     );
     expect(runtimeEvent).toBeDefined();
     publishAfterRestart(runtimeEvent!);
-    for (let attempt = 0; attempt < 20 && !parentCatalog.getRuntimeNode(runtimeNodeId); attempt += 1) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    expect(parentCatalog.getRuntimeNode(runtimeNodeId)).toMatchObject({
+    await expect.poll(() => parentCatalog.getRuntimeNode(runtimeNodeId)).toMatchObject({
       runtimeNodeId,
       ownerControlNodeId: child.controlNodeId,
       reachability: "reachable",
@@ -422,7 +419,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
           authority: parentCatalog.authority(),
           projectionRootControlNodeId: child.controlNodeId,
           coveredControlNodeIds: [child.controlNodeId],
-          feedId: child.feedId,
+          feedId: childCatalog.localControlNode().feedId,
           controlCursor: 7,
           generatedAt: now,
           capabilities: [],

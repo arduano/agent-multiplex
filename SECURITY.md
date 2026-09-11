@@ -46,6 +46,14 @@ disclosure.
 ## Security boundaries
 
 - Control nodes are trusted canonical metadata/catalog authorities.
+- Answering or expiring an imported interaction preserves its admitted child
+  ownership. It does not authorize identity transfer or weaken snapshot and
+  terminal-response conflict checks.
+- Initial receipt handoff trusts the authenticated standalone child's prior
+  authority only during its first complete snapshot. The parent persists this
+  admission and accepts no later invented historical receipt or changed terminal
+  result. Existing subtree moves and undrained metadata work are rejected; a
+  network outage never invokes handoff or promotes an attached branch.
 - Runtimes are trusted with allowed workspaces, native harness credentials,
   provider secrets, app-server output, and the runtime account's OS authority.
 - Gateways are zero-authority protocol actors but can observe all data granted by
@@ -60,6 +68,27 @@ disclosure.
   locators, not identity.
 - Terminal output is opaque and unredacted. `terminal-control` is equivalent to
   typing at a native agent under the runtime account.
+- Live queue observations use `read` and may contain operator prompt text. They
+  require an active binding and neither activate stopped sessions nor persist
+  queue text in the catalog. Moving a queued message into a running turn requires
+  `agent-control` and the durable command fence; unknown results must not be
+  replaced by remove/resend.
+- Native Copilot task lists/progress use the active-binding `read` boundary
+  and can include commands, paths, prompt text and recent output. They never
+  resume stopped sessions or grant arbitrary shell/process access. Exact-ID
+  task promotion and cancellation require `agent-control` and the durable
+  command fence. False acknowledgements remain no-ops; an unknown result cannot
+  authorize another mutation, alternate task or process-termination fallback.
+- Native context compaction requires `agent-control` and the existing durable
+  command/binding fence. It can make provider/model requests and changes native
+  context. It does not resume stopped sessions, grant tool permissions or add
+  a synthetic user prompt. Codex start acknowledgement is not completion; native
+  Copilot false results remain false. Unknown outcomes must retain their original
+  operation identity without automatic retry.
+- Native Codex goal observations use the same live-binding `read` boundary.
+  Setting or clearing goals requires `agent-control` and a durable command ID;
+  setting an active goal may cause Codex to continue work under its native
+  behavior. Goal reads never resume a session or grant tool permissions.
 - Copilot's `setPermissionMode` command uses `agent-control` and changes the native
   session's tool, path and URL permission mode. Native managed policy remains
   enforced by Copilot. The adapter never substitutes unconditional approval
@@ -110,3 +139,12 @@ That trusted edge must verify credentials, assign action scopes, enforce origins
 and connection expiry, and retain the reference byte bounds. Declaring an external
 edge is not a remote or environment-controlled authentication bypass; the reference
 daemon retains its bearer/explicit-loopback policy.
+
+
+The optional authority storage worker is trusted code in the same OS process,
+not an isolation boundary for hostile plugins. Its private IPC accepts only
+allowlisted domain methods and authenticated endpoint context, then re-applies
+committed enrollment scopes and the original router validation. No SQL endpoint,
+stale authorization cache, remote worker configuration, lock deletion or automatic
+mutation replay is exposed. Loopback storage health contains fixed categories and
+aggregate timings only, with no native messages, SQL values or credentials.

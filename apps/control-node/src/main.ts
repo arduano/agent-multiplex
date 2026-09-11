@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
-import { randomBytes, randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
-import { chmod, link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { readFileSync, realpathSync } from "node:fs";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
@@ -38,10 +37,12 @@ import {
   parseDesiredControlNodeUpstream,
   type ControlNodeAppConfig,
 } from "./config.js";
+import { loadOrCreateControlNodeSecretKey } from "./identity.js";
+export { loadOrCreateControlNodeSecretKey } from "./identity.js";
 import { createControlNodeHttpSurface } from "./http.js";
 import { superviseUpstreamControlNode } from "./upstream.js";
 
-const VERSION = "0.2.3";
+const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 export interface ControlNodeReadyInfo {
   readonly controlNodeId: ControlNodeId;
@@ -65,6 +66,10 @@ export async function runControlNode(
   signal: AbortSignal,
   options: ControlNodeAppOptions = {},
 ): Promise<void> {
+  if (config.storageOwner === "worker") {
+    const { runIsolatedAuthorityControlNode } = await import("./isolated-control.js");
+    return runIsolatedAuthorityControlNode(config, signal, options);
+  }
   const instanceId = config.instanceId ?? randomUUID();
   const secretKey = await loadOrCreateControlNodeSecretKey(config.identityPath);
   const catalog = new ControlNodeCatalog({
@@ -350,54 +355,6 @@ export async function runControlNode(
   }
 }
 
-export async function loadOrCreateControlNodeSecretKey(
-  filename: string,
-): Promise<Uint8Array> {
-  try {
-    const encoded = (await readFile(filename, "utf8")).trim();
-    const key = Buffer.from(encoded, "base64url");
-    if (key.byteLength !== 32) {
-      throw new Error(
-        `${filename} must contain one base64url-encoded 32-byte Iroh key`,
-      );
-    }
-    await chmod(filename, 0o600);
-    return key;
-  } catch (error) {
-    if (errorCode(error) !== "ENOENT") throw error;
-  }
-
-  const key = randomBytes(32);
-  await mkdir(dirname(filename), { recursive: true, mode: 0o700 });
-  const temporary = `${filename}.${process.pid}.${randomUUID()}.tmp`;
-  await writeFile(temporary, `${Buffer.from(key).toString("base64url")}\n`, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
-  try {
-    await link(temporary, filename);
-    await chmod(filename, 0o600);
-    return key;
-  } catch (error) {
-    if (errorCode(error) !== "EEXIST") throw error;
-    const encoded = (await readFile(filename, "utf8")).trim();
-    const winner = Buffer.from(encoded, "base64url");
-    if (winner.byteLength !== 32) {
-      throw new Error(`${filename} contains an invalid Iroh key`);
-    }
-    await chmod(filename, 0o600);
-    return winner;
-  } finally {
-    await unlink(temporary).catch(() => undefined);
-  }
-}
-
-function errorCode(error: unknown): string | undefined {
-  return error && typeof error === "object" && "code" in error
-    ? String(Reflect.get(error, "code"))
-    : undefined;
-}
 
 function listen(
   server: import("node:http").Server,
@@ -470,3 +427,5 @@ See https://github.com/arduano/agent-multiplex/blob/main/apps/control-node/READM
     });
   }
 }
+
+export { runIsolatedAuthorityControlNode, IsolatedControlOwner } from "./isolated-control.js";

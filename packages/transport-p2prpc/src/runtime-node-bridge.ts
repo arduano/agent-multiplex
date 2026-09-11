@@ -31,6 +31,8 @@ import type {
   LaunchProfileIdentity,
   LaunchRecord,
   LaunchRequest,
+  NativeStateRequest,
+  NativeStateResult,
   NativeHistoryRequest,
   NativeHistoryResult,
   NativeModel,
@@ -212,6 +214,17 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
     return this.peer.rpc.commands.execute.mutate({
       runtimeNodeBootId: this.runtimeNodeBootId,
       command,
+    });
+  }
+
+  public readNativeState(
+    sessionId: SessionId,
+    request: NativeStateRequest,
+  ): Promise<NativeStateResult> {
+    return this.peer.rpc.sessions.readNativeState.query({
+      runtimeNodeBootId: this.runtimeNodeBootId,
+      sessionId,
+      request,
     });
   }
 

@@ -20,6 +20,11 @@ Stop preserves the logical ID, vendor binding, launch provenance, and provider
 resources required for resume. Archive is never automatic and is not the same
 as Codex's own native thread-archive concept.
 
+Runtime restart clears the old process's active status before durable bindings
+are replayed to the control node. Resuming remains explicit. A temporary native
+attachment used to read stopped history does not make a session active or
+command-ready; only a handle installed in the runtime's active bindings does.
+
 ## Launch lifecycle
 
 `launches.create` durably admits work before asynchronous provisioning:
@@ -120,6 +125,13 @@ attachment remain discoverable. The same session identity returned by two
 sibling subtrees is a conflict, not a deduplication opportunity.
 
 ## History and interactions
+
+Resolving, expiring or retiring an imported interaction preserves its child
+projection ownership. A terminal answer does not make the record local to the
+authority. Otherwise the next child reconnect would reject its valid snapshot
+as an identity takeover. Snapshot ownership and terminal-answer conflict checks
+continue to fail closed. Existing damaged ownership markers require a backed-up,
+fenced catalog repair; restarting the native agent does not repair them.
 
 `sessions.readNativeHistory` always routes to the recorded provider/backend and
 harness adapter. Multiplex does not read `.codex`, Copilot session files, or

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   emptyMetadataSnapshot,
   newAuthorityEpochId,
@@ -50,6 +50,7 @@ const timestamp = "2026-09-03T01:00:00.000Z";
 class FakeSource implements ControlNodeSourceClient {
   public dispatches = 0;
   public commandReads = 0;
+  public stateReads = 0;
   public executeError: Error | undefined;
   public getCommandError: Error | undefined;
   public recoveredCommand: CommandRecord | null = null;
@@ -128,6 +129,10 @@ class FakeSource implements ControlNodeSourceClient {
     });
   }
   public readNativeHistory(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public readNativeState(): Promise<import("@arduano/agent-multiplex-protocol").NativeStateResult> {
+    this.stateReads += 1;
+    return Promise.resolve({ harness: "copilot", vendorSessionId: "native-1", payload: packNativePayload({ items: [], steeringMessages: [] }) });
+  }
   public beginImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
   public writeImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
   public commitImageUpload(): Promise<never> { return Promise.reject(new Error("unused")); }
@@ -393,6 +398,168 @@ describe("AccessGatewayProjection source selection", () => {
     expect(gateway.listControlNodes()).toHaveLength(1);
   });
 
+  it("cannot resurrect an unavailable ancestor while its recovery snapshot is pending", async () => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const snapshots = overlappingSnapshots(authority(root), root, child);
+    const ancestor = source("ancestor", snapshots.ancestor), descendant = source("descendant", snapshots.descendant);
+    const gateway = new AccessGatewayProjection([ancestor, descendant]);
+    await gateway.refreshAll(); gateway.markUnavailable("ancestor" as SourceId);
+    const feed = gateway.feedId();
+    let release!: (value: GatewaySourceSnapshot) => void;
+    ancestor.client.loadSnapshot = () => new Promise(resolve => { release = resolve; });
+    const pending = gateway.refreshSource("ancestor" as SourceId, { deferSelection: true });
+    await Promise.resolve();
+    for (let index = 0; index < 5; index++) await gateway.refreshSource("descendant" as SourceId);
+    expect(gateway.diagnostics().find(value => value.sourceId === "descendant")?.state).toBe("selected");
+    expect(gateway.feedId()).toBe(feed);
+    release(snapshots.ancestor); await pending;
+    await gateway.refreshSource("descendant" as SourceId);
+    expect(gateway.diagnostics().find(value => value.sourceId === "descendant")?.state).toBe("selected");
+    expect(gateway.feedId()).toBe(feed);
+    expect(gateway.activateSource("ancestor" as SourceId)).toBe(true);
+    expect(gateway.diagnostics().find(value => value.sourceId === "ancestor")?.state).toBe("selected");
+  });
+
+  it("bounds snapshot acceptance, retains the pending lane, and rejects late success", async () => {
+    vi.useFakeTimers();
+    try {
+      const id = newControlNodeId(), fixture = source("source", snapshot(authority(id), [id]));
+      const gateway = new AccessGatewayProjection([fixture]); let release!: (value: GatewaySourceSnapshot) => void;
+      const load = vi.fn(() => new Promise<GatewaySourceSnapshot>(resolve => { release = resolve; })); fixture.client.loadSnapshot = load;
+      const pending = gateway.refreshSource("source" as SourceId, { timeoutMs: 100 });
+      const rejected = expect(pending).rejects.toMatchObject({ code: "TIMEOUT" });
+      await vi.advanceTimersByTimeAsync(100); await rejected;
+      expect(gateway.diagnostics()[0]?.state).toBe("unavailable");
+      for (let index = 0; index < 10; index++) await expect(gateway.refreshSource("source" as SourceId)).rejects.toThrow("still settling");
+      expect(load).toHaveBeenCalledTimes(1);
+      release(fixture.client.snapshot); await vi.advanceTimersByTimeAsync(0);
+      expect(gateway.diagnostics()[0]?.state).toBe("unavailable"); expect(gateway.listControlNodes()).toEqual([]);
+      fixture.client.loadSnapshot = async () => fixture.client.snapshot;
+      await gateway.refreshSource("source" as SourceId); expect(gateway.diagnostics()[0]?.state).toBe("selected");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("fences an in-flight snapshot after explicit unavailability and shutdown cancellation", async () => {
+    const id = newControlNodeId(), fixture = source("source", snapshot(authority(id), [id]));
+    const gateway = new AccessGatewayProjection([fixture]); let release!: (value: GatewaySourceSnapshot) => void;
+    fixture.client.loadSnapshot = () => new Promise(resolve => { release = resolve; });
+    const controller = new AbortController();
+    const pending = gateway.refreshSource("source" as SourceId, { signal: controller.signal });
+    const rejected = expect(pending).rejects.toThrow("source disconnected"); await Promise.resolve();
+    gateway.markUnavailable("source" as SourceId); controller.abort(); await rejected;
+    release(fixture.client.snapshot); await new Promise(resolve => setTimeout(resolve, 0));
+    expect(gateway.diagnostics()[0]?.state).toBe("unavailable"); expect(gateway.listControlNodes()).toEqual([]);
+  });
+
+  it("clears a settled failed snapshot lane before the caller retries", async () => {
+    const id = newControlNodeId(), fixture = source("source", snapshot(authority(id), [id]));
+    const gateway = new AccessGatewayProjection([fixture]);
+    fixture.client.loadError = new Error("read failed");
+    await expect(gateway.refreshSource("source" as SourceId)).rejects.toThrow("read failed");
+    fixture.client.loadError = undefined;
+    await gateway.refreshSource("source" as SourceId);
+    expect(gateway.diagnostics()[0]?.state).toBe("selected");
+  });
+
+  it("cannot admit a previously retained snapshot while a newer recovery read is pending", async () => {
+    const id = newControlNodeId(), fixture = source("source", snapshot(authority(id), [id]));
+    const gateway = new AccessGatewayProjection([fixture]);
+    await gateway.refreshSource("source" as SourceId, { deferSelection: true });
+    let release!: (value: GatewaySourceSnapshot) => void;
+    fixture.client.loadSnapshot = () => new Promise(resolve => { release = resolve; });
+    const pending = gateway.refreshSource("source" as SourceId, { deferSelection: true });
+    await Promise.resolve();
+    expect(gateway.activateSource("source" as SourceId)).toBe(false);
+    release(fixture.client.snapshot); await pending;
+    expect(gateway.activateSource("source" as SourceId)).toBe(true);
+  });
+
+  it("rejects a changed pinned source identity while accepting normal boot changes", async () => {
+    const id = newControlNodeId(), fixture = source("source", snapshot(authority(id), [id]));
+    const gateway = new AccessGatewayProjection([fixture]);
+    await gateway.refreshSource("source" as SourceId);
+    const boot = newControlNodeBootId(), feed = newFeedId();
+    fixture.client.snapshot = { ...fixture.client.snapshot,
+      manifest: { ...fixture.client.snapshot.manifest, sourceControlNodeBootId: boot, feedId: feed },
+      controlNodes: fixture.client.snapshot.controlNodes.map(value => ({ ...value, controlNodeBootId: boot, feedId: feed })),
+    };
+    await gateway.refreshSource("source" as SourceId);
+    const replacement = newControlNodeId();
+    fixture.client.snapshot = snapshot(authority(replacement), [replacement]);
+    await expect(gateway.refreshSource("source" as SourceId)).rejects.toThrow("pinned control identity");
+    expect(gateway.diagnostics()[0]?.state).toBe("unavailable");
+  });
+
+  it("does not admit an ancestor that regresses a selected healthy child runtime", async () => {
+    const root = newControlNodeId(), child = newControlNodeId(); const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor), descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([ancestor, descendant]); await gateway.refreshAll();
+    gateway.markUnavailable("ancestor" as SourceId);
+    ancestor.client.snapshot = { ...views.ancestor, runtimeNodes: views.ancestor.runtimeNodes.map(value => ({ ...value, reachability: "unreachable" })) };
+    await gateway.refreshSource("ancestor" as SourceId, { deferSelection: true });
+    expect(gateway.activateSource("ancestor" as SourceId)).toBe(false);
+    expect(gateway.diagnostics().find(value => value.sourceId === "descendant")?.state).toBe("selected");
+    ancestor.client.snapshot = views.ancestor;
+    await gateway.refreshSource("ancestor" as SourceId, { deferSelection: true });
+    expect(gateway.activateSource("ancestor" as SourceId)).toBe(true);
+  });
+
+  it.each(["stale", "boot"])("keeps a healthy child when the recovered ancestor has a %s runtime view", async kind => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor), descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([ancestor, descendant]); await gateway.refreshAll();
+    gateway.markUnavailable("ancestor" as SourceId);
+    ancestor.client.snapshot = { ...views.ancestor, runtimeNodes: views.ancestor.runtimeNodes.map(runtime => ({ ...runtime,
+      ...(kind === "boot" ? { runtimeNodeBootId: newRuntimeNodeBootId() } : {}),
+    })), sessions: views.ancestor.sessions.map(session => ({ ...session, ...(kind === "stale" ? { updatedAt: new Date(Date.parse(timestamp) - 31_000).toISOString() } : {}) })) };
+    await gateway.refreshSource("ancestor" as SourceId, { deferSelection: true });
+    expect(gateway.activateSource("ancestor" as SourceId)).toBe(false);
+    expect(gateway.diagnostics().find(value => value.sourceId === "descendant")?.state).toBe("selected");
+  });
+
+  it("permits a fresh ancestor whose non-replicated runtime heartbeat timestamp is older", async () => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor), descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([ancestor, descendant]); await gateway.refreshAll();
+    gateway.markUnavailable("ancestor" as SourceId);
+    ancestor.client.snapshot = { ...views.ancestor, runtimeNodes: views.ancestor.runtimeNodes.map(runtime => ({ ...runtime, lastHeartbeatAt: new Date(Date.parse(timestamp) - 3600_000).toISOString() })) };
+    await gateway.refreshSource("ancestor" as SourceId, { deferSelection: true });
+    expect(gateway.activateSource("ancestor" as SourceId)).toBe(true);
+  });
+
+  it.each([true, false])("completes caught-up ancestor admission on heartbeat only when deferSelection=%s permits it", async deferSelection => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor), descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([ancestor, descendant]); await gateway.refreshAll();
+    gateway.markUnavailable("ancestor" as SourceId);
+    ancestor.client.snapshot = { ...views.ancestor, runtimeNodes: views.ancestor.runtimeNodes.map(runtime => ({ ...runtime, reachability: "unreachable" })) };
+    await gateway.refreshSource("ancestor" as SourceId, { deferSelection });
+    const manifest = views.ancestor.manifest;
+    gateway.ingest("ancestor" as SourceId, { kind: "control", eventId: crypto.randomUUID(), feedId: manifest.feedId, cursor: manifest.controlCursor + 1,
+      provenance: { authority: manifest.authority, originControlNodeId: child }, change: { type: "runtimeNode.upsert", runtimeNode: views.ancestor.runtimeNodes[0]! } });
+    gateway.ingest("ancestor" as SourceId, { kind: "heartbeat", feedId: manifest.feedId, controlCursor: manifest.controlCursor + 1, authorityRefs: [manifest.authority] });
+    expect(gateway.diagnostics().find(value => value.sourceId === "ancestor")?.state).toBe(deferSelection ? "synchronizing" : "selected");
+  });
+
+  it("does not hide durable conflicts behind ancestor health protection", async () => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor), descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([ancestor, descendant]); await gateway.refreshAll();
+    gateway.markUnavailable("ancestor" as SourceId);
+    ancestor.client.snapshot = { ...views.ancestor,
+      runtimeNodes: views.ancestor.runtimeNodes.map(value => ({ ...value, reachability: "unreachable" })),
+      sessions: views.ancestor.sessions.map(value => ({ ...value, metadata: { ...value.metadata, values: { "agent.title": "divergent same revision" } } })),
+    };
+    await gateway.refreshSource("ancestor" as SourceId, { deferSelection: true });
+    expect(gateway.activateSource("ancestor" as SourceId)).toBe(false);
+    expect(gateway.diagnostics().map(value => value.state)).toEqual(["conflict", "conflict"]);
+  });
+
   it("coexists with disjoint siblings and independent realms", async () => {
     const leftId = newControlNodeId();
     const rightId = newControlNodeId();
@@ -589,6 +756,22 @@ describe("AccessGatewayProjection source selection", () => {
 });
 
 describe("AccessGatewayProjection routing and feed", () => {
+  it("observes native state only through the selected source without durable dispatch", async () => {
+    const root = newControlNodeId(); const child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const ancestor = source("ancestor", views.ancestor); const descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([descendant, ancestor]);
+    await gateway.refreshAll();
+    const sessionId = views.descendant.sessions[0]!.sessionId;
+    const request = { harness: "copilot", view: "pendingMessages" } as const;
+    expect(await gateway.readNativeState(sessionId, request)).toMatchObject({ payload: packNativePayload({ items: [], steeringMessages: [] }) });
+    expect(ancestor.client.stateReads).toBe(1); expect(descendant.client.stateReads).toBe(0);
+    expect(ancestor.client.dispatches).toBe(0); expect(descendant.client.dispatches).toBe(0);
+    gateway.markUnavailable("ancestor" as SourceId);
+    await gateway.readNativeState(sessionId, request);
+    expect(descendant.client.stateReads).toBe(1);
+  });
+
   it("routes a launch exactly once through the selected ancestor", async () => {
     const root = newControlNodeId();
     const child = newControlNodeId();

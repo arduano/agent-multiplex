@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { extname } from "node:path";
 
@@ -53,7 +53,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 const DEFAULT_HTTP_URL = "http://127.0.0.1:4317/trpc";
-const VERSION = "0.2.3";
+const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 interface GlobalOptions {
   readonly httpUrl: string;

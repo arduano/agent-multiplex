@@ -40,6 +40,121 @@ the native Codex or Copilot app server; Agent Multiplex never parses history
 files. It is also the sole owner of any managed PTY and its bounded in-memory
 terminal broker.
 
+Active native handles are process-local. At startup, the runtime normalizes
+persisted active rows to resumable/stopped with no runtime epoch before its
+reverse feed can replay them. Adapter inventory alone cannot advertise command
+readiness: temporary history attachments and other discovered native handles
+remain resumable until installed in the runtime's active binding map. This
+prevents an old durable row or concurrent history read from undoing the control
+node's restart fence.
+
+Runtime presence heartbeats are independent of native inventory and metadata
+maintenance. Each maintenance lane retains one pending job across connection
+epochs, with a 30-second result acceptance deadline. Connection retirement and
+expiry fence later submissions and local application of late responses; they
+cannot undo a control request already dispatched. Remote boot/authority and
+stable operation-ID fences remain authoritative. Pending requests retain their
+slots until settlement, including after a deadline, and shutdown still drains
+admitted service work.
+
+Copilot's read-only SDK calls have a 15-second caller deadline; native primary
+history size-reduction retries share one deadline. Identical requests coalesce
+per native handle and read method, while cursor and observation-revision changes
+cannot join an older snapshot. Expired calls release their runtime read callers
+but retain their native slots until settlement, discarding late responses. A
+shared adapter cap of 256 pending native reads bounds retained state across
+handle churn. No timeout unlocks or retries an ambiguous native mutation, and
+no read deadline implies cancellation, agent completion or a recovered server.
+
+Native history responses keep the native payload separate from bounded transfer
+availability. Descending reads permit a client to open a recent window without
+scanning the full transcript. The opt-in `unavailableItem` result advances past
+one oversized item only with the harness's actual next cursor (or Copilot SDK
+event index). It describes an omission, never synthetic native output. Clients
+must show that gap explicitly. The original item remains in harness-owned history;
+this has no retention, archive, or image-store effect.
+
+Codex's capability-gated `history.native.turns` view reads bounded native
+`thread/turns/list` pages independently of item history. It preserves turn
+status, error, timestamps and cursors; a client can request the newest turn
+without scanning earlier conversation items or mistaking an older failure for
+the current outcome. Oversized pages are re-read at the same native input cursor
+with smaller limits. One oversized summary is re-read with native
+`itemsView: "notLoaded"`, which preserves metadata and explicitly describes the
+absent item detail. If that metadata is still oversized, failure or the opt-in
+omission remains explicit. This observation adds no catalog authority or lifecycle
+mutation; idle status alone does not prove success or error recovery.
+
+Copilot's opt-in primary history view delegates ownership selection to native
+`eventLog.read` before applying its page limit. It preserves native root events
+and subagent lifecycle markers, leaving the default full-history view intact.
+The native cursor advances over the entire returned batch: an oversized batch
+must be re-read at the same input cursor with a smaller limit, never locally
+truncated with the original next cursor. Native cursor expiry fails explicitly
+and requires client window reset; it must not silently repeat the fresh tail as
+older history. Gateways add no transcript or history-cursor authority.
+
+Live native state is a separate read-only observation via
+`sessions.readNativeState`, including Copilot's `pendingMessages` and Codex's
+`goal` views. It routes
+through the owning control tree under read access and the runtime boot fence,
+serializes with binding lifecycle, and requires an active matching harness
+handle. It never attaches a temporary history handle, resumes a stopped binding,
+or writes a command/catalog record. Native queue shapes and stable IDs remain
+unchanged inside the bounded native envelope. Unavailable/oversized reads fail
+explicitly; they do not fabricate an empty queue. The queue-change native event
+invalidates observations; gateways retain no independent queue authority.
+
+Copilot `steerQueuedMessage` is a separate durable mutation using the native
+atomic queued-item-to-steering transition and exact item ID. It never reconstructs
+or removes/resends a prompt. A false native acknowledgement preserves the queued
+item; missing or malformed acknowledgements remain outcome unknown and may only
+be reconciled under the original command identity. Queue observations do not
+themselves imply a mutation outcome or retry authorization.
+
+Copilot tracked task observations use the same active-binding read surface. The
+`tasks` view performs only native detached-shell metadata refresh and listing;
+its entire two-step read shares a caller deadline and retains an unresolved
+native read lane after timeout. An expired refresh never dispatches a later list.
+Task/progress snapshots preserve native sync/background execution, eligibility,
+owner/model attribution, and explicit absence. No gateway task authority, native
+history scan, process discovery, or implicit session activation is introduced.
+The complete snapshot is bounded; unsupported, malformed or oversized native
+responses fail rather than masquerading as an empty task list.
+
+`promoteTaskToBackground` and `cancelTask` use the ordinary durable harness
+command journal and exact native task ID, not a PID, display name or tool-call
+ID. Promotion releases only the native eligible sync waiter; cancellation uses
+only the native task API. False acknowledgements remain definite no-ops. Missing
+or lost acknowledgements retain the original unknown outcome and never trigger
+a second task mutation or a shell/process fallback. Native task-change events
+invalidate observations without overriding whole-session liveness. A task read
+or changed status does not authorize replay of an uncertain mutation.
+
+Codex goal state belongs exclusively to the native app server. Its read view
+preserves a native goal or explicit absence; unsupported, malformed, oversized
+and stale-binding observations fail instead of reporting no goal. Root native
+goal updates/clears invalidate a client's observation, while descendant goal
+events keep their original thread ownership. There is no goal authority in
+catalog metadata or gateways, and goal status never substitutes for turn
+liveness. `setGoal` and `clearGoal` use the existing fenced durable command path.
+Only supplied native setter fields are forwarded; omitted versus explicitly
+cleared budgets remain distinct. Native refusals are failures; missing/malformed
+mutation replies are outcome unknown and must be reconciled with the original
+command identity. Read snapshots never constitute permission to retry a mutation.
+
+Native context compaction is a capability-gated durable harness command under
+the existing runtime boot/binding fences and stable operation identity. Codex
+acknowledges native `thread/compact/start`; Copilot preserves native
+`history.compact` completion results, including false/no-op outcomes and counters.
+These are different acknowledgements and must not be flattened into a shared
+"compaction complete" result. Neither adapter injects a synthetic prompt, resumes
+a stopped binding, or uses vendor history files. Native events retain their
+original progress/ownership semantics. Compaction does not create catalog
+authority, and a completed compaction alone does not finish other session work.
+Lost, malformed, oversized or retired-binding mutation acknowledgements remain
+unknown under their original stable command identity and are never auto-retried.
+
 ### Access gateway
 
 An access gateway has `dataAuthority: none`. It is a p2prpc client of one or
@@ -97,6 +212,59 @@ cycles before either catalog mutates. The subtree proof is an authenticated
 claim by the child inside the internal p2prpc trust domain; mutually malicious
 or simultaneously attaching peers would require a multi-party reservation
 protocol, which is outside the current single-writer MVP.
+
+### Initial attachment of an existing standalone authority
+
+A standalone authority with existing metadata receipts can attach directly to an
+authority root after its queued metadata work and downstream receipt deliveries
+have drained. The child advertises this requirement through the existing
+attachment capabilities; the supervisor calls the catalog preflight before
+dispatch, and both sides reject unsupported transitions before committing them.
+Moving an already formed control subtree, attaching historical receipts beneath
+an intermediate branch, or merging receipts from earlier authority chains
+requires a coordinated handoff which this implementation does not provide.
+Empty controls can still form ordinary trees from the root downward.
+
+The parent persists the authenticated prior authority and exact attachment
+admission in the appended `control-node-v5-authority-receipt-handoff` migration.
+Only the first complete, validated child snapshot may import terminal receipts
+from that prior standalone authority. Their operation IDs, patches, authority
+fences, timestamps and results remain byte-equivalent protocol records. Receipt
+canonical revisions must not exceed the transferred session metadata; equal
+revisions must agree. The snapshot and closure of this admission window commit
+atomically. Later snapshots and events can replay those exact historical
+receipts, but cannot invent or change them. The parent keeps imported terminal
+receipts outside the replaceable child projection, so resnapshot cannot erase
+its idempotency evidence.
+
+Interaction records retain their admitted child projection across local
+resolution, expiry and retirement. These lifecycle changes never transfer
+ownership to the authority or to another child. Repeated native publication
+preserves an existing interaction's projection; first publication follows its
+owning session. Resnapshot still rejects foreign identities and conflicting
+terminal responses. Repair of an older missing projection marker must establish
+the exact session/runtime/attachment provenance before restoring that marker;
+it must not change the native interaction payload or response.
+
+An exact terminal metadata operation can be reconciled after its authority
+changes; an unknown request with an old authority fence remains rejected. No old
+queued proposal is silently retargeted or applied twice. A lost initial attach
+reply can recover the same admission while its first snapshot is uncommitted,
+including a new child boot with the same endpoint, role, feed and request proof.
+The child rotates its control feed when it commits the new authority so existing
+observers must re-read a complete snapshot. Session-filtered streams receive the
+feed boundary immediately, and transient native replay with prior-authority
+provenance is discarded for explicit history/gap recovery. Imported receipts
+are published after their session records so an already-watching root gateway
+receives the same ledger as a fresh snapshot. Native bindings and runtime epochs
+remain runtime-owned and do not change for attachment.
+
+Root hot-session search reads the durable projection while a child is offline;
+archived search can still require the owning child. A local gateway connected
+directly to an attached branch can route native commands through its local
+runtime while the root is unreachable. Metadata proposals remain queued under
+the root's unchanged authority and settle after reconnect. This does not promote
+the branch or grant local canonical metadata authority.
 
 ## Launch extension roles
 
@@ -249,6 +417,14 @@ UI-server builds cannot authenticate that SDK connection with
 runtime's OS/container boundary is part of the experiment's trust boundary.
 Probe failure falls back to structured Copilot with no terminal capability.
 
+Copilot may retain an empty new native session only in memory. After restart,
+only its exact missing-session load refusal establishes that resume had no
+external effect; the adapter reports that as a failed operation with explicit
+stop/archive recovery. Inventory absence alone does not establish missing native
+history or permit a replacement. Unrecognized/transport resume errors remain
+outcome unknown. No layer fabricates native history or silently recreates a
+session to repair its catalog entry.
+
 Copilot permission policy remains native session state. `setPermissionMode` travels
 through the ordinary fenced command journal under `agent-control`; the adapter
 calls the pinned native permission API and projects only acknowledged state in
@@ -257,6 +433,37 @@ native `assisted` can be observed but is not an offered setter. It is independen
 the interactive/plan/autopilot mode. Reads on attachment/resume never mutate
 permissions, and newer root permission events fence delayed read/mutation
 snapshots. Missing, malformed or unsupported state does not imply off or on.
+
+Copilot model projection likewise reads the native current model on each
+attachment/resume and observes root model-change events. Native model IDs remain
+unchanged, including explicit auto selection; absence does not imply a default.
+Newer native changes or acknowledged selections fence delayed reads, and newer
+native changes also fence delayed mutation acknowledgements. Descendant model
+changes do not alter the root settings. Its assistant-loop idle signal does not
+end whole-session work: attached commands or background agents may remain active
+until root session idle, and pending root interactions retain waiting status.
+Attachment and inventory refresh read the supported native activity snapshot
+through the existing active handle to recover turns that started before event
+subscription and missed root idle events. Failed or malformed reads mark the
+unchanged running/idle observation unknown; newer native activity, existing
+errors and actionable pending input remain authoritative. Read failure cannot
+declare completion or name an unobserved task.
+New native lifecycle transitions, including
+ones that leave the status unchanged, fence delayed activity snapshots. Resume
+flags preserve already-running or continued work when the activity API is absent.
+Command uncertainty cannot replace a newer native activity observation, and a
+late permission acknowledgement cannot revive a subsequently idle session.
+Modern envelope and legacy data ownership markers both fence child events; the
+chronological parentId chain is never child provenance.
+Native mode follows the same root ownership and revision rules: attachment reads
+supported `session.mode.get`, and `session.mode_changed` mirrors native transitions
+such as leaving plan mode. Reads cannot overwrite newer native changes or command
+acknowledgements, and later native transitions fence delayed mutation replies.
+Unavailable/malformed observations remain unknown; no UI action infers a native
+mode transition without observation or acknowledgement.
+Sending/steering, including uncertain command outcomes, never downgrades an
+unresolved root interaction to working/unknown. Closed adapter handles reject
+late status changes, and adapter shutdown detaches late attachment results.
 
 Native permission requests/completions carry the exact pending request ID. An
 external native completion retires only that matching interaction, fenced by
@@ -324,6 +531,12 @@ not silently dropped or retained in another unbounded application queue.
 Cursor-aware subscriptions reconnect and recover through the ordinary
 replay/gap rules. Bespoke HTTP edges must provide equivalent byte-bounded
 policies around both their tRPC HTTP and WebSocket adapters.
+
+The protocol access client uses one HTTP request per query or mutation. Native
+history and task observations must not delay unrelated responses through a
+shared non-streaming HTTP batch. Request cancellation remains scoped to that
+HTTP operation; it is not proof that a dispatched native action was cancelled.
+This transport isolation adds no automatic mutation replay or transcript cache.
 
 ## Mutation routing
 
@@ -459,3 +672,50 @@ access router. Native bearer configuration cannot be combined with this mode.
 The trusted application owns origin/CSRF defenses and authentication expiry for
 long-lived connections, and retains the maintained ingress/egress byte bounds.
 This embedding API changes no wire contract or data authority.
+
+## Storage progress, admission and projection recovery
+
+An authority-only reference composition can own its original catalog/service in
+one worker behind typed, allowlisted domain operations. This is an execution
+boundary within a trusted process, not a new data role or SQL service. The worker
+re-derives enrollment scopes from committed catalog state and executes the existing
+input/output, authority, endpoint, boot and operation-identity checks. Transport
+identity remains in the outer process. No cache has authorization authority.
+
+Success publication follows the FULL SQLite commit. Adjacent child control events
+may share one bounded commit (64 events, 1 MiB, 20 ms collection window); native
+events and resnapshot boundaries keep their original order. All event identities,
+payload comparisons, child checkpoints and projection changes commit atomically.
+A failed member rolls back the entire batch. Exact session replays avoid duplicate
+projection writes/feed events but still preserve child replay evidence. Unchanged
+metadata retains its index. Native binding-recovery replay remains supported.
+
+Same-boot heartbeat observations remain live in memory while unchanged durable
+timestamps are coalesced for 30 seconds; real presence/boot changes persist and
+restart reconstructs liveness conservatively. Only active/running activity ticks
+which differ solely in lastActivityAt/updatedAt may coalesce for 30 seconds of
+reported activity. Settings, binding, authority, last-seen, interactions and status
+transitions are never coalesced. Final status commits its complete timestamp.
+
+Feed retention runs in separate 1,000-event transactions after acknowledgment,
+with atomic deletion/minimum-cursor updates. It retries maintenance failures
+without changing the result of a committed operation. Normal headroom is one
+chunk; prolonged failure can exceed it and remains visible in metrics. The
+immutable imported-event identity ledger is unchanged and continues growing;
+pruning or changing its payload representation requires separate compatibility
+work. No durability weakening or filesystem migration is implicit.
+
+Gateway snapshot retention is distinct from routing eligibility. Failed sources
+remain ineligible through sibling refreshes. Deadlines fence late acceptance and
+retain outstanding underlying attempts. Explicit activation preserves conflict,
+identity, overlap and authority fences, and refuses to replace healthy selected
+child runtimes with an unavailable, different-boot or materially older replicated session
+projection. Consumers can require sustained fresh heartbeats before failback.
+This is route selection within the same authority tree, never branch promotion.
+
+An isolated authority exposes loopback health while its single catalog owner
+opens/checks retained state. Domain requests are rejected before admission until
+initialization completes. Slow startup retains the original open without the
+normal request timeout; explicit shutdown still closes that owner. Publication
+starts at the persisted checkpoint before boot/recovery commits, so retained
+startup does not require replay from a compacted-away cursor zero.

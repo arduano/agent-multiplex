@@ -1,5 +1,32 @@
 # Copilot adapter
 
+## Native context compaction
+
+Experimental `context.compact` v1 exposes the no-argument `compact` command using
+the pinned SDK's `session.history.compact({ trigger: "manual" })` method. It
+requires the current active binding and records the native result, including
+`success: false`, counters, optional summary and context-window breakdown.
+Compaction does not inject a user message, resume a stopped session or override
+whole-session status. Missing native support fails before dispatch; malformed,
+oversized, lost or retired-binding acknowledgements remain unknown under the
+original durable command ID. Native compaction events retain their original
+ownership and progress semantics. See [adapter guidance](../../docs/wiki/Adapters-and-Terminals.md#native-context-compaction).
+
+## Empty sessions and restart
+
+Pinned Copilot CLI `1.0.81` does not durably save a session that has never received
+a user message. Its public native save operation does not force those empty
+events to disk. The session remains controllable while its native handle exists,
+but may be missing after native shutdown or a host restart. Multiplex does not
+insert a dummy message, parse vendor files, or recreate that session silently.
+
+The exact native missing-session load refusal is a failed resume with a recovery
+message, rather than an ambiguous operation that blocks lifecycle recovery.
+Stop and archive that catalog entry explicitly, then create a replacement.
+Transport loss and unrecognized native failures still remain `outcomeUnknown`
+under the original operation ID; absence from an inventory page is never proof
+that a resume failed or permission to retry it.
+
 `CopilotAdapter` hosts one SDK-managed Copilot CLI runtime and exposes it through
 the runtime-node-core `AgentAdapter` contract. Multiple active sessions share that
 runtime and its configured Copilot home/account scope.
@@ -16,15 +43,35 @@ Key behavior:
   so startup events are buffered until runtime-node-core subscribes.
 - prompts use native `enqueue`/`immediate` delivery; models and
   interactive/plan/autopilot modes use the SDK's native APIs.
+- the selected model is read through native `model.getCurrent` on each attachment
+  and updated by root model-change events. Delayed reads cannot replace newer
+  choices, and missing native state never implies a default selection.
+- mode is read through native `mode.get` on attachment and mirrored from root
+  `session.mode_changed`, including native transitions out of plan mode. Newer
+  native modes fence delayed reads and command acknowledgements.
+- `assistant.idle` leaves ongoing commands, background agents and pending root
+  interactions active; root `session.idle` marks whole-session work idle. Native
+  `metadata.activity` reads on attachment and inventory reconcile missed lifecycle
+  events using existing active handles, without resuming sessions.
+  Failed activity reads mark unchanged running/idle observations unknown while
+  retaining newer native events, errors and actionable pending input.
 - permission requests use native request/completion events and the SDK's pending
   permission RPC, preserving their exact request identities. Questions,
   elicitation and exit-plan callbacks remain separate pending interactions.
-- history is read exclusively through `CopilotSession.getEvents()`. The adapter
-  never reads Copilot files. The opaque pagination cursor has the form
+- full history is read through `CopilotSession.getEvents()`; the opt-in primary
+  view uses native `eventLog.read`. The adapter never reads Copilot files.
+  The full-history opaque pagination cursor has the form
   `copilot:event-index:<n>` and pages the native event array without interpreting
   event content.
 - `stop` disconnects the SDK handle but preserves the vendor session for native
   resume. `close` gracefully disconnects all handles and stops the shared CLI.
+
+Read-only native requests have a 15-second caller deadline and coalesce identical
+in-flight reads. A timed-out request retains its native slot until settlement;
+late results are discarded, and repeated polling cannot issue replacements while
+it is stalled. The adapter caps retained pending reads across session handles at
+256. Primary-history page-size reductions share one deadline. Mutations are never
+timed out or retried by this helper. See [stalled reads and recovery limits](../../docs/wiki/Adapters-and-Terminals.md#stalled-copilot-reads).
 
 The implementation is pinned and tested against `@github/copilot-sdk@1.0.13`.
 The optional stock-TUI integration additionally pins
@@ -124,3 +171,20 @@ include the provider object.
 See GitHub's pinned
 [custom-provider documentation](https://github.com/github/copilot-sdk/blob/v1.0.13/nodejs/README.md#custom-providers)
 for the upstream `ProviderConfig` surface.
+
+
+## Native tracked tasks
+
+Experimental `tasks.list`, `tasks.progress`, `tasks.promoteToBackground` and
+`tasks.cancel` v1 capabilities expose native task observations and exact-ID
+controls. Synchronous shell waits, background tasks and native model/owner
+attribution remain intact. Lists refresh detached-shell metadata and share a
+bounded read lane/deadline; they never load history or resume a stopped session.
+False mutation acknowledgements remain no-ops; uncertain acknowledgements use
+the existing durable command identity without retry or shell fallbacks.
+
+See [task operation guidance](../../docs/wiki/Adapters-and-Terminals.md#copilot-tracked-tasks)
+for view/command names, read limits, native caveats and client behavior. The
+[disposable native smoke](test/native-tasks-smoke.mjs) proves sync-shell
+promotion/cancellation without model requests; Windows and model-driven
+agent/client behavior remain separate UAT.

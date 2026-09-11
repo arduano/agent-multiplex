@@ -286,6 +286,7 @@ async function connectChild(parent: ControlNodeService, child: ControlNodeServic
     execute: unused,
     readNativeHistory: unused,
     beginImageUpload: (input) => child.beginImageUpload(input),
+    readNativeState: (sessionId, request) => child.readNativeState(sessionId, request),
     writeImageUpload: (input) => child.writeImageUpload(input),
     commitImageUpload: (input) => child.commitImageUpload(input),
     abortImageUpload: (input) => child.abortImageUpload(input),
@@ -311,6 +312,39 @@ function rejection(code: keyof typeof TRPC_ERROR_CODES_BY_KEY): TRPCClientError<
 }
 
 describe("protocol-v4 launch binding durability", () => {
+  it.each(["direct", "child"] as const)("routes native state through the %s owner under read scope without catalog writes", async route => {
+    const catalog = new ControlNodeCatalog({ filename: stateFile(`native-state-root-${route}`), now: clock });
+    const childCatalog = new ControlNodeCatalog({ filename: stateFile(`native-state-child-${route}`), now: clock });
+    const service = new ControlNodeService({ catalog, now: clock });
+    const child = new ControlNodeService({ catalog: childCatalog, now: clock });
+    const runtime = registration(); const input = launch(runtime, "native-state");
+    runtime.harnesses = runtime.harnesses.map(entry => ({ ...entry, harness: "copilot" }));
+    input.harness = "copilot";
+    const owner = route === "direct" ? service : child;
+    const ownerCatalog = route === "direct" ? catalog : childCatalog;
+    const calls: unknown[] = [];
+    const payload = packNativePayload({ items: [], steeringMessages: [] });
+    const connectionInfo = connection(runtime, async () => accepted(input));
+    connectionInfo.readNativeState = async (sessionId, request) => {
+      calls.push({ sessionId, request }); return { harness: "copilot", vendorSessionId: "native-state", payload };
+    };
+    try {
+      register(owner, runtime, connectionInfo);
+      ownerCatalog.recordLaunch(succeeded(input, "native-state"));
+      ownerCatalog.mergeRuntimeSession({ ...boundSession(input, "native-state"), harness: "copilot" });
+      if (route === "child") await connectChild(service, child);
+      const before = catalog.sourceManifest().controlCursor;
+      const request = { harness: "copilot", view: "pendingMessages" } as const;
+      const reader = createAccessRouter(service).createCaller({ grantedScopes: ["read"] });
+      expect(await reader.sessions.readNativeState({ sessionId: input.sessionId, request })).toEqual({ harness: "copilot", vendorSessionId: "native-state", payload });
+      expect(calls).toEqual([{ sessionId: input.sessionId, request }]);
+      expect(catalog.sourceManifest().controlCursor).toBe(before);
+      const noRead = createAccessRouter(service).createCaller({ grantedScopes: ["agent-control"] });
+      await expect(noRead.sessions.readNativeState({ sessionId: input.sessionId, request })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(calls).toHaveLength(1);
+    } finally { service.close(); child.close(); catalog.close(); childCatalog.close(); }
+  });
+
   it.each(["direct", "child"] as const)(
     "reserves the logical session across routes when %s launches first",
     async (firstRoute) => {

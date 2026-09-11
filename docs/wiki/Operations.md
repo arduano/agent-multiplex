@@ -38,12 +38,41 @@ individual failures and reports an aggregate error after all attempts finish.
 Embedding applications must close their SQLite store in `finally`, after
 awaiting service shutdown, including when shutdown rejects.
 
+Runtime registration starts presence heartbeats without waiting for initial
+native inventory or metadata delivery. Both maintenance lanes run independently
+and retain one in-flight job across reconnects. Results arriving after connection
+retirement or the 30-second acceptance deadline are discarded; a deadline does
+not cancel the underlying request or free its slot for duplicate work. Already
+dispatched control mutations remain governed by their boot, authority and stable
+operation-ID fences. Metadata retries retain those IDs. Presence therefore
+reports daemon connectivity independently of a stalled native harness; it does
+not prove that agent commands are responsive. Copilot read deadlines and recovery
+limits are described in the [adapter guide](Adapters-and-Terminals.md#stalled-copilot-reads).
+
 ## Bootstrap discipline
 
 Enrollment flags are temporary apertures. Open one role at a time, enroll and
 pin expected endpoints, verify the topology, then close the aperture and restart
 the control if configuration requires it. Defaults are read-only. Keep ordinary
 UI credentials separate from topology/authority recovery credentials.
+
+For initial standalone-authority attachment to a new root, first inspect and
+drain metadata outboxes, pending receipt deliveries and in-flight metadata or
+archive operations. Include runtime outboxes in this check: old unknown patches
+are deliberately not retargeted to a different authority. Back up each stopped
+control and its identity before changing the desired parent. Stop only the
+control service when the runtime is independently supervised; control outages
+do not require stopping native agents. Run the control catalog's
+`assertCanAttach()` preflight before dispatching the first attachment.
+
+The appended control migration records the old authority's immutable receipt
+handoff. Upgrade both attaching controls and their new root together; previous
+binaries cannot open the new control-store migration. Runtime schema and wire
+protocol stay unchanged. After attachment, verify unchanged runtime/native
+identities, complete root open-session search, historical receipt reconciliation,
+and root-offline operation through any local branch gateway. Cold archived
+search may still require an online child; this is not an archive replication
+feature. See [architecture guidance](Architecture-and-Data-Roles.md#attaching-an-existing-host-catalog).
 
 ## Monitor
 
@@ -103,3 +132,52 @@ isolated backend.
 
 See [Backups, upgrades, and recovery](Backups-Upgrades-and-Recovery.md) and the
 detailed [deployment runbook](../deployment-v4.md).
+
+## Storage stalls and an isolated authority
+
+The reference control supports `AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER=worker`
+(or `storageOwner: "worker"` when embedded). This composition is for an authority
+with child controls, no upstream and no locally owned runtimes. The existing
+catalog, domain service and validating router share one worker and one SQLite
+writer; HTTP and QUIC stay on the transport thread. Combined control/runtime
+hosts retain the normal composition and need their own maintenance window.
+
+The trusted loopback `/health` endpoint does no filesystem work. It reports the
+age of the worker's last progress message, fixed-category catalog timings and
+counters, bounded IPC queue count/bytes/age, child-feed failure count, and transport
+event-loop delay. Progress older than ten seconds returns 503. This distinguishes
+responsive transport from stalled storage; it neither declares native agents
+stopped nor grants a stale authority route. The counters describe attempted work,
+including rolled-back transactions; elapsed timings describe completed attempts.
+
+IPC admits at most 256 outstanding requests, 32 MiB of arguments and 8 MiB per
+payload. Response credits are released only after the receiving thread consumes
+them; buffered large replies are capped at 32 MiB with bounded small error replies.
+A queued request whose deadline expires is rejected before dispatch. A dispatched
+mutation timeout, owner exit or untransferable result is outcome unknown under its
+original operation ID. Read failures remain unavailable. Timed-out lanes stay
+occupied until settlement; no timer creates another writer or replays a mutation.
+Streams pull one item at a time and retain at most 128 handles. Idle pulls have no
+synthetic deadline; late stream opens are closed and cancellation retains its slot
+until native settlement.
+
+During a complete worker stall, fresh catalog snapshots and authority operations
+are unavailable. Gateways retain previously committed display observations and
+use validated direct child routes. They never label a cached root snapshot as a
+fresh snapshot to authorize failback. Root-only offline rows across a cold client
+reload remain a separate display-cache concern. Neither worker threads nor QUIC
+can repair a stalled kernel syscall, code page fault or machine-wide failure.
+
+Shutdown closes admission and child pumps, drains admitted domain operations and
+then closes the catalog. The transport caller has a bounded shutdown deadline;
+a missed drain remains a failure and does not release the SQLite writer lock.
+No watchdog starts a replacement worker. Verify the old process actually exited
+before restarting; never delete its lock as a timeout workaround. Ordinary runtime
+stores retain WAL/FULL durability and existing filesystem placement.
+
+During isolated-authority startup, loopback health is available while the sole
+storage worker opens/checks its catalog. Domain requests are rejected before
+admission until initialization completes. A slow open has no arbitrary read
+deadline that triggers replacement; an explicit shutdown still closes admission
+and waits for the existing worker. Compacted catalogs initialize publication at
+their persisted checkpoint, so reopening never requires retired cursor zero.

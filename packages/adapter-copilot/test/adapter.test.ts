@@ -7,7 +7,7 @@ import type {
 } from "@github/copilot-sdk";
 import { RuntimeConnection } from "@github/copilot-sdk";
 import { runtimeEpochSchema, type RuntimeEpoch } from "@arduano/agent-multiplex-protocol";
-import type { AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
+import { AdapterOutcomeUnknownError, type AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -85,6 +85,72 @@ class Client implements CopilotAdapterClient {
 }
 
 describe("CopilotAgentAdapter", () => {
+  it("reports a confirmed missing saved session as a recoverable failure without recreating it", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const nativeError = Object.assign(new Error(
+      "Request session.resume failed with message: Failed to load session events: Session not found: empty-before-restart",
+    ), { code: -32603 });
+    const resume = vi.spyOn(client, "resumeSession").mockRejectedValue(nativeError);
+    const create = vi.spyOn(client, "createSession");
+    const failure = await adapter.resume({ harness: "copilot", vendorSessionId: "empty-before-restart", continuePendingWork: false })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect((failure as Error).message).toContain("Stop and archive this entry");
+    expect((failure as Error).cause).toBe(nativeError);
+    expect(resume).toHaveBeenCalledTimes(1);
+    expect(create).not.toHaveBeenCalled();
+    await expect(adapter.listSessions()).resolves.toEqual([]);
+    await adapter.close();
+  });
+
+  it.each([
+    { message: "Request session.resume failed with message: Failed to load session events: Session not found: another-session", code: -32603 },
+    { message: "Request session.resume failed with message: Failed to load session events: Session not found: missing", code: -32001 },
+    { message: "Request session.resume failed with message: Failed to load session events: Session not found: missing", code: undefined },
+    { message: "Connection ended while session was resuming", code: -32603 },
+    { message: "Native tool reports Session not found: missing", code: -32603 },
+  ])("keeps unproven resume outcomes unknown: %j", async native => {
+    const client = new Client(); const adapter = adapterFor(client);
+    vi.spyOn(client, "resumeSession").mockRejectedValue(Object.assign(new Error(native.message), { code: native.code }));
+    const create = vi.spyOn(client, "createSession");
+    await expect(adapter.resume({ harness: "copilot", vendorSessionId: "missing", continuePendingWork: false }))
+      .rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(create).not.toHaveBeenCalled();
+    await adapter.close();
+  });
+
+  it.each(["spawn", "resume"] as const)("detaches a native handle when %s completes after adapter shutdown", async operation => {
+    const client = new Client(); const adapter = adapterFor(client);
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    const create = client.createSession.bind(client); const resume = client.resumeSession.bind(client);
+    client.createSession = async config => { const native = await create(config); await gate; return native; };
+    client.resumeSession = async (id, config) => { const native = await resume(id, config); await gate; return native; };
+    const result = operation === "spawn"
+      ? adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "late-attachment" } })
+      : adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: "late-attachment", continuePendingWork: false });
+    await vi.waitFor(() => expect(client.sessions.has("late-attachment")).toBe(true));
+    await adapter.close(); release();
+    await expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(client.sessions.get("late-attachment")?.disconnected).toBe(true);
+  });
+
+  it("does not return a session closed while attachment observations were pending", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    const create = client.createSession.bind(client);
+    client.createSession = async config => {
+      const native = await create(config);
+      native.rpc.metadata = { activity: async () => { await gate; return { hasActiveWork: false, abortable: false }; } };
+      return native;
+    };
+    const result = adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "late-observation" } });
+    await vi.waitFor(() => expect(client.sessions.has("late-observation")).toBe(true));
+    await adapter.close(); release();
+    await expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(client.sessions.get("late-observation")?.disconnected).toBe(true);
+  });
+
   it("honors an explicit structured-runtime executable with the pinned CLI", async () => {
     const client = new Client();
     const adapter = new CopilotAgentAdapter({
@@ -300,6 +366,26 @@ describe("CopilotAgentAdapter", () => {
     await adapter.close();
   });
 
+  it("advertises opt-in primary history without changing full native history", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    const primary = { ...event("assistant.message"), id: "primary" };
+    const child = { ...event("assistant.message"), id: "child", agentId: "child-agent" };
+    native.events.push(primary, child);
+    native.rpc.eventLog = { read: vi.fn(async () => ({ events: [primary], cursor: "native-end", hasMore: false, cursorStatus: "ok" })) };
+    expect((await adapter.describe()).capabilities).toContainEqual(expect.objectContaining({ name: "history.native.primary", version: "v1" }));
+    expect((await adapter.describe()).capabilities).toContainEqual({ name: "context.compact", version: "v1", experimental: true });
+    const getEvents = vi.spyOn(native, "getEvents");
+    expect((await session.readNativeHistory({ harness: "copilot", limit: 100, native: { view: "primary", sortDirection: "desc" } })).payload).toEqual([primary]);
+    expect(getEvents).not.toHaveBeenCalled();
+    expect((await session.readNativeHistory({ harness: "copilot", limit: 100 })).payload).toEqual([primary, child]);
+    delete native.rpc.eventLog;
+    await expect(session.readNativeHistory({ harness: "copilot", limit: 100, native: { view: "primary" } })).rejects.toThrow("primary history is unavailable");
+    expect(getEvents).toHaveBeenCalledOnce();
+    await adapter.close();
+  });
+
   it.each(["text", "numbers"] as const)("bounds %s history pages by wire bytes and preserves the exact next event index", async (kind) => {
     const client = new Client();
     const adapter = adapterFor(client);
@@ -313,6 +399,38 @@ describe("CopilotAgentAdapter", () => {
     const second = await session.readNativeHistory({ harness: "copilot", limit: 100, cursor: page.nextCursor! });
     expect(second.complete).toBe(true);
     expect(second.payload).toHaveLength(1);
+    await adapter.close();
+  });
+
+  it("pages newest events first and keeps the older cursor stable as new events arrive", async () => {
+    const client = new Client();
+    const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    native.events.push(...Array.from({ length: 1_100 }, (_, index) => ({ ...event("assistant.message"), id: String(index) })));
+    const newest = await session.readNativeHistory({ harness: "copilot", limit: 100, native: { sortDirection: "desc" } });
+    expect((newest.payload as Array<{ id: string }>).map(value => value.id)).toEqual(Array.from({ length: 100 }, (_, index) => String(1099 - index)));
+    expect(newest.nextCursor).toBe("copilot:event-before:1000");
+    native.events.push({ ...event("assistant.message"), id: "new" });
+    const older = await session.readNativeHistory({ harness: "copilot", limit: 100, native: { sortDirection: "desc" }, cursor: newest.nextCursor });
+    expect((older.payload as Array<{ id: string }>)[0]?.id).toBe("999");
+    const first = await session.readNativeHistory({ harness: "copilot", limit: 100, native: { sortDirection: "desc" }, cursor: "copilot:event-before:50" });
+    expect(first.complete).toBe(true);
+    expect((first.payload as Array<{ id: string }>).at(-1)?.id).toBe("0");
+    await expect(session.readNativeHistory({ harness: "copilot", limit: 100, cursor: newest.nextCursor })).rejects.toThrow("Invalid Copilot history cursor");
+    await adapter.close();
+  });
+
+  it("reports a single oversized event without blocking subsequent older history", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    native.events.push({ ...event("assistant.message"), id: "older" }, { ...event("assistant.message"), id: "oversized", data: { content: "x".repeat(2_000_000) } } as SessionEvent);
+    const request = { harness: "copilot" as const, limit: 100, native: { sortDirection: "desc", omitOversizedItems: true } };
+    const skipped = await session.readNativeHistory(request);
+    expect(skipped).toMatchObject({ payload: [], complete: false, nextCursor: "copilot:event-before:1", unavailableItem: { reason: "exceedsWireLimit", nativeItemId: "oversized" } });
+    const older = await session.readNativeHistory({ ...request, cursor: skipped.nextCursor });
+    expect(older).toMatchObject({ complete: true, payload: [{ id: "older" }] });
     await adapter.close();
   });
 

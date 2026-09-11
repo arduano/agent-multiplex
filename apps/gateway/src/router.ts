@@ -254,6 +254,12 @@ export function createAccessGatewayRouter(
         .input(accessContract.sessions.execute.input)
         .output(accessContract.sessions.execute.output)
         .mutation(({ input }) => guarded(() => projection.execute(input))),
+      readNativeState: read
+        .input(accessContract.sessions.readNativeState.input)
+        .output(accessContract.sessions.readNativeState.output)
+        .query(({ input }) =>
+          guarded(() => projection.readNativeState(input.sessionId, input.request)),
+        ),
       readNativeHistory: read
         .input(accessContract.sessions.readNativeHistory.input)
         .output(accessContract.sessions.readNativeHistory.output)

@@ -45,6 +45,8 @@ import {
   type MetadataOperationRecord,
   type MetadataPatch,
   type MetadataSnapshot,
+  type NativeStateRequest,
+  type NativeStateResult,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeInventoryItem,
@@ -264,6 +266,14 @@ export class RuntimeNodeService {
         : { providers: options.terminalProviders }),
       ...options.terminalBrokerOptions,
     });
+    // Native handles belong to one runtime process. Persisted active rows are
+    // resume bindings after startup, never evidence that this boot can execute
+    // commands. Normalize before the reverse feed can replay durable bindings.
+    for (const record of this.#store.listSessions()) {
+      if (record.availability === "active" || record.runtimeEpoch !== null) {
+        this.#persistStopped(record);
+      }
+    }
     queueMicrotask(() => this.#recoverDurableOperations());
   }
 
@@ -456,6 +466,12 @@ export class RuntimeNodeService {
         }),
       )
     ).filter((item): item is NativeInventoryItem => item !== null)
+      // Adapter discovery also sees temporary history attachments and handles
+      // outside this runtime's installed bindings. Only #active below proves
+      // that commands can reach an owned handle.
+      .map((item): NativeInventoryItem => item.availability === "active"
+        ? { ...item, availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null }
+        : item)
       .filter((item) => !this.#store.isNativeBindingArchived(item));
     for (const [sessionId, binding] of this.#active) {
       const record = this.#store.getSession(sessionId);
@@ -860,6 +876,24 @@ export class RuntimeNodeService {
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
     return this.#admit(() => this.#readNativeHistory(sessionId, request));
+  }
+
+  public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    return this.#admit(() => this.#serialize(sessionId, async () => {
+      const record = this.#store.getSession(sessionId);
+      if (!record) throw new RuntimeNodeProtocolError("NOT_FOUND", "session binding not found");
+      if (record.harness !== request.harness) throw new RuntimeNodeProtocolError("FENCED", "native state request harness does not match binding");
+      const active = this.#active.get(sessionId);
+      if (!active || record.availability !== "active") throw new RuntimeNodeProtocolError("CONFLICT", "native state requires an active session binding");
+      if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");
+      const result = await active.session.readNativeState(request);
+      if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
+        throw new RuntimeNodeProtocolError("FENCED", "native state response does not match binding");
+      }
+      // Queue views carry display text, not image attachments or retained history.
+      // The ordinary native envelope enforces the bounded response without storage.
+      return { ...result, payload: packNativePayload(result.payload) };
+    }));
   }
 
   async #readNativeHistory(

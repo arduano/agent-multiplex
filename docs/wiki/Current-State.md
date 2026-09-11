@@ -5,7 +5,231 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-07.
+Last reconciled: 2026-09-11.
+
+## Retained catalog startup correction
+
+Published [`.15`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.2) corrects a latent restart defect when a catalog has compacted
+past cursor zero: publication initializes from its committed checkpoint before
+boot/recovery events. It also keeps slow authority initialization in one retained
+lane, exposes health during database open and rejects domain requests before
+initialization. Do not activate `.14` on retained roots; the previously published
+bytes remain immutable. Catalog, identities, receipts and durability are preserved.
+All 930 deterministic tests, 16 packed consumers, typecheck/build and source
+gates pass; all 19 published artifacts are independently verified. Native-model
+qualification remains waived. See the [checkpoint](../checkpoint-v4.md#retained-catalog-startup-correction--2026-09-11).
+
+## Storage reliability prerelease
+
+Published [`0.2.4-hotfix.14`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)
+adds gateway recovery admission, catalog no-op/coalescing and ordered group
+commits, and an opt-in authority-only storage worker with bounded asynchronous
+RPC. Protocol v5, migrations, native agent pins, p2prpc and authoritative
+WAL/FULL durability are unchanged. The existing filesystem remains in place.
+See [operations](Operations.md#storage-stalls-and-an-isolated-authority) and
+[the detailed boundary](../design/data-roles-v4.md#storage-progress-admission-and-projection-recovery).
+
+All 928 deterministic tests, typecheck/build, docs/checkpoint/release/secret checks,
+16 packed consumers and SBOM pass. All 19 published assets were independently
+byte-compared and package integrities verified. Implementation-stage Docker tree
+and scale runs pass; their original image/source scope is retained in the
+[checkpoint](../checkpoint-v4.md#storage-stall-containment--2026-09-11).
+Native-model qualification remains waived. Consumer activation is recorded by Leo;
+combined host/runtime storage is not isolated by this authority-only option.
+
+## Independent access HTTP requests
+
+The published [`0.2.4-hotfix.13` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-10.1) removes non-streaming HTTP batching from
+`createAccessClient`. Each query/mutation now has its own response and cancellation
+boundary, so a slow native history/task read cannot hold unrelated fleet reads in
+the same batch. p2prpc already uses one QUIC stream per RPC and is unchanged.
+Existing authentication, WebSocket subscriptions and mutation identities are
+preserved. **884 deterministic tests**, typecheck/build, documentation/release checks,
+all16 packed consumers and independently verified public artifacts pass. The
+[checkpoint](../checkpoint-v4.md#independent-access-http-requests--2026-09-10) owns the exact evidence; no installed-host or native-model qualification is claimed.
+
+## Imported interaction ownership hotfix
+
+The published [`0.2.4-hotfix.12` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.3) preserves child projection ownership when an
+interaction is resolved, expires, is republished or becomes stale. Previously an
+authority-side lifecycle update could clear that marker, causing a later valid
+child snapshot to be rejected as an identity takeover. Existing snapshot and
+terminal-answer conflict checks remain intact. No migration, protocol or native
+dependency change is involved; an existing damaged marker requires a separately
+reviewed, backed-up repair. See [interaction guidance](Lifecycle-Metadata-and-Search.md#history-and-interactions).
+
+Typecheck/build, **879 deterministic tests**, checkpoint, documentation,
+release metadata and source-secret checks pass. All 16 isolated packed consumers,
+the SBOM, deterministic Docker control tree and 100-session/10-runtime scale suite
+pass. All 19 published assets were independently downloaded and verified.
+Native-model qualification remains waived for this incremental prerelease. The
+[checkpoint](../checkpoint-v4.md#imported-interaction-ownership-hotfix--2026-09-09)
+records release evidence; installed repair and activation belong to the consumer.
+
+## Native context compaction hotfix
+
+The published [`0.2.4-hotfix.11` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.2) adds `context.compact` v1 for native Codex and
+Copilot context compaction. Codex acknowledges starting native compaction;
+Copilot preserves its completion result, including false outcomes. Both use the
+existing durable command and active-binding fences without synthetic messages,
+implicit resume or automatic mutation retry. See [adapter guidance](Adapters-and-Terminals.md#native-context-compaction).
+
+Typecheck/build, **874 deterministic tests across 92 files**, documentation,
+checkpoint, release metadata and source-secret checks pass. All 16 isolated
+packed consumers and the release-build SBOM pass; all 19 published assets were
+independently downloaded and checksum-verified. The owner waived native-model
+qualification for this incremental prerelease. Compaction may itself call a
+model, so no live compaction is included in source validation. Protocol v5,
+native/transport dependency pins and migrations are unchanged. The [checkpoint](../checkpoint-v4.md#native-context-compaction-hotfix--2026-09-09)
+records source and artifact evidence; installed activation remains consumer
+maintenance work.
+
+## Copilot native task controls hotfix
+
+The published [`0.2.4-hotfix.10` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.1) adds capability-gated native Copilot
+task lists/progress and durable exact-ID background-promotion/cancellation.
+Bounded active-binding reads preserve native task/model/owner fields without
+loading history; controls preserve definite no-ops and unknown mutation outcomes.
+See [tracked tasks](Adapters-and-Terminals.md#copilot-tracked-tasks).
+
+Typecheck/build, **848 deterministic tests across 90 files**, documentation,
+checkpoint, release metadata and high-severity dependency audit gates pass. All
+16 isolated packed consumers and the release-build SBOM pass; all 19 published
+assets were independently downloaded and checksum-verified.
+The owner waived native-model qualification for incremental prerelease publication.
+Disposable Linux native shell checks make no model/provider requests; Windows and
+model-driven agent/client behavior remain UAT. Protocol v5, native/transport pins
+and migrations are unchanged. The [checkpoint](../checkpoint-v4.md#copilot-native-task-controls-hotfix--2026-09-09)
+records the source and artifact evidence; installed activation belongs to the consumer.
+
+## Copilot stalled-read and presence recovery hotfix
+
+The published [`0.2.4-hotfix.9` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.2) bounds read-only Copilot SDK requests and retains
+stalled calls until native settlement, preventing refresh/reconnect request piles.
+Inventory observes whole-session activity through existing native handles. A failed
+observation reports unknown while newer lifecycle events, errors and actionable
+input remain authoritative. Runtime presence heartbeats proceed independently of
+native inventory and metadata maintenance. Native mode reads/events also keep
+acknowledged mode current after plan approval. See [adapter recovery](Adapters-and-Terminals.md#stalled-copilot-reads)
+and [process supervision](Operations.md#process-supervision).
+
+Typecheck/build, **826 deterministic tests**, documentation, checkpoint, release
+metadata and all 16 isolated packed-consumer checks pass. The release-build SBOM
+contains all packages and bundled web identities; all 19 published assets were
+independently downloaded and checksum-verified. This remains an incremental prerelease under the owner's native-model
+qualification waiver. Protocol v5, transport/native pins and migrations are
+unchanged; mutation ambiguity and stable operation IDs retain their existing
+semantics. No native-model or installed-rollout qualification is claimed. The
+[checkpoint](../checkpoint-v4.md#copilot-stalled-read-recovery-hotfix--2026-09-08)
+owns release evidence; installed activation belongs to the personal consumer.
+
+## Bounded Codex failed-turn detail hotfix
+
+The published [`0.2.4-hotfix.8` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.1) adds optional `history.native.turns` v1. A client
+can request one newest native turn to recover its exact status/error after a
+reload; existing item history and metadata reads retain their behavior. Native
+summary pages stay bounded, falling back to the pinned native `notLoaded` view
+for a single oversized summary. No provider decisions are reclassified by the
+adapter, and history reads issue no command or automatic retry of agent work.
+See [native history](Adapters-and-Terminals.md#bounded-native-history).
+
+The source passes typecheck/build, **783 deterministic tests**, checkpoint,
+documentation, release metadata and all 16 isolated packed-consumer checks.
+Published artifacts were independently downloaded and checksum-verified.
+Native-model qualification is waived
+under the existing incremental hotfix exception; no live qualification or
+installed rollout is claimed here. Protocol v5, transport/native dependencies
+and migrations are unchanged. Publication evidence belongs to the checkpoint;
+installed runtime activation belongs to the personal consumer repository.
+
+## Standalone authority attachment hotfix
+
+The published [`0.2.4-hotfix.7` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.7) repairs attachment of an existing standalone catalog directly to
+an authority root. Its first complete snapshot transfers immutable historical
+metadata receipts; later replays cannot invent or change those results.
+The new control-only migration is `control-node-v5-authority-receipt-handoff`
+(version 6). Wire protocol, native bindings and runtime storage are unchanged.
+Queued work and receipt deliveries must drain first; formed subtree moves and
+populated attachment under an intermediate branch remain explicitly rejected.
+See [architecture guidance](Architecture-and-Data-Roles.md#attaching-an-existing-host-catalog).
+Typecheck, **768 tests**, documentation, checkpoint, release metadata, all 16
+isolated packed consumers and deterministic Docker tree/100-session scale checks
+pass for the signed source. Published tarballs were independently downloaded and
+checksum-verified. No native-model qualification or stable promotion is claimed;
+installed rollout remains in the personal consumer repository. See the
+[checkpoint](../checkpoint-v4.md#standalone-authority-handoff-hotfix--2026-09-07).
+
+## Codex goals and unavailable Copilot recovery
+
+The published [`0.2.4-hotfix.6` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.6) adds capability-gated native Codex goal reads and
+durable goal set/clear commands. Objectives, statuses, optional token budgets,
+usage and notifications retain their pinned native semantics. It also classifies
+Copilot's exact missing-saved-session resume refusal as a definite failure,
+keeping Stop/Archive recovery usable. Untouched empty Copilot sessions can still
+be absent after restart in CLI 1.0.81; there is no silent recreation or synthetic
+history. See [adapter guidance](Adapters-and-Terminals.md).
+
+Typecheck, production build, **758 tests**, checkpoint, documentation, release
+metadata and all 16 isolated packed-consumer checks pass. The owner waived
+model-using qualification for this batch.
+Protocol v5, native/transport pins and migrations are unchanged. Publication and
+installed rollout are recorded separately in the checkpoint and consumer repo.
+
+## Copilot lifecycle audit follow-up
+
+The published [`0.2.4-hotfix.5` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.5) repairs send/resume/permission/shutdown observation
+races and adds optional `history.native.primary` v1. Primary reads delegate to
+Copilot's native ownership-filtered event log with opaque cursors; children no
+longer consume a main-conversation page. Default all-events history stays
+available. See [native history](Adapters-and-Terminals.md#bounded-native-history).
+
+Typecheck, **716 tests**, checkpoint, documentation and release-metadata gates
+pass. A disposable CLI 1.0.81 / SDK 1.0.13 session verified native primary paging
+and continuation across append without any model prompt. No production session
+was used for qualification. Wire protocol, transport/native pins and migrations
+are unchanged. This remains an unqualified incremental prerelease under the
+existing owner exception; artifact and publication evidence belongs to the
+[checkpoint](../checkpoint-v4.md#copilot-lifecycle-audit-hotfix--2026-09-07).
+
+## Copilot queue visibility follow-up
+
+The published [`0.2.4-hotfix.4` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.4) adds capability-gated, read-only
+`sessions.readNativeState` for Copilot pending messages and the durable
+`steerQueuedMessage` command. Queue reads require a live binding and never resume
+sessions. Conversion uses native `queue.sendNow` atomically, preserving the
+existing message and attachments. See [pending messages](Adapters-and-Terminals.md#copilot-pending-messages).
+Protocol version, transport dependency, native pins and migrations remain
+unchanged. Older hosts remain usable without the new capabilities. No native
+model calls or host restart are part of this source validation. Typecheck,
+678 tests and all 16 isolated packed consumers pass; see the
+[checkpoint](../checkpoint-v4.md#copilot-pending-messages-hotfix--2026-09-07).
+
+## Copilot observation follow-up
+
+The published [`0.2.4-hotfix.3` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.3) restores Copilot's retained model through its
+read-only native model snapshot on attachment and observes later root model
+changes. It also keeps a session working across `assistant.idle`, which may
+still have background agents or attached shell commands, until `session.idle`.
+No wire, native dependency, transport or migration boundary changes. The source passes all 655 tests and packed-consumer checks; no native-model
+qualification is claimed. See the [checkpoint](../checkpoint-v4.md#copilot-observation-hotfix--2026-09-07) for the exact artifact and test boundaries.
+
+## Urgent session hotfix
+
+The owner authorized incremental hotfix deployment, followed by broad checks
+without model calls. The immutable `0.2.4-hotfix.2` GitHub prerelease fixes runtime
+liveness after restart and adds bounded newest-first native history reads with
+explicit unavailable-item markers. It also permits an explicit runtime listener
+address on hosts with many network interfaces.
+
+Deterministic Docker tree/100-session checks passed on the published source.
+Current review source additionally passes CI, Windows startup, CodeQL and all
+16 independent packed consumers. The
+[checkpoint](../checkpoint-v4.md#urgent-session-hotfix-evidence-2026-09-07) records
+the separate immutable artifact and tested-source identities. Published reference
+executables still print `0.2.3` for `--version`; their package manifests correctly
+identify the hotfix. Current source fixes that reporting issue, without replacing
+the published bytes. This prerelease has no native-model qualification or stable
+promotion. Installed consumer facts and laptop UAT belong to the personal repository.
 
 ## Embedded locator refresh release
 
@@ -155,9 +379,8 @@ state machines and extension contracts.
 - Copilot SDK spawn/resume, history, prompts, modes, interrupts, interactions,
   events, and runtime-local OpenAI-compatible BYOK configuration. Its stock TUI
   bridge is opt-in and experimental.
-- Current source also exposes Copilot native `permissions.mode` and its
-  acknowledged setting separately from agent mode. The published baseline above
-  does not yet include this additive command; see the
+- Copilot native `permissions.mode`, published since `0.2.2`, exposes its
+  acknowledged setting separately from agent mode; see the
   [adapter guide](Adapters-and-Terminals.md#copilot) for semantics.
 - Bounded image upload/read/path resolution across the control tree, immutable
   runtime retention, native image references, browser/CLI attachments, and

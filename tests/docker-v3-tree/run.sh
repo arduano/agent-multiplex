@@ -231,6 +231,7 @@ docker run --detach \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_NAME=tree-authority \
+  --env AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER=worker \
   --env AGENT_MULTIPLEX_CONTROL_NODE_STATE=/state/control-node.sqlite \
   --env AGENT_MULTIPLEX_CONTROL_NODE_IDENTITY=/state/control-node.identity \
   --env AGENT_MULTIPLEX_CONTROL_NODE_HTTP_BIND=127.0.0.1 \

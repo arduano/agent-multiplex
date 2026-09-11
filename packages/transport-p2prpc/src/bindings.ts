@@ -38,6 +38,8 @@ import type {
   LaunchRequest,
   LineageId,
   MetadataOperationRecord,
+  NativeStateRequest,
+  NativeStateResult,
   NativeHistoryRequest,
   NativeHistoryResult,
   NativeModel,
@@ -180,6 +182,14 @@ interface ControlNodeLinkPeerRpc {
       mutate(
         input: ControlNodeLinkFence & { request: ArchiveRequest },
       ): Promise<ArchiveRecord>;
+    };
+    readNativeState: {
+      query(
+        input: ControlNodeLinkFence & {
+          sessionId: SessionId;
+          request: NativeStateRequest;
+        },
+      ): Promise<NativeStateResult>;
     };
     readNativeHistory: {
       query(
@@ -405,6 +415,8 @@ export function childControlNodeConnectionFromPeerResolver(
     getArchive: (archiveOperationId) =>
       rpc().archives.get.query({ ...fence(), archiveOperationId }),
     execute: (command) => rpc().commands.execute.mutate({ ...fence(), command }),
+    readNativeState: (sessionId, request) =>
+      rpc().sessions.readNativeState.query({ ...fence(), sessionId, request }),
     readNativeHistory: (sessionId, request) =>
       rpc().sessions.readNativeHistory.query({ ...fence(), sessionId, request }),
     beginImageUpload: (request) => rpc().images.beginUpload.mutate({ ...fence(), request }),

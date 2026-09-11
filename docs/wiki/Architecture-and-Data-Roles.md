@@ -112,3 +112,22 @@ binding owner. A transport failure after dispatch may produce
 
 For the full overlap and failover rules, read
 [the data-role design](../design/data-roles-v4.md).
+
+## Attaching an existing host catalog
+
+A standalone authority containing sessions and settled metadata can attach
+directly to an authority root after its metadata queues and delivery intents
+drain. The first validated snapshot transfers immutable historical receipts and
+session metadata together; the root then retains open-session rows when the
+host goes offline. The control's feed changes, while its runtime and native
+agents can stay running. Runtime inventory reconciliation adopts the new
+canonical metadata authority without replacing native bindings.
+
+The reference supervisor needs the desired parent at startup; first-time parent
+configuration therefore requires a control-only restart. It is not a dynamic
+public `topology.attach` procedure. Empty trees may be constructed from the root
+downward, but moving a formed subtree or transferring an existing catalog under
+an intermediate branch is rejected pending a coordinated handoff design.
+Graceful detach remains unsupported. See the
+[initial authority handoff](../design/data-roles-v4.md#initial-attachment-of-an-existing-standalone-authority)
+for receipt, restart and offline guarantees.

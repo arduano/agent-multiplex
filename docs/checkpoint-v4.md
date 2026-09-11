@@ -1,5 +1,253 @@
 # Release qualification checkpoint
 
+## Retained catalog startup correction — 2026-09-11
+
+Signed tag [`hotfix-2026-09-11.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.2)
+identifies source `774fb8e762d465bd0e2ae3dea87e1e9bd03a80f6` and all 16
+`0.2.4-hotfix.15` packages. It supersedes `.14` for retained control activation.
+An installed-root attempt exposed a latent preexisting restart bug: boot
+publication began at zero even after retention had retired that cursor. The
+constructor now starts from its persisted checkpoint before new boot/recovery
+commits. It preserves authority, feed identity, metadata, native bindings and
+operation receipts; old cursors still correctly reject external replay.
+
+Isolated startup also keeps one pending database open without the ordinary
+request deadline, exposes health and rejects domain requests before admission
+until initialized. Explicit shutdown closes the existing owner without another
+writer. No migration, protocol/native/transport pin or durability change.
+
+Node 24.19.0 / npm 11.17.0 passed typecheck/build, **930 deterministic tests**,
+checkpoint/docs/release/secret checks, all 16 packed consumers and the
+507-component SBOM. New tests reopen a compacted catalog with retained receipts
+and hold startup beyond the ordinary request deadline with health available and
+no queued domain calls. A byte-verified retained catalog copy also opened through
+the real isolated worker with no production transport or native requests.
+
+All 19 downloaded published assets match the local bytes; all package
+SHA-256/SHA-512 values and signed source/tag identities verify. Evidence is
+retained under `receipts/storage-reliability/2026-09-11/`, including the correction
+assets and startup regression results. Earlier Docker runs retain their original
+source/image scope; no exact-correction Docker or native-model qualification is
+claimed. This is the same incremental prerelease waiver, not stable promotion.
+
+
+## Storage stall containment — 2026-09-11
+
+Signed [`hotfix-2026-09-11.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)
+identifies source `fd17b7a61f2097378b38438ae8abbadbf06bf1c8` and all 16
+`0.2.4-hotfix.14` packages. Gateway recovery admission, catalog write reduction
+and bounded authority-worker RPC preserve protocol, migration, native/transport
+pins and WAL/FULL durability. Worker isolation applies only to an authority
+without upstream or locally owned runtimes. No filesystem placement changes.
+
+Node 24.19.0 / npm 11.17.0 passed typecheck/build, 928 tests across 99 files,
+checkpoint/docs/release/secret checks, all 16 role-isolated packed consumers and
+the 507-component release-build SBOM. Tests cover a 60-second writer stall with
+responsive health, bounded queued/response credits, actual SQLITE_FULL, worker
+exit before commit and after commit-before-reply, child feeds and lost reverse
+command replies reconciled under the original operation ID without redispatch.
+All 19 published assets were independently downloaded and byte-compared; all
+package SHA-256/SHA-512 integrities and signed source/tag identities verify.
+
+Implementation-stage deterministic Docker runs passed:
+
+- Tree: `receipts/protocol-v4-control-tree/20260911T020533Z-d9d67a55876f/`,
+  image `sha256:f094734d430de0fa7d2aa42083e6aa7b30c7eafe108f09cde971780dfda8bad8`.
+  Includes isolated authority, root restart, direct-child fallback and convergence.
+- Scale: `receipts/protocol-v4-mock-docker-scale/20260911T015742Z-aae9532d6c60/`,
+  image `sha256:4dffeee69b73a14bd612fc047537364eb11aabe8e43e0d6239639d492240d45f`,
+  10 runtimes / 100 sessions using ordinary local-runtime composition.
+
+These Docker runs preceded the final clean source commit; their manifests and
+image identities define that evidence, not an invented clean-tag rerun. Prior
+failed tree receipts remain diagnostics. Scrubbed checksummed release evidence
+is under `receipts/storage-reliability/2026-09-11/`. Native-model qualification is
+waived for this incremental prerelease; no stable registry promotion or installed
+host qualification is claimed. Imported-event identity evidence remains unpruned;
+retention failures may exceed normal headroom, and worker termination cannot
+make a stuck kernel syscall complete.
+
+
+## Independent access HTTP requests — 2026-09-10
+
+Signed tag [`hotfix-2026-09-10.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-10.1) identifies source
+`01ba00f4d3fddf0cc10f1c6c79b311fc92a21bc6` and all16 `0.2.4-hotfix.13` packages.
+The release changes only the access client's HTTP request
+construction: one independently completed/cancellable request per query or
+mutation. It preserves bearer/custom headers, WebSocket subscriptions and
+exact mutation bodies without replay. The unchanged p2prpc implementation already
+opens one QUIC bidirectional stream per RPC. No migration, protocol version,
+native binary or transport dependency is changed.
+
+Typecheck/build, **884 tests across 94 files**, documentation, checkpoint,
+release metadata and source-secret checks pass on Node `24.19.0` / npm `11.17.0`.
+Five real-loopback HTTP regressions cover held history/task reads, independent
+cancellation, authentication and failed mutation dispatch. An initial test run
+used a restrictive process umask that invalidated the existing unsafe-directory
+fixture; the complete rerun under the normal 022 umask passes. Native-model
+qualification remains waived for this incremental prerelease. All16 packed consumers and the507-component SBOM pass. All19 public assets
+were independently downloaded and byte-compared, including SHA256/SHA512
+integrities. Source and tag signatures verify against tracked release signers. Private evidence is under
+`receipts/independent-http/2026-09-10/`.
+
+## Imported interaction ownership hotfix — 2026-09-09
+
+Signed tag [`hotfix-2026-09-09.3`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.3)
+identifies source `a5a6ef8d77e528c40728353560b9d8299c07a8af` and 16 packages at
+`0.2.4-hotfix.12`. Interaction resolution, expiry, republication and retirement
+preserve imported child projection ownership. Snapshot takeover and conflicting
+terminal-answer checks remain enforced. No migration, native/transport pin,
+protocol, or third-party dependency changes are included. Existing corrupt
+markers require a separately fenced, backed-up repair.
+
+Typecheck/build, **879 tests across 93 files**, docs/checkpoint/release and
+source-secret checks pass. All 16 role-isolated packed consumers pass using the
+exact published transport tarball resolver; the release-build SBOM verifies
+507 components and 125 bundled web identities. All 19 published assets were
+independently downloaded, byte-compared and SHA256/SHA512-verified; signed source
+and tag signatures verify against the tracked signer list. The exact toolchain
+is Node `24.19.0` and npm `11.17.0`.
+
+The deterministic Docker control-tree suite passes at
+`receipts/protocol-v4-control-tree/20260909T060834Z-6954053c7b0f/`.
+The 10-runtime/100-session Docker scale suite passes at
+`receipts/protocol-v4-mock-docker-scale/20260909T061400Z-dde54c610e37/`.
+Scrubbed checksummed release evidence is in
+`receipts/interaction-ownership/2026-09-09/`. These are deterministic qualifications,
+with no native model calls. This uses the existing incremental prerelease
+exception and native-model waiver; stable registry promotion and installed-host
+qualification are not claimed.
+
+## Native context compaction hotfix — 2026-09-09
+
+Signed tag [`hotfix-2026-09-09.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.2) identifies source
+`e5846a5e068ef01d37a82e893291bad19671c9f1` and all 16 `0.2.4-hotfix.11` packages.
+The release adds explicit native Codex/Copilot compaction through the existing
+stable command and active-binding fences. Codex preserves its start
+acknowledgement, while Copilot preserves completion counters and false results.
+Malformed, oversized, lost or retired-binding acknowledgements remain unknown
+without replay. Security/notices review records agent-control authorization and
+potential provider/model calls. No new third-party package, migration,
+native/transport pin, generated declaration or protocol-version change is included.
+
+Source validation passed: typecheck/build, **874 deterministic tests across 92
+files**, checkpoint, documentation, release metadata and source-secret checks.
+The exact release toolchain is Node `24.19.0` and npm `11.17.0`. The high-severity
+npm audit passes; two existing moderate Vitest development-tool advisories remain
+outside this change. All 16 role-isolated packed consumers pass. The SBOM contains
+507 release-build components, including all 16 packages and 125 bundled web
+identities.
+
+Published at `2026-09-09T05:46:47Z`, all 19 assets were independently downloaded
+and byte-compared with the validated artifact set. Tarball SHA1/SHA256/SHA512,
+sizes, source commit and exact toolchain match the public manifest. Source commit
+and tag signatures verify against the tracked release signers. Scrubbed and
+checksummed evidence belongs to `receipts/native-compaction/2026-09-09/`.
+This is the owner-authorized incremental prerelease exception; native-model
+qualification is waived. Native compaction itself may make model requests, so no
+live compaction, Windows qualification or installed-host activation is claimed.
+
+## Copilot native task controls hotfix — 2026-09-09
+
+Signed tag [`hotfix-2026-09-09.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-09.1) identifies source
+`37816aa9a217bfbfd301825e6369d8f599ee85df` and all 16 `0.2.4-hotfix.10` packages.
+The release adds native Copilot task observation, progress,
+exact-ID promotion and cancellation. Read lanes retain stalled calls, metadata
+refresh cannot outlive its list deadline, and mutation ambiguity preserves the
+original durable operation. Security/notices review covers read versus
+agent-control authorization. The adapter directly declares the already locked
+Zod validator; no new third-party package, migration, native/transport pin or
+protocol-version change is included.
+
+Source validation passed: typecheck/build, **848 deterministic tests across 90
+files**, checkpoint, documentation, release metadata and source-secret checks.
+Codex regeneration from the exact pinned CLI is byte-identical after the tracked
+ESM normalization. The high-severity npm audit passes; two existing moderate
+Vitest development-tool advisories remain outside this API hotfix.
+
+All 16 isolated packed consumers pass. The SBOM contains 507 release-build
+components, including all 16 published packages and 125 bundled web identities.
+The prerelease was published at `2026-09-09T03:16:07Z`; all 19 assets were
+independently downloaded and byte-compared, and tarball SHA256/SHA512 integrities
+match the artifact manifest. Source commit and tag signatures both verify against
+the tracked release signers. Local scrubbed/checksummed evidence belongs to
+`receipts/copilot-task-controls/2026-09-09/`.
+
+A disposable native Linux smoke on that exact clean source verified synchronous
+shell promotion, synchronous/background cancellation, progress, absent-ID no-ops
+and task-change events with **zero model/provider requests**. Its receipt is
+`receipts/copilot-native-tasks/2026-09-09T03-13-35.586Z/`.
+This follows the owner-authorized incremental prerelease exception; native-model
+qualification is waived. These checks do not qualify Windows or model-driven
+agent/client behavior, and no installed-host activation is claimed.
+
+## Copilot stalled-read recovery hotfix — 2026-09-08
+
+Signed tag [`hotfix-2026-09-08.2`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.2) identifies source
+`77a3898254a367c81ba43c69293aab4c62f8ff98` and all 16 `0.2.4-hotfix.9` packages.
+The release contains bounded/coalesced Copilot read-only calls,
+native activity reconciliation, mode observation and independent runtime presence
+maintenance. Timeouts discard late read results while retaining unresolved native
+slots; they never retry ambiguous mutations or imply native completion. Runtime
+maintenance retains one job per lane across reconnects and fences late results.
+No protocol, transport/native dependency or migration boundary changed.
+
+Typecheck/build, **826 deterministic tests across 89 files**, documentation,
+checkpoint and release metadata checks pass for this implementation. Private
+source/log checksums belong to `receipts/copilot-read-recovery/2026-09-08/`.
+All 16 isolated packed consumers pass using the configured GitHub Packages read
+credential. The release-build SBOM contains 507 components, including all 16
+packages and 125 bundled web identities. Published at `2026-09-08T11:46:09Z`,
+all 19 assets were independently downloaded and compared with local artifacts;
+all tarball SHA256 and SHA512 integrities match the manifest. Both source commit
+and tag signatures verify against the tracked release signers. Native-model
+qualification is waived under the owner's incremental hotfix exception; this
+entry claims no live model qualification or installed host activation.
+
+## Bounded Codex turn detail hotfix — 2026-09-08
+
+Signed tag [`hotfix-2026-09-08.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-08.1) identifies source
+`a4c69378ac16adc4f00adcd071e2efe65f537514` and all 16 `0.2.4-hotfix.8` package
+artifacts. It adds capability-gated native turn status/error paging.
+The adapter preserves native errors, timestamps and cursors, with bounded
+summary reads and native `notLoaded` fallback. Native decisions and ordinary
+item history remain unchanged. No wire, transport/native dependency or
+migration boundary changed.
+
+Typecheck/build, **783 deterministic tests across 88 files**, checkpoint,
+documentation and release metadata checks passed on the implementation source.
+Private source/log checksums are recorded in
+`receipts/codex-turn-detail/2026-09-08/source-checks.json`. This is deterministic
+source evidence, not native-model qualification. All 16 isolated packed consumers
+also passed using the configured GitHub Packages credential. An initial attempt
+using the GitHub CLI token failed with insufficient registry scopes; that failure
+is diagnostic only. All 19 published assets were independently downloaded and
+verified against the local artifacts. Installed rollout remains in the consumer
+repository; the owner has waived model-using release qualification for these
+incremental hotfixes.
+
+## Codex goals and unavailable Copilot recovery — 2026-09-07
+
+Signed tag `hotfix-2026-09-07.6` identifies source
+`cbb37c222865fc194f17577d75fea3d330551c27`. The
+[published prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.6)
+contains 16 `0.2.4-hotfix.6` packages, `pack-manifest.json` and `SHA256SUMS`.
+It adds native Codex goal observation/set/clear and
+recognizes Copilot's exact missing-history resume refusal as a known failure.
+The pinned goal schemas match the installed Codex 0.153.4 contracts; no generated
+source, native dependency, transport, migration or protocol-version changes.
+
+Node 24.19.0/npm 11.17.0 typecheck, production build, all **758 tests**, checkpoint,
+docs and release metadata checks pass. The owner waived model-using qualification.
+Disposable CLI 1.0.81 probes reproduced empty-session loss and verified the known
+failed resume with no user message or replacement. The scrubbed local receipt is
+`receipts/copilot-empty-session-recovery/2026-09-07-no-model/`; it does not claim
+Windows or native-model release qualification. All 16 isolated packed consumers
+also pass with the exact independently published transport tarball. The registry
+path could not authenticate with this machine's GitHub Packages scope, so no
+registry-auth verification is claimed. Installed rollout belongs to the personal
+consumer's implementation status; no stable promotion or native soak is claimed.
+
 Status: signed `v0.2.3` published on 2026-09-07 with an explicit native-model waiver.
 
 This document records release qualification and separately scoped development
@@ -7,6 +255,130 @@ evidence. Its filename remains stable for existing links. It is not a second
 architecture guide. Start a new development session with
 [`wiki/Current-State.md`](wiki/Current-State.md), then use the role-specific
 wiki and design documents linked at the end of this page.
+
+## Copilot pending messages hotfix — 2026-09-07
+
+Signed tag `hotfix-2026-09-07.4` identifies source
+`fea5cedc1cdd8f61002f108203e2a4d23cab202e`. The
+[immutable prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.4)
+contains 16 `0.2.4-hotfix.4` packages, `pack-manifest.json` and `SHA256SUMS`.
+It adds live Copilot pending-message reads and atomic queue-to-steering commands;
+new procedures are optional and capability-gated. Protocol version 5, native
+pins, p2prpc `0.2.1` and migrations remain unchanged.
+
+Typechecking, **678 tests**, docs/checkpoint/release gates and all 16 isolated
+packed consumers pass. Packed checks use the same verifier with the transport
+resolved from its independently published public tarball; no registry-auth
+qualification is claimed. The separate p2prpc worktree also passes typechecking
+and **401 tests**, without changes. Framework dependencies were reinstalled from
+the lock before testing, and the actual loaded Copilot SDK is `1.0.13`.
+No model calls, native soak, stable promotion or installed-host qualification
+is claimed. Consumer rollout and deferred Windows restart belong to the
+personal repository's handoff.
+
+## Copilot observation hotfix — 2026-09-07
+
+The published `0.2.4-hotfix.3` fixes model observation after native attachment
+and keeps attached/background work running until Copilot's whole-session idle
+signal. Model API reads and root changes retain native IDs and fence late
+observations; no model selection is replayed on resume. Twenty-two new adapter
+regressions cover these boundaries and pending interactions.
+
+Local typecheck, all **655 tests**, checkpoint, documentation and release checks
+pass. The 16-package graph retains protocol 5, Copilot SDK `1.0.13` / CLI
+`1.0.81`, Codex `0.152.0`, p2prpc `0.2.1` and released migrations. No real
+model calls, soak, native qualification or stable promotion is claimed.
+Signed tag `hotfix-2026-09-07.3` identifies source
+`0eaf6ae20538e461ab37730d7b2f267c5b912aaa`; the
+[GitHub prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.3)
+contains all 16 packages and their manifest/checksums. The personal consumer's
+installed tarball integrities match all 16 manifest entries.
+
+All packages pass publint, applicable type/export checks and 16 isolated
+consumers using the public `p2prpc@0.2.1` release tarball, matching the personal
+consumer's transport dependency. The stock registry consumer check was blocked
+by the available GitHub token's missing package-read scope. No registry consumer
+qualification is claimed. The fallback retained the same verifier and replaced
+only transport discovery with its public release URL. Consumer deployment facts
+belong to the personal repository.
+
+## Urgent session hotfix evidence — 2026-09-07
+
+The owner authorized focused-check prerelease deployment followed by broad
+non-model checks. This evidence does not promote a stable release or assert a
+passing native-model qualification. Wire protocol remains `5`, transport remains
+exact public `@arduano/p2prpc-core@0.2.1`, and native pins remain Codex `0.152.0`,
+Copilot SDK `1.0.13` and CLI `1.0.81`.
+
+### Immutable deployed package boundary
+
+Signed tag `hotfix-2026-09-07.2` peels to
+`564f166ebe579eefa749c9682400628d68af63ce`. Its
+[GitHub prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.2)
+was published at `2026-09-07T03:45:02Z`, with 16 lockstep `0.2.4-hotfix.2`
+tarballs. The `pack-manifest.json` SHA-256 is
+`78075b77456f0688b176cfd21fa8c59252bbc4fad738b9e513ac5a1f4840b7ca`;
+the `SHA256SUMS` file SHA-256 is
+`8f5381559ad1459cbf44c8f4a3b77e063e8da0c87b39f2fb00d0466d9503d037`.
+No artifact or signed tag was replaced during final validation.
+
+[Docker qualification run 34082871111](https://github.com/arduano/agent-multiplex/actions/runs/34082871111)
+checked out that exact commit and passed both deterministic suites. Downloaded
+artifact `10004313224` contains the following successful, scrubbed receipts;
+independent SHA-256 verification passed all 48 inventory entries in each:
+
+| Receipt | SHA-256 of its `SHA256SUMS` |
+| --- | --- |
+| `protocol-v4-control-tree/20260907T042344Z-4ee2f6401bae` | `f15c19833b4607637b6df2583ae31c2ddc02aa6aaacc03a3d40dcb3349102553` |
+| `protocol-v4-mock-docker-scale/20260907T042605Z-11cc549a3bc9` | `18d61bcaa1ee000c2cd5b4c2a7c3b0810657cfa49f2730b612a107f00ea04777` |
+
+The tree run exercised authority/branch failover and recovery, queued metadata,
+native event reassembly and immutable image transfer. The scale run exercised
+10 runtimes/100 concurrent mock sessions, client and runtime reconnect recovery,
+zero native event gaps/duplicates and responsive dashboard checks. Its receipt
+records Node `24.19.0`, Docker `28.0.4`, zero real agent processes and zero inference
+requests. Both runners removed disposable state; they did not alter installed
+hosts or existing sessions. Receipt directory names retain their historical `v4`
+spelling; their manifests explicitly record protocol `5`.
+
+### Final reviewed source checks
+
+Review head `15e27abc9f7ec0d4e6fa93514fb69c7175c3b31f` passed these PR workflows:
+
+- [CI 34085039526](https://github.com/arduano/agent-multiplex/actions/runs/34085039526):
+  typecheck, 633 tests across 81 files, docs/checkpoint/release gates, build,
+  no-model native Copilot permission smoke, audit, all 16 independent packed
+  consumers, SBOM and tracked-source credential scan.
+- [Windows 34085039485](https://github.com/arduano/agent-multiplex/actions/runs/34085039485):
+  x64 private-state/storage/native startup and isolated Copilot permission RPCs,
+  with zero model calls or retained credentials.
+- [CodeQL 34085039503](https://github.com/arduano/agent-multiplex/actions/runs/34085039503)
+  and [dependency review 34085039508](https://github.com/arduano/agent-multiplex/actions/runs/34085039508).
+
+These workflows checked out GitHub's synthetic PR merge commit
+`093c43828a42a535c7f4576c47c44431fa21fd79`. Its complete Git tree is byte-identical
+to the review head: `1dcd16b986b6fb258c5e0b63385d1358e06c8a57`, including the
+lockfile. The downloaded pack manifest names that merge commit; its SHA-256 is
+`c61dab0d50db28be4eae01c1556f8997b9f5e51a1cfa56440c7833efe0b5a0cf`.
+All 16 downloaded package checksums passed. The `SHA256SUMS` SHA-256 is
+`27e149e5c4b207ae7a20e915fec36156d53df3750a2b7e1bda7bc8d9715e278a`.
+These CI candidates are separate from the immutable prerelease bytes above.
+
+Windows receipt inventories also passed independent checksums. Startup receipt
+`2026-09-07T04-59-52.643Z` has inventory SHA-256
+`ee327f3cb96991f08ee62b24dde85940e0491ee10b667ec4ae6c06a5788c9621`;
+permission receipt `2026-09-07T04-59-54.797Z` has inventory SHA-256
+`7775646813d5efedfe77396647c9fd29400ecd14c60b4351e899c9863b4ed6fd`.
+Downloaded evidence is retained locally under `receipts/urgent-final-ci/`;
+credential-pattern scans found no raw credentials in its textual receipt files.
+
+The published hotfix reference CLI/control/runtime/gateway executables still
+print the stale hardcoded `0.2.3` for `--version`, although package manifests and
+consumer locks correctly identify `0.2.4-hotfix.2`. Final source commit `15e27ab`
+reads the installed package manifest instead; this fixed the packed executable
+verification failure without changing the immutable release. Installed bespoke
+hosts, corporate OAuth and laptop fallback/outage UAT remain consumer-owned
+evidence, not outcomes implied by these framework checks.
 
 
 ## Embedded locator release — 2026-09-07
@@ -429,3 +801,83 @@ external-model image-prompt suite.
   upgrade, and failure behavior.
 - [Release guide](wiki/Releases.md) — versioning, publication, recovery, and
   downstream verification procedure.
+
+
+## Copilot lifecycle audit hotfix — 2026-09-07
+
+The owner requested a deeper Copilot delivery/event audit and roughly100 useful
+conversation messages on initial load. The `0.2.4-hotfix.5` source repairs:
+
+- Waiting-input, already-active resume and shutdown observation races.
+- Late failed command acknowledgements or successful permission replies replacing
+  newer native lifecycle state, and legacy child provenance changing root state.
+- Missing native send IDs reported as success rather than outcome unknown.
+- Child-heavy history starvation via optional `history.native.primary` v1,
+  native primary filtering and direction-fenced opaque continuation cursors.
+
+Local exact-toolchain gates pass: typecheck, **716 tests across85 files**,
+checkpoint, documentation and release metadata. Primary history has15 deterministic
+cases covering ordering, view/direction/cursor fences, expiry, bounded image and
+byte transfer, and oversized-page retries without cursor skips. Nine lifecycle
+race cases cover late acknowledgements and legacy ownership, in addition to the
+existing adapter suites.
+
+A disposable exact CLI1.0.81 / SDK1.0.13 session verified the native primary
+backward method and opaque continuation across appends, without model prompts
+or production state. Native expiry was not exercised; its failure behavior is
+covered against the exact schema with deterministic fixtures. No transport,
+protocol version, native pin or migration changed. Consumer UI findings and
+installed rollout facts belong to the personal repository. This is a model-free,
+unqualified prerelease under the existing owner exception, not a stable or
+native-model qualification claim.
+
+Published all16 immutable GitHub prerelease tarballs from signed source
+`ea05e78c4f9cc892c1b99b4cd403a3ba17bb0dbe` under
+[`hotfix-2026-09-07.5`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.5).
+The release retains its source-bound pack manifest, tarballs, checksum inventory
+and507-component release-build SBOM. `SHA256SUMS` digest:
+`cc5e8b096b834a982433d4b19a9b4bebfa000247cdcd55f28e34dac303717e34`.
+
+All16 isolated packed-consumer checks pass using the exact public p2prpc0.2.1
+tarball at the unchanged declared dependency boundary. This uses the prior
+public-transport verifier after the known registry token-scope failure; it is
+separate from registry-authentication evidence. No `latest` promotion or native
+model-credit gate was performed.
+
+## Standalone authority handoff hotfix — 2026-09-07
+
+Published [`hotfix-2026-09-07.7`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-07.7),
+version `0.2.4-hotfix.7`, from SSH-signed source
+`b2b708b01386b086f52d0c3931e29846fc81b14a` under the existing owner exception.
+The 16 exact-toolchain artifacts retain immutable manifests, SHA-256/SHA-512
+inventories and the 507-component SBOM. The pack manifest digest is
+`26cb1a6bd7a7bd570aac143bf4c892ddf8cc282f6a77f8c779293ae7f8626d1d`.
+All published assets were independently downloaded through GitHub CLI and all
+16 tarballs passed their released checksum inventory.
+
+Typecheck, production build, **768 tests**, checkpoint, docs, release metadata,
+secret scan and all 16 role-isolated packed consumers pass. Final-source
+deterministic Docker evidence:
+
+- Tree: `receipts/protocol-v4-control-tree/20260907T140142Z-480c110dbc72/`.
+- 10-runtime/100-session scale: `receipts/protocol-v4-mock-docker-scale/20260907T140142Z-579c7b38691c/`.
+
+Earlier `c80f8b0` Docker runs are historical, preceding the final observer fixes.
+A direct vitest attempt without regenerated dashboard assets had three HTTP
+fixture failures; the final standard `npm test` rebuild passed all 768 tests.
+Direct urllib downloads encountered gateway timeouts; GitHub CLI independently
+downloaded and verified the complete final public asset set.
+
+Control-only migration 6 records authenticated prior authority, original
+attachment admission and atomic first-snapshot receipt admission closure.
+Historical results stay immutable and reconcile by their original IDs.
+Already-watching root gateways receive imported receipts; session-filtered
+streams immediately reset on feed change and discard prior-authority native
+replay for explicit history/gap recovery. Undrained metadata, populated attachment
+beneath a branch, and formed-subtree transfers fail closed. Root and attaching
+controls need this update; runtime storage/native bindings and transport/native
+pins are unchanged. Older controls require a stopped-state backup for rollback.
+
+No model prompts, native qualification claim, registry `latest` promotion or
+production session mutation were used for qualification. Installed source and
+NAS/laptop rollout facts belong to the personal repository.

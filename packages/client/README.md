@@ -1,15 +1,18 @@
 # @arduano/agent-multiplex-client
 
-Protocol-v4 clients for the authority-neutral `access` contract.
+Protocol-v5 clients for the authority-neutral `access` contract.
 
 `createAccessClient` is the HTTP/WebSocket client used by browsers, TUIs, and
 embedded dashboards. Bearer providers are evaluated again for every HTTP
-request and WebSocket reconnect. `watchAccess` adds bounded serialized
-consumption, application-level retry, cursor advancement, and replay
+request and WebSocket reconnect. Each query or mutation has its own HTTP
+request, so a slow native history or task read cannot hold another operation's
+response in the same batch. Cancelling one request does not cancel its peers;
+it does not prove that dispatched remote work stopped. `watchAccess` adds
+bounded serialized consumption, application-level retry, cursor advancement, and replay
 suppression. A `nativeGap` is passed through: recovery always uses the native
 `readNativeHistory` operation.
 
-Launch helpers construct retry-stable protocol-v4 requests against an exact
+Launch helpers construct retry-stable protocol-v5 requests against an exact
 runtime/profile schema fence. Launch and archive responses may be intermediate;
 recover them by ID or the bounded operation/watch APIs. `sessions.search` is
 the bounded source for normal running/stopped lists and explicit archived,

@@ -1,7 +1,7 @@
 import {
   createTRPCClient,
   createWSClient,
-  httpBatchLink,
+  httpLink,
   splitLink,
   wsLink,
   type CreateTRPCClient,
@@ -16,7 +16,7 @@ import {
   type BearerTokenProvider,
 } from "./http.js";
 
-/** tRPC client for the authority-neutral protocol-v4 access contract. */
+/** tRPC client for the authority-neutral protocol-v5 access contract. */
 export type AccessClient = CreateTRPCClient<AccessRouter>;
 
 export interface AccessClientOptions {
@@ -57,7 +57,9 @@ export function createAccessClient(options: AccessClientOptions): AccessClientHa
         keepAlive: { enabled: true, intervalMs: 10_000, pongTimeoutMs: 3_000 },
       })
     : undefined;
-  const http = httpBatchLink<AccessRouter>({
+  // Native reads can take much longer than catalog and health requests. Keep
+  // each operation's response and cancellation independent at the HTTP edge.
+  const http = httpLink<AccessRouter>({
     url: options.httpUrl,
     ...(options.bearerToken !== undefined
       ? { headers: bearerAuthorizationHeaders(options.bearerToken) }

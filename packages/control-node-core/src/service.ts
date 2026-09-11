@@ -1,3 +1,4 @@
+import { childImportBatches } from "./child-import-batches.js";
 import {
   assertImageResponseTarget,
   imageContract,
@@ -79,6 +80,8 @@ import {
   type LineageId,
   type MetadataOperationRecord,
   type MetadataPatch,
+  type NativeStateRequest,
+  type NativeStateResult,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeModel,
@@ -1139,6 +1142,17 @@ export class ControlNodeService {
       : this.#runtime(session.runtimeNodeId).readNativeHistory(sessionId, request);
   }
 
+  public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    const session = this.catalog.getSession(sessionId);
+    if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
+    if (session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "archived session resources have been released");
+    if (session.harness !== request.harness) throw new ControlNodeCoreError("FENCED", "native state request harness does not match binding");
+    const route = this.#route(session.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+    if (!owner.readNativeState) throw new ControlNodeCoreError("UNSUPPORTED", "native state observation is unavailable");
+    return owner.readNativeState(sessionId, request);
+  }
+
   public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {
     const request = imageContract.beginUpload.input.parse(input);
     return this.#routeImage(request, (owner) => owner.beginImageUpload(request))
@@ -1925,10 +1939,11 @@ export class ControlNodeService {
         if (!attachment) return;
         const checkpoint = this.catalog.childCheckpoint(connection.controlNodeId);
         if (!checkpoint) return;
-        for await (const item of connection.subscribeAggregate({ ...checkpoint, native: {} }, controller.signal)) {
+        for await (const group of childImportBatches(connection.subscribeAggregate({ ...checkpoint, native: {} }, controller.signal), requiresChildResnapshot)) {
+          const item = Array.isArray(group) ? group.at(-1)! : group;
           if (controller.signal.aborted) return;
           if (item.kind === "control") {
-            this.catalog.importChildControl(connection.controlNodeId, attachment.attachmentId, item);
+            this.catalog.importChildControls(connection.controlNodeId, attachment.attachmentId, Array.isArray(group) ? group : [item]);
             if (requiresChildResnapshot(item)) {
               if (
                 this.#childPumps.get(connection.controlNodeId) !== pump ||

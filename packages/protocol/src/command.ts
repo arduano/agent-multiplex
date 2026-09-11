@@ -31,9 +31,22 @@ export const codexCommandSchema = z.discriminatedUnion("type", [
     native: jsonObjectSchema.optional(),
   }),
   z.object({ type: z.literal("interrupt"), turnId: z.string().optional() }),
+  z.object({ type: z.literal("compact") }).strict(),
   z.object({ type: z.literal("setModel"), model: z.string().min(1) }),
   z.object({ type: z.literal("setEffort"), effort: z.string().min(1) }),
   z.object({ type: z.literal("setMode"), mode: jsonValueSchema }),
+  z.object({
+    type: z.literal("setGoal"),
+    objective: z.string().min(1).max(4_000).refine((value) => value.trim().length > 0, {
+      message: "goal objective must not be blank",
+    }).optional(),
+    status: z.enum(["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"]).optional(),
+    tokenBudget: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).nullable().optional(),
+  }).strict().refine(
+    (value) => value.objective !== undefined || value.status !== undefined || value.tokenBudget !== undefined,
+    { message: "at least one goal field is required" },
+  ),
+  z.object({ type: z.literal("clearGoal") }).strict(),
   z.object({
     type: z.literal("updateTurnSettings"),
     turnId: z.string().min(1).optional(),
@@ -74,12 +87,16 @@ export const copilotCommandSchema = z.discriminatedUnion("type", [
     native: jsonObjectSchema.optional(),
   }),
   z.object({ type: z.literal("interrupt") }),
+  z.object({ type: z.literal("compact") }).strict(),
   z.object({ type: z.literal("setModel"), model: z.string().min(1) }),
   z.object({
     type: z.literal("setMode"),
     mode: z.enum(["interactive", "plan", "autopilot"]),
   }),
   z.object({ type: z.literal("setPermissionMode"), mode: z.enum(["manual", "allow-all"]) }).strict(),
+  z.object({ type: z.literal("steerQueuedMessage"), id: z.string().min(1).max(4_096) }).strict(),
+  z.object({ type: z.literal("promoteTaskToBackground"), id: z.string().min(1).max(4_096) }).strict(),
+  z.object({ type: z.literal("cancelTask"), id: z.string().min(1).max(4_096) }).strict(),
 ]);
 
 export const harnessCommandSchema = z.discriminatedUnion("harness", [

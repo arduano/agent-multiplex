@@ -37,6 +37,7 @@ import {
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import { copilotJson } from "./json.js";
+import { CopilotReadRequests } from "./reads.js";
 import {
   CopilotAdapterSession,
   CopilotSessionBridge,
@@ -95,6 +96,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #providerModels: readonly string[];
   readonly #providerModelCapabilities: Readonly<Record<string, ModelCapabilities>>;
   readonly #active = new Map<string, CopilotAdapterSession>();
+  readonly #reads = new CopilotReadRequests();
   #startPromise: Promise<void> | undefined;
   #started = false;
   #closed = false;
@@ -179,7 +181,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
       }));
     }
     await this.ensureStarted();
-    const models = await this.#client.listModels();
+    const models = await this.#reads.read("adapter:models", "", () => this.#client.listModels());
+    this.assertOpen();
     return models.map((model) => ({
       harness: "copilot",
       id: model.id,
@@ -190,7 +193,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
 
   public async listSessions(): Promise<NativeInventoryItem[]> {
     await this.ensureStarted();
-    const metadata = await this.#client.listSessions();
+    // Reconcile missed root lifecycle events from the existing native handle.
+    // This is observation only: never resume/replace a handle to query activity.
+    const [metadata] = await Promise.all([
+      this.#reads.read("adapter:sessions", "", () => this.#client.listSessions()),
+      Promise.all([...this.#active.values()].map(session => session.readActivity())),
+    ]);
+    this.assertOpen();
     const byId = new Map(metadata.map((entry) => [entry.sessionId, entry]));
     const result = metadata.map((entry) => this.inventoryItem(entry));
     for (const session of this.#active.values()) {
@@ -216,6 +225,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError(`Copilot adapter cannot spawn ${options.harness}`);
     }
     await this.ensureStarted();
+    this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
     const vendorSessionId = nativeSessionId(options.native) ?? randomUUID();
@@ -251,6 +261,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         { cause },
       );
     }
+    if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
       native,
       options.cwd,
@@ -268,7 +279,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await session.readPermissions();
+    await Promise.all([session.readPermissions(), session.readModel(), session.readMode(), session.readActivity()]);
+    if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the created session could be returned");
     return session;
   }
 
@@ -278,11 +290,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError(`Copilot adapter cannot resume ${options.harness}`);
     }
     await this.ensureStarted();
+    this.assertOpen();
 
     // One SDK handle is the sole upstream controller. An explicit resume is
     // also the recovery path after a runtime failure, so replace stale handles.
     const prior = this.#active.get(options.vendorSessionId);
     if (prior) await prior.stop();
+    this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
     const cwd = options.cwd ?? null;
@@ -313,11 +327,23 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native = await this.#client.resumeSession(options.vendorSessionId, config);
     } catch (cause) {
       bridge.close();
+      // CLI 1.0.81 deliberately keeps a never-used session in memory only.
+      // Its explicit load refusal means no resume effect occurred; retaining
+      // outcomeUnknown here would unnecessarily wedge the durable lifecycle.
+      // Keep the predicate exact: timeouts, transport failures and unrelated
+      // native errors remain ambiguous and must not be blindly retried.
+      if (isMissingNativeSession(cause, options.vendorSessionId)) {
+        throw new Error(
+          "Copilot has no saved history for this session. An empty session may not survive a host restart. Stop and archive this entry, then create a new session.",
+          { cause },
+        );
+      }
       throw new AdapterOutcomeUnknownError(
         `Copilot session ${options.vendorSessionId} may have resumed, but resume was not acknowledged`,
         { cause },
       );
     }
+    if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
       native,
       cwd,
@@ -335,8 +361,19 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await session.readPermissions();
+    await Promise.all([session.readPermissions(), session.readModel(), session.readMode(), session.readActivity()]);
+    if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the resumed session could be returned");
     return session;
+  }
+
+  private async rejectLateAttachment(native: CopilotNativeSession, bridge: CopilotSessionBridge): Promise<never> {
+    bridge.close();
+    try {
+      await native.disconnect();
+    } catch (cause) {
+      throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; native detachment was not acknowledged", { cause });
+    }
+    throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; the late native handle was detached");
   }
 
   public async close(): Promise<void> {
@@ -379,6 +416,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native,
       bridge,
       settings,
+      reads: this.#reads,
       onStopped: () => {
         if (this.#active.get(native.sessionId) === session) {
           this.#active.delete(native.sessionId);
@@ -461,12 +499,19 @@ export class CopilotAgentAdapter implements AgentAdapter {
   }
 
   private async runtimeStatus(): Promise<CopilotRuntimeStatus> {
-    return this.#client.getStatus();
+    const status = await this.#reads.read("adapter:status", "", () => this.#client.getStatus());
+    this.assertOpen();
+    return status;
   }
 
   private assertOpen(): void {
     if (this.#closed) throw new Error("Copilot adapter is closed");
   }
+}
+
+function isMissingNativeSession(error: unknown, sessionId: string): boolean {
+  return error instanceof Error && "code" in error && error.code === -32603 &&
+    error.message === `Request session.resume failed with message: Failed to load session events: Session not found: ${sessionId}`;
 }
 
 function bundledCopilotExecutable(): string | undefined {
@@ -688,6 +733,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "session.create", version, experimental: false },
     { name: "session.resume", version, experimental: false },
     { name: "history.native", version, experimental: false },
+    { name: "history.native.primary", version: "v1", experimental: true },
     { name: "prompt.enqueue", version, experimental: false },
     { name: "prompt.steer.immediate", version, experimental: false },
     { name: "interrupt", version, experimental: false },
@@ -696,6 +742,13 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "reasoning-effort.create-resume", version, experimental: false },
     { name: "mode.native", version, experimental: true },
     { name: "permissions.mode", version: "v1", experimental: true },
+    { name: "context.compact", version: "v1", experimental: true },
+    { name: "queue.pending", version: "v1", experimental: true },
+    { name: "queue.sendNow", version: "v1", experimental: true },
+    { name: "tasks.list", version: "v1", experimental: true },
+    { name: "tasks.progress", version: "v1", experimental: true },
+    { name: "tasks.promoteToBackground", version: "v1", experimental: true },
+    { name: "tasks.cancel", version: "v1", experimental: true },
     { name: "interactions.permission", version, experimental: false },
     { name: "interactions.userInput", version, experimental: false },
     { name: "interactions.elicitation", version, experimental: true },
