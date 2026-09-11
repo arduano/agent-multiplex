@@ -7,16 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-11.
 
-## Storage reliability candidate
+## Storage reliability prerelease
 
-The next incremental prerelease stages gateway recovery fencing, catalog no-op
-and group-commit reductions, and an optional authority-only storage worker.
-Protocol v5, migrations, native agent pins and p2prpc are unchanged. The filesystem
-environment and authoritative WAL/FULL durability remain unchanged. See
-[operations](Operations.md#storage-stalls-and-an-isolated-authority) and
+Published [`0.2.4-hotfix.14`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)
+adds gateway recovery admission, catalog no-op/coalescing and ordered group
+commits, and an opt-in authority-only storage worker with bounded asynchronous
+RPC. Protocol v5, migrations, native agent pins, p2prpc and authoritative
+WAL/FULL durability are unchanged. The existing filesystem remains in place.
+See [operations](Operations.md#storage-stalls-and-an-isolated-authority) and
 [the detailed boundary](../design/data-roles-v4.md#storage-progress-admission-and-projection-recovery).
-Source validation and installed activation are still in progress; this is not a
-published or native-model-qualified release claim.
+
+All 928 deterministic tests, typecheck/build, docs/checkpoint/release/secret checks,
+16 packed consumers and SBOM pass. All 19 published assets were independently
+byte-compared and package integrities verified. Implementation-stage Docker tree
+and scale runs pass; their original image/source scope is retained in the
+[checkpoint](../checkpoint-v4.md#storage-stall-containment--2026-09-11).
+Native-model qualification remains waived. Consumer activation is recorded by Leo;
+combined host/runtime storage is not isolated by this authority-only option.
 
 ## Independent access HTTP requests
 

@@ -1,5 +1,42 @@
 # Release qualification checkpoint
 
+## Storage stall containment — 2026-09-11
+
+Signed [`hotfix-2026-09-11.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)
+identifies source `fd17b7a61f2097378b38438ae8abbadbf06bf1c8` and all 16
+`0.2.4-hotfix.14` packages. Gateway recovery admission, catalog write reduction
+and bounded authority-worker RPC preserve protocol, migration, native/transport
+pins and WAL/FULL durability. Worker isolation applies only to an authority
+without upstream or locally owned runtimes. No filesystem placement changes.
+
+Node 24.19.0 / npm 11.17.0 passed typecheck/build, 928 tests across 99 files,
+checkpoint/docs/release/secret checks, all 16 role-isolated packed consumers and
+the 507-component release-build SBOM. Tests cover a 60-second writer stall with
+responsive health, bounded queued/response credits, actual SQLITE_FULL, worker
+exit before commit and after commit-before-reply, child feeds and lost reverse
+command replies reconciled under the original operation ID without redispatch.
+All 19 published assets were independently downloaded and byte-compared; all
+package SHA-256/SHA-512 integrities and signed source/tag identities verify.
+
+Implementation-stage deterministic Docker runs passed:
+
+- Tree: `receipts/protocol-v4-control-tree/20260911T020533Z-d9d67a55876f/`,
+  image `sha256:f094734d430de0fa7d2aa42083e6aa7b30c7eafe108f09cde971780dfda8bad8`.
+  Includes isolated authority, root restart, direct-child fallback and convergence.
+- Scale: `receipts/protocol-v4-mock-docker-scale/20260911T015742Z-aae9532d6c60/`,
+  image `sha256:4dffeee69b73a14bd612fc047537364eb11aabe8e43e0d6239639d492240d45f`,
+  10 runtimes / 100 sessions using ordinary local-runtime composition.
+
+These Docker runs preceded the final clean source commit; their manifests and
+image identities define that evidence, not an invented clean-tag rerun. Prior
+failed tree receipts remain diagnostics. Scrubbed checksummed release evidence
+is under `receipts/storage-reliability/2026-09-11/`. Native-model qualification is
+waived for this incremental prerelease; no stable registry promotion or installed
+host qualification is claimed. Imported-event identity evidence remains unpruned;
+retention failures may exceed normal headroom, and worker termination cannot
+make a stuck kernel syscall complete.
+
+
 ## Independent access HTTP requests — 2026-09-10
 
 Signed tag [`hotfix-2026-09-10.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-10.1) identifies source
