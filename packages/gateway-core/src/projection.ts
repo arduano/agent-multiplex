@@ -1650,7 +1650,9 @@ export class AccessGatewayProjection {
           : record);
         break;
       case "session.upsert":
-        sessions = upsert(sessions, change.session, (record) => record.sessionId);
+        sessions = change.session.catalogState === "archived"
+          ? sessions.filter((record) => record.sessionId !== change.session.sessionId)
+          : upsert(sessions, change.session, (record) => record.sessionId);
         if (this.#selected.has(source.definition.sourceId)) {
           this.#rememberOwner(
             this.#sessionLookupRecords,

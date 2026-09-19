@@ -983,7 +983,7 @@ export class RuntimeNodeService {
     const timestamp = now();
     const record: ArchiveRecord = {
       ...request,
-      authority: request.expectedAuthority,
+      authority: { ...request.expectedAuthority },
       state: "accepted",
       releasedAt: null,
       createdAt: timestamp,
