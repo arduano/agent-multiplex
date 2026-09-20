@@ -71,17 +71,17 @@
     "release:publish": "node scripts/publish-release.mjs release-artifacts"
   },
   "dependencies": {
-    "@trpc/client": "11.18.0",
-    "@trpc/server": "11.18.0",
-    "superjson": "2.2.2",
-    "uuid": "11.1.1",
-    "zod": "4.1.5"
+    "@trpc/client": "11.19.0",
+    "@trpc/server": "11.19.0",
+    "superjson": "2.2.6",
+    "uuid": "14.0.2",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.5",
     "@axe-core/playwright": "^4.13.0",
     "@cyclonedx/cyclonedx-npm": "6.0.1",
-    "@types/node": "24.3.0",
+    "@types/node": "26.6.1",
     "@types/ws": "8.18.1",
     "playwright-core": "^1.62.1",
     "publint": "0.3.24",
@@ -92,8 +92,8 @@
   },
   "overrides": {
     "@github/copilot": "1.0.81",
-    "@trpc/client": "11.18.0",
-    "@trpc/server": "11.18.0"
+    "@trpc/client": "11.19.0",
+    "@trpc/server": "11.19.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,

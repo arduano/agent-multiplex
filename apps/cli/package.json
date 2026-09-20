@@ -25,6 +25,6 @@
   "dependencies": {
     "@arduano/agent-multiplex-client": "0.2.3",
     "@arduano/agent-multiplex-protocol": "0.2.3",
-    "@trpc/client": "11.18.0"
+    "@trpc/client": "11.19.0"
   }
 }
