@@ -39,14 +39,46 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
         run: npm.cmd ci --strict-allow-scripts
+      - name: Detect staged transport boundary
+        id: transport
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+          const path = 'transport-candidate/manifest.json';
+          const manifest = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+          if (manifest && (!/^[0-9a-f]{40}$/.test(manifest.upstreamCommit) ||
+              typeof manifest.releaseBlocked !== 'boolean')) throw new Error('Invalid transport candidate boundary');
+          appendFileSync(process.env.GITHUB_OUTPUT,
+            `candidate=${manifest !== null}\nrelease_blocked=${manifest?.releaseBlocked === true}\n` +
+            `upstream_commit=${manifest?.upstreamCommit ?? ''}\n`);
+          NODE
+      - name: Check out exact independent transport source
+        if: steps.transport.outputs.candidate == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: arduano/p2prpc
+          ref: ${{ steps.transport.outputs.upstream_commit }}
+          path: receipts/upstream-p2prpc
+          # Private source requires this read-only cross-repository token.
+          token: ${{ secrets.P2PRPC_SOURCE_READ_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Prepare reviewed transport candidate without changing pins
+        if: steps.transport.outputs.candidate == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm.cmd run prepare:transport-renewal -- receipts/upstream-p2prpc
       - name: Build exact framework source
         run: npm.cmd run typecheck
       - name: Qualify Windows startup without model calls
         run: node tests/windows-copilot-smoke.mjs
       - name: Verify native Copilot permission RPCs without model calls
         run: node tests/copilot-permissions-smoke.mjs
+      - name: Explain external consumer qualification boundary
+        if: steps.transport.outputs.release_blocked == 'true'
+        run: Write-Output "::notice::Optional personal-consumer checkout, composition and receipt upload are skipped for the unpinned transport candidate; separate release and consumer qualification are required."
       - name: Check out optional personal consumer
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' && steps.transport.outputs.release_blocked != 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
@@ -54,7 +86,7 @@ jobs:
           path: .cache/leo-consumer
           persist-credentials: false
       - name: Qualify optional personal composition
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' && steps.transport.outputs.release_blocked != 'true' }}
         working-directory: .cache/leo-consumer
         env:
           CONSUMER_SHA: ${{ inputs.consumer_ref }}
@@ -74,7 +106,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git diff --exit-code -- package.json package-lock.json
       - name: Upload optional composition receipt
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.consumer_ref != '' && steps.transport.outputs.release_blocked != 'true' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-leo-consumer-${{ inputs.consumer_ref }}

@@ -1241,7 +1241,7 @@ jq -n \
         {name:$copilotName,id:$copilotId,role:"Copilot-only runtime node + real Copilot BYOK runtime",publishedPorts:[]}
       ],
       authority:{controlNodeId:$controlNodeId,sqliteBacked:true},
-      transport:{protocol:"p2prpc v1 over Iroh",controlEndpointId:$endpoint,ticketRecorded:false,ticketSha256:$ticketDigest},
+      transport:{protocol:"p2prpc v5 / authenticated renewal contract 1 over Iroh",controlEndpointId:$endpoint,ticketRecorded:false,ticketSha256:$ticketDigest},
       ingress:{onlyPublishedApplicationPort:"gateway HTTP/WebSocket",browserAndVerifierUseGatewayOnly:true},
       browserRunsOnDockerHost:true,
       acceptancePlumbing:{
@@ -1271,12 +1271,16 @@ COPILOT_VERSION=$(jq -r '.[] | select(.harness == "copilot") | .runtimeVersion /
   "$RECEIPT_DIR/rpc/harness-catalog.json")
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}')
 IFS=$'\t' read -r P2PRPC_VERSION P2PRPC_INTEGRITY < <(
-  node -e '
-    const lock = require(process.argv[1]);
-    const dependency = lock.packages?.["node_modules/@arduano/p2prpc-core"];
-    if (!dependency?.version || !dependency?.integrity) process.exit(1);
+  docker exec "$CONTROL_CONTAINER" node --input-type=module -e '
+    import { existsSync, readFileSync } from "node:fs";
+    const json = (path) => JSON.parse(readFileSync(path, "utf8"));
+    const candidate = "transport-candidate/artifact.json";
+    const installed = json("node_modules/@arduano/p2prpc-core/package.json");
+    const dependency = existsSync(candidate) ? json(candidate)
+      : json("package-lock.json").packages?.["node_modules/@arduano/p2prpc-core"];
+    if (!dependency?.version || !dependency?.integrity || installed.version !== dependency.version) process.exit(1);
     process.stdout.write(`${dependency.version}\t${dependency.integrity}\n`);
-  ' "$REPO_ROOT/package-lock.json"
+  '
 )
 capture_logs
 if rg --quiet '(UnhandledPromiseRejection|uncaught exception|SQLITE_CORRUPT|database disk image is malformed)' \

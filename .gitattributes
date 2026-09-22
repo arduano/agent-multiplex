@@ -1,0 +1,3 @@
+# Unified diffs use one space for an empty context line. Check the applied
+# independent source for whitespace errors; retain ordinary checks elsewhere.
+transport-candidate/*.patch whitespace=-blank-at-eol

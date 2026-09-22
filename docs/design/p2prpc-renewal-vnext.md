@@ -33,13 +33,18 @@ each new physical connection. The fresh transcript binds the previous session
 identity and next generation as well as both endpoint identities, fresh nonces,
 roles, protocol and credentials. Duplicate or stale handoffs fail closed.
 
-The physical QUIC initiator schedules renewal before expiry. The original hard
+The physical QUIC initiator schedules renewal halfway through the remaining
+grant. A responder rejects a replacement before one quarter of its installed
+grant has elapsed. The original hard
 expiry watchdog remains armed throughout preparation; an unfinished handshake
 cannot extend it. There is at most one pending replacement. Both endpoints
 repeat credential validation, endpoint admission and active-operation policy
 checks, including idle subscriptions. Authorization admission is serialized with
 handoff. Authority-changing credentials cannot silently inherit the old request
-context: principal identity, scopes and relevant claims must remain compatible.
+context: principal identity, scopes and claims must remain identical except
+token freshness fields `exp`, `iat`, `nbf` and `jti`. Existing procedure contexts
+remain immutable admission snapshots; their captured file facades cannot gain
+new authority after that generation retires.
 A rejected credential or policy check closes the connection promptly. A stalled
 or otherwise failed replacement cannot keep old credentials alive past expiry.
 
@@ -197,7 +202,12 @@ configured pending-handshake limit, and a fixed 64 KiB buffer per admitted
 renewal. Application streams cannot consume that reserve. A busy slot queues
 within the incumbent expiry fence; genuine exhaustion beyond that deadline
 fails closed. Directional reserves prevent simultaneous opposite-role renewals
-from holding all slots while waiting for each other.
+from holding all slots while waiting for each other. Maximum additional
+aggregate renewal buffer capacity is `2 * maxPendingHandshakes * 64 KiB`;
+the renewal queue has an additional `maxPeers` bound. Noncooperative credential
+and authorization callbacks retain their capacity until actual settlement.
+New operations retain incumbent admission during queuing/authentication; the
+brief admission barrier begins at active-operation reauthorization.
 
 `getCredential` is invoked for every generation and must obtain fresh authority
 when needed. The replacement must advance the effective expiration by at least

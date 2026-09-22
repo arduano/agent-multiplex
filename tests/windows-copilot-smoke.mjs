@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -119,9 +119,23 @@ try {
   rmSync(root, { recursive: true, force: true });
 }
 
+const transportManifestPath = "transport-candidate/manifest.json";
+const transportArtifactPath = "transport-candidate/artifact.json";
+const transportCandidate = existsSync(transportManifestPath) && existsSync(transportArtifactPath)
+  ? JSON.parse(readFileSync(transportArtifactPath, "utf8")) : null;
+if (transportCandidate) {
+  const manifest = JSON.parse(readFileSync(transportManifestPath, "utf8"));
+  const installed = JSON.parse(readFileSync("node_modules/@arduano/p2prpc-core/package.json", "utf8"));
+  assert.equal(transportCandidate.version, installed.version, "receipt must identify the installed transport");
+  assert.equal(transportCandidate.upstreamCommit, manifest.upstreamCommit);
+  assert.equal(transportCandidate.patchSha256,
+    createHash("sha256").update(readFileSync(join("transport-candidate", manifest.patch))).digest("hex"));
+}
+
 const receipt = {
   result: "passed", source: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   lockfileSha256: createHash("sha256").update(readFileSync("package-lock.json")).digest("hex"),
+  transportCandidate,
   node: process.version, platform: process.platform, arch: process.arch, checks,
   scope: "native Windows x64 startup and private persistence only; corporate authentication, network policy, and model turns require laptop UAT",
   modelCalls: 0, retainedCredentials: false,

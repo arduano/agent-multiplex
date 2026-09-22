@@ -25,6 +25,12 @@ import {
 } from "./github-commit-status.mjs";
 import { nativeStreamSummaryPassed } from "./native-stream-evidence.mjs";
 
+const renewalManifest = resolve(repositoryRoot, "transport-candidate/manifest.json");
+assert(
+  !existsSync(renewalManifest) || readJson("transport-candidate/manifest.json").releaseBlocked !== true,
+  "Native release qualification cannot attest an unpinned transport review candidate. Publish and pin its independent core before recording release qualification.",
+);
+
 const repository = "arduano/agent-multiplex";
 const repositoryOwner = "arduano";
 const statusContext = "Agent Multiplex / Native four-container qualification";

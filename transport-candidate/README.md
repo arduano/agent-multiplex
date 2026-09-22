@@ -27,5 +27,14 @@ Normal release packaging is blocked. Future independent core publication and
 exact pin changes require separate authorization and repeat qualification; the
 local overlay is not a release dependency or production startup mechanism.
 
+Linux source CI, Docker qualification and Windows startup workflows prepare
+the exact upstream source under `receipts/upstream-p2prpc`. Private source access
+requires a read-only `P2PRPC_SOURCE_READ_TOKEN`; the default workflow token is
+sufficient only when that repository is readable with it. Candidate CI skips
+release packing, release SBOM/upload and the optional external personal-consumer
+composition. Native release-status recording also rejects this unpinned graph.
+These workflows were syntax-validated locally; Windows execution and hosted
+workflow execution are separate qualification steps.
+
 See the [design](../docs/design/p2prpc-renewal-vnext.md) and
 [handoff](../docs/wiki/Transport-Renewal-Handoff.md).
