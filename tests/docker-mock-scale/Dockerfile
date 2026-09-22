@@ -37,7 +37,9 @@ COPY transport-candidate/ ./transport-candidate/
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 
-RUN node scripts/install-transport-renewal.mjs \
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
+    --mount=type=cache,id=agent-multiplex-deterministic-npm,target=/root/.npm,sharing=locked \
+    node scripts/install-transport-renewal.mjs \
     && npm run build -- --force \
     && npm prune --omit=dev \
     && node scripts/install-transport-renewal.mjs \
