@@ -115,7 +115,7 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.getByTestId("send-button").click();
-  await page.getByTestId("action-status").filter({ hasText: "Message sent" }).waitFor({ timeout: 30_000 });
+  await page.getByTestId("action-status").filter({ hasText: "Message accepted" }).waitFor({ timeout: 30_000 });
   assert(await page.locator('img[alt="shapes.png"]').count() === 0, "Acknowledged image draft was not cleared");
   findings.checks.push("image-only-upload-and-send");
   await poll(async () => (await client.sessions.get.query(session.sessionId))?.runtimeStatus === "idle");
