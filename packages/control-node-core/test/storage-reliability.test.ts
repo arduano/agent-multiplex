@@ -20,7 +20,7 @@ const create = (options: Partial<ControlNodeCatalogOptions> = {}) => {
   const catalog = new ControlNodeCatalog({ filename: join(dir, "catalog.sqlite"), now, ...options }); catalogs.push(catalog); return catalog;
 };
 function runtime(catalog: ControlNodeCatalog) {
-  return catalog.registerRuntimeNode({ runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), name: "fixture", allowedRoots: ["/work"], harnesses: [], protocolVersion: 5 });
+  return catalog.registerRuntimeNode({ runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), name: "fixture", allowedRoots: ["/work"], harnesses: [], protocolVersion: 6 });
 }
 function session(catalog: ControlNodeCatalog) {
   const node = runtime(catalog);
@@ -30,7 +30,7 @@ function session(catalog: ControlNodeCatalog) {
 const runtimeRecord = ({ catalogState: _state, catalogRevision: _revision, archivedAt: _archivedAt, ...record }: SessionRecord) => record;
 function attach(parent: ControlNodeCatalog, child: ControlNodeCatalog) {
   const descriptor = child.localControlNode();
-  const { attachment } = parent.attachChild({ controlNodeId: descriptor.controlNodeId, controlNodeBootId: descriptor.controlNodeBootId, feedId: descriptor.feedId, name: descriptor.name, protocolVersion: 5, capabilities: descriptor.capabilities, expectedParentControlNodeId: parent.localControlNode().controlNodeId, childProof: child.attachmentProof() });
+  const { attachment } = parent.attachChild({ controlNodeId: descriptor.controlNodeId, controlNodeBootId: descriptor.controlNodeBootId, feedId: descriptor.feedId, name: descriptor.name, protocolVersion: 6, capabilities: descriptor.capabilities, expectedParentControlNodeId: parent.localControlNode().controlNodeId, childProof: child.attachmentProof() });
   child.applyParentAttachment(attachment, "fixture-parent");
   parent.replaceChildSnapshot(descriptor.controlNodeId, attachment.attachmentId, child.accessSnapshot());
   return attachment;
@@ -188,7 +188,7 @@ describe("catalog storage reliability", () => {
     catalog.heartbeatChild(descriptor.controlNodeId, descriptor.controlNodeBootId);
     clockMs += 10_000; catalog.registerRuntimeNode(node);
     catalog.attachChild({ controlNodeId: descriptor.controlNodeId, controlNodeBootId: descriptor.controlNodeBootId,
-      feedId: descriptor.feedId, name: descriptor.name, protocolVersion: 5, capabilities: descriptor.capabilities,
+      feedId: descriptor.feedId, name: descriptor.name, protocolVersion: 6, capabilities: descriptor.capabilities,
       expectedParentControlNodeId: catalog.localControlNode().controlNodeId, childProof: child.attachmentProof(),
       resume: { attachmentId: attachment.attachmentId, lineageId: attachment.lineageId, authority: attachment.authority } });
     expect(catalog.markStaleRuntimeNodes(new Date(clockMs - 1_000))).toEqual([]);

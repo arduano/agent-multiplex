@@ -311,7 +311,7 @@ describe("gateway edge authentication", () => {
         result: {
           data: {
             instanceId: "test-gateway",
-            protocolVersion: 5,
+            protocolVersion: 6,
             componentKind: "access-gateway",
             dataAuthority: "none",
           },
@@ -437,7 +437,7 @@ function gatewaySourceWithSession(historyError: Error) {
   const snapshot: GatewaySourceSnapshot = {
     manifest: {
       componentKind: "control-node",
-      protocolVersion: 5,
+      protocolVersion: 6,
       sourceControlNodeId: controlNodeId,
       sourceControlNodeBootId: controlNodeBootId,
       authority,
@@ -459,7 +459,7 @@ function gatewaySourceWithSession(historyError: Error) {
       dataRole: { role: "authority", authority },
       connectedAt: at,
       lastHeartbeatAt: at,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: [],
     }],
     runtimeNodes: [{
@@ -473,7 +473,7 @@ function gatewaySourceWithSession(historyError: Error) {
       lastHeartbeatAt: at,
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     }],
     sessions: [{
       sessionId,

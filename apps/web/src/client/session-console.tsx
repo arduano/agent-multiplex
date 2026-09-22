@@ -70,6 +70,7 @@ import { maySettleCommandDraft, type SubmittedDraft } from "./command-draft.js";
 import { ImageSessionProvider, TranscriptImagePreview, prepareImageFile, isLocalImagePath, modelImageLimits } from "./image-media.js";
 import { pendingInteractionRefetchInterval } from "./interaction-refresh.js";
 import { InteractionCards } from "./interactions.js";
+import { lifecycleTone, sessionLifecycleLabel, type LifecycleTone } from "./session-lifecycle.js";
 import {
   advanceNativeHistorySignal,
   nativeHistoryInitiallyReady,
@@ -106,9 +107,10 @@ interface UncertainCommand {
 
 interface DraftImage { id: string; file: File; url: string; descriptor?: ImageDescriptor; }
 
-export function SessionConsole({ session, terminalCapability }: {
+export function SessionConsole({ session, terminalCapability, online = true }: {
   readonly session: SessionRecord | null;
   readonly terminalCapability: TerminalSideChannelCapability | null | undefined;
+  readonly online?: boolean;
 }) {
   const { connectionKey } = useApi();
   const bindingIdentity = session ? sessionBindingIdentity(session) : "no-session";
@@ -118,14 +120,16 @@ export function SessionConsole({ session, terminalCapability }: {
       session={session}
       bindingIdentity={bindingIdentity}
       terminalCapability={terminalCapability}
+      online={online}
     />
   );
 }
 
-function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
+function BoundSessionConsole({ session, bindingIdentity, terminalCapability, online }: {
   readonly session: SessionRecord | null;
   readonly bindingIdentity: string;
   readonly terminalCapability: TerminalSideChannelCapability | null | undefined;
+  readonly online: boolean;
 }) {
   const { client, connectionKey } = useApi();
   const queryClient = useQueryClient();
@@ -423,6 +427,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
 
   const active = session.availability === "active";
   const running = session.runtimeStatus === "running";
+  const lifecycleLabel = sessionLifecycleLabel(session, online);
   const pendingInteractions = interactions.data?.filter((item) => item.state === "pending") ?? [];
   const title = sessionTitle(session);
   const settingsSummary = appliedSettingsSummary(
@@ -578,7 +583,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
               Terminal
             </Tabs.Trigger>
           </Tabs.List>
-          <StatusLabel tone={runtimeTone(session.runtimeStatus)}>{humanizeStatus(session.runtimeStatus)}</StatusLabel>
+          <StatusLabel tone={lifecycleTone(lifecycleLabel)}>{lifecycleLabel}</StatusLabel>
           <span className="inline-flex items-center gap-1.5" title="Live event stream">
             <Radio aria-hidden="true" className={classes("size-3", streamState === "live" ? "text-[var(--status-live)]" : "text-[var(--text-muted)]")} />
             <span data-testid="stream-status">{streamState}</span>
@@ -1052,7 +1057,7 @@ function ExecutionStatus({ status }: { readonly status: string }) {
   );
 }
 
-function StatusLabel({ tone, children }: { readonly tone: ReturnType<typeof runtimeTone>; readonly children: string }) {
+function StatusLabel({ tone, children }: { readonly tone: LifecycleTone; readonly children: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={classes(
@@ -1098,13 +1103,6 @@ function commandStatus(success: string, record: CommandRecord): string {
   }
   if (record.state === "failed") return `Command failed: ${record.error?.message ?? record.commandId}`;
   return `Command ${record.state}: ${record.commandId}`;
-}
-
-function runtimeTone(status: SessionRecord["runtimeStatus"]): "good" | "warn" | "bad" | "neutral" {
-  if (status === "idle" || status === "running") return "good";
-  if (status === "waitingForInput") return "warn";
-  if (status === "error") return "bad";
-  return "neutral";
 }
 
 function sessionTitle(session: SessionRecord): string {

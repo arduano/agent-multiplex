@@ -139,6 +139,17 @@ export class CopilotSessionBridge {
     return view === "pendingMessages" ? this.#queueRevision : this.#taskRevision;
   }
 
+  /** Fresh creation observes every interaction callback from the beginning.
+   * Resume cannot prove that ephemeral requests were not pruned upstream. */
+  public interactionHydration(complete: boolean): void {
+    // The same attachment boundary governs child callbacks: a fresh handle has
+    // observed them from its beginning, while resume cannot prove that no
+    // earlier child remains active. Both baselines are buffered before startup
+    // callbacks by the adapter.
+    this.emit({ kind: "lifecycle", fact: { type: "childrenHydrated", items: [], complete } });
+    this.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete } });
+  }
+
   public status(): SessionRuntimeStatus {
     return this.#status;
   }

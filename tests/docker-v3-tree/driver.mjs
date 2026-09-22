@@ -81,9 +81,9 @@ const streamResets = [];
 let watcher;
 
 try {
-  const system = await waitFor("protocol-v5 zero-authority gateway", timeoutMs, async () => {
+  const system = await waitFor("protocol-v6 zero-authority gateway", timeoutMs, async () => {
     const value = await client.system.describe.query();
-    return value.protocolVersion === 5 &&
+    return value.protocolVersion === 6 &&
       value.componentKind === "access-gateway" &&
       value.dataAuthority === "none"
       ? value
@@ -162,7 +162,7 @@ try {
       sandbox: "read-only",
     },
     {
-      "agent.title": `Protocol v5 tree ${runId}`,
+      "agent.title": `Protocol v6 tree ${runId}`,
       "acceptance.run_id": runId,
       "acceptance.topology": "control-tree",
     },

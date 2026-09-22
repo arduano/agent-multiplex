@@ -7,6 +7,7 @@ import { TRPCClientError } from "@trpc/client";
 import { TRPC_ERROR_CODES_BY_KEY } from "@trpc/server/rpc";
 import {
   canonicalJson,
+  initialLifecycle,
   emptyMetadataSnapshot,
   newArchiveOperationId,
   newCommandId,
@@ -75,7 +76,7 @@ function registration(
       capabilities: [],
     }],
     launchProfiles: [profile],
-    protocolVersion: 5,
+    protocolVersion: 6,
   };
 }
 
@@ -241,7 +242,7 @@ async function connectChild(parent: ControlNodeService, child: ControlNodeServic
     feedId: node.feedId,
     name: node.name,
     endpointId,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: node.capabilities,
     expectedParentControlNodeId: parent.catalog.localControlNode().controlNodeId,
     childProof: child.catalog.attachmentProof(),
@@ -284,6 +285,7 @@ async function connectChild(parent: ControlNodeService, child: ControlNodeServic
     archive: unused,
     getArchive: unused,
     execute: unused,
+    readLifecycle: (sessionId) => child.readLifecycle(sessionId),
     readNativeHistory: unused,
     beginImageUpload: (input) => child.beginImageUpload(input),
     readNativeState: (sessionId, request) => child.readNativeState(sessionId, request),
@@ -312,6 +314,38 @@ function rejection(code: keyof typeof TRPC_ERROR_CODES_BY_KEY): TRPCClientError<
 }
 
 describe("protocol-v4 launch binding durability", () => {
+  it.each(["direct", "child"] as const)("routes a lifecycle snapshot/cursor through the %s owner and rejects stale identity", async route => {
+    const catalog = new ControlNodeCatalog({ filename: stateFile(`lifecycle-root-${route}`), now: clock });
+    const childCatalog = new ControlNodeCatalog({ filename: stateFile(`lifecycle-child-${route}`), now: clock });
+    const service = new ControlNodeService({ catalog, now: clock });
+    const child = new ControlNodeService({ catalog: childCatalog, now: clock });
+    const runtime = registration(); const input = launch(runtime, "lifecycle-snapshot");
+    const owner = route === "direct" ? service : child;
+    const ownerCatalog = route === "direct" ? catalog : childCatalog;
+    const bound = boundSession(input, "lifecycle-snapshot");
+    const snapshot = { state: initialLifecycle({ sessionId: input.sessionId, runtimeNodeId: runtime.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: bound.bindingRevision, runtimeEpoch: bound.runtimeEpoch! }), nextNativeSequence: 7 };
+    let reads = 0;
+    const connectionInfo = connection(runtime, async () => accepted(input));
+    connectionInfo.readLifecycle = async sessionId => { expect(sessionId).toBe(input.sessionId); reads++; return snapshot; };
+    try {
+      register(owner, runtime, connectionInfo);
+      ownerCatalog.recordLaunch(succeeded(input, "lifecycle-snapshot"));
+      ownerCatalog.mergeRuntimeSession(bound);
+      if (route === "child") await connectChild(service, child);
+      const before = catalog.sourceManifest().controlCursor;
+      const reader = createAccessRouter(service).createCaller({ grantedScopes: ["read"] });
+      expect(await reader.sessions.readLifecycle({ sessionId: input.sessionId })).toEqual(snapshot);
+      expect(reads).toBe(1);
+      expect(catalog.sourceManifest().controlCursor).toBe(before);
+      const noRead = createAccessRouter(service).createCaller({ grantedScopes: ["agent-control"] });
+      await expect(noRead.sessions.readLifecycle({ sessionId: input.sessionId })).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(reads).toBe(1);
+      snapshot.state.fence.runtimeEpoch = newRuntimeEpoch();
+      await expect(reader.sessions.readLifecycle({ sessionId: input.sessionId })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+    } finally { service.close(); child.close(); catalog.close(); childCatalog.close(); }
+  });
+
   it.each(["direct", "child"] as const)("routes native state through the %s owner under read scope without catalog writes", async route => {
     const catalog = new ControlNodeCatalog({ filename: stateFile(`native-state-root-${route}`), now: clock });
     const childCatalog = new ControlNodeCatalog({ filename: stateFile(`native-state-child-${route}`), now: clock });

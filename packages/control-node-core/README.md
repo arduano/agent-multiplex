@@ -1,6 +1,6 @@
 # @arduano/agent-multiplex-control-node-core
 
-The transport-neutral protocol-v4 control-node implementation for Agent
+The transport-neutral protocol-v6 control-node implementation for Agent
 Multiplex. It owns canonical session catalog state and metadata, composes strict
 control-node trees, routes operations to runtime nodes, and exposes bounded hot
 feeds and cold session search.

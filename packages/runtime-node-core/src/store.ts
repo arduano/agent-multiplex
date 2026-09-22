@@ -13,8 +13,11 @@ import {
   archiveRequestSchema,
   canonicalJson,
   commandRecordSchema,
+  safeCommandError,
   jsonObjectSchema,
   launchRecordSchema,
+  lifecycleStateSchema,
+  type LifecycleState,
   launchRequestSchema,
   metadataOperationRecordSchema,
   metadataPatchSchema,
@@ -109,6 +112,14 @@ export class RuntimeNodeStore {
         version: 5,
         name: "runtime-node-store-v5-images",
         apply: migrateRuntimeNodeSchemaV5,
+      }, {
+        version: 6,
+        name: "runtime-node-store-v6-command-errors",
+        apply: migrateRuntimeNodeCommandErrors,
+      }, {
+        version: 7,
+        name: "runtime-node-store-v7-lifecycle-evidence",
+        apply: (database) => database.exec("CREATE TABLE lifecycle_state (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT"),
       }],
     });
     this.#db = this.#sqlite.database;
@@ -122,6 +133,17 @@ export class RuntimeNodeStore {
 
   public close(): void {
     this.#sqlite.close();
+  }
+
+  public getLifecycle(sessionId: SessionId): LifecycleState | undefined {
+    const row = this.#db.prepare("SELECT record_json FROM lifecycle_state WHERE session_id=?").get(sessionId) as Row | undefined;
+    return row ? lifecycleStateSchema.parse(decode(row.record_json)) : undefined;
+  }
+
+  public putLifecycle(state: LifecycleState): void {
+    const value = lifecycleStateSchema.parse(state);
+    this.#db.prepare("INSERT INTO lifecycle_state(session_id, record_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json")
+      .run(value.fence.sessionId, encode(value));
   }
 
   public getImage(imageId: string): RuntimeImageEntry | undefined {
@@ -727,7 +749,7 @@ export class RuntimeNodeStore {
       this.putCommand({
         ...record,
         state: "outcomeUnknown",
-        error: "runtime node restarted after native dispatch; outcome requires reconciliation",
+        error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown" }),
         updatedAt: new Date().toISOString(),
       });
     }
@@ -1038,6 +1060,24 @@ function migrateRuntimeNodeSchemaV4(database: DatabaseSync): void {
     CREATE UNIQUE INDEX archived_native_bindings_session
       ON archived_native_bindings(session_id);
   `);
+}
+
+function migrateRuntimeNodeCommandErrors(database: DatabaseSync): void {
+  const update = database.prepare("UPDATE command_journal SET record_json=? WHERE command_id=?");
+  for (const row of database.prepare("SELECT command_id, record_json FROM command_journal").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (typeof value.error === "string") {
+      if (value.state !== "failed" && value.state !== "outcomeUnknown") {
+        throw new Error("command-error migration refused a nonterminal legacy error");
+      }
+      // Deterministic across runtime and replicated control receipts. The old
+      // freeform text is discarded, never inspected, logged or heuristically classified.
+      value.error = safeCommandError(undefined, { stage: "recovery",
+        certainty: value.state === "failed" ? "definiteFailure" : "outcomeUnknown",
+        diagnosticId: String(row.command_id) });
+    }
+    update.run(encode(commandRecordSchema.parse(value)), String(row.command_id));
+  }
 }
 
 function migrateRuntimeNodeSchemaV5(database: DatabaseSync): void {

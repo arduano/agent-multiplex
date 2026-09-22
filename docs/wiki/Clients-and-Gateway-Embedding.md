@@ -1,6 +1,6 @@
 # Clients and gateway embedding
 
-The reusable client boundary is the protocol-v5 access router. The same shape is
+The reusable client boundary is the protocol-v6 access router. The same shape is
 served by a trusted-local control node and by the authenticated multi-source
 gateway; applications do not need separate data models for the two.
 
@@ -67,6 +67,13 @@ messages are never matched to commands by their text or images. The reference
 console retains uncertainty only for its current mounted binding; durable
 reload and cross-tab draft recovery remain embedding-application work.
 
+Generic failed or unknown command receipts now expose a typed `CommandError`:
+an allowlisted code, stage, certainty, diagnostic ID, and fixed public message.
+The fixed text is safe to persist and display, but the diagnostic ID is only a
+support correlation key. Reconcile `outcomeUnknown` through the original
+command ID and payload hash; neither an error code nor a new connection permits
+redispatch.
+
 For browser request construction, import the asynchronous helpers from
 `@arduano/agent-multiplex-client/browser`. They use Web Crypto SHA-256 when it
 is available and fall back to `@noble/hashes` when an HTTP origin or embedded
@@ -88,6 +95,35 @@ must understand:
 Use the cursor helpers and `watchAccess` exported by the client package. Commit a
 cursor only after the application has committed the corresponding item. Native
 history remains opaque harness data; do not build a fallback transcript parser.
+
+## Copilot lifecycle snapshot handoff
+
+An active Copilot `SessionRecord` carries a bounded runtime-produced lifecycle
+label and exact binding fence. It is suitable for fleet and header status. Use
+`sessions.readLifecycle` when a client needs the full payload-free state across
+root work, tasks, children, queue, interactions, command delivery, compaction,
+and continuity. Catalog running/stopped/archived state and source availability
+remain separate; Offline, a successful receipt, or catalog idle does not prove
+native completion.
+
+The full response contains the runtime-owned lifecycle state and the exclusive
+next native-event sequence observed with it. Use `LifecycleNativeHandoff` from
+`@arduano/agent-multiplex-client` as follows:
+
+1. Construct the helper and start the access subscription first.
+2. Pass matching native, gap, stream-reset, and session-update items to
+   `observe()` while the query is in flight.
+3. Query `sessions.readLifecycle` and call `install()` exactly once.
+4. Apply only the contiguous native events returned by `install()` and later
+   `observe()` calls.
+
+The helper discards overlap below the snapshot cursor and fails closed on a
+missing sequence, explicit gap/reset, binding or native-epoch replacement, or
+bounded-buffer overflow. Start a fresh handoff and use native-history recovery
+when it reports `gap`; never fill the hole from terminal output, message text,
+queue disappearance, or a newer catalog label. The gateway also fences the
+query across selected-source generation changes, while controls revalidate the
+current runtime boot and binding before returning it.
 
 ## Embedding a gateway
 
@@ -161,7 +197,8 @@ into canonical chat history.
 
 ## Images and native payloads
 
-The v5 `images` API routes authenticated upload, read, and path-snapshot requests
+The `images` API introduced in v5 routes authenticated upload, read, and
+path-snapshot requests
 through the selected source to the owning runtime. Use the client image helpers
 and retain the same image ID/bytes when reconciling interrupted uploads. Native
 history, events, command results, and interactions use a bounded

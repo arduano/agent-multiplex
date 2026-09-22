@@ -25,7 +25,7 @@ function fixture() {
 function populate(catalog: ControlNodeCatalog) {
   const runtimeNodeId = newRuntimeNodeId();
   const runtimeNodeBootId = newRuntimeNodeBootId();
-  catalog.registerRuntimeNode({ runtimeNodeId, runtimeNodeBootId, name: "runtime", allowedRoots: ["/work"], harnesses: [], protocolVersion: 5 });
+  catalog.registerRuntimeNode({ runtimeNodeId, runtimeNodeBootId, name: "runtime", allowedRoots: ["/work"], harnesses: [], protocolVersion: 6 });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId, generation: "fixture", complete: true, capturedAt: new Date().toISOString(),
     sessions: [{ harness: "codex", adapterScopeId: "fixture" as AdapterScopeId,
@@ -46,7 +46,7 @@ function request(parent: ControlNodeCatalog, child: ControlNodeCatalog): Control
   const local = child.localControlNode();
   const role = child.dataRole();
   return { controlNodeId: local.controlNodeId, controlNodeBootId: local.controlNodeBootId, feedId: local.feedId,
-    name: local.name, endpointId: "fixture-child-endpoint", protocolVersion: 5, capabilities: local.capabilities,
+    name: local.name, endpointId: "fixture-child-endpoint", protocolVersion: 6, capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId, childProof: child.attachmentProof(),
     ...(role.role === "branch" && role.branch.lifecycle === "attached" ? {
       resume: { attachmentId: role.branch.attachmentId, lineageId: role.branch.lineageId, authority: role.authority },
@@ -149,6 +149,44 @@ describe("standalone authority receipt handoff", () => {
       parent.replaceChildSnapshot(next.controlNodeId, recovered.attachment.attachmentId, child.accessSnapshot());
       expect(parent.listSessions()).toHaveLength(1);
       expect(() => parent.attachChild(next)).toThrow();
+    } finally { parent.close(); child.close(); }
+  });
+
+  it("migrates a pending lost-reply handoff across the protocol-v6 feed rotation", () => {
+    const f = fixture();
+    let parent = f.parent;
+    let child = f.child;
+    try {
+      populate(child);
+      const original = request(parent, child);
+      const admission = parent.attachChild(original);
+      child.close(); parent.close();
+
+      for (const [filename, pending] of [[f.parentFile, true], [f.childFile, false]] as const) {
+        const database = new DatabaseSync(filename);
+        database.exec(`
+          UPDATE control_nodes SET record_json=json_set(record_json, '$.protocolVersion', 5);
+          UPDATE runtime_nodes SET record_json=json_set(record_json, '$.protocolVersion', 5);
+          DELETE FROM schema_migrations WHERE version>=7;
+          PRAGMA user_version=6;
+        `);
+        if (pending) database.exec(
+          "UPDATE attachment_authority_handoffs SET request_json=json_set(request_json, '$.protocolVersion', 5) WHERE snapshot_imported=0",
+        );
+        database.close();
+      }
+
+      parent = new ControlNodeCatalog({ filename: f.parentFile });
+      child = new ControlNodeCatalog({ filename: f.childFile });
+      const migrated = request(parent, child);
+      expect(migrated.feedId).not.toBe(original.feedId);
+      const recovered = parent.attachChild(migrated);
+      expect(recovered.attachment).toEqual(admission.attachment);
+      expect(recovered.child).toMatchObject({
+        controlNodeBootId: migrated.controlNodeBootId,
+        feedId: migrated.feedId,
+        protocolVersion: 6,
+      });
     } finally { parent.close(); child.close(); }
   });
 

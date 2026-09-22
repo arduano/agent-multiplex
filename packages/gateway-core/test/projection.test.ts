@@ -6,6 +6,9 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   emptyMetadataSnapshot,
+  initialLifecycle,
+  newRuntimeEpoch,
+  safeCommandError,
   newAuthorityEpochId,
   newCommandId,
   imageDescriptorSchema,
@@ -51,6 +54,7 @@ class FakeSource implements ControlNodeSourceClient {
   public dispatches = 0;
   public commandReads = 0;
   public stateReads = 0;
+  public lifecycleReads = 0;
   public executeError: Error | undefined;
   public getCommandError: Error | undefined;
   public recoveredCommand: CommandRecord | null = null;
@@ -129,6 +133,14 @@ class FakeSource implements ControlNodeSourceClient {
     });
   }
   public readNativeHistory(): Promise<never> { return Promise.reject(new Error("unused")); }
+  public async readLifecycle(sessionId: import("@arduano/agent-multiplex-protocol").SessionId) {
+    this.lifecycleReads++;
+    const session = this.snapshot.sessions.find(item => item.sessionId === sessionId)!;
+    const runtime = this.snapshot.runtimeNodes.find(item => item.runtimeNodeId === session.runtimeNodeId)!;
+    return { state: initialLifecycle({ sessionId, runtimeNodeId: session.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: session.bindingRevision, runtimeEpoch: session.runtimeEpoch! }),
+      nextNativeSequence: 9 };
+  }
   public readNativeState(): Promise<import("@arduano/agent-multiplex-protocol").NativeStateResult> {
     this.stateReads += 1;
     return Promise.resolve({ harness: "copilot", vendorSessionId: "native-1", payload: packNativePayload({ items: [], steeringMessages: [] }) });
@@ -233,7 +245,7 @@ function controlNode(
         },
     connectedAt: timestamp,
     lastHeartbeatAt: timestamp,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: [],
   };
 }
@@ -246,7 +258,7 @@ function snapshot(
   const sourceControlNodeId = ids[0]!;
   const manifest: SourceManifest = {
     componentKind: "control-node",
-    protocolVersion: 5,
+    protocolVersion: 6,
     sourceControlNodeId,
     sourceControlNodeBootId: newControlNodeBootId(),
     authority: authorityRef,
@@ -271,7 +283,7 @@ function snapshot(
         allowedRoots: ["/work"],
         harnesses: [],
         launchProfiles: [],
-        protocolVersion: 5,
+        protocolVersion: 6,
       }]
     : [];
   const sessions: SessionRecord[] = options.withSession
@@ -756,6 +768,32 @@ describe("AccessGatewayProjection source selection", () => {
 });
 
 describe("AccessGatewayProjection routing and feed", () => {
+  it("routes atomic lifecycle snapshots through the selected source and fences delayed failover replies", async () => {
+    const root = newControlNodeId(); const child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    views.descendant.sessions[0]!.runtimeEpoch = newRuntimeEpoch();
+    const ancestor = source("ancestor", views.ancestor); const descendant = source("descendant", views.descendant);
+    const gateway = new AccessGatewayProjection([descendant, ancestor]);
+    await gateway.refreshAll();
+    const sessionId = views.descendant.sessions[0]!.sessionId;
+    const snapshot = await gateway.readLifecycle(sessionId);
+    expect(snapshot).toMatchObject({ nextNativeSequence: 9, state: { fence: { sessionId } } });
+    expect(ancestor.client.lifecycleReads).toBe(1); expect(descendant.client.lifecycleReads).toBe(0);
+    let release!: (value: typeof snapshot) => void;
+    vi.spyOn(ancestor.client, "readLifecycle").mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const delayed = gateway.readLifecycle(sessionId);
+    const rejected = expect(delayed).rejects.toMatchObject({ code: "CONFLICT" });
+    gateway.markUnavailable("ancestor" as SourceId);
+    release(snapshot);
+    await rejected;
+    expect(await gateway.readLifecycle(sessionId)).toEqual(snapshot);
+    expect(descendant.client.lifecycleReads).toBe(1);
+    expect(ancestor.client.dispatches + descendant.client.dispatches).toBe(0);
+    vi.spyOn(descendant.client, "readLifecycle").mockResolvedValueOnce({ ...snapshot,
+      state: { ...snapshot.state, fence: { ...snapshot.state.fence, runtimeEpoch: newRuntimeEpoch() } } });
+    await expect(gateway.readLifecycle(sessionId)).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("observes native state only through the selected source without durable dispatch", async () => {
     const root = newControlNodeId(); const child = newControlNodeId();
     const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
@@ -1069,6 +1107,28 @@ describe("AccessGatewayProjection routing and feed", () => {
     await expect(gateway.getCommand(command.commandId)).resolves.toEqual(record);
     expect(ancestor.client.commandReads).toBe(0);
     expect(descendant.client.commandReads).toBe(1);
+  });
+
+  it("preserves a typed runtime failure and its diagnostic identity through command recovery", async () => {
+    const root = newControlNodeId();
+    const definition = source("only", snapshot(authority(root), [root], { withSession: true }));
+    const gateway = new AccessGatewayProjection([definition]);
+    await gateway.refreshAll();
+    const session = gateway.listSessions()[0]!;
+    const command = { commandId: newCommandId(), payloadHash: "0123456789abcdef",
+      sessionId: session.sessionId, runtimeNodeId: session.runtimeNodeId, bindingRevision: session.bindingRevision,
+      request: { harness: "codex" as const, command: { type: "interrupt" as const } } };
+    const record = await gateway.execute(command);
+    const sentinel = "SYNTHETIC_SECRET_SENTINEL_DO_NOT_PERSIST";
+    const error = safeCommandError(Object.assign(new Error(sentinel), { code: "FENCED" }), {
+      stage: "native", certainty: "definiteFailure",
+    });
+    definition.client.recoveredCommand = { ...record, state: "failed", error };
+    const recovered = await gateway.getCommand(command.commandId);
+    expect(recovered?.error).toEqual(error);
+    expect(JSON.stringify(recovered)).not.toContain(sentinel);
+    expect(definition.client.dispatches).toBe(1);
+    expect(definition.client.commandReads).toBe(1);
   });
 
   it("rotates its synthetic feed on source selection and deduplicates native events", async () => {

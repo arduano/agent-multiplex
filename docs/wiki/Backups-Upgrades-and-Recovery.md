@@ -9,7 +9,7 @@ owned by a launch provider.
 | Role | Preserve together | What loss means |
 | --- | --- | --- |
 | Control node | SQLite database, live WAL/SHM when applicable, endpoint identity | Canonical catalog, metadata, authority, topology, operation feed, endpoint pin |
-| Runtime node | Entire runtime state directory, SQLite/WAL/SHM, endpoint identity, provider-managed recovery references | Bindings, commands, outbox, launch/archive checkpoints, tombstones, and retained images |
+| Runtime node | Entire runtime state directory, SQLite/WAL/SHM, endpoint identity, provider-managed recovery references | Bindings, commands, lifecycle evidence, outbox, launch/archive checkpoints, tombstones, and retained images |
 | Gateway | Gateway SQLite and identity | Source locators, renewed tickets, cursors, health; no canonical domain data |
 | Harness/provider | Native auth/config and provider resources under their own backup policy | Native history or external workspace/container state |
 
@@ -47,8 +47,8 @@ reachability material and should not appear in shareable receipts.
 3. Start exactly one writer and let startup run application-ID, migration-ledger,
    integrity, and foreign-key checks.
 4. Verify logical and endpoint identities before allowing peers to connect.
-5. Confirm topology, selected sources, runtime bindings, metadata revisions,
-   operation journals, and provider resources.
+5. Confirm topology, selected sources, runtime bindings, lifecycle fences,
+   metadata revisions, operation journals, and provider resources.
 6. Exercise a read, native-history request, and harmless fresh operation.
 
 Restoring a control database without the pinned control endpoint identity causes
@@ -95,18 +95,34 @@ node_modules/.bin/codex app-server generate-ts --experimental \
   --out packages/adapter-codex/src/generated
 ```
 
-Protocol v5 is a coordinated upgrade of controls, runtimes, gateways, and
-clients; mixed v4/v5 peers are rejected. New control/runtime migrations append
-version 5 while retaining the released v3/v4 identities. They wrap legacy native
-receipts exactly once. An oversized legacy payload refuses migration atomically
-and preserves the original database and migration ledger. Keep a complete
-pre-upgrade backup and resolve incompatible records through an explicit
-upgrade/export decision; do not truncate receipts or edit released migrations.
-See [the image design](../design/images-v5.md).
+Protocol v6 is a coordinated upgrade of controls, runtimes, gateways, clients,
+and adapters; mixed v5/v6 peers are rejected. It retains every released
+migration identity, appends control schema version 7 for typed command errors,
+and appends runtime versions 6 and 7 for typed command errors and durable
+Copilot lifecycle evidence. Command-error migration replaces legacy terminal
+error strings with fixed typed recovery records; it refuses a nonterminal
+legacy error instead of guessing its certainty. The earlier v5 image migration
+and control authority-handoff migration remain immutable historical entries.
+
+Keep a complete pre-upgrade backup. A migrated database is a future schema to
+older binaries, so rollback means restoring the complete pre-upgrade role unit,
+not editing `user_version`, dropping the lifecycle table, or rewriting the
+migration ledger. Resolve incompatible records through an explicit
+upgrade/export decision; never truncate receipts. See
+[the lifecycle design](../design/copilot-session-lifecycle-vnext.md),
+[the command-error audit](../audits/copilot-lifecycle-vnext-errors.md), and
+[the image design](../design/images-v5.md).
 
 The Docker command names above retain `v4` for compatibility with existing
-automation; they test the current source, whose wire protocol is v5. Historical
-v4 receipts qualify only their recorded released source.
+automation; they test the current source, whose wire protocol is v6. Historical
+v4/v5 receipts qualify only their recorded source. The lifecycle work has no
+live/native protocol-v6 receipt; do not infer one from deterministic mock
+qualification.
+
+The current source still pins public `@arduano/p2prpc-core@0.2.1`. The separate
+renewal work is an external dependency and has not been merged or substituted by
+a local package. Its eventual upgrade must preserve the lifecycle transport
+contract and be qualified before an exact pin/lockfile update here.
 
 ## Recovery decisions
 
@@ -135,7 +151,7 @@ runtime and reconcile old external/provider resources manually.
 Restore the control database and identity first. Promotion of an explicitly
 detached branch creates a new realm/epoch; it is disaster recovery, not a
 transparent replica election. Any later reunion of divergent realms is an
-administrative data merge outside protocol v5.
+administrative data merge outside protocol v6.
 
 ### `outcomeUnknown`
 

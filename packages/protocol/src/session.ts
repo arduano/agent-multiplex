@@ -10,6 +10,7 @@ import {
   sessionIdSchema,
 } from "./ids.js";
 import { jsonValueSchema } from "./json.js";
+import { lifecycleProjectionSchema } from "./lifecycle.js";
 import {
   launchBackendIdSchema,
   launchContractVersionSchema,
@@ -90,6 +91,7 @@ const runtimeOwnedSessionFields = {
   availability: sessionAvailabilitySchema,
   runtimeStatus: sessionRuntimeStatusSchema,
   harnessSettings: harnessSessionSettingsSchema.optional(),
+  lifecycle: lifecycleProjectionSchema.optional(),
   nativeSummary: jsonValueSchema.optional(),
   launchProvenance: sessionLaunchProvenanceSchema.nullable().default(null),
   metadata: metadataSnapshotSchema,
@@ -98,6 +100,38 @@ const runtimeOwnedSessionFields = {
   lastSeenAt: isoDateSchema.nullable(),
   lastActivityAt: isoDateSchema.nullable().default(null),
 } as const;
+
+function validateLifecycleProjection(
+  record: {
+    sessionId: string;
+    runtimeNodeId: string;
+    harness: z.infer<typeof harnessSchema>;
+    bindingRevision: number;
+    runtimeEpoch: z.infer<typeof runtimeEpochSchema> | null;
+    availability: SessionAvailability;
+    lifecycle?: z.infer<typeof lifecycleProjectionSchema> | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const lifecycle = record.lifecycle;
+  if (!lifecycle) return;
+  const fence = lifecycle.fence;
+  if (
+    record.harness !== "copilot" ||
+    record.availability !== "active" ||
+    record.runtimeEpoch === null ||
+    fence.sessionId !== record.sessionId ||
+    fence.runtimeNodeId !== record.runtimeNodeId ||
+    fence.bindingRevision !== record.bindingRevision ||
+    fence.runtimeEpoch !== record.runtimeEpoch
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["lifecycle"],
+      message: "lifecycle projection must match an active Copilot runtime binding",
+    });
+  }
+}
 
 /** Canonical control-node projection. Catalog fields are never runtime-owned. */
 export const sessionRecordSchema = z
@@ -109,6 +143,7 @@ export const sessionRecordSchema = z
     archivedAt: isoDateSchema.nullable().default(null),
   })
   .superRefine((record, ctx) => {
+    validateLifecycleProjection(record, ctx);
     if (record.catalogState === "archived" && record.archivedAt === null) {
       ctx.addIssue({
         code: "custom",
@@ -139,7 +174,8 @@ export const runtimeNodeSessionRecordSchema = z
     ...runtimeOwnedSessionFields,
     metadataAuthority: authorityRefSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(validateLifecycleProjection);
 export type RuntimeNodeSessionRecord = z.infer<
   typeof runtimeNodeSessionRecordSchema
 >;

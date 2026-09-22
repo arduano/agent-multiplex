@@ -1,6 +1,6 @@
 # @arduano/agent-multiplex-transport-p2prpc
 
-The node-to-node transport for Agent Multiplex protocol v4. It wraps
+The node-to-node transport for Agent Multiplex protocol v6. It wraps
 `@arduano/p2prpc-core` at an exact qualified version and fixes the protocol
 identity to `agent-multiplex` contract `4`. The sibling `../p2prpc` checkout is
 used only while developing and qualifying that independently released package.

@@ -75,7 +75,7 @@ function registration(
       available: true,
       capabilities: [{ name: "interactive", experimental: false }],
     }],
-    protocolVersion: 5,
+    protocolVersion: 6,
   };
 }
 
@@ -108,7 +108,7 @@ function childRequest(catalog: ControlNodeCatalog): ControlNodeAttachmentRequest
     controlNodeBootId: newControlNodeBootId(),
     feedId: newFeedId(),
     name: "child-v3-test",
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: ["catalog.sqlite-v3"],
     expectedParentControlNodeId: catalog.localControlNode().controlNodeId,
     childProof: {
@@ -262,7 +262,7 @@ function attachmentRequest(
     feedId: local.feedId,
     name: local.name,
     ...(local.endpointId ? { endpointId: local.endpointId } : {}),
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),
@@ -1916,7 +1916,7 @@ describe("control-node protocol-v4 hardening invariants", () => {
     await expect(inFlight).rejects.toMatchObject({ code: "OUTCOME_UNKNOWN" });
     expect(fixture.catalog.getCommand(command.commandId)).toMatchObject({
       state: "outcomeUnknown",
-      error: expect.stringContaining("boot was replaced"),
+      error: { code: "FENCED", stage: "recovery", certainty: "outcomeUnknown" },
     });
 
     fixture.service.close();
@@ -1924,12 +1924,13 @@ describe("control-node protocol-v4 hardening invariants", () => {
   });
 
   it("recovers a validated terminal command after dispatch outcome became unknown", async () => {
+    const sentinel = "SYNTHETIC_SECRET_SENTINEL_DO_NOT_PERSIST";
     let dispatched: CommandEnvelope | undefined;
     let recoveryCalls = 0;
     const fixture = runtimeFixture({
       execute: async (command) => {
         dispatched = command;
-        throw new Error("reply was lost after dispatch");
+        throw new Error(sentinel);
       },
       getCommand: async (commandId) => {
         recoveryCalls += 1;
@@ -1941,7 +1942,11 @@ describe("control-node protocol-v4 hardening invariants", () => {
     await expect(fixture.service.execute(command)).rejects.toMatchObject({
       code: "OUTCOME_UNKNOWN",
     });
-    expect(fixture.catalog.getCommand(command.commandId)).toMatchObject({ state: "outcomeUnknown" });
+    expect(fixture.catalog.getCommand(command.commandId)).toMatchObject({ state: "outcomeUnknown", error: {
+      code: "OUTCOME_UNKNOWN", stage: "dispatch", certainty: "outcomeUnknown",
+    } });
+    expect(JSON.stringify(fixture.catalog.getCommand(command.commandId))).not.toContain(sentinel);
+    expect(JSON.stringify(fixture.catalog.controlEventsAfter(0))).not.toContain(sentinel);
 
     await expect(fixture.service.recoverCommand(command.commandId)).resolves.toMatchObject({
       commandId: command.commandId,

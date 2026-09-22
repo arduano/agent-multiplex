@@ -94,3 +94,7 @@ and SBOM from the exact release artifact as usual.
 Storage-worker isolation uses built-in Node worker_threads, perf_hooks and v8
 APIs plus the existing SQLite/tRPC dependencies. It adds no third-party package,
 vendor code, filesystem driver or bundled supervisor executable.
+
+The lifecycle command-error contract uses the existing locked Zod and UUID
+packages. Its fixed public messages and SQLite migrations add no third-party
+dependency or copied vendor implementation.

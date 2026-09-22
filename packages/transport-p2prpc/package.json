@@ -1,7 +1,7 @@
 {
   "name": "@arduano/agent-multiplex-transport-p2prpc",
   "version": "0.2.4-hotfix.16",
-  "description": "Authenticated p2prpc node-to-node transport bindings for Agent Multiplex protocol v5.",
+  "description": "Authenticated p2prpc node-to-node transport bindings for Agent Multiplex protocol v6.",
   "private": false,
   "type": "module",
   "main": "./dist/index.js",

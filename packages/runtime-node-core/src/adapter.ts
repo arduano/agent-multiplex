@@ -9,6 +9,7 @@ import type {
   HarnessSpawnOptions,
   JsonValue,
   LaunchBackendId,
+  LifecycleFact,
   NativeHistoryRequest,
   NativeStateRequest,
   NativePayload,
@@ -89,6 +90,7 @@ export interface AdapterSettingsEvent {
 }
 
 export type AdapterEvent =
+  | { kind: "lifecycle"; fact: LifecycleFact }
   | AdapterNativeEvent
   | AdapterInteractionEvent
   | AdapterInteractionSettledEvent

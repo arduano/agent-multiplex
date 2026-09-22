@@ -5,9 +5,17 @@ import {
   createMultiplexSharedSecretSecurity,
   type MultiplexAuthorization,
 } from "../src/security.js";
+import { AGENT_MULTIPLEX_P2P_PROTOCOL } from "../src/constants.js";
 import { pinnedConnectOptions } from "../src/target.js";
 
 describe("p2prpc transport identity", () => {
+  it("binds the exact protocol-v6 application identity", () => {
+    expect(AGENT_MULTIPLEX_P2P_PROTOCOL).toEqual({
+      applicationId: "agent-multiplex",
+      contractVersion: "6",
+    });
+  });
+
   it("pins endpoint and exact shared-secret principal independently of locator", () => {
     const target = pinnedConnectOptions({
       endpointId: "expected-iroh-key",

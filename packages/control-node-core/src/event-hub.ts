@@ -226,9 +226,9 @@ export class ControlNodeEventHub {
     // after these snapshots is buffered; controls at or below the barrier are
     // skipped later because the durable journal is their source of truth.
     const checkpoint = this.#catalog.feedCheckpoint();
-    const nativeReplay = includeNative
+    const nativeReplay = new Map(includeNative
       ? [...this.#rings].map(([sessionId, ring]) => [sessionId, [...ring]] as const)
-      : [];
+      : []);
     const authorityRefs = [this.#catalog.authority()];
     let replayCursor = cursor?.controlCursor ?? checkpoint.controlCursor;
     try {
@@ -264,6 +264,23 @@ export class ControlNodeEventHub {
         }
       }
       if (includeNative && cursor) {
+        // A requested session can have lost its entire ring after restart or
+        // a feed/epoch change. Iterating retained rings alone silently hides it.
+        for (const sessionId of Object.keys(cursor.native) as SessionId[]) {
+          if (sessions !== null && !sessions.has(sessionId)) continue;
+          if (!nativeReplay.has(sessionId)) {
+            yield {
+              kind: "nativeGap",
+              sessionId,
+              reason: "requested native cursor has no retained ring",
+              recovery: "readNativeHistory",
+              provenance: {
+                originControlNodeId: this.#catalog.localControlNode().controlNodeId,
+                authority: this.#catalog.authority(),
+              },
+            };
+          }
+        }
         for (const [sessionId, ring] of nativeReplay) {
           if (sessions !== null && !sessions.has(sessionId)) continue;
           const wanted = cursor.native[sessionId];
@@ -272,7 +289,16 @@ export class ControlNodeEventHub {
           const wantedSequence = wanted?.runtimeEpoch === newestEpoch ? wanted.sequence : -1;
           const sameEpoch = ring.filter((event) => event.runtimeEpoch === newestEpoch);
           const first = sameEpoch[0];
-          if (first && wantedSequence + 1 < first.sequence) {
+          const last = sameEpoch.at(-1);
+          if (last && wantedSequence > last.sequence) {
+            yield {
+              kind: "nativeGap",
+              sessionId,
+              reason: `native ring ends at sequence ${last.sequence}, behind requested sequence ${wantedSequence}`,
+              recovery: "readNativeHistory",
+              provenance: last.provenance,
+            };
+          } else if (first && wantedSequence + 1 < first.sequence) {
             yield {
               kind: "nativeGap",
               sessionId,

@@ -1,5 +1,6 @@
 import { childImportBatches } from "./child-import-batches.js";
 import {
+  safeCommandError,
   assertImageResponseTarget,
   imageContract,
   type ImageAbortUploadResult,
@@ -35,6 +36,8 @@ import {
   launchListPageSchema,
   launchRecordSchema,
   launchRequestSchema,
+  lifecycleSnapshotSchema,
+  type LifecycleSnapshot,
   metadataOperationRecordSchema,
   metadataPatchSchema,
   runtimeNodeEventItemSchema,
@@ -311,7 +314,7 @@ export class ControlNodeService {
   public describe() {
     return {
       application: "agent-multiplex" as const,
-      protocolVersion: 5 as const,
+      protocolVersion: 6 as const,
       componentKind: "control-node" as const,
       dataAuthority: "control-node" as const,
       instanceId: this.#instanceId,
@@ -1142,6 +1145,26 @@ export class ControlNodeService {
       : this.#runtime(session.runtimeNodeId).readNativeHistory(sessionId, request);
   }
 
+  public async readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+    const session = this.catalog.getSession(sessionId);
+    if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
+    if (session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "archived session resources have been released");
+    const route = this.#route(session.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+    const snapshot = lifecycleSnapshotSchema.parse(await owner.readLifecycle(sessionId));
+    const current = this.catalog.getSession(sessionId);
+    const runtime = this.catalog.getRuntimeNode(session.runtimeNodeId);
+    const fence = snapshot.state.fence;
+    if (!current || current.catalogState === "archived" || current.runtimeNodeId !== session.runtimeNodeId ||
+      current.bindingRevision !== session.bindingRevision || current.runtimeEpoch !== session.runtimeEpoch ||
+      fence.sessionId !== sessionId || fence.runtimeNodeId !== session.runtimeNodeId ||
+      fence.bindingRevision !== session.bindingRevision || fence.runtimeEpoch !== session.runtimeEpoch ||
+      fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
+      throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
+    }
+    return snapshot;
+  }
+
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
     const session = this.catalog.getSession(sessionId);
     if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
@@ -1543,7 +1566,7 @@ export class ControlNodeService {
       const unknown = commandRecordSchema.parse({
         ...current,
         state: "outcomeUnknown",
-        error: "control-node dispatch ownership was lost before a terminal response",
+        error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown" }),
         updatedAt: this.#now().toISOString(),
       });
       return Promise.resolve(this.catalog.updateCommand(unknown));
@@ -1587,7 +1610,7 @@ export class ControlNodeService {
           const unknown = commandRecordSchema.parse({
             ...durable,
             state: "outcomeUnknown",
-            error: cause instanceof Error ? cause.message : String(cause),
+            error: safeCommandError(cause, { stage: "dispatch", certainty: "outcomeUnknown" }),
             updatedAt: this.#now().toISOString(),
           });
           this.catalog.updateCommand(unknown);

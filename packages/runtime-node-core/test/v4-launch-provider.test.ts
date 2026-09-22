@@ -350,7 +350,7 @@ describe("runtime v4 launch providers", () => {
     expect(service.metadataOutbox()).toHaveLength(1);
     expect(service.createLaunch(request)).toEqual(succeeded);
     expect(adapter.spawned).toHaveLength(1);
-    expect((await service.describe()).protocolVersion).toBe(5);
+    expect((await service.describe()).protocolVersion).toBe(6);
 
     await service.close();
     store.close();
@@ -804,14 +804,14 @@ describe("runtime store v3 to v5", () => {
     downgrade.prepare("UPDATE bindings SET record_json=? WHERE session_id=?")
       .run(JSON.stringify(legacyJson), legacyCompatible.sessionId);
     downgrade.exec(
-      "DROP TABLE images; DROP TABLE launch_journal; DROP TABLE archive_journal; DROP TABLE archived_native_bindings",
+      "DROP TABLE images; DROP TABLE launch_journal; DROP TABLE archive_journal; DROP TABLE archived_native_bindings; DROP TABLE IF EXISTS lifecycle_state",
     );
     downgrade.prepare("DELETE FROM schema_migrations WHERE version>=4").run();
     downgrade.exec("PRAGMA user_version=3");
     downgrade.close();
 
     const migrated = new RuntimeNodeStore(filename);
-    expect(migrated.diagnostics().userVersion).toBe(5);
+    expect(migrated.diagnostics().userVersion).toBe(7);
     expect(migrated.getSession(legacyCompatible.sessionId)).toMatchObject({
       launchProvenance: null,
       lastActivityAt: timestamp,

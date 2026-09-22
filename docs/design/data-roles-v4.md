@@ -1,6 +1,6 @@
-# Agent Multiplex protocol v5 data roles
+# Agent Multiplex protocol v6 data roles
 
-Protocol v5 separates data authority, execution, aggregation, and presentation.
+Protocol v6 separates data authority, execution, aggregation, and presentation.
 The distinction is an invariant, not merely naming.
 
 ## Roles
@@ -105,6 +105,22 @@ unchanged inside the bounded native envelope. Unavailable/oversized reads fail
 explicitly; they do not fabricate an empty queue. The queue-change native event
 invalidates observations; gateways retain no independent queue authority.
 
+For an active Copilot binding, the runtime is also the sole writer of durable,
+payload-free lifecycle evidence. Its fence combines logical session, runtime
+identity and boot, binding revision, and native runtime epoch; evidence never
+crosses that fence. The state preserves independent root, task, child, queue,
+interaction, command-delivery, compaction, and continuity dimensions. Catalog
+idle, a successful command receipt, queue absence, or elapsed time cannot fill
+an unknown dimension.
+
+`sessions.readLifecycle` drains already admitted native-event work and returns
+the reduced state with the exclusive next native-event sequence. Task and queue
+observations use their own invalidation revisions because the pinned Copilot SDK
+does not provide native snapshot cursors. A failed or stale observation leaves
+that dimension unknown. The full reducer, transition tables, snapshot/stream
+handoff, and pinned-SDK limits are normative in
+[`copilot-session-lifecycle-vnext.md`](copilot-session-lifecycle-vnext.md).
+
 Copilot `steerQueuedMessage` is a separate durable mutation using the native
 atomic queued-item-to-steering transition and exact item ID. It never reconstructs
 or removes/resends a prompt. A false native acknowledgement preserves the queued
@@ -161,6 +177,11 @@ An access gateway has `dataAuthority: none`. It is a p2prpc client of one or
 more control nodes and exposes the selected projection over HTTP/WebSocket. It
 may propose metadata mutations and route agent controls, but it never commits
 domain state.
+
+For `sessions.readLifecycle`, the gateway holds the selected source generation
+across the read and rejects a reply if selection changed. It validates the
+returned runtime/binding fence against the selected projection but does not
+reduce, cache as authority, or repair lifecycle evidence.
 
 A configured gateway connection is a `source`. Only control nodes can be
 sources. There is no gateway-to-gateway upstream mode and no generic p2prpc
@@ -293,7 +314,7 @@ sessions. It exposes no metadata mutation, agent command, terminal, source,
 topology, or authority methods. This is an API-discipline boundary, not a
 sandbox: a statically imported TypeScript module is trusted with the gateway
 process. Dynamic package installation and remotely supplied plugin code are
-outside protocol v5.
+outside protocol v6.
 
 Runtime providers and backends are also registered statically at process
 startup. The runtime independently validates every input even when a gateway
@@ -309,7 +330,7 @@ state machines and a concrete PR-review/container composition.
 
 ## Session catalog lifecycle
 
-Protocol v5 deliberately separates catalog visibility from transient native
+Protocol v6 deliberately separates catalog visibility from transient native
 status. The stable user-facing state is derived as follows:
 
 | State | Durable representation | Default visibility | Allowed next actions |
@@ -358,6 +379,24 @@ does not pretend rollback or blindly repeat it. The runtime tombstone survives
 restart and prevents later app-server inventory from resurrecting the released
 native binding. Archiving one session never closes a shared app server; process
 shutdown remains a separate backend lifecycle.
+
+### Copilot work lifecycle
+
+The catalog states above answer whether a logical session is open, actively
+bound, resumable, or archived. They do not answer whether Copilot is working,
+waiting for root input, waiting for child/task work, queued, finished, failed,
+interrupted, or uncertain. Protocol v6 derives those labels from the separate
+runtime-owned lifecycle state. Of that state, a control catalog stores only the
+bounded label, sequence, version, and exact fence needed for fleet projection;
+the full state remains at the runtime and is routed on demand.
+
+Native event gaps and incomplete resume hydration remain explicit. `Offline`
+comes from routing/presence, while `Unknown` comes from missing lifecycle
+certainty. Displayed, consumed, and settled command evidence is correlated only
+by exact native and Multiplex identities; transcript text, queue disappearance,
+and whole-session idle are not substitutes. See the
+[normative lifecycle design](copilot-session-lifecycle-vnext.md) for the
+exhaustive transitions and identity domains.
 
 ## Runtime images
 
@@ -591,9 +630,9 @@ operation settlement, control event creation, and delivery intent are one
 transaction.
 
 Runtime-node SQLite stores contain local bindings, launch/archive/command
-journals, provider-private checkpoints, archived-binding tombstones, and
-metadata outboxes. Managed PTYs, replay buffers, and keyboard leases are
-explicitly excluded.
+journals, Copilot lifecycle state, provider-private checkpoints,
+archived-binding tombstones, and metadata outboxes. Managed PTYs, replay
+buffers, and keyboard leases are explicitly excluded.
 
 Private SQLite state uses POSIX directory mode 0700 and regular files at 0600.
 On Windows, where those mode bits cannot represent privacy, a protected
@@ -630,16 +669,28 @@ restart therefore binds Iroh to a stable UDP address/port (or is provisioned
 with another supported discovery mechanism). The endpoint secret preserves
 identity; the stable listener preserves the ticket's direct route.
 
+The protocol-v6 source still pins public `@arduano/p2prpc-core@0.2.1`; the
+separate renewal work is neither merged nor duplicated here. A future transport
+upgrade must preserve authority/feed, runtime boot, binding, native epoch,
+operation identity/hash, and consumer cursor continuity across renewal. It must
+fence retired generations, report a gap/reset when continuity is unproved, and
+never replay an uncertain mutation. Transport connection generation is not a
+lifecycle or authority generation.
+
 All stores use distinct SQLite application IDs, WAL, full synchronization,
 foreign keys, integrity checks, strict tables, an exclusive lifetime writer
 lock, checkpoint/backup APIs, and immutable migration ledgers. Control and
-runtime stores retain their released v3/v4 ledger entries and append v5
-migrations for image storage and bounded native payload envelopes. Incompatible
-legacy payloads cause an atomic migration refusal; immutable receipts are never
-truncated or silently rewritten. See [images](images-v5.md). The
-gateway operational schema remains at its unchanged v3 migration target; schema
-version is per store, not a claim about wire compatibility. Foreign,
-unversioned, future, corrupt, or rewritten migration histories fail closed.
+runtime stores retain their released v3/v4/v5 entries. Protocol v6 appends
+control schema version 7 for typed generic command errors, runtime version 6
+for those errors, and runtime version 7 for lifecycle evidence. The separately
+named control authority-handoff entry remains version 6 and is not rewritten.
+Incompatible legacy payloads or command errors cause an atomic migration
+refusal; immutable receipts are never truncated or silently rewritten. See
+[images](images-v5.md) and the
+[command-error audit](../audits/copilot-lifecycle-vnext-errors.md). The gateway
+operational schema remains at its unchanged v3 migration target; schema version
+is per store, not a claim about wire compatibility. Foreign, unversioned,
+future, corrupt, or rewritten migration histories fail closed.
 
 ## Trust boundaries
 

@@ -161,7 +161,7 @@ assert(
 );
 
 console.log(
-  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v5 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
+  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v6 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
 );
 
 function assertNoOrphanedCompilerOutput(workspacePath) {

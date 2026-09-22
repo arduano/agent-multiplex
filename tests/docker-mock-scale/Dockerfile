@@ -57,5 +57,5 @@ COPY --from=build /opt/src/agent-multiplex/ /opt/src/agent-multiplex/
 RUN mkdir -p /state /workspace \
     && chown -R 1000:100 /state /workspace
 
-LABEL org.opencontainers.image.title="Agent Multiplex protocol-v4 mock scale acceptance"
+LABEL org.opencontainers.image.title="Agent Multiplex protocol-v6 mock scale acceptance"
 LABEL org.opencontainers.image.description="Control node, authenticated access gateway, and ten mock runtime nodes"

@@ -54,7 +54,7 @@ Bespoke runtime applications can construct `RuntimeNodeService` with explicit
 resource preparation/recovery/compensation, optional resume/stop work, and
 idempotent release. A backend owns one harness adapter scope and optional
 per-session native cleanup. Both are trusted TypeScript modules imported at
-startup; protocol v4 has no dynamic plugin loader. The runtime recomputes each
+startup; protocol v6 has no dynamic plugin loader. The runtime recomputes each
 profile's canonical JSON-Schema hash and rejects conflicting identities before
 opening the service.
 

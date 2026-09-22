@@ -12,11 +12,12 @@ describe("Copilot lifecycle evidence normalization", () => {
     ]);
     expect(copilotLifecycleFacts("user.message", event({ messageId: "native-message", turnId: "native-turn" }))).toEqual([
       { type: "messageDisplayed", messageId: "native-message", owner: "root" },
+      { type: "messageConsumed", messageId: "native-message", owner: "root" },
     ]);
   });
-  it.each(["agentId", "parentToolCallId"])("fences legacy %s child evidence without treating parentId as ownership", owner => {
+  it.each([["agentId", "agent"], ["parentToolCallId", "tool"]] as const)("fences legacy %s child evidence without treating parentId as ownership", (owner, namespace) => {
     expect(copilotLifecycleFacts("user.message", event({ messageId: "message", [owner]: "child" }))).toEqual([]);
-    expect(copilotLifecycleFacts("session.error", event({ [owner]: "child" }))).toEqual([{ type: "child", id: "agent:child", state: "failed" }]);
+    expect(copilotLifecycleFacts("session.error", event({ [owner]: "child" }))).toEqual([{ type: "child", id: `${namespace}:child`, state: "failed" }]);
     expect(copilotLifecycleFacts("session.idle", event())).toEqual([{ type: "rootIdle", aborted: false }]);
   });
   it("uses the unique observed start fence instead of a reusable native loop counter", () => {

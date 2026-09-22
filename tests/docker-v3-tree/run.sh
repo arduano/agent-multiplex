@@ -150,7 +150,7 @@ cleanup() {
     rm -rf -- "$RUNTIME_DIR"
   fi
   if (( COMPLETED == 0 )); then
-    printf 'Protocol-v5 tree acceptance failed. Inspect driver-failure.json and logs/.\n' \
+    printf 'Protocol-v6 tree acceptance failed. Inspect driver-failure.json and logs/.\n' \
       >"$RECEIPT_DIR/FAILED.txt"
   fi
   if (( status == 0 && COMPLETED == 1 )); then
@@ -209,7 +209,7 @@ wait_for_file() {
   fail "timed out waiting for $description"
 }
 
-note "building immutable protocol-v5 image"
+note "building immutable protocol-v6 image"
 if ! docker build --progress=plain \
   --secret "id=npmrc,src=$DOCKER_NPMRC" \
   --file "$SCRIPT_DIR/Dockerfile" \
@@ -516,7 +516,7 @@ jq -n \
     runId:$runId,
     imageId:$imageId,
     passed:true,
-    multiplexProtocol:5,
+    multiplexProtocol:6,
     topology:{authorityControlNodeId:$authorityId,branchControlNodeId:$branchId,runtimeNodes:1,gatewaySources:2},
     endpointPins:{authority:$authorityEndpoint,branch:$branchEndpoint,preservedAcrossRestart:true},
     receiptSecurity:{rawSecretsRecorded:false,rawTicketsRecorded:false,
@@ -534,4 +534,4 @@ jq -n \
 )
 
 COMPLETED=1
-note "all protocol-v5 control-tree assertions passed"
+note "all protocol-v6 control-tree assertions passed"

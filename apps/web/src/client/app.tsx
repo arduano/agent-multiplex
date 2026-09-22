@@ -34,6 +34,7 @@ import type {
 
 import { ApiProvider, errorMessage, useApi } from "./api.js";
 import { MetadataPanel } from "./metadata-panel.js";
+import { lifecycleDot, lifecycleRank, sessionLifecycleLabel } from "./session-lifecycle.js";
 import { SessionConsole } from "./session-console.js";
 import { SpawnDialog } from "./spawn-dialog.js";
 import { terminalSideChannelCapability } from "./terminal-state.js";
@@ -189,10 +190,12 @@ function Dashboard({ draftToken, onDraftToken, connection, onConnect }: {
   ) ?? null;
   const filteredSessions = useMemo(() => {
     const needle = deferredSearch.trim().toLocaleLowerCase();
+    const runtimes = new Map((runtimeNodes.data ?? []).map((runtime) => [runtime.runtimeNodeId, runtime]));
     return [...(sessions.data?.sessions ?? [])]
       .filter((session) => !needle || sessionSearchText(session).includes(needle))
-      .sort((left, right) => sessionRank(left) - sessionRank(right) || right.updatedAt.localeCompare(left.updatedAt));
-  }, [deferredSearch, sessions.data]);
+      .sort((left, right) => sessionRank(left, runtimes.get(left.runtimeNodeId)) -
+        sessionRank(right, runtimes.get(right.runtimeNodeId)) || right.updatedAt.localeCompare(left.updatedAt));
+  }, [deferredSearch, runtimeNodes.data, sessions.data]);
 
   const globalStatus = !connection.requested
     ? "disconnected"
@@ -255,7 +258,14 @@ function Dashboard({ draftToken, onDraftToken, connection, onConnect }: {
               onSelect={setSelectedId}
             />
           )}
-          center={<SessionConsole session={selected} terminalCapability={terminalCapability} />}
+          center={(
+            <SessionConsole
+              session={selected}
+              terminalCapability={terminalCapability}
+              online={selectedRuntime === undefined ||
+                selectedRuntime.presence === "online" && selectedRuntime.reachability === "reachable"}
+            />
+          )}
           inspector={(actions) => (
             <InspectorPane
               actions={actions}
@@ -543,6 +553,9 @@ function SessionRow({ session, runtime, selected, onSelect }: {
   readonly onSelect: () => void;
 }) {
   const title = sessionTitle(session);
+  const label = sessionLifecycleLabel(session, runtime === undefined ||
+    runtime.presence === "online" && runtime.reachability === "reachable");
+  const dot = lifecycleDot(label);
   return (
     <button
       type="button"
@@ -562,9 +575,9 @@ function SessionRow({ session, runtime, selected, onSelect }: {
       <span className="flex items-start gap-2.5">
         <span className={classes(
           "mt-1.5 size-1.5 shrink-0 rounded-full",
-          session.runtimeStatus === "running" ? "bg-[var(--status-live)]" :
-            session.runtimeStatus === "waitingForInput" ? "bg-[var(--status-waiting)]" :
-              session.runtimeStatus === "error" ? "bg-[var(--status-error)]" : "bg-[var(--text-muted)]",
+          dot === "live" ? "bg-[var(--status-live)]" :
+            dot === "waiting" ? "bg-[var(--status-waiting)]" :
+              dot === "error" ? "bg-[var(--status-error)]" : "bg-[var(--text-muted)]",
         )} />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-medium leading-5 text-[var(--text-primary)]" title={title}>{title}</span>
@@ -573,7 +586,7 @@ function SessionRow({ session, runtime, selected, onSelect }: {
             <span aria-hidden="true">·</span>
             <span className="shrink-0">{session.availability}</span>
             <span aria-hidden="true">·</span>
-            <span className="shrink-0">{session.runtimeStatus}</span>
+            <span className="shrink-0">{label}</span>
             <span aria-hidden="true">·</span>
             <span className="truncate">{runtime?.name ?? shortId(session.runtimeNodeId)}</span>
           </span>
@@ -816,11 +829,9 @@ function sessionSearchText(session: SessionRecord): string {
     .toLocaleLowerCase();
 }
 
-function sessionRank(session: SessionRecord): number {
-  if (session.runtimeStatus === "waitingForInput") return 0;
-  if (session.runtimeStatus === "running") return 1;
-  if (session.availability === "active") return 2;
-  return 3;
+function sessionRank(session: SessionRecord, runtime?: RuntimeNodeDescriptor): number {
+  return lifecycleRank(sessionLifecycleLabel(session, runtime === undefined ||
+    runtime.presence === "online" && runtime.reachability === "reachable"));
 }
 
 function shortId(value: string): string {

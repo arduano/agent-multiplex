@@ -8,6 +8,7 @@ import {
 import { jsonObjectSchema, jsonValueSchema, jsonWireByteUpperBound } from "./json.js";
 import { commandImageBindingSchema, IMAGE_MAX_COMMAND_IMAGES, nativeImagePointerValue, nativePayloadSchema, NATIVE_PAYLOAD_MAX_BYTES } from "./image.js";
 import { isoDateSchema } from "./session.js";
+import { commandErrorSchema } from "./command-error.js";
 
 export const commandStateSchema = z.enum([
   "received",
@@ -160,8 +161,14 @@ export const commandRecordSchema = z.object({
   state: commandStateSchema,
   request: jsonValueSchema,
   result: nativePayloadSchema.optional(),
-  error: z.string().optional(),
+  error: commandErrorSchema.optional(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema,
+}).superRefine((value, context) => {
+  if (value.error === undefined) return;
+  if ((value.state !== "failed" && value.state !== "outcomeUnknown") ||
+    value.error.certainty !== (value.state === "failed" ? "definiteFailure" : "outcomeUnknown")) {
+    context.addIssue({ code: "custom", path: ["error"], message: "command error certainty must match its receipt state" });
+  }
 });
 export type CommandRecord = z.infer<typeof commandRecordSchema>;

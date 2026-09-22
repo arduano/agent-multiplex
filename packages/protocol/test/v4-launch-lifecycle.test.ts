@@ -15,6 +15,8 @@ import {
   newControlNodeId,
   newLaunchId,
   newRealmId,
+  newRuntimeEpoch,
+  newRuntimeNodeBootId,
   newRuntimeNodeId,
   newSessionId,
   runtimeNodeControlChangeSchema,
@@ -330,6 +332,43 @@ describe("protocol v4 archive and catalog lifecycle", () => {
     expect(runtimeNodeSessionRecordSchema.safeParse(runtime).success).toBe(true);
     expect(runtimeNodeSessionRecordSchema.safeParse(open).success).toBe(false);
   });
+
+  it("admits lifecycle projections only on their exact active Copilot binding", () => {
+    const runtimeEpoch = newRuntimeEpoch();
+    const active = {
+      ...canonicalSession(),
+      harness: "copilot" as const,
+      adapterScopeId: "copilot-test",
+      availability: "active" as const,
+      runtimeStatus: "idle" as const,
+      runtimeEpoch,
+    };
+    const lifecycle = {
+      version: 1 as const,
+      fence: {
+        sessionId: active.sessionId,
+        runtimeNodeId: active.runtimeNodeId,
+        runtimeNodeBootId: newRuntimeNodeBootId(),
+        bindingRevision: active.bindingRevision,
+        runtimeEpoch,
+      },
+      nextSequence: 0,
+      label: "Unknown" as const,
+    };
+    expect(sessionRecordSchema.safeParse({ ...active, lifecycle }).success).toBe(true);
+    for (const invalid of [
+      { ...active, availability: "resumable", runtimeEpoch: null, lifecycle },
+      { ...active, harness: "codex", lifecycle },
+      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, sessionId: newSessionId() } } },
+      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, runtimeNodeId: newRuntimeNodeId() } } },
+      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, bindingRevision: 2 } } },
+      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, runtimeEpoch: newRuntimeEpoch() } } },
+    ]) expect(sessionRecordSchema.safeParse(invalid).success).toBe(false);
+
+    const { catalogState: _, catalogRevision: __, archivedAt: ___, ...runtime } = active;
+    expect(runtimeNodeSessionRecordSchema.safeParse({ ...runtime, lifecycle }).success).toBe(true);
+    expect(runtimeNodeSessionRecordSchema.safeParse({ ...runtime, availability: "resumable", runtimeEpoch: null, lifecycle }).success).toBe(false);
+  });
 });
 
 describe("protocol v4 session search and streams", () => {
@@ -414,8 +453,8 @@ describe("protocol v4 session search and streams", () => {
   });
 });
 
-describe("protocol v4 compatibility boundary", () => {
-  it("rejects v3 peers and contains no sessions.spawn contract", () => {
+describe("protocol v6 compatibility boundary", () => {
+  it("rejects older peers and contains no sessions.spawn contract", () => {
     const description = {
       application: "agent-multiplex",
       componentKind: "access-gateway",
@@ -424,26 +463,22 @@ describe("protocol v4 compatibility boundary", () => {
       capabilities: [],
     };
     expect(
-      systemDescriptionSchema.safeParse({ ...description, protocolVersion: 5 })
+      systemDescriptionSchema.safeParse({ ...description, protocolVersion: 6 })
         .success,
     ).toBe(true);
-    expect(
-      systemDescriptionSchema.safeParse({ ...description, protocolVersion: 3 })
-        .success,
-    ).toBe(false);
+    for (const protocolVersion of [3, 5]) {
+      expect(systemDescriptionSchema.safeParse({ ...description, protocolVersion }).success).toBe(false);
+    }
     expect(
       gatewayEnrollmentSchema.safeParse({
         name: "gateway",
-        protocolVersion: 5,
+        protocolVersion: 6,
         requestedScopes: ["read", "agent-launch"],
       }).success,
     ).toBe(true);
-    expect(
-      gatewayEnrollmentSchema.safeParse({
-        name: "gateway",
-        protocolVersion: 3,
-      }).success,
-    ).toBe(false);
+    for (const protocolVersion of [3, 5]) {
+      expect(gatewayEnrollmentSchema.safeParse({ name: "gateway", protocolVersion }).success).toBe(false);
+    }
     expect("spawn" in accessContract.sessions).toBe(false);
     expect("list" in accessContract.sessions).toBe(false);
     expect("search" in accessContract.sessions).toBe(true);

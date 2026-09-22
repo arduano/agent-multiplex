@@ -18,6 +18,18 @@ const session = sessionRecordSchema.parse({
   cwd: "/workspace/lifecycle-fixture",
   availability: "active",
   runtimeStatus: "idle",
+  lifecycle: {
+    version: 1,
+    fence: {
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      runtimeNodeId: "00000000-0000-4000-8000-000000000002",
+      runtimeNodeBootId: "00000000-0000-4000-8000-000000000007",
+      bindingRevision: 1,
+      runtimeEpoch: "00000000-0000-4000-8000-000000000003",
+    },
+    nextSequence: 4,
+    label: "Ready",
+  },
   metadata: { ...emptyMetadataSnapshot(), values: { "agent.title": "Lifecycle fixture" } },
   metadataAuthority: {
     realmId: "00000000-0000-4000-8000-000000000004",

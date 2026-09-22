@@ -16,7 +16,7 @@ import {
   type BearerTokenProvider,
 } from "./http.js";
 
-/** tRPC client for the authority-neutral protocol-v5 access contract. */
+/** tRPC client for the authority-neutral protocol-v6 access contract. */
 export type AccessClient = CreateTRPCClient<AccessRouter>;
 
 export interface AccessClientOptions {

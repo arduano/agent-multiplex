@@ -43,12 +43,12 @@ describe("isolated authority control", () => {
     try {
       const identity = await owner.rpc.call<{ controlNodeId: string }>("identity");
       const caller = createIsolatedAccessRouter(owner.rpc).createCaller({ trustedLocalAccess: true });
-      expect(await caller.system.describe()).toMatchObject({ protocolVersion: 5, instanceId: "fixture-instance" });
+      expect(await caller.system.describe()).toMatchObject({ protocolVersion: 6, instanceId: "fixture-instance" });
       expect(await caller.sources.snapshot()).toMatchObject({ source: { manifest: { sourceControlNodeId: identity.controlNodeId } } });
       await expect(createIsolatedAccessRouter(owner.rpc).createCaller({}).sessions.search({} as never)).rejects.toMatchObject({ code: "FORBIDDEN" });
       const endpoint = "a".repeat(64);
       const ingress = createIsolatedControlRouter(owner.rpc).createCaller({ authenticatedActorId: endpoint, endpointId: endpoint });
-      const enrolled = await ingress.ingress.gateways.enroll({ name: "fixture-gateway", protocolVersion: 5, requestedScopes: ["read"] });
+      const enrolled = await ingress.ingress.gateways.enroll({ name: "fixture-gateway", protocolVersion: 6, requestedScopes: ["read"] });
       expect(enrolled.accepted).toBe(true);
       expect(await owner.rpc.call("enrollment", [endpoint])).toMatchObject({ role: "access-gateway", scopes: ["read"] });
       http.server.listen(0, "127.0.0.1"); await once(http.server, "listening");
@@ -100,13 +100,13 @@ describe("isolated authority control", () => {
       const ingress = createIsolatedControlRouter(owner.rpc).createCaller({ endpointId: endpoint, authenticatedActorId: endpoint });
       const local = child.localControlNode();
       const admitted = await ingress.ingress.controlNodes.attach({ controlNodeId: local.controlNodeId, controlNodeBootId: local.controlNodeBootId,
-        feedId: local.feedId, name: local.name, protocolVersion: 5, capabilities: local.capabilities,
+        feedId: local.feedId, name: local.name, protocolVersion: 6, capabilities: local.capabilities,
         expectedParentControlNodeId: root.controlNodeId as never, childProof: child.attachmentProof() });
       child.applyParentAttachment(admitted.attachment, "root-endpoint");
       await ingress.ingress.controlNodes.heartbeat({ controlNodeId: local.controlNodeId, controlNodeBootId: local.controlNodeBootId,
         attachmentId: admitted.attachment.attachmentId, lineageId: admitted.attachment.lineageId,
         authority: admitted.attachment.authority, checkpoint: child.feedCheckpoint() });
-      const runtime = child.registerRuntimeNode({ runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), name: "child-runtime", allowedRoots: ["/work"], harnesses: [], protocolVersion: 5 });
+      const runtime = child.registerRuntimeNode({ runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), name: "child-runtime", allowedRoots: ["/work"], harnesses: [], protocolVersion: 6 });
       const access = createIsolatedAccessRouter(owner.rpc).createCaller({ trustedLocalAccess: true });
       await expect.poll(async () => (await access.runtimeNodes.list()).map(item => item.runtimeNodeId)).toContain(runtime.runtimeNodeId);
       expect(snapshotCalls).toBe(1); expect(streamCalls).toBe(1);

@@ -9,6 +9,8 @@ import {
   type SqliteDiagnostics,
 } from "@arduano/agent-multiplex-storage-sqlite";
 import {
+  safeCommandError,
+  sameLifecycleFence,
   accessSnapshotSchema,
   archiveRecordSchema,
   authorityPromoteInputSchema,
@@ -269,6 +271,11 @@ export class ControlNodeCatalog {
           name: "control-node-v5-authority-receipt-handoff",
           apply: ControlNodeCatalog.#migrateAuthorityReceiptHandoff,
         },
+        {
+          version: 7,
+          name: "control-node-v6-command-errors",
+          apply: ControlNodeCatalog.#migrateCommandErrors,
+        },
       ],
       ...(options.now === undefined ? {} : { now: options.now }),
     });
@@ -441,7 +448,7 @@ export class ControlNodeCatalog {
     const local = this.localControlNode();
     return sourceManifestSchema.parse({
       componentKind: "control-node",
-      protocolVersion: 5,
+      protocolVersion: 6,
       sourceControlNodeId: local.controlNodeId,
       sourceControlNodeBootId: local.controlNodeBootId,
       authority: this.authority(),
@@ -562,9 +569,16 @@ export class ControlNodeCatalog {
     if (existing && request.resume === undefined && pendingHandoff &&
       Number(pendingHandoff.snapshot_imported) === 0) {
       const admitted = controlNodeAttachmentRequestSchema.parse(decode(pendingHandoff.request_json));
-      if (sameCanonicalJson({ ...admitted, controlNodeBootId: request.controlNodeBootId }, request)) {
+      // A coordinated protocol migration rotates the child's feed and a
+      // restart replaces its boot. Those two transport identities may advance
+      // while the original authority handoff admission remains durable.
+      if (sameCanonicalJson({ ...admitted,
+        controlNodeBootId: request.controlNodeBootId,
+        feedId: request.feedId,
+      }, request)) {
         const child = controlNodeDescriptorSchema.parse({ ...this.getControlNode(request.controlNodeId)!,
-          controlNodeBootId: request.controlNodeBootId, presence: "online", lastHeartbeatAt: this.#timestamp() });
+          controlNodeBootId: request.controlNodeBootId, feedId: request.feedId,
+          presence: "online", lastHeartbeatAt: this.#timestamp() });
         this.#mutate(() => {
           this.#putControlNode(child, request.controlNodeId);
           this.#appendControl({ type: "controlNode.upsert", controlNode: child });
@@ -653,7 +667,7 @@ export class ControlNodeCatalog {
       dataRole: role,
       connectedAt: timestamp,
       lastHeartbeatAt: timestamp,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: request.capabilities,
     });
     this.#mutate(() => {
@@ -1509,6 +1523,8 @@ export class ControlNodeCatalog {
           cwd: item.cwd,
           availability: item.availability,
           runtimeStatus: item.runtimeStatus,
+          ...(base?.lifecycle && base.runtimeEpoch === item.runtimeEpoch && item.availability === "active"
+            ? { lifecycle: base.lifecycle } : {}),
           ...(item.harnessSettings !== undefined
             ? { harnessSettings: item.harnessSettings }
             : base?.harnessSettings === undefined
@@ -1558,8 +1574,9 @@ export class ControlNodeCatalog {
         for (const existing of this.listSessions({ runtimeNodeId: snapshot.runtimeNodeId })) {
           if (seen.has(nativeKey(existing))) continue;
           this.#stalePendingInteractionsForSession(existing.sessionId, timestamp);
+          const { lifecycle: _lifecycle, ...withoutLifecycle } = existing;
           const unavailable = sessionRecordSchema.parse({
-            ...existing,
+            ...withoutLifecycle,
             availability: "unavailable",
             runtimeStatus: "unknown",
             runtimeEpoch: null,
@@ -1597,6 +1614,16 @@ export class ControlNodeCatalog {
     const runtime = this.getRuntimeNode(incoming.runtimeNodeId);
     if (!runtime || runtime.ownerControlNodeId !== this.#controlNodeId) throw new ControlNodeCoreError("FENCED", "runtime session is not locally owned");
     const current = this.getSession(incoming.sessionId);
+    if (incoming.lifecycle) {
+      const fence = incoming.lifecycle.fence;
+      if (fence.sessionId !== incoming.sessionId || fence.runtimeNodeId !== incoming.runtimeNodeId ||
+          fence.runtimeNodeBootId !== runtime.runtimeNodeBootId || fence.bindingRevision !== incoming.bindingRevision ||
+          fence.runtimeEpoch !== incoming.runtimeEpoch || incoming.harness !== "copilot" || incoming.availability !== "active") {
+        throw new ControlNodeCoreError("FENCED", "lifecycle projection does not match the active runtime binding");
+      }
+      if (current?.lifecycle && sameLifecycleFence(current.lifecycle.fence, fence) &&
+          current.lifecycle.nextSequence > incoming.lifecycle.nextSequence) return current;
+    }
     if (current?.catalogState === "archived") return current;
     const nativeOwnerRow = this.#db.prepare(`
       SELECT record_json FROM sessions
@@ -1929,8 +1956,9 @@ export class ControlNodeCatalog {
         const timestamp = record.releasedAt ?? this.#timestamp();
         this.#stalePendingInteractionsForSession(session.sessionId, timestamp);
         this.#deleteMetadataDeliveryIntentsForSession(session.sessionId);
+        const { lifecycle: _lifecycle, ...withoutLifecycle } = session;
         const archived = sessionRecordSchema.parse({
-          ...session,
+          ...withoutLifecycle,
           availability: "unavailable",
           runtimeStatus: "stopped",
           runtimeEpoch: null,
@@ -1965,8 +1993,9 @@ export class ControlNodeCatalog {
     if (current.runtimeStatus === "stopped" && current.availability !== "active") {
       return current;
     }
+    const { lifecycle: _lifecycle, ...withoutLifecycle } = current;
     const stopped = sessionRecordSchema.parse({
-      ...current,
+      ...withoutLifecycle,
       availability: "resumable",
       runtimeStatus: "stopped",
       runtimeEpoch: null,
@@ -3182,6 +3211,51 @@ export class ControlNodeCatalog {
     `);
   }
 
+  static #migrateCommandErrors(database: DatabaseSync): void {
+    database.exec(`
+      UPDATE control_nodes SET record_json=json_set(record_json, '$.protocolVersion', 6);
+      UPDATE runtime_nodes SET record_json=json_set(record_json, '$.protocolVersion', 6);
+    `);
+    const update = database.prepare("UPDATE commands SET record_json=? WHERE command_id=?");
+    for (const row of database.prepare("SELECT command_id, record_json FROM commands").all() as Row[]) {
+      const value = decode(row.record_json) as Record<string, unknown>;
+      if (typeof value.error === "string") {
+        if (value.state !== "failed" && value.state !== "outcomeUnknown") {
+          throw new Error("command-error migration refused a nonterminal legacy error");
+        }
+        value.error = safeCommandError(undefined, { stage: "recovery",
+          certainty: value.state === "failed" ? "definiteFailure" : "outcomeUnknown",
+          diagnosticId: String(row.command_id) });
+      }
+      update.run(encode(commandRecordSchema.parse(value)), String(row.command_id));
+    }
+    const updateHandoff = database.prepare(
+      "UPDATE attachment_authority_handoffs SET request_json=? WHERE attachment_id=?",
+    );
+    for (const row of database.prepare(
+      "SELECT attachment_id, request_json FROM attachment_authority_handoffs WHERE snapshot_imported=0",
+    ).all() as Row[]) {
+      const request = decode(row.request_json) as Record<string, unknown>;
+      request.protocolVersion = 6;
+      updateHandoff.run(
+        encode(controlNodeAttachmentRequestSchema.parse(request)),
+        String(row.attachment_id),
+      );
+    }
+    // Old journal entries may contain freeform errors. A clean feed boundary
+    // prevents stale cursors or imported event hashes from crossing schemas.
+    const feedId = newFeedId();
+    database.prepare("UPDATE control_node_identity SET feed_id=? WHERE singleton=1").run(feedId);
+    database.prepare(`UPDATE control_nodes SET record_json=json_set(record_json, '$.feedId', ?)
+      WHERE control_node_id=(SELECT control_node_id FROM control_node_identity WHERE singleton=1)`).run(feedId);
+    database.exec(`
+      DELETE FROM imported_events;
+      DELETE FROM child_checkpoints;
+      DELETE FROM control_events;
+      UPDATE control_feed_state SET last_cursor=0, minimum_cursor=0 WHERE singleton=1;
+    `);
+  }
+
   #hasMetadataReceipts(): boolean {
     return this.#db.prepare("SELECT 1 FROM metadata_operations LIMIT 1").get() !== undefined;
   }
@@ -3268,7 +3342,7 @@ export class ControlNodeCatalog {
       dataRole: this.dataRole(),
       connectedAt: timestamp,
       lastHeartbeatAt: timestamp,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: [
         "catalog.sqlite-v4",
         "sessions.lifecycle-v4",
@@ -3308,7 +3382,7 @@ export class ControlNodeCatalog {
     this.#mutate(() => {
       for (const row of started) {
         const command = parse(commandRecordSchema, row.record_json);
-        const unknown = commandRecordSchema.parse({ ...command, state: "outcomeUnknown", error: "control node restarted before a terminal response", updatedAt: this.#timestamp() });
+        const unknown = commandRecordSchema.parse({ ...command, state: "outcomeUnknown", error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown" }), updatedAt: this.#timestamp() });
         this.#putCommand(unknown);
         this.#appendControl({ type: "command.changed", command: unknown });
       }
@@ -3543,8 +3617,9 @@ export class ControlNodeCatalog {
           const session = this.getSession(archive.sessionId);
           if (session?.catalogState === "open") {
             this.#deleteMetadataDeliveryIntentsForSession(session.sessionId);
+            const { lifecycle: _lifecycle, ...withoutLifecycle } = session;
             this.#putSession(sessionRecordSchema.parse({
-              ...session,
+              ...withoutLifecycle,
               availability: "unavailable",
               runtimeStatus: "stopped",
               runtimeEpoch: null,
@@ -3559,7 +3634,10 @@ export class ControlNodeCatalog {
       }
       case "session.unavailable": {
         const current = this.getSession(change.sessionId);
-        if (current) this.#putSession({ ...current, availability: "unavailable", updatedAt: this.#timestamp() }, source);
+        if (current) {
+          const { lifecycle: _lifecycle, ...withoutLifecycle } = current;
+          this.#putSession({ ...withoutLifecycle, availability: "unavailable", updatedAt: this.#timestamp() }, source);
+        }
         break;
       }
       case "metadata.changed": {
@@ -4124,7 +4202,7 @@ export class ControlNodeCatalog {
       const unknown = commandRecordSchema.parse({
         ...command,
         state: "outcomeUnknown",
-        error: "runtime-node boot was replaced before a terminal response",
+        error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown", code: "FENCED" }),
         updatedAt: timestamp,
       });
       this.#putCommand(unknown);
@@ -4132,8 +4210,9 @@ export class ControlNodeCatalog {
     }
     for (const session of this.listSessions({ runtimeNodeId })) {
       this.#stalePendingInteractionsForSession(session.sessionId, timestamp);
+      const { lifecycle: _lifecycle, ...withoutLifecycle } = session;
       const fenced = sessionRecordSchema.parse({
-        ...session,
+        ...withoutLifecycle,
         availability: "resumable",
         runtimeStatus: "stopped",
         runtimeEpoch: null,

@@ -21,6 +21,25 @@ function fixture() {
 }
 
 describe("Copilot command and event ordering", () => {
+  it("orders the interaction hydration baseline before startup callbacks", async () => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(true);
+    const response = bridge.interaction("userInput", { question: "disposable" }, {
+      ephemeral: true,
+      cancelValue: { answer: "cancelled" },
+      parseResponse: value => value,
+    });
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    expect(events.map(event => event.kind === "lifecycle" ? event.fact.type : event.kind)).toEqual([
+      "childrenHydrated", "interactionsHydrated", "status", "interaction",
+    ]);
+    const interaction = events.find((event): event is Extract<AdapterEvent, { kind: "interaction" }> => event.kind === "interaction")!;
+    await interaction.resolve({ answer: "ok" });
+    await expect(response).resolves.toEqual({ answer: "ok" });
+    bridge.close();
+  });
+
   it.each(["agentId", "parentToolCallId"])("fences legacy %s child lifecycle and settings", key => {
     const f = fixture();
     f.emit("assistant.turn_start", { turnId: "0" });

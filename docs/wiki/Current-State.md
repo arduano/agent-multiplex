@@ -5,7 +5,45 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-11.
+Last reconciled: 2026-09-22.
+
+## Unreleased protocol-v6 Copilot lifecycle candidate
+
+The maintained source now declares protocol v6 as a coordinated clean break
+from protocol v5. Controls, runtimes, gateways, clients, and adapters must move
+together; there is no mixed-version compatibility branch. The latest published
+protocol-v5 packages and every retained release receipt keep their original
+scope.
+
+Protocol v6 adds a runtime-owned, durable Copilot lifecycle state under an exact
+session/runtime/boot/binding/native-epoch fence. Its executable reducer keeps
+root work, tasks, children, queue, interactions, command delivery, compaction,
+and stream continuity independent. Catalog rows carry a bounded label/fence
+projection. The routed `sessions.readLifecycle` query returns the full
+payload-free state with an exclusive native-event sequence for a subscribe-first
+snapshot/stream handoff. Missing continuity and incomplete native hydration
+remain Unknown; catalog idle, elapsed time, text equality, queue disappearance,
+or a successful generic command receipt cannot manufacture completion.
+
+Generic durable command receipts also use typed `CommandError` records with an
+allowlisted code, stage, certainty, diagnostic ID, and fixed public text. The
+upgrade appends control schema version 7 for those errors, runtime version 6 for
+the same boundary, and runtime version 7 for lifecycle evidence. Released
+migration identities remain immutable.
+
+The exact source still pins public `@arduano/p2prpc-core@0.2.1`. Seamless
+authenticated-session renewal is separate external work: it has not been
+inspected, merged, duplicated, or pinned in this candidate. Its required
+identity, cursor, generation, gap, and no-mutation-replay behavior is defined in
+the [normative lifecycle design](../design/copilot-session-lifecycle-vnext.md).
+The [evidence audit](../audits/copilot-lifecycle-vnext-audit.md) records which
+SDK and repository assumptions are confirmed, disproved, conditional, or still
+blocked.
+
+This candidate has no live/native-model, production, Windows, or p2prpc-renewal
+qualification and has not been published or deployed. Deterministic source
+qualification must be read from the final exact-source receipts; historical
+protocol-v5 release evidence does not qualify this boundary.
 
 ## Retained catalog startup correction
 
@@ -253,13 +291,13 @@ Suggested first prompt for a new session:
 
 | Boundary | Current value |
 | --- | --- |
-| Wire protocol | `5`; coordinated upgrade required from v4 |
-| Latest release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3) |
+| Wire protocol | `6` in maintained source; coordinated upgrade required from protocol v5 |
+| Signed stable release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3), protocol v5; later published hotfix prereleases are recorded above |
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
 | Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.3` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
-| Node transport | Exact public `@arduano/p2prpc-core@0.2.1` from the separate [`arduano/p2prpc`](https://github.com/arduano/p2prpc) repository |
-| Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.13` and optional CLI `1.0.81`; model qualification waived for this patch |
+| Node transport | Exact public `@arduano/p2prpc-core@0.2.1`; separate renewal work is not merged or pinned |
+| Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.13` and optional CLI `1.0.81`; no native/model protocol-v6 qualification |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
 The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains
@@ -270,7 +308,9 @@ is separate from a passing native-model receipt. The
 [checkpoint](../checkpoint-v4.md#embedded-locator-release-2026-09-07) owns release
 identities, workflow links and artifact verification.
 
-Protocol v5, transport, native CLI pins and released migrations are unchanged.
+The signed release facts in the preceding paragraphs remain protocol-v5
+history. Transport and native pins are unchanged in protocol-v6 source, while
+the new control/runtime migrations are unreleased.
 The prior `v0.2.1` Windows patch had an owner-authorized five-minute native soak;
 that evidence remains historical and does not requalify later patches or the transport
 renewal boundary.
@@ -278,10 +318,11 @@ GitHub Packages requires an authenticated client with `read:packages`, even for
 public packages.
 
 Protocol-v2 `host`, `worker`, `observer`, and `Fleet` code is archived evidence.
-Protocol v5 peers reject v4 and earlier peers. Upgrade controls, runtimes,
-gateways, and clients together. There is no wire compatibility shim or
-`sessions.spawn` network procedure. SQLite v5 migrations are explicit and
-transactional; see [upgrade guidance](Backups-Upgrades-and-Recovery.md).
+Protocol v6 peers reject protocol-v5 and earlier peers. Upgrade controls,
+runtimes, gateways, clients, and adapters together. There is no wire
+compatibility shim or `sessions.spawn` network procedure. SQLite migrations are
+explicit and transactional; see
+[upgrade guidance](Backups-Upgrades-and-Recovery.md).
 
 ## The system in one diagram
 
@@ -341,6 +382,11 @@ generations, and immutable-record forks fail closed. Read the
   lists; **archived** is cold, searchable authority data after resource release.
   Stop preserves resumability. Archive is never inferred from age, inventory,
   or connectivity, and there is no unarchive/restore operation yet.
+- Copilot work lifecycle is a separate runtime-owned evidence state. Session
+  rows expose its bounded projection and `sessions.readLifecycle` exposes the
+  full fenced dimensions plus native-stream handoff cursor. Offline and Unknown
+  remain distinct, and delivery/settlement never derives from transcript text or
+  elapsed time.
 - Native history is always requested from the owning Codex app server or
   Copilot SDK. Never parse vendor session files or promote terminal scrollback
   into history.
@@ -364,6 +410,12 @@ state machines and extension contracts.
 
 - Durable launch, resume, stop, archive, metadata, and at-most-once native
   command operations with retry-stable identities and recovery fences.
+- Protocol-v6 Copilot lifecycle reducer/projections, runtime persistence,
+  proactive revision-fenced task/queue observations, exact native delivery
+  correlation where the SDK supplies identity, and routed
+  `sessions.readLifecycle` snapshot/native-cursor handoff.
+- Typed, fixed-message generic command errors with certainty-preserving
+  runtime/control migrations and original-ID read-only receipt recovery.
 - Running/stopped default search plus explicit archived search, bounded pages,
   stable query-bound cursors, activity/profile/runtime/harness filters, and
   structural metadata predicates.
@@ -394,6 +446,7 @@ state machines and extension contracts.
 | Change | Start here | Then read |
 | --- | --- | --- |
 | Wire schema or tRPC contract | [`packages/protocol/src`](../../packages/protocol/src) | [Data roles](../design/data-roles-v4.md) |
+| Copilot work lifecycle/reducer | [`packages/protocol/src/lifecycle.ts`](../../packages/protocol/src/lifecycle.ts), [`packages/runtime-node-core/src/lifecycle.ts`](../../packages/runtime-node-core/src/lifecycle.ts) | [Lifecycle design](../design/copilot-session-lifecycle-vnext.md) |
 | Catalog, authority, tree, metadata | [`packages/control-node-core/src`](../../packages/control-node-core/src) | [Architecture](Architecture-and-Data-Roles.md) |
 | Bindings, providers, commands, PTYs | [`packages/runtime-node-core/src`](../../packages/runtime-node-core/src) | [Launch extensions](../design/launch-extensions-v4.md) |
 | Multi-source selection and routing | [`packages/gateway-core/src`](../../packages/gateway-core/src) | [Client/gateway embedding](Clients-and-Gateway-Embedding.md) |
@@ -436,9 +489,10 @@ repair or import them to solve a maintained task.
    and model-credit use is authorized. A run counts only with a scrubbed,
    checksummed passing receipt from the exact source/dependency boundary.
 
-## Protocol-v5 release scope
+## Released protocol-v5 scope
 
-The `0.2.0` source adds bounded runtime-owned images, native image envelopes,
+This section is historical release context. The `0.2.0` source adds bounded
+runtime-owned images, native image envelopes,
 client attachments, and appended control/runtime SQLite migrations. It also
 hardens launch admission/recovery, Codex RPC lifecycle, runtime shutdown, and
 image-queue lifecycle delivery. Runtime component injection, control readiness
@@ -457,6 +511,10 @@ Docker tree/mock scale and immutable publication. All 16 downloaded tarballs
 match the release checksums and build-provenance attestations. The owner-created
 exact-commit status separately waives native-model qualification for this patch.
 No native-model receipt is claimed; earlier evidence retains its original scope.
+
+These receipts predate the protocol-v6 lifecycle boundary. They do not qualify
+its reducer, migrations, routed lifecycle query, browser projection, typed
+command errors, or transport-renewal contract.
 
 The [0.2.3 checkpoint](../checkpoint-v4.md#embedded-locator-release-2026-09-07)
 owns exact identities and digests. Corporate auth/network and physical laptop
@@ -483,12 +541,22 @@ and gitignored.
   unsupported. See [Windows embedding](Install-and-Authenticate.md#windows-copilot-embedding).
 - Bespoke launch providers need their own validation, crash-boundary,
   idempotent cleanup, resume/history/archive, and end-to-end tests.
-- General file attachments remain deferred; the v5 attachment surface currently
+- General file attachments remain deferred; the current attachment surface
   supports images.
+- The pinned Copilot SDK supplies no universal caller causal ID, complete
+  pending-interaction hydration after resume, native task/queue snapshot cursor,
+  or per-command settlement event. Protocol v6 preserves those unknowns and
+  correlates display/consumption only when the exact native message identity is
+  present.
+- Full lifecycle state is query-only; catalog streams carry its bounded label.
+  The reference web consumes that label but does not yet perform the complete
+  snapshot/native-stream handoff.
+- Seamless p2prpc renewal remains an external dependency. The current source
+  pins `@arduano/p2prpc-core@0.2.1` and claims no renewal qualification.
 
-Protocol v5 is an explicit compatibility boundary; the released v4 evidence
-remains historical. There is no partially adopted v2/v3 architecture
-to finish. New work should preserve the boundaries above or make
+Protocol v6 is an explicit compatibility boundary; released v4/v5 evidence
+remains historical. There is no partially adopted v2/v3 architecture to finish.
+New work should preserve the boundaries above or make
 an explicit protocol/design change with tests and migration consequences.
 
 ## Documentation authority
@@ -496,7 +564,8 @@ an explicit protocol/design change with tests and migration consequences.
 - This page owns **current state and fresh-session context**.
 - Wiki topic pages own **operator and integration guidance**.
 - `docs/design/` owns **deep behavioral invariants**, including the v5 image
-  design; older maintained design filenames remain stable for links.
+  design and the protocol-v6 Copilot lifecycle design; older maintained design
+  filenames remain stable for links.
 - `docs/checkpoint-v4.md` owns **release qualification evidence**.
 - `docs/deployment-v4.md` owns **the detailed personal deployment runbook**.
 - `docs/research` and explicitly archived v2/v3 documents are historical input,

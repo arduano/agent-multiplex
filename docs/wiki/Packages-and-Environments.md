@@ -4,20 +4,21 @@ Use the narrowest package that owns the behavior being changed. The protocol is
 transport-compatible data; the core packages are transport-neutral services;
 apps are reference composition roots.
 
-Qualification entries below describe the released boundary. The v5 image change
-requires new exact-source qualification; see [current state](Current-State.md).
+The maintained source is the unreleased protocol-v6 lifecycle boundary. The
+latest published packages remain protocol v5, and their receipts do not qualify
+this source. See [current state](Current-State.md) for the exact distinction.
 
 ## Package map
 
 | Package or app | Owns | Does not own |
 | --- | --- | --- |
-| `@arduano/agent-multiplex-protocol` | Zod schemas, IDs, streams, lifecycle and tRPC-compatible contracts | Persistence, routing, native SDK calls |
+| `@arduano/agent-multiplex-protocol` | Zod schemas, IDs, streams, executable lifecycle reducer/projections, typed command errors, and tRPC-compatible contracts | Persistence, routing, native SDK calls |
 | `@arduano/agent-multiplex-storage-sqlite` | Hardened single-writer SQLite lifecycle, migration ledger, integrity, checkpoint, backup | Domain schema or replication policy |
 | `@arduano/agent-multiplex-control-node-core` | Canonical catalog/metadata, branch replication, recursive routing, operation records | Agent processes or gateway authentication |
-| `@arduano/agent-multiplex-runtime-node-core` | Bindings, path policy, launch/provider/backend registry, durable runtime journals, image storage, terminal broker | Canonical metadata or multi-source selection |
+| `@arduano/agent-multiplex-runtime-node-core` | Bindings, path policy, launch/provider/backend registry, durable runtime and lifecycle journals, image storage, terminal broker | Canonical metadata or multi-source selection |
 | `@arduano/agent-multiplex-gateway-core` | Validated multi-source projection, overlap suppression, routing, restricted launch-plugin port | Domain authority or native execution |
 | `@arduano/agent-multiplex-transport-p2prpc` | Authenticated endpoint-pinned node links using p2prpc | Browser auth or application policy |
-| `@arduano/agent-multiplex-client` | Browser-safe HTTP/WS client construction, command/image helpers, cursor-aware watches | Node p2prpc or UI state |
+| `@arduano/agent-multiplex-client` | Browser-safe HTTP/WS client construction, command/image helpers, lifecycle/native handoff, cursor-aware watches | Node p2prpc or UI state |
 | `@arduano/agent-multiplex-client-p2prpc` | Node-only direct p2prpc control-source client | Browser bundles or gateway projection |
 | `@arduano/agent-multiplex-adapter-codex` | Codex app-server RPC, native events/history/interactions, shared-server terminal | Catalog authority or workspace provisioning |
 | `@arduano/agent-multiplex-adapter-copilot` | Copilot SDK sessions, events/history/interactions, BYOK, experimental TUI bridge | Catalog authority or generic provider policy |
@@ -29,7 +30,7 @@ requires new exact-source qualification; see [current state](Current-State.md).
 | `apps/web` | React operator workspace | Canonical transcript or metadata storage |
 
 `apps/host` and `packages/host-core` are archived protocol-v2 evidence. They are
-not workspaces and are never valid dependencies for protocol v5.
+not workspaces and are never valid dependencies for protocol v6.
 
 The published `@arduano/agent-multiplex-web` package contains the already-built
 browser assets in `dist/client` as well as its small Node asset-serving entry
@@ -48,16 +49,18 @@ consumers should serve or compose the packaged output rather than rebuilding it.
 | Reproducible release toolchain | Node `24.19.0`, npm `11.17.0` |
 | Qualification container base | `node:24.19.0-bookworm-slim` at OCI index digest `sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df` |
 | Module system | TypeScript/JavaScript ESM |
-| Wire contract | Agent Multiplex protocol 5; see the [release baseline](Current-State.md#release-and-compatibility-baseline) |
+| Wire contract | Agent Multiplex protocol 6 in current source; coordinated break from the published protocol-v5 graph |
 | Node transport | Exact `@arduano/p2prpc-core@0.2.1` package (p2prpc v1 API) |
 | Qualified OS | Linux x86-64 Docker |
 | Qualified Codex | `@openai/codex` / CLI `0.152.0` |
-| Qualified Copilot | SDK/CLI package `1.0.81`; SDK `1.0.11` |
+| Pinned Copilot source | CLI package `1.0.81`; SDK `1.0.13`; protocol-v6 native/model qualification is not claimed |
 | Browser | Modern browser with WebSocket; SHA-256 uses Web Crypto or the bundled `@noble/hashes` fallback |
 | Persistence | Local filesystem with SQLite locking and durable rename semantics |
 
-The release-authorizing real receipt used Node `24.19.0` and Docker Server
-`29.7.2`. Exact receipt and p2prpc identities are in [Releases](Releases.md).
+The latest release-authorizing real receipt used Node `24.19.0` and Docker
+Server `29.7.2`; it retains its recorded protocol-v5 scope. Exact receipt and
+p2prpc identities are in [Releases](Releases.md). No live/native protocol-v6
+receipt exists for the lifecycle change.
 
 macOS may satisfy the POSIX and native-module assumptions, but it has not been
 qualified by the retained Docker receipts. The maintained Codex supervisor uses
@@ -77,14 +80,16 @@ npm run check:checkpoint
 
 Build, typecheck, and test begin by deleting active workspace `dist/` trees.
 This prevents renamed or removed modules from surviving an incremental build.
-`check:checkpoint` verifies exactly 16 active v5 workspaces, the lockfile and
+`check:checkpoint` verifies exactly 16 active workspaces, the lockfile and
 project references, archive exclusion, package entry points, the exact p2prpc
 dependency, Docker build inputs, and compiler-output provenance.
 
 Normal gates validate the locked public transport dependency independently of
-any sibling `../p2prpc` checkout. Qualify that checkout explicitly when working
-on transport changes. Only maintained Docker acceptance suites track the
-current release image; archived fixtures remain historical evidence.
+any sibling `../p2prpc` checkout. The separate p2prpc renewal implementation has
+not been merged or pinned in this source; it must be qualified and released
+independently before any future exact pin update. Only maintained Docker
+acceptance suites track the current source image; archived fixtures remain
+historical evidence.
 
 ## Choosing a layer
 

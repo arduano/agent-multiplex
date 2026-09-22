@@ -1758,7 +1758,7 @@ function printCommandRecord(record: CommandRecord, json: boolean): void {
       `command ${record.commandId} ${record.state}${record.sessionId ? ` session=${record.sessionId}` : ""}`,
     );
     if (record.result !== undefined) printJson(record.result);
-    if (record.error) console.error(record.error);
+    if (record.error) console.error(`${record.error.message} [${record.error.code}; diagnostic ${record.error.diagnosticId}]`);
   }
   if (record.state === "failed" || record.state === "outcomeUnknown") {
     process.exitCode = 2;

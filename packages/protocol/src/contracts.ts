@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { accessSnapshotSchema } from "./access-snapshot.js";
+import { lifecycleSnapshotSchema } from "./lifecycle.js";
 
 import {
   archiveRecordSchema,
@@ -121,7 +122,7 @@ export type ComponentKind = z.infer<typeof componentKindSchema>;
 
 const systemDescriptionBase = {
   application: z.literal("agent-multiplex"),
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(6),
   instanceId: z.string().min(1),
   capabilities: z.array(z.string().min(1).max(256)),
 } as const;
@@ -257,6 +258,10 @@ export const accessContract = {
     stop: { input: stopCommandSchema, output: commandRecordSchema },
     archive: { input: archiveRequestSchema, output: archiveRecordSchema },
     execute: { input: commandEnvelopeSchema, output: commandRecordSchema },
+    readLifecycle: {
+      input: z.object({ sessionId: sessionIdSchema }).strict(),
+      output: lifecycleSnapshotSchema,
+    },
     readNativeState: {
       input: z.object({
         sessionId: sessionIdSchema,
@@ -442,6 +447,10 @@ export const runtimeNodeContract = {
         request: archiveRequestSchema,
       }),
       output: archiveRecordSchema,
+    },
+    readLifecycle: {
+      input: z.object({ runtimeNodeBootId: runtimeNodeBootIdSchema, sessionId: sessionIdSchema }).strict(),
+      output: lifecycleSnapshotSchema,
     },
     readNativeState: {
       input: z.object({
@@ -783,6 +792,10 @@ export const controlNodeLinkContract = {
     archive: {
       input: controlNodeLinkFenceSchema.extend({ request: archiveRequestSchema }),
       output: archiveRecordSchema,
+    },
+    readLifecycle: {
+      input: controlNodeLinkFenceSchema.extend({ sessionId: sessionIdSchema }).strict(),
+      output: lifecycleSnapshotSchema,
     },
     readNativeState: {
       input: controlNodeLinkFenceSchema.extend({

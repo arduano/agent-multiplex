@@ -17,7 +17,7 @@ const sessionId = newSessionId();
 const tasksInput = { sessionId, request: { harness: "copilot", view: "tasks" } } as const;
 const historyInput = { sessionId, request: { harness: "copilot", limit: 100 } } as const;
 const description = {
-  protocolVersion: 5,
+  protocolVersion: 6,
   componentKind: "access-gateway",
   dataAuthority: "none",
   instanceId: "independent-http-test",

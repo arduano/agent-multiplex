@@ -1,6 +1,6 @@
 # @arduano/agent-multiplex-runtime-node-core
 
-The transport-neutral protocol-v4 runtime-node implementation for Agent
+The transport-neutral protocol-v6 runtime-node implementation for Agent
 Multiplex. It owns native session bindings, durable command and launch journals,
 provider recovery checkpoints, metadata proposals, and optional managed PTYs.
 

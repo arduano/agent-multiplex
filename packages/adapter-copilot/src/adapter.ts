@@ -228,6 +228,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
+    // This baseline must precede any callback or event that createSession can
+    // synchronously buffer. Later positive interaction facts then extend it.
+    bridge.interactionHydration(true);
     const vendorSessionId = nativeSessionId(options.native) ?? randomUUID();
     const model = options.model ?? this.#defaultModel;
     const config = this.sessionConfig(
@@ -299,6 +302,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
+    // Resume cannot prove absence because pending callbacks are ephemeral, but
+    // its partial baseline must still precede any callback replay.
+    bridge.interactionHydration(false);
     const cwd = options.cwd ?? null;
     const model = options.model ?? this.#defaultModel;
     const config = this.resumeConfig(

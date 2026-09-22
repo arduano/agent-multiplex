@@ -20,7 +20,8 @@ async function fixture() {
   const store = new RuntimeNodeStore(":memory:");
   const runtimeNodeId = newRuntimeNodeId(); const runtimeNodeBootId = newRuntimeNodeBootId();
   const payload = { items: [{ id: "queue-id", messageId: "message-id", displayText: "hello", agentMode: "interactive", kind: "message" }], steeringMessages: [] };
-  const readNativeState = vi.fn(async () => ({ harness: "copilot" as const, vendorSessionId: "native-state", payload }));
+  const readNativeState = vi.fn(async (input: NativeStateRequest) => ({ harness: "copilot" as const, vendorSessionId: "native-state",
+    payload: input.harness === "copilot" && input.view === "tasks" ? { tasks: [] } : payload }));
   const readNativeHistory = vi.fn(async () => { throw new Error("history must not run"); });
   const session: AdapterSession = {
     harness: "copilot", adapterScopeId: "native-state-test", vendorSessionId: "native-state", cwd, runtimeEpoch: newRuntimeEpoch(),
@@ -40,11 +41,28 @@ async function fixture() {
     harness: "copilot", input: { cwd } };
   service.createLaunch(launch);
   await vi.waitFor(() => expect(service.getLaunch(launch.launchId)?.state).toBe("succeeded"));
+  await vi.waitFor(async () => expect((await service.readLifecycle(launch.sessionId)).state).toMatchObject({
+    tasks: { freshness: "observed" }, queue: { freshness: "observed" },
+  }));
+  readNativeState.mockClear();
   const caller = createRuntimeNodeRouter(service).createCaller({});
   return { service, store, session, launch, runtimeNodeBootId, readNativeState, readNativeHistory, resume, caller, payload };
 }
 
 describe("active-only native session observations", () => {
+  it("exposes the atomic lifecycle snapshot/cursor under the runtime boot fence without native reads", async () => {
+    const f = await fixture();
+    const snapshot = await f.caller.sessions.readLifecycle({ sessionId: f.launch.sessionId, runtimeNodeBootId: f.runtimeNodeBootId });
+    expect(snapshot).toMatchObject({ nextNativeSequence: 0, state: { version: 1, fence: {
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, runtimeNodeBootId: f.runtimeNodeBootId,
+      runtimeEpoch: f.session.runtimeEpoch, bindingRevision: 1,
+    } } });
+    expect(f.readNativeState).not.toHaveBeenCalled(); expect(f.readNativeHistory).not.toHaveBeenCalled();
+    expect(f.resume).not.toHaveBeenCalled(); expect(f.session.execute).not.toHaveBeenCalled();
+    await expect(f.caller.sessions.readLifecycle({ sessionId: f.launch.sessionId, runtimeNodeBootId: newRuntimeNodeBootId() }))
+      .rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+
   it("routes a bounded read through the runtime boot fence with no history, resume or durable command", async () => {
     const f = await fixture(); const before = f.store.getSession(f.launch.sessionId);
     expect(await f.caller.sessions.readNativeState({ sessionId: f.launch.sessionId, runtimeNodeBootId: f.runtimeNodeBootId, request })).toEqual({

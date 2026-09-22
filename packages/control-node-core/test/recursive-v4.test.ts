@@ -53,7 +53,7 @@ function addArchivedSession(
     allowedRoots: ["/work"],
     harnesses: [],
     launchProfiles: [],
-    protocolVersion: 5,
+    protocolVersion: 6,
   });
   const active = sessionId === undefined
     ? catalog.reconcileInventory({
@@ -151,7 +151,7 @@ function attach(
     feedId: childNode.feedId,
     name: childNode.name,
     endpointId: childEndpointId,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: childNode.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

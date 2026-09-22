@@ -205,7 +205,7 @@ try {
   const authority = controlNodes[0];
   const topologyChecks = {
     gatewayHasZeroAuthority:
-      system.protocolVersion === 5 &&
+      system.protocolVersion === 6 &&
       system.componentKind === "access-gateway" &&
       system.dataAuthority === "none",
     exactlyOneSelectedControlSource:
@@ -216,7 +216,7 @@ try {
       controlNodes.length === 1 &&
       authority?.presence === "online" &&
       authority?.dataRole.role === "authority" &&
-      authority?.protocolVersion === 5,
+      authority?.protocolVersion === 6,
     exactlyTwoOnlineRuntimeNodes:
       runtimeNodes.length === 2 &&
       runtimeNodes.every((node) =>

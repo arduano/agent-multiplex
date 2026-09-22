@@ -25,6 +25,7 @@ import type {
   LineageId,
   MetadataOperationRecord,
   MetadataPatch,
+  LifecycleSnapshot,
   NativeStateRequest,
   NativeStateResult,
   NativeHistoryRequest,
@@ -78,6 +79,7 @@ export interface RuntimeNodeConnection extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
+  readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot>;
   readNativeState?(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult>;
   readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   getTerminal?(input: TerminalGetInput): Promise<TerminalDescriptor | null>;
@@ -126,6 +128,7 @@ export interface ChildControlNodeConnection extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
+  readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot>;
   readNativeState?(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult>;
   readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   getTerminal?(input: TerminalGetInput): Promise<TerminalDescriptor | null>;

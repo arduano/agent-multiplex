@@ -20,7 +20,7 @@ describe("isolated authority crash boundaries", () => {
         const catalog=new ControlNodeCatalog({filename:workerData.filename,failpoint:point=>{
           if(armed && workerData.phase==='before-commit' && point==='metadata.authority.afterState')process.exit(42);
         }});
-        const node=catalog.registerRuntimeNode({runtimeNodeId:newRuntimeNodeId(),runtimeNodeBootId:newRuntimeNodeBootId(),name:'fixture',allowedRoots:['/work'],harnesses:[],protocolVersion:5});
+        const node=catalog.registerRuntimeNode({runtimeNodeId:newRuntimeNodeId(),runtimeNodeBootId:newRuntimeNodeBootId(),name:'fixture',allowedRoots:['/work'],harnesses:[],protocolVersion:6});
         const [session]=catalog.reconcileInventory({runtimeNodeId:node.runtimeNodeId,generation:workerData.generation,complete:true,capturedAt:new Date().toISOString(),sessions:[{harness:'codex',adapterScopeId:'fixture',vendorSessionId:'fixture',cwd:'/work',availability:'active',runtimeStatus:'idle',runtimeEpoch:newRuntimeEpoch(),lastActivityAt:new Date().toISOString()}]});
         new IsolatedRpc(parentPort,(method,args)=>{
           if(method!=='patch')throw new Error('unknown fixture action');

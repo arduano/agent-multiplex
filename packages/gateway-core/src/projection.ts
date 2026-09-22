@@ -18,6 +18,8 @@ import { isDeepStrictEqual } from "node:util";
 
 import {
   accessSnapshotSchema,
+  lifecycleSnapshotSchema,
+  type LifecycleSnapshot,
   accessStreamItemSchema,
   archiveRecordSchema,
   canonicalJson,
@@ -147,6 +149,7 @@ export interface ControlNodeSourceClient extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
+  readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot>;
   readNativeState?(
     sessionId: SessionId,
     request: NativeStateRequest,
@@ -971,6 +974,25 @@ export class AccessGatewayProjection {
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
     return this.#ownerForSession(sessionId).definition.client.readNativeHistory(sessionId, request);
+  }
+
+  public async readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+    const source = this.#ownerForSession(sessionId);
+    const generation = source.generation;
+    const owner = source.definition.client;
+    const snapshot = lifecycleSnapshotSchema.parse(await owner.readLifecycle(sessionId));
+    if (source !== this.#ownerForSession(sessionId) || source.generation !== generation) {
+      throw new GatewayRoutingError("CONFLICT", "lifecycle source changed during observation");
+    }
+    const fence = snapshot.state.fence;
+    this.#ownerForSessionBinding({ sessionId, runtimeNodeId: fence.runtimeNodeId, bindingRevision: fence.bindingRevision });
+    const current = source.snapshot?.sessions.find(item => item.sessionId === sessionId) ?? this.#sessionLookupRecords.get(sessionId);
+    const runtime = source.snapshot?.runtimeNodes.find(item => item.runtimeNodeId === fence.runtimeNodeId);
+    if (fence.sessionId !== sessionId || current?.catalogState === "archived" ||
+      fence.runtimeEpoch !== current?.runtimeEpoch || fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
+      throw new GatewayRoutingError("CONFLICT", "lifecycle snapshot does not match the selected runtime binding");
+    }
+    return snapshot;
   }
 
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {

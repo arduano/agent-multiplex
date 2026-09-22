@@ -51,6 +51,52 @@ function nativeEvent(
 }
 
 describe("ControlNodeEventHub native replay deduplication", () => {
+  it.each(["ahead", "missing", "expired"] as const)("reports a %s native cursor gap before live delivery", async (scenario) => {
+    const catalog = new ControlNodeCatalog({ filename: stateFile(scenario), now: clock });
+    const hub = new ControlNodeEventHub({ catalog, heartbeatMs: 60_000, nativeRingSize: 1 });
+    const sessionId = newSessionId();
+    const runtimeEpoch = newRuntimeEpoch();
+    if (scenario !== "missing") hub.publish(nativeEvent(catalog, sessionId, runtimeEpoch, 3));
+    const controller = new AbortController();
+    const iterator = hub.attach({
+      sessions: [sessionId], includeNative: true,
+      cursor: { ...catalog.feedCheckpoint(), native: { [sessionId]: { runtimeEpoch, sequence: scenario === "ahead" ? 8 : 0 } } },
+    }, controller.signal)[Symbol.asyncIterator]();
+    try {
+      await expect(iterator.next()).resolves.toMatchObject({ done: false, value: {
+        kind: "nativeGap", sessionId, recovery: "readNativeHistory",
+        reason: scenario === "ahead" ? expect.stringContaining("behind requested sequence 8")
+          : scenario === "missing" ? expect.stringContaining("no retained ring")
+            : expect.stringContaining("begins at sequence 3"),
+      } });
+      const next = iterator.next();
+      const live = nativeEvent(catalog, sessionId, runtimeEpoch, 9);
+      hub.publish(live);
+      await expect(next).resolves.toEqual({ done: false, value: live });
+    } finally {
+      controller.abort();
+      await iterator.return?.();
+      hub.close(); catalog.close();
+    }
+  });
+
+  it("ignores unselected missing cursor rings and compares sequence only within the latest epoch", async () => {
+    const catalog = new ControlNodeCatalog({ filename: stateFile("selected"), now: clock });
+    const hub = new ControlNodeEventHub({ catalog, heartbeatMs: 60_000 });
+    const sessionId = newSessionId();
+    const replacement = nativeEvent(catalog, sessionId, newRuntimeEpoch(), 0);
+    hub.publish(replacement);
+    const controller = new AbortController();
+    const iterator = hub.attach({ sessions: [sessionId], includeNative: true,
+      cursor: { ...catalog.feedCheckpoint(), native: {
+        [sessionId]: { runtimeEpoch: newRuntimeEpoch(), sequence: 99 },
+        [newSessionId()]: { runtimeEpoch: newRuntimeEpoch(), sequence: 99 },
+      } },
+    }, controller.signal)[Symbol.asyncIterator]();
+    try { await expect(iterator.next()).resolves.toEqual({ done: false, value: replacement }); }
+    finally { controller.abort(); await iterator.return?.(); hub.close(); catalog.close(); }
+  });
+
   it("suppresses reconnect replays and non-advancing sequences before replay or broadcast", async () => {
     const catalog = new ControlNodeCatalog({ filename: stateFile("reconnect"), now: clock });
     const hub = new ControlNodeEventHub({ catalog, heartbeatMs: 60_000 });
@@ -121,7 +167,7 @@ describe("ControlNodeEventHub native replay deduplication", () => {
       name: "native-dedup-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     const previousEpoch = newRuntimeEpoch();
     const [session] = catalog.reconcileInventory({

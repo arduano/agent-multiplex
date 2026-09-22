@@ -15,10 +15,10 @@ function fixture() {
   cleanup.push(() => root.close(), () => child.close());
   const local = child.localControlNode();
   const admission = root.attachChild({ controlNodeId: local.controlNodeId, controlNodeBootId: local.controlNodeBootId, feedId: local.feedId,
-    name: local.name, protocolVersion: 5, capabilities: local.capabilities, expectedParentControlNodeId: root.localControlNode().controlNodeId, childProof: child.attachmentProof() });
+    name: local.name, protocolVersion: 6, capabilities: local.capabilities, expectedParentControlNodeId: root.localControlNode().controlNodeId, childProof: child.attachmentProof() });
   child.applyParentAttachment(admission.attachment, "fixture-parent");
   const runtimeNodeId = newRuntimeNodeId(), now = new Date().toISOString();
-  child.registerRuntimeNode({ runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(), name: "runtime", allowedRoots: [], harnesses: [], protocolVersion: 5 });
+  child.registerRuntimeNode({ runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(), name: "runtime", allowedRoots: [], harnesses: [], protocolVersion: 6 });
   const [session] = child.reconcileInventory({ runtimeNodeId, generation: "fixture", complete: true, capturedAt: now, sessions: [{ harness: "copilot", adapterScopeId: "fixture" as AdapterScopeId,
     vendorSessionId: "native", cwd: "/work", availability: "active", runtimeStatus: "waitingForInput", runtimeEpoch: newRuntimeEpoch(), lastActivityAt: now }] });
   const pending: InteractionRecord = { interactionId: newInteractionId(), sessionId: session!.sessionId, harness: "copilot", runtimeEpoch: session!.runtimeEpoch!, requestType: "userInput",
@@ -69,7 +69,7 @@ describe("interaction projection ownership", () => {
     cleanup.push(() => other.close());
     const n = other.localControlNode();
     const a = f.root.attachChild({ controlNodeId: n.controlNodeId, controlNodeBootId: n.controlNodeBootId, feedId: n.feedId, name: n.name,
-      protocolVersion: 5, capabilities: n.capabilities, expectedParentControlNodeId: f.root.localControlNode().controlNodeId, childProof: other.attachmentProof() });
+      protocolVersion: 6, capabilities: n.capabilities, expectedParentControlNodeId: f.root.localControlNode().controlNodeId, childProof: other.attachmentProof() });
     other.applyParentAttachment(a.attachment, "fixture-parent");
     const snapshot = other.accessSnapshot();
     expect(() => f.root.replaceChildSnapshot(n.controlNodeId, a.attachment.attachmentId, { ...snapshot, interactions: [f.pending] })).toThrow();

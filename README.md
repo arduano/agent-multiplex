@@ -5,8 +5,11 @@ Copilot agent sessions. Native app servers stay on runtime machines while one
 typed access API serves CLIs, browsers, mobile clients, and bespoke internal
 dashboards.
 
-The maintained package graph uses protocol v5. Upgrade all roles together when
-adopting v5; see the [current release baseline](docs/wiki/Current-State.md#release-and-compatibility-baseline).
+The maintained source graph uses protocol v6. It is a coordinated clean break
+from protocol v5, so upgrade controls, runtimes, gateways, clients, and adapters
+together. See the
+[current source and release baseline](docs/wiki/Current-State.md#release-and-compatibility-baseline)
+and the [Copilot lifecycle design](docs/design/copilot-session-lifecycle-vnext.md).
 Archived protocol-v2 `host`,
 `worker`, `observer`, and `Fleet` APIs remain outside the maintained boundary.
 
@@ -49,8 +52,8 @@ CLI / web / mobile / bespoke dashboard
 
 - A **control node** is the canonical catalog and metadata authority for its
   realm. Controls form a strict tree.
-- A **runtime node** owns native processes, bindings, durable operation state,
-  and optional ephemeral terminals.
+- A **runtime node** owns native processes, bindings, durable operation and
+  Copilot lifecycle-evidence state, and optional ephemeral terminals.
 - An **access gateway** owns no domain data. It projects one or more control
   sources, suppresses redundant descendants, and routes authorized actions.
 - A **harness adapter** preserves native Codex or Copilot models, modes, events,
@@ -114,6 +117,13 @@ quotas, and repository policy belong in paired gateway/runtime extensions.
 Running and stopped sessions stay in normal views; archived sessions move to
 explicit bounded cold search. Metadata is a flat namespaced JSON key/value
 document and all canonical revisions come from the control authority.
+
+For an active Copilot binding, runtime-owned lifecycle evidence is separate from
+the catalog lifecycle and native transcript. Session rows carry a bounded
+projection; `sessions.readLifecycle` returns the full fenced state plus the
+native-stream handoff cursor. A gap or incomplete native observation remains
+unknown rather than being inferred from catalog idle, elapsed time, or queue
+absence.
 
 This project targets trusted personal or internal networks. Shared-secret
 enrollment and bearer authentication are not public multi-tenant identity or

@@ -9,7 +9,7 @@ host, secret, and audit controls where organizational users are involved.
 
 | Version | Security fixes |
 | --- | --- |
-| `0.1.x` (v4 release) and current protocol-v5 development | Yes |
+| Protocol-v4/v5 releases and current protocol-v6 development | Yes |
 | Protocol v3 and earlier | No |
 | Archived protocol-v2 host/worker source | No |
 
@@ -58,6 +58,10 @@ disclosure.
   provider secrets, app-server output, and the runtime account's OS authority.
 - Gateways are zero-authority protocol actors but can observe all data granted by
   their sources and route powerful actions.
+- `sessions.readLifecycle` requires `read` access. Its state is payload-free but
+  exposes native task, queue, interaction, child, message, and command identities.
+  The runtime is its only writer; control and gateway routes must preserve the
+  runtime boot, binding, native epoch, sequence, and selected-source fences.
 - Gateway plugins, runtime providers/backends, and adapters are trusted
   in-process modules. They are not tenant sandboxes.
 - A statically injected runtime path policy is also trusted application code
@@ -126,6 +130,10 @@ disclosure.
   session metadata.
 - Reconcile `outcomeUnknown` by its stable operation/resource identity; do not
   blindly retry a potentially committed action.
+- Generic durable command errors use fixed public text, an allowlisted code,
+  stage, certainty and diagnostic ID. Never copy native exception text, stack or
+  causes into these receipts. This does not sanitize native history, opaque
+  terminal output, launch/archive errors, or arbitrary thrown RPC errors.
 - Treat a gateway `conflict` as a correctness incident; source priority cannot
   repair an authority or immutable-record fork.
 - Requalify the exact native and p2prpc dependency boundary before upgrades.

@@ -26,6 +26,7 @@ import {
   type LaunchProfileIdentity,
   type LaunchProviderId,
   type LaunchRequest,
+  type LifecycleSnapshot,
   type NativeStateRequest,
   type NativeStateResult,
   type NativeHistoryRequest,
@@ -220,6 +221,10 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
   public async execute(command: CommandEnvelope) {
     return this.#mutation(async () =>
       (await this.#access()).sessions.execute.mutate(command));
+  }
+
+  public async readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+    return this.#query(async () => (await this.#access()).sessions.readLifecycle.query({ sessionId }));
   }
 
   public async readNativeState(

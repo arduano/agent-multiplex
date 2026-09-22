@@ -31,7 +31,7 @@ export const runtimeNodeDescriptorSchema = z.object({
   allowedRoots: z.array(z.string()),
   harnesses: z.array(harnessCatalogEntrySchema),
   launchProfiles: z.array(launchProfileDescriptorSchema).default([]),
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(6),
 });
 export type RuntimeNodeDescriptor = z.infer<
   typeof runtimeNodeDescriptorSchema

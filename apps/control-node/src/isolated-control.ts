@@ -22,7 +22,7 @@ import { createIsolatedControlRouter, createIsolatedAccessRouter } from "./isola
 type ReverseDescriptor = ChildControlNodePeerBinding & { endpointId: string };
 type Enrollment = ReturnType<ControlNodeCatalog["activePeerEnrollment"]>;
 const reverseMethods = new Set<string>([
-  "readSubtreeSnapshot", "listModels", "listLaunchProfileModels", "refreshInventory", "createLaunch", "getLaunch", "listLaunches", "searchSessions", "getSession", "resume", "stop", "archive", "getArchive", "execute", "readNativeState", "readNativeHistory", "beginImageUpload", "writeImageUpload", "commitImageUpload", "abortImageUpload", "resolveImagePath", "readImage", "imageLimits", "getTerminal", "openTerminal", "acquireTerminalLease", "renewTerminalLease", "releaseTerminalLease", "sendTerminalInput", "terminateTerminal", "resolveInteraction", "getCommand", "applyMetadata", "applyDetachment",
+  "readSubtreeSnapshot", "listModels", "listLaunchProfileModels", "refreshInventory", "createLaunch", "getLaunch", "listLaunches", "searchSessions", "getSession", "resume", "stop", "archive", "getArchive", "execute", "readLifecycle", "readNativeState", "readNativeHistory", "beginImageUpload", "writeImageUpload", "commitImageUpload", "abortImageUpload", "resolveImagePath", "readImage", "imageLimits", "getTerminal", "openTerminal", "acquireTerminalLease", "renewTerminalLease", "releaseTerminalLease", "sendTerminalInput", "terminateTerminal", "resolveInteraction", "getCommand", "applyMetadata", "applyDetachment",
 ] satisfies Array<keyof ChildControlNodeConnection>);
 
 /** Single storage owner. A timeout retires response acceptance, never ownership.

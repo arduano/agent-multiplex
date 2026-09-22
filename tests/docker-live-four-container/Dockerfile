@@ -72,4 +72,4 @@ COPY --chmod=0755 tests/docker-live-four-container/codex-runtime-entrypoint.sh \
   /usr/local/bin/agent-multiplex-live-codex-runtime
 
 LABEL org.opencontainers.image.title="Agent Multiplex four-container live acceptance"
-LABEL org.opencontainers.image.description="Protocol-v4 authority, gateway UI, Codex runtime, and Copilot BYOK runtime"
+LABEL org.opencontainers.image.description="Protocol-v6 authority, gateway UI, Codex runtime, and Copilot BYOK runtime"

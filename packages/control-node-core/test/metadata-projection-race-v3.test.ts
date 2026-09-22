@@ -46,7 +46,7 @@ function addSession(catalog: ControlNodeCatalog, vendorSessionId: string) {
     name: `runtime-${vendorSessionId}`,
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 5,
+    protocolVersion: 6,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -159,7 +159,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -452,7 +452,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -466,7 +466,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       name: "command-child-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     parent.replaceChildSnapshot(
       childNode.controlNodeId,
@@ -553,7 +553,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -567,7 +567,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       name: "proxy-command-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     parent.replaceChildSnapshot(
       childNode.controlNodeId,
@@ -704,7 +704,7 @@ function attachControlNode(
     feedId: local.feedId,
     name: local.name,
     endpointId: local.endpointId,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

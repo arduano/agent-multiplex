@@ -1,0 +1,285 @@
+import { z } from "zod";
+import { commandIdSchema, runtimeEpochSchema, runtimeNodeBootIdSchema, runtimeNodeIdSchema, sessionIdSchema } from "./ids.js";
+
+/** Independent contract version: transport/source epochs are not native generations. */
+export const LIFECYCLE_VERSION = 1 as const;
+const opaqueId = z.string().min(1).max(4_096);
+const counter = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+export const lifecycleFenceSchema = z.object({
+  sessionId: sessionIdSchema,
+  runtimeNodeId: runtimeNodeIdSchema,
+  runtimeNodeBootId: runtimeNodeBootIdSchema,
+  bindingRevision: z.number().int().positive(),
+  runtimeEpoch: runtimeEpochSchema,
+}).strict();
+export type LifecycleFence = z.infer<typeof lifecycleFenceSchema>;
+
+const taskSchema = z.object({ id: opaqueId, kind: z.enum(["agent", "shell", "client"]), status: z.enum(["running", "idle", "completed", "failed", "cancelled", "orphaned"]) }).strict();
+const queueItemSchema = z.object({ id: opaqueId, messageId: opaqueId.optional(), kind: z.enum(["queued", "steering"]) }).strict();
+const childIdentitySchema = z.string().min(6).max(4_096).regex(/^(agent|tool):.+$/, "child identity must carry its namespace");
+const childSchema = z.object({ id: childIdentitySchema, state: z.enum(["running", "settled", "completed", "failed", "unknown"]) }).strict();
+const lifecycleOwnerSchema = z.union([
+  z.literal("root"),
+  z.string().min(6).max(4_096).regex(/^(agent|tool):.+$/, "child owner must carry its identity namespace"),
+]);
+const interactionSchema = z.object({ id: opaqueId, owner: lifecycleOwnerSchema, kind: z.enum(["permission", "userInput", "elicitation", "exitPlan", "other"]) }).strict();
+const commandSchema = z.object({
+  commandId: commandIdSchema, payloadHash: z.string().min(1).max(256),
+  kind: z.enum(["send", "steer", "compact", "other"]),
+  admission: z.enum(["prepared", "dispatched", "accepted", "failed", "outcomeUnknown"]),
+  messageId: opaqueId.optional(),
+  displayed: z.boolean(), consumed: z.boolean(), settled: z.boolean(),
+}).strict();
+export type LifecycleCommand = z.infer<typeof commandSchema>;
+
+/** Payload-free runtime observation. None of these fields grant catalog authority. */
+export const lifecycleStateSchema = z.object({
+  version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema,
+  nextSequence: counter, continuity: z.enum(["continuous", "gap"]),
+  root: z.object({ phase: z.enum(["unknown", "paused", "idle", "working"]), cycle: opaqueId.nullable(), outcome: z.enum(["none", "finished", "interrupted", "failed"]) }).strict(),
+  tasks: z.object({ revision: counter, freshness: z.enum(["unknown", "observed"]), items: z.array(taskSchema).max(1_000) }).strict(),
+  children: z.object({ completeness: z.enum(["complete", "partial"]), items: z.array(childSchema).max(256) }).strict(),
+  queue: z.object({
+    revision: counter,
+    freshness: z.enum(["unknown", "observed"]),
+    items: z.array(queueItemSchema).max(1_000),
+    unidentifiedSteering: counter,
+    inFlightSteering: counter.nullable(),
+  }).strict(),
+  interactions: z.object({ completeness: z.enum(["complete", "partial"]), items: z.array(interactionSchema).max(256) }).strict(),
+  commands: z.array(commandSchema).max(256),
+  displayedMessageIds: z.array(opaqueId).max(512),
+  consumedMessageIds: z.array(opaqueId).max(512),
+  compaction: z.enum(["unknown", "running", "observedComplete"]),
+}).strict();
+export type LifecycleState = z.infer<typeof lifecycleStateSchema>;
+
+export const lifecycleFactSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("rootStarted"), cycleId: opaqueId }).strict(),
+  z.object({ type: z.literal("rootModelIdle") }).strict(),
+  z.object({ type: z.literal("rootIdle"), aborted: z.boolean() }).strict(),
+  z.object({ type: z.literal("rootFailed") }).strict(),
+  z.object({ type: z.literal("rootObserved"), active: z.boolean() }).strict(),
+  z.object({ type: z.literal("child"), id: childIdentitySchema, state: z.enum(["running", "completed", "failed"]) }).strict(),
+  z.object({ type: z.literal("childrenHydrated"), items: z.array(childSchema).max(256), complete: z.boolean() }).strict(),
+  z.object({ type: z.literal("tasksInvalidated") }).strict(),
+  z.object({ type: z.literal("tasksObserved"), revision: counter, items: z.array(taskSchema).max(1_000) }).strict(),
+  z.object({ type: z.literal("queueInvalidated") }).strict(),
+  z.object({
+    type: z.literal("queueObserved"),
+    revision: counter,
+    items: z.array(queueItemSchema).max(1_000),
+    unidentifiedSteering: counter,
+    inFlightSteering: counter.nullable(),
+  }).strict(),
+  z.object({ type: z.literal("interactionOpened"), interaction: interactionSchema }).strict(),
+  z.object({ type: z.literal("interactionClosed"), id: opaqueId }).strict(),
+  z.object({ type: z.literal("interactionsHydrated"), items: z.array(interactionSchema).max(256), complete: z.boolean() }).strict(),
+  z.object({ type: z.literal("commandPrepared"), commandId: commandIdSchema, payloadHash: z.string().min(1).max(256), kind: commandSchema.shape.kind }).strict(),
+  z.object({ type: z.literal("commandReceipt"), commandId: commandIdSchema, payloadHash: z.string().min(1).max(256), admission: commandSchema.shape.admission.exclude(["prepared"]), messageId: opaqueId.optional() }).strict(),
+  z.object({ type: z.literal("messageDisplayed"), messageId: opaqueId, owner: lifecycleOwnerSchema }).strict(),
+  z.object({ type: z.literal("messageConsumed"), messageId: opaqueId, owner: lifecycleOwnerSchema }).strict(),
+  z.object({ type: z.literal("commandSettled"), commandId: commandIdSchema, payloadHash: z.string().min(1).max(256) }).strict(),
+  z.object({ type: z.literal("compaction"), phase: z.enum(["running", "observedComplete"]) }).strict(),
+  z.object({ type: z.literal("gap") }).strict(),
+]);
+export type LifecycleFact = z.infer<typeof lifecycleFactSchema>;
+export const lifecycleEvidenceSchema = z.object({ version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema, sequence: counter, fact: lifecycleFactSchema }).strict();
+export type LifecycleEvidence = z.infer<typeof lifecycleEvidenceSchema>;
+
+export function initialLifecycle(fence: LifecycleFence): LifecycleState {
+  return { version: LIFECYCLE_VERSION, fence, nextSequence: 0, continuity: "continuous",
+    root: { phase: "unknown", cycle: null, outcome: "none" },
+    tasks: { revision: 0, freshness: "unknown", items: [] }, children: { completeness: "partial", items: [] },
+    queue: { revision: 0, freshness: "unknown", items: [], unidentifiedSteering: 0, inFlightSteering: null },
+    interactions: { completeness: "partial", items: [] }, commands: [],
+    displayedMessageIds: [], consumedMessageIds: [], compaction: "unknown" };
+}
+export function sameLifecycleFence(a: LifecycleFence, b: LifecycleFence): boolean {
+  return a.sessionId === b.sessionId && a.runtimeNodeId === b.runtimeNodeId && a.runtimeNodeBootId === b.runtimeNodeBootId && a.bindingRevision === b.bindingRevision && a.runtimeEpoch === b.runtimeEpoch;
+}
+function invalidate(s: LifecycleState): LifecycleState {
+  return { ...s, continuity: "gap", root: { ...s.root, phase: "unknown", cycle: null, outcome: "none" },
+    tasks: { ...s.tasks, revision: s.tasks.revision + 1, freshness: "unknown" },
+    queue: { ...s.queue, revision: s.queue.revision + 1, freshness: "unknown" },
+    children: { completeness: "partial", items: s.children.items.map((c) => ({ ...c, state: "unknown" })) },
+    // A close may be among the lost facts. Retaining an item would turn stale
+    // positive evidence into a false blocking request after recovery.
+    interactions: { completeness: "partial", items: [] }, compaction: "unknown" };
+}
+
+function startRootCycle(s: LifecycleState, cycleId: string): LifecycleState {
+  return { ...s, continuity: "continuous", root: { phase: "working", cycle: cycleId, outcome: "none" } };
+}
+
+/** Pure single-writer reducer. A gap requires a replacement snapshot, never an idle guess. */
+export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEvidence): LifecycleState {
+  if (evidence.version !== LIFECYCLE_VERSION || !sameLifecycleFence(state.fence, evidence.fence) || evidence.sequence < state.nextSequence) return state;
+  if (evidence.sequence !== state.nextSequence) {
+    const gapped = { ...invalidate(state), nextSequence: evidence.sequence + 1 };
+    // A uniquely identified start is a safe foreground recovery boundary. It
+    // certifies only the new root cycle; invalidated dimensions remain unknown.
+    return evidence.fact.type === "rootStarted" ? startRootCycle(gapped, evidence.fact.cycleId) : gapped;
+  }
+  let s: LifecycleState = { ...state, nextSequence: evidence.sequence + 1 };
+  const f = evidence.fact;
+  switch (f.type) {
+    case "gap": return invalidate(s);
+    case "rootStarted": return startRootCycle(s, f.cycleId);
+    // Model-loop idle is weaker than whole-session idle. Keep it distinct so a
+    // complete task/queue snapshot cannot accidentally project Ready while an
+    // attached shell or background agent may still be winding down.
+    case "rootModelIdle": return { ...s, root: { ...s.root, phase: "paused" } };
+    case "rootObserved": {
+      // metadata.activity carries no cycle identity. Activity discovered after
+      // a terminal/idle observation starts an unidentified cycle and therefore
+      // must discard the old cycle's outcome rather than revive it on the next
+      // inactive sample.
+      if (f.active && s.root.phase !== "working") {
+        return { ...s, root: { phase: "working", cycle: null, outcome: "none" } };
+      }
+      return { ...s, root: { ...s.root, phase: f.active ? "working" : "idle" } };
+    }
+    case "rootFailed": return { ...s, root: { ...s.root, phase: "idle", outcome: "failed" } };
+    case "rootIdle": return { ...s, continuity: "continuous",
+      root: { ...s.root, phase: "idle", outcome: s.root.outcome !== "none" ? s.root.outcome
+        : f.aborted ? "interrupted" : s.root.cycle === null ? "none" : "finished" },
+      // The SDK defines root session.idle as having no background agents or
+      // attached shell commands in flight. It proves quiescence, not a missing
+      // child's success outcome.
+      children: { completeness: "complete", items: s.children.items.map((c) => c.state === "running" || c.state === "unknown" ? { ...c, state: "settled" } : c) } };
+    case "child": {
+      const children = s.children.items.filter((c) => c.id !== f.id);
+      if (children.length >= 256) return invalidate(s);
+      return { ...s, children: { ...s.children, items: [...children, { id: f.id, state: f.state }] } };
+    }
+    case "childrenHydrated": {
+      if (f.complete) return { ...s, children: { completeness: "complete", items: f.items } };
+      const hydrated = new Map(f.items.map((child) => [child.id, child]));
+      for (const child of s.children.items) hydrated.set(child.id, child);
+      return { ...s, children: { completeness: "partial", items: [...hydrated.values()] } };
+    }
+    case "tasksInvalidated": return { ...s, tasks: { ...s.tasks, revision: s.tasks.revision + 1, freshness: "unknown" } };
+    case "tasksObserved": return f.revision !== s.tasks.revision ? s : { ...s, tasks: { ...s.tasks, freshness: "observed", items: f.items } };
+    case "queueInvalidated": return { ...s, queue: { ...s.queue, revision: s.queue.revision + 1, freshness: "unknown" } };
+    case "queueObserved": return f.revision !== s.queue.revision ? s : { ...s, queue: {
+      ...s.queue,
+      freshness: "observed",
+      items: f.items,
+      unidentifiedSteering: f.unidentifiedSteering,
+      inFlightSteering: f.inFlightSteering,
+    } };
+    case "interactionOpened": {
+      const items = s.interactions.items.filter((i) => i.id !== f.interaction.id);
+      if (items.length >= 256) return invalidate(s);
+      return { ...s, interactions: { ...s.interactions, items: [...items, f.interaction] } };
+    }
+    case "interactionClosed": return { ...s, interactions: { ...s.interactions, items: s.interactions.items.filter((i) => i.id !== f.id) } };
+    case "interactionsHydrated": {
+      if (f.complete) return { ...s, interactions: { completeness: "complete", items: f.items } };
+      // A reconnect snapshot is explicitly incomplete. Preserve callbacks that
+      // opened while the snapshot was in flight; an empty partial observation
+      // can never prove their absence.
+      const hydrated = new Map(f.items.map((interaction) => [interaction.id, interaction]));
+      for (const interaction of s.interactions.items) hydrated.set(interaction.id, interaction);
+      return { ...s, interactions: { completeness: "partial", items: [...hydrated.values()] } };
+    }
+    case "commandPrepared": {
+      const old = s.commands.find((c) => c.commandId === f.commandId);
+      if (old) {
+        if (old.payloadHash !== f.payloadHash || old.kind !== f.kind) throw new Error("lifecycle command identity conflict");
+        return s;
+      }
+      // Durable command_journal remains the unbounded original-ID receipt
+      // source. This is only a bounded recent-correlation view: eviction loses
+      // optional later refinement but never changes the durable receipt or
+      // manufactures delivery certainty.
+      let commands = s.commands;
+      if (commands.length === 256) {
+        const evict = commands.findIndex((command) =>
+          command.settled ||
+          command.displayed ||
+          command.consumed ||
+          command.admission === "failed" ||
+          (command.admission === "accepted" && command.kind !== "send" && command.kind !== "steer"));
+        commands = commands.filter((_, index) => index !== (evict === -1 ? 0 : evict));
+      }
+      return { ...s, commands: [...commands, { commandId: f.commandId, payloadHash: f.payloadHash, kind: f.kind, admission: "prepared", displayed: false, consumed: false, settled: false }] };
+    }
+    case "commandReceipt": {
+      const old = s.commands.find((c) => c.commandId === f.commandId);
+      if (!old) return s;
+      if (old.payloadHash !== f.payloadHash || (old.messageId !== undefined && f.messageId !== undefined && old.messageId !== f.messageId)) throw new Error("lifecycle command identity conflict");
+      if (old.admission === "accepted" || old.admission === "failed") {
+        if ((f.admission === "accepted" || f.admission === "failed") && old.admission !== f.admission) throw new Error("lifecycle terminal receipt conflict");
+        return s;
+      }
+      if (old.admission === "outcomeUnknown" && f.admission === "dispatched") return s;
+      const messageId = f.messageId ?? old.messageId;
+      return { ...s, commands: s.commands.map((c) => c !== old ? c : { ...c, admission: f.admission,
+        ...(messageId === undefined ? {} : { messageId }),
+        displayed: c.displayed || (messageId !== undefined && s.displayedMessageIds.includes(messageId)),
+        consumed: c.consumed || (messageId !== undefined && s.consumedMessageIds.includes(messageId)),
+      }) };
+    }
+    case "messageDisplayed": {
+      if (f.owner !== "root") return s;
+      const messageId = f.messageId;
+      return { ...s, displayedMessageIds: [...s.displayedMessageIds.filter((id) => id !== messageId).slice(-511), messageId],
+        commands: s.commands.map((c) => c.messageId === messageId ? { ...c, displayed: true } : c) };
+    }
+    case "messageConsumed": return f.owner !== "root" ? s : {
+      ...s,
+      consumedMessageIds: [...s.consumedMessageIds.filter((id) => id !== f.messageId).slice(-511), f.messageId],
+      commands: s.commands.map((c) => c.messageId === f.messageId ? { ...c, consumed: true } : c),
+    };
+    case "commandSettled": {
+      const old = s.commands.find((command) => command.commandId === f.commandId);
+      if (!old) return s;
+      if (old.payloadHash !== f.payloadHash) throw new Error("lifecycle command identity conflict");
+      return { ...s, commands: s.commands.map((command) => command === old ? { ...command, settled: true } : command) };
+    }
+    case "compaction": return { ...s, compaction: f.phase };
+  }
+}
+
+/** Install only a snapshot from the explicitly selected generation and binding. */
+export function reconcileLifecycle(current: LifecycleState, snapshot: LifecycleState, sourceGeneration: number, expectedGeneration: number): LifecycleState {
+  if (sourceGeneration !== expectedGeneration || !sameLifecycleFence(current.fence, snapshot.fence) || snapshot.nextSequence < current.nextSequence) return current;
+  return lifecycleStateSchema.parse(snapshot);
+}
+export type LifecycleLabel = "Offline" | "Unknown" | "Waiting for input" | "Failed" | "Interrupted" | "Working" | "Waiting for child/task" | "Queued" | "Finished" | "Ready";
+export function projectLifecycle(s: LifecycleState, online = true): LifecycleLabel {
+  if (!online) return "Offline";
+  if (s.continuity === "gap") return "Unknown";
+  if (s.interactions.items.some((i) => i.owner === "root")) return "Waiting for input";
+  if (s.root.outcome === "failed") return "Failed";
+  if (s.root.outcome === "interrupted") return "Interrupted";
+  if (s.root.phase === "working") return "Working";
+  if (s.tasks.freshness === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
+  if (s.queue.freshness === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
+  if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.freshness === "unknown" || s.queue.freshness === "unknown" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
+  return s.root.outcome === "finished" ? "Finished" : "Ready";
+}
+export function projectDelivery(command: LifecycleCommand, state: LifecycleState): "Prepared" | "Dispatched" | "Accepted" | "Queued" | "Displayed" | "Consumed" | "Settled" | "Failed" | "Unknown" {
+  if (command.settled) return "Settled";
+  if (command.consumed) return "Consumed";
+  if (command.displayed) return "Displayed";
+  if (command.messageId !== undefined && state.queue.freshness === "observed" && state.queue.items.some((i) => i.messageId === command.messageId)) return "Queued";
+  return ({ prepared: "Prepared", dispatched: "Dispatched", accepted: "Accepted", failed: "Failed", outcomeUnknown: "Unknown" } as const)[command.admission];
+}
+
+/** Atomic runtime-owned observation and native-stream handoff, not a vendor task cursor. */
+export const lifecycleSnapshotSchema = z.object({
+  state: lifecycleStateSchema,
+  nextNativeSequence: counter,
+}).strict();
+export type LifecycleSnapshot = z.infer<typeof lifecycleSnapshotSchema>;
+export const lifecycleProjectionSchema = z.object({
+  version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema, nextSequence: counter,
+  label: z.enum(["Unknown", "Waiting for input", "Failed", "Interrupted", "Working", "Waiting for child/task", "Queued", "Finished", "Ready", "Offline"]),
+}).strict();
+export type LifecycleProjection = z.infer<typeof lifecycleProjectionSchema>;
+export function lifecycleProjection(state: LifecycleState): LifecycleProjection {
+  return { version: LIFECYCLE_VERSION, fence: state.fence, nextSequence: state.nextSequence, label: projectLifecycle(state) };
+}

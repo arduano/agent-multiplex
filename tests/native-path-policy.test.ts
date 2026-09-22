@@ -424,7 +424,7 @@ describe("NativePathPolicy", () => {
     });
     expect(rejectedSend).toMatchObject({
       state: "failed",
-      error: expect.stringContaining("outside configured allowed roots"),
+      error: { code: "FENCED", certainty: "definiteFailure" },
     });
     expect(adapter.session?.requests).toHaveLength(1);
 

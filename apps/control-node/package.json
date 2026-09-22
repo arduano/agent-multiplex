@@ -1,7 +1,7 @@
 {
   "name": "@arduano/agent-multiplex-control-node",
   "version": "0.2.4-hotfix.16",
-  "description": "Reference durable control-node daemon for Agent Multiplex protocol v5.",
+  "description": "Reference durable control-node daemon for Agent Multiplex protocol v6.",
   "private": false,
   "type": "module",
   "main": "./dist/main.js",

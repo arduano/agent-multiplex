@@ -127,9 +127,8 @@ describe("Copilot native pending queue", () => {
     pending.resolve({ items: [], steeringMessages: [] });
     await result;
     expect(f.send).not.toHaveBeenCalled();
-    expect(f.received.filter(item => item.kind === "lifecycle")).toEqual([
-      { kind: "lifecycle", fact: { type: "queueInvalidated" } },
-    ]);
+    expect(f.received.flatMap(item => item.kind === "lifecycle" && item.fact.type === "queueInvalidated"
+      ? [item.fact.type] : [])).toEqual(["queueInvalidated"]);
   });
 
   it.each([true, false])("uses the atomic native transition and preserves its steered=%s acknowledgement", async steered => {

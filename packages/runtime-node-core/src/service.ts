@@ -1,5 +1,12 @@
 import {
   canonicalJson,
+  lifecycleProjection,
+  lifecycleFactSchema,
+  sameLifecycleFence,
+  type LifecycleFact,
+  type LifecycleFence,
+  type LifecycleSnapshot,
+  safeCommandError,
   packNativePayload,
   nativePayloadSchema,
   nativeImagePointerValue,
@@ -90,7 +97,7 @@ import {
 } from "./adapter.js";
 import { RuntimeNodeEventHub } from "./event-hub.js";
 import { NativePathPolicy } from "./native-path-policy.js";
-import { AllowedPathPolicy, type RuntimePathPolicy } from "./path-policy.js";
+import { AllowedPathPolicy, PathPolicyError, type RuntimePathPolicy } from "./path-policy.js";
 import {
   DirectWorkspaceLaunchProvider,
   LaunchProviderOutcomeUnknownError,
@@ -115,6 +122,7 @@ import {
 } from "./terminal.js";
 import { collectCleanupErrors, waitForAll } from "./settled-work.js";
 import { RuntimeImages, RuntimeImageError, type RuntimeImageOptions } from "./images.js";
+import { RuntimeLifecycleJournal } from "./lifecycle.js";
 
 const now = (): string => new Date().toISOString();
 
@@ -173,6 +181,14 @@ interface ActiveBinding {
   eventOverflowed: boolean;
   queuedInteractions: Set<AdapterInteractionEvent>;
   deferredLifecycle: Map<string, Exclude<AdapterEvent, { kind: "native" | "interaction" }>>;
+  lifecycleRefreshes: Record<LifecycleRefreshView, LifecycleRefreshLane>;
+}
+
+type LifecycleRefreshView = "tasks" | "pendingMessages";
+
+interface LifecycleRefreshLane {
+  phase: "idle" | "scheduled" | "running";
+  pending: boolean;
 }
 
 interface PendingInteraction {
@@ -204,6 +220,7 @@ export class RuntimeNodeService {
   readonly #scheduledLaunches = new Set<LaunchId>();
   readonly #scheduledArchives = new Set<ArchiveRequest["archiveOperationId"]>();
   readonly #events: RuntimeNodeEventHub;
+  readonly #lifecycle: RuntimeLifecycleJournal;
   readonly #terminals: TerminalBroker;
   readonly #images: RuntimeImages;
   readonly #localImageBackends = new Set<string>();
@@ -218,6 +235,7 @@ export class RuntimeNodeService {
 
   public constructor(options: RuntimeNodeServiceOptions) {
     this.#store = options.store;
+    this.#lifecycle = new RuntimeLifecycleJournal(options.store);
     this.#runtimeNodeId = options.runtimeNodeId;
     this.#runtimeNodeBootId = options.runtimeNodeBootId;
     this.#name = options.name;
@@ -306,7 +324,7 @@ export class RuntimeNodeService {
       allowedRoots: [...roots],
       harnesses,
       launchProfiles: this.launchProfiles(),
-      protocolVersion: 5 as const,
+      protocolVersion: 6 as const,
       ...(this.#endpointId ? { endpointId: this.#endpointId } : {}),
     };
     return descriptor;
@@ -860,6 +878,11 @@ export class RuntimeNodeService {
         this.#launchRegistry.backendForSession(record).adapter.imageCodec?.validateCommand?.(input.request);
         const reconstructed = await this.#reconstructImages(input, record);
         const request = await this.#nativePathPolicy.command(reconstructed);
+        if (request.harness === "copilot") {
+          const kind = request.command.type === "send" || request.command.type === "steer" || request.command.type === "compact" ? request.command.type : "other";
+          this.#appendLifecycle(input.sessionId, active, { type: "commandPrepared", commandId: input.commandId, payloadHash: input.payloadHash, kind });
+          this.#appendLifecycle(input.sessionId, active, { type: "commandReceipt", commandId: input.commandId, payloadHash: input.payloadHash, admission: "dispatched" });
+        }
         const result = await active.session.execute(request);
         this.#syncHarnessSettings(input.sessionId, active);
         return result;
@@ -871,6 +894,19 @@ export class RuntimeNodeService {
     return this.#store.getCommand(commandId) ?? null;
   }
 
+  public readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+    return this.#admit(async () => {
+      const binding = this.#active.get(sessionId);
+      if (!binding || binding.session.harness !== "copilot") throw new RuntimeNodeProtocolError("CONFLICT", "lifecycle observation requires an active Copilot binding");
+      // Drain already-admitted native payload extraction before taking the pair.
+      await binding.events;
+      if (this.#active.get(sessionId) !== binding) throw new RuntimeNodeProtocolError("FENCED", "lifecycle binding changed");
+      const fence = this.#lifecycleFence(sessionId, binding);
+      if (!fence) throw new RuntimeNodeProtocolError("FENCED", "lifecycle binding is unavailable");
+      return { state: this.#lifecycle.read(fence), nextNativeSequence: binding.sequence };
+    });
+  }
+
   public readNativeHistory(
     sessionId: SessionId,
     request: NativeHistoryRequest,
@@ -879,21 +915,60 @@ export class RuntimeNodeService {
   }
 
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
-    return this.#admit(() => this.#serialize(sessionId, async () => {
-      const record = this.#store.getSession(sessionId);
-      if (!record) throw new RuntimeNodeProtocolError("NOT_FOUND", "session binding not found");
-      if (record.harness !== request.harness) throw new RuntimeNodeProtocolError("FENCED", "native state request harness does not match binding");
-      const active = this.#active.get(sessionId);
-      if (!active || record.availability !== "active") throw new RuntimeNodeProtocolError("CONFLICT", "native state requires an active session binding");
-      if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");
-      const result = await active.session.readNativeState(request);
-      if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
-        throw new RuntimeNodeProtocolError("FENCED", "native state response does not match binding");
+    return this.#admit(() => this.#serialize(sessionId, () => this.#readNativeState(sessionId, request)));
+  }
+
+  async #readNativeState(
+    sessionId: SessionId,
+    request: NativeStateRequest,
+    expectedBinding?: ActiveBinding,
+    recordLifecycle = false,
+  ): Promise<NativeStateResult> {
+    const record = this.#store.getSession(sessionId);
+    if (!record) throw new RuntimeNodeProtocolError("NOT_FOUND", "session binding not found");
+    if (record.harness !== request.harness) throw new RuntimeNodeProtocolError("FENCED", "native state request harness does not match binding");
+    const active = this.#active.get(sessionId);
+    if (!active || record.availability !== "active") throw new RuntimeNodeProtocolError("CONFLICT", "native state requires an active session binding");
+    if (expectedBinding && active !== expectedBinding) throw new RuntimeNodeProtocolError("FENCED", "native state binding changed before observation");
+    if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");
+    const lifecycleFence = this.#lifecycleFence(sessionId, active);
+    const observation = recordLifecycle && lifecycleFence ? this.#lifecycle.read(lifecycleFence) : undefined;
+    const result = await active.session.readNativeState(request);
+    await active.events;
+    if (this.#active.get(sessionId) !== active) throw new RuntimeNodeProtocolError("FENCED", "native state binding changed");
+    const currentFence = this.#lifecycleFence(sessionId, active);
+    if (lifecycleFence && (!currentFence || !sameLifecycleFence(lifecycleFence, currentFence))) {
+      throw new RuntimeNodeProtocolError("FENCED", "native state lifecycle fence changed");
+    }
+    if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
+      throw new RuntimeNodeProtocolError("FENCED", "native state response does not match binding");
+    }
+    if (request.harness === "copilot" && observation && result.payload && typeof result.payload === "object" && !Array.isArray(result.payload)) {
+      const data = result.payload;
+      if (request.view === "tasks" && Array.isArray(data.tasks)) {
+        const fact = lifecycleFactSchema.parse({ type: "tasksObserved", revision: observation.tasks.revision,
+          items: data.tasks.map((task) => {
+            const value = task as Record<string, JsonValue>;
+            return { id: value.id, kind: value.type, status: value.status };
+          }) });
+        this.#appendLifecycle(sessionId, active, fact);
       }
-      // Queue views carry display text, not image attachments or retained history.
-      // The ordinary native envelope enforces the bounded response without storage.
-      return { ...result, payload: packNativePayload(result.payload) };
-    }));
+      if (request.view === "pendingMessages" && Array.isArray(data.items) && Array.isArray(data.steeringMessages)) {
+        const fact = lifecycleFactSchema.parse({ type: "queueObserved", revision: observation.queue.revision,
+          items: data.items.map((item) => {
+            const value = item as Record<string, JsonValue>;
+            return { id: value.id, ...(typeof value.messageId === "string" ? { messageId: value.messageId } : {}), kind: "queued" };
+          }),
+          // Steering strings have no exact item identity. Preserve only their
+          // count; never synthesize queue IDs from text or array position.
+          unidentifiedSteering: data.steeringMessages.length,
+          inFlightSteering: typeof data.inFlightSteeringCount === "number" ? data.inFlightSteeringCount : null });
+        this.#appendLifecycle(sessionId, active, fact);
+      }
+    }
+    // Queue views carry display text, not image attachments or retained history.
+    // The ordinary native envelope enforces the bounded response without storage.
+    return { ...result, payload: packNativePayload(result.payload) };
   }
 
   async #readNativeHistory(
@@ -1252,6 +1327,8 @@ export class RuntimeNodeService {
     };
     this.#pendingInteractions.delete(interactionId);
     this.#rememberResolvedInteraction(resolved);
+    const binding = this.#active.get(resolved.sessionId);
+    if (binding && binding.session.runtimeEpoch === resolved.runtimeEpoch) this.#appendLifecycle(resolved.sessionId, binding, { type: "interactionClosed", id: interactionId });
     this.#events.publish({
       kind: "control",
       change: { type: "interaction.changed", interaction: resolved },
@@ -2208,8 +2285,9 @@ export class RuntimeNodeService {
 
   #persistStopped(record: RuntimeNodeSessionRecord): RuntimeNodeSessionRecord {
     const timestamp = now();
+    const { lifecycle: _lifecycle, ...active } = record;
     const stopped: RuntimeNodeSessionRecord = {
-      ...record,
+      ...active,
       availability: "resumable",
       runtimeStatus: "stopped",
       runtimeEpoch: null,
@@ -2240,10 +2318,97 @@ export class RuntimeNodeService {
   }
 
   #publishSession(session: RuntimeNodeSessionRecord): void {
+    const binding = this.#active.get(session.sessionId);
+    const fence = binding && this.#lifecycleFence(session.sessionId, binding);
+    if (fence && session.runtimeEpoch === fence.runtimeEpoch && session.availability === "active") {
+      session = { ...session, lifecycle: lifecycleProjection(this.#lifecycle.read(fence)) };
+      this.#store.putSession(session);
+    } else if (session.lifecycle !== undefined) {
+      const { lifecycle: _old, ...rest } = session;
+      session = rest;
+      this.#store.putSession(session);
+    }
     this.#events.publish({
       kind: "control",
       change: { type: "session.upsert", session },
     });
+  }
+
+  #lifecycleFence(sessionId: SessionId, binding: ActiveBinding): LifecycleFence | undefined {
+    if (binding.session.harness !== "copilot") return undefined;
+    const record = this.#store.getSession(sessionId);
+    if (!record || record.runtimeEpoch !== binding.session.runtimeEpoch || record.availability !== "active") return undefined;
+    return { sessionId, runtimeNodeId: this.#runtimeNodeId, runtimeNodeBootId: this.#runtimeNodeBootId,
+      bindingRevision: record.bindingRevision, runtimeEpoch: binding.session.runtimeEpoch };
+  }
+
+  #appendLifecycle(sessionId: SessionId, binding: ActiveBinding, fact: LifecycleFact): void {
+    if (this.#active.get(sessionId) !== binding) return;
+    const fence = this.#lifecycleFence(sessionId, binding);
+    if (!fence) return;
+    this.#lifecycle.append(fence, fact);
+    if (fact.type === "tasksInvalidated") {
+      this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
+    } else if (fact.type === "queueInvalidated") {
+      this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
+    } else if (fact.type === "gap") {
+      this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
+      this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
+    }
+    const record = this.#store.getSession(sessionId);
+    if (record) this.#publishSession(record);
+  }
+
+  #scheduleLifecycleRefresh(
+    sessionId: SessionId,
+    binding: ActiveBinding,
+    view: LifecycleRefreshView,
+  ): void {
+    if (
+      this.#active.get(sessionId) !== binding ||
+      binding.session.harness !== "copilot" ||
+      !binding.session.readNativeState
+    ) {
+      return;
+    }
+    const lane = binding.lifecycleRefreshes[view];
+    if (lane.phase === "scheduled") return;
+    if (lane.phase === "running") {
+      lane.pending = true;
+      return;
+    }
+    lane.phase = "scheduled";
+    const task = this.#admit(() => this.#serialize(sessionId, async () => {
+      if (
+        this.#active.get(sessionId) !== binding ||
+        binding.session.harness !== "copilot" ||
+        !binding.session.readNativeState
+      ) {
+        return false;
+      }
+      lane.phase = "running";
+      try {
+        await this.#readNativeState(sessionId, { harness: "copilot", view }, binding, true);
+        return true;
+      } catch {
+        // Observation failures carry no state. A later native invalidation can
+        // schedule a new read, but this attempt is never retried on its own.
+        return false;
+      }
+    }));
+    const settle = (_succeeded: boolean) => {
+      lane.phase = "idle";
+      const pending = lane.pending;
+      lane.pending = false;
+      // An invalidation observed during this generation is a distinct trigger,
+      // even when the in-flight read failed because that same invalidation
+      // fenced it. Collapse the burst to one follow-up; never self-retry when
+      // no newer trigger arrived.
+      if (pending && !this.#closed && this.#active.get(sessionId) === binding) {
+        this.#scheduleLifecycleRefresh(sessionId, binding, view);
+      }
+    };
+    void task.then(settle, () => settle(false));
   }
 
   #publishLaunch(launch: LaunchRecord): void {
@@ -2503,6 +2668,10 @@ export class RuntimeNodeService {
       eventOverflowed: false,
       queuedInteractions: new Set(),
       deferredLifecycle: new Map(),
+      lifecycleRefreshes: {
+        tasks: { phase: "idle", pending: false },
+        pendingMessages: { phase: "idle", pending: false },
+      },
       unsubscribe: () => undefined,
     };
     this.#active.set(sessionId, binding);
@@ -2514,6 +2683,8 @@ export class RuntimeNodeService {
       // A synchronously replayed terminal status may have retired the binding
       // before subscribe returned its actual disposer.
       if (this.#active.get(sessionId) !== binding) unsubscribe();
+      this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
+      this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
     } catch (error) {
       if (this.#active.get(sessionId) === binding) this.#active.delete(sessionId);
       throw error;
@@ -2532,16 +2703,16 @@ export class RuntimeNodeService {
     // subscribe() can replay startup events before the launch transaction installs
     // its session row. Queue payloads until that synchronous commit completes;
     // terminal statuses still need to retire a stopped binding immediately.
-    if (binding.pendingEvents === 0 && (!hasPayload || (session && !codec))) {
+    if (binding.pendingEvents === 0 && (event.kind === "lifecycle" ? Boolean(session) : (!hasPayload || (session && !codec)))) {
       try { this.#onAdapterEvent(sessionId, binding, event); }
-      catch { this.#events.publish({ kind: "nativeGap", sessionId, reason: "native payload validation failed", recovery: "readNativeHistory" }); }
+      catch { this.#publishNativeGap(sessionId, binding, "native payload validation failed"); }
       return;
     }
     const bytes = Buffer.byteLength(JSON.stringify(event));
     if (binding.pendingEvents >= this.#nativeEventQueueLimit || binding.pendingEventBytes + bytes > this.#nativeEventQueueBytes) {
       binding.eventOverflowed = binding.pendingEvents > 0;
       if (!hasPayload) this.#deferLifecycleEvent(sessionId, binding, event);
-      this.#events.publish({ kind: "nativeGap", sessionId, reason: "native image extraction queue overflowed", recovery: "readNativeHistory" });
+      this.#publishNativeGap(sessionId, binding, "native image extraction queue overflowed");
       return;
     }
     binding.pendingEvents += 1;
@@ -2553,7 +2724,7 @@ export class RuntimeNodeService {
       const payload = hasPayload ? await this.#externalize(current, event.payload) : undefined;
       this.#onAdapterEvent(sessionId, binding, event, payload);
     }).catch(() => {
-      this.#events.publish({ kind: "nativeGap", sessionId, reason: "native image extraction failed", recovery: "readNativeHistory" });
+      this.#publishNativeGap(sessionId, binding, "native image extraction failed");
     });
     binding.events = task;
     this.#nativeEventTasks.set(task, sessionId);
@@ -2568,7 +2739,7 @@ export class RuntimeNodeService {
         // have drained. A stopped binding then rejects every later callback.
         for (const update of deferred) {
           try { this.#onAdapterEvent(sessionId, binding, update); }
-          catch { this.#events.publish({ kind: "nativeGap", sessionId, reason: "native lifecycle validation failed", recovery: "readNativeHistory" }); }
+          catch { this.#publishNativeGap(sessionId, binding, "native lifecycle validation failed"); }
         }
         binding.eventOverflowed = false;
       }
@@ -2576,11 +2747,17 @@ export class RuntimeNodeService {
     });
   }
 
+  #publishNativeGap(sessionId: SessionId, binding: ActiveBinding, reason: string): void {
+    this.#appendLifecycle(sessionId, binding, { type: "gap" });
+    this.#events.publish({ kind: "nativeGap", sessionId, reason, recovery: "readNativeHistory" });
+  }
+
   #deferLifecycleEvent(
     sessionId: SessionId,
     binding: ActiveBinding,
     event: Exclude<AdapterEvent, { kind: "native" | "interaction" }>,
   ): void {
+    if (event.kind === "lifecycle") return;
     let key: string = event.kind;
     if (event.kind === "interactionSettled") {
       // Never allocate entries for arbitrary request IDs. This buffer has at
@@ -2606,6 +2783,10 @@ export class RuntimeNodeService {
     // adapter. Fence every callback by the installed binding so a retired
     // native runtime cannot overwrite or interleave with its replacement.
     if (this.#active.get(sessionId) !== binding) return;
+    if (event.kind === "lifecycle") {
+      this.#appendLifecycle(sessionId, binding, event.fact);
+      return;
+    }
     if (event.kind === "native") {
       const timestamp = Date.now();
       if (timestamp - binding.lastActivityPersistedAt >= 1_000) {
@@ -2636,9 +2817,10 @@ export class RuntimeNodeService {
       const record = this.#store.getSession(sessionId);
       if (record) {
         const timestamp = now();
+        const { lifecycle: _lifecycle, ...withoutLifecycle } = record;
         const updated: RuntimeNodeSessionRecord = event.status === "stopped"
           ? {
-              ...record,
+              ...withoutLifecycle,
               availability: "resumable",
               runtimeStatus: "stopped",
               runtimeEpoch: null,
@@ -2680,6 +2862,7 @@ export class RuntimeNodeService {
         }
         pending.retired = true;
         this.#pendingInteractions.delete(interactionId);
+        this.#appendLifecycle(sessionId, binding, { type: "interactionClosed", id: interactionId });
         const settled: InteractionRecord = {
           ...pending.record,
           state: event.state,
@@ -2707,6 +2890,13 @@ export class RuntimeNodeService {
       expiresAt: event.expiresAt ?? null,
       resolvedAt: null,
     };
+    const interactionPayload = event.payload && typeof event.payload === "object" && !Array.isArray(event.payload) ? event.payload : {};
+    const childOwner = typeof interactionPayload.agentId === "string" && interactionPayload.agentId.length > 0 ? `agent:${interactionPayload.agentId}`
+      : typeof interactionPayload.parentToolCallId === "string" && interactionPayload.parentToolCallId.length > 0 ? `tool:${interactionPayload.parentToolCallId}` : undefined;
+    this.#appendLifecycle(sessionId, binding, { type: "interactionOpened", interaction: {
+      id: interactionId, owner: childOwner ?? "root",
+      kind: event.requestType === "approval" ? "permission" : event.requestType,
+    } });
     this.#pendingInteractions.set(interactionId, {
       record,
       native: event,
@@ -2811,8 +3001,10 @@ export class RuntimeNodeService {
       updatedAt: timestamp,
     };
     this.#store.putCommand(record);
+    let failureStage: "native" | "recording" = "native";
     try {
       const result = await execute();
+      failureStage = "recording";
       let packedResult: NativePayload | undefined;
       if (result !== undefined) {
         try {
@@ -2832,18 +3024,34 @@ export class RuntimeNodeService {
         updatedAt: now(),
       };
     } catch (error) {
+      const uncertain = error instanceof AdapterOutcomeUnknownError || error instanceof LaunchProviderOutcomeUnknownError;
       record = {
         ...record,
-        state:
-          error instanceof AdapterOutcomeUnknownError ||
-          error instanceof LaunchProviderOutcomeUnknownError
-            ? "outcomeUnknown"
-            : "failed",
-        error: error instanceof Error ? error.message : String(error),
+        state: uncertain ? "outcomeUnknown" : "failed",
+        error: safeCommandError(error, {
+          stage: failureStage === "native" && (error instanceof PathPolicyError || error instanceof RuntimeNodeProtocolError || error instanceof RuntimeImageError)
+            ? "admission" : failureStage,
+          certainty: uncertain ? "outcomeUnknown" : "definiteFailure",
+          ...(error instanceof PathPolicyError ? { code: "FENCED" } : {}),
+        }),
         updatedAt: now(),
       };
     }
     this.#store.putCommand(record);
+    if (sessionId && record.state !== "started") {
+      const binding = this.#active.get(sessionId);
+      const original = encodedRequest as Record<string, JsonValue>;
+      // A reply can survive binding retirement; its receipt is durable, but it
+      // must never advance the lifecycle of the replacement handle.
+      const current = this.#store.getSession(sessionId);
+      if (binding && current?.bindingRevision === original.bindingRevision) {
+        const value = record.result?.json;
+        const messageId = value && typeof value === "object" && !Array.isArray(value) && typeof value.messageId === "string" ? value.messageId : undefined;
+        this.#appendLifecycle(sessionId, binding, { type: "commandReceipt", commandId, payloadHash,
+          admission: record.state === "succeeded" ? "accepted" : record.state === "failed" ? "failed" : "outcomeUnknown",
+          ...(messageId ? { messageId } : {}) });
+      }
+    }
     return record;
   }
 

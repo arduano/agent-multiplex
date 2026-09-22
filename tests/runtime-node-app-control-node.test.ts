@@ -54,7 +54,7 @@ function maintenanceFixture() {
     allowedRoots: ["/tmp"],
     harnesses: [],
     launchProfiles: [],
-    protocolVersion: 5,
+    protocolVersion: 6,
   };
   const patch: MetadataPatch = {
     operationId: newOperationId(),
@@ -262,7 +262,7 @@ describe("runtime-node control-node RPC path", () => {
       allowedRoots: ["/tmp"],
       harnesses: [],
       launchProfiles: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     };
     const inventory: InventorySnapshot = {
       runtimeNodeId,
