@@ -1,5 +1,75 @@
 # Release qualification checkpoint
 
+## Authenticated renewal review candidate — 2026-09-22
+
+Local, unpublished implementation source
+`b357e43e02515f8d25568a2eff800e7d86495368` was clean during qualification. It is
+based on signed prerelease source `c28811b320f436acbec332b00199716a3c62cfa7`.
+See the [handoff](wiki/Transport-Renewal-Handoff.md) for review commits and the
+[design/migration](design/p2prpc-renewal-vnext.md) for contract and rollout.
+Later handoff/checkpoint commits contain documentation only.
+
+The independently staged core is `0.3.0-renewal.0`, wire/ALPN v5, handshake v4,
+renewal contract 1, against upstream
+`6f0bac778d8944e846e50151b5e42a4a7f9982b0`. Multiplex's p2prpc application contract
+is `5.renewal.1`; domain protocol remains v5. The 16 published Multiplex versions,
+dependency pins and root lockfile are unchanged. This qualifies a verified local
+artifact overlay; release packing and native release attestation are blocked
+until independent publication, exact pin review and qualification of that graph.
+
+| Boundary | SHA-256 |
+| --- | --- |
+| Complete independent source patch | `c10c42e68be3807bcedd77e85b127ce5cf2eb218cad10793596b1cf559128cca` |
+| Reproducible core tarball | `789da942e6902121a86a12f644c747acb2454dcb8e6bd2448803e16cfbfe05d5` |
+| Passing receipt's `SHA256SUMS` | `fe817fbe1ed1d38c3db1cf982aa9aad3159a000502ee41393fa56eacd8eb77a3` |
+
+On Node 24.19.0 / npm 11.17.0, with test umask 022:
+
+- Multiplex: 932 tests / 101 files, full typecheck/build, checkpoint/docs/release
+  metadata/secret checks, pinned-action/actionlint validation and whitespace checks.
+- Independent core: 413 unit tests / 15 files, 26 real-Iroh integration tests /
+  2 files, full typecheck (core/example/benchmarks), build, ESLint, docs, package
+  content, packed consumer and tree-shaken native-import smokes.
+- Real QUIC renewal tests span three original accelerated authentication
+  lifetimes. Coverage includes idle/busy cursor continuity, reads, one mutation
+  invocation, cancellation, unknown settlement and read-only receipt recovery,
+  invalid tokens, idle-policy revocation, scope changes, replacement timeout,
+  duplicate/stale lineage, clock skew, capacity contention, fixed-expiry rejection
+  and genuine reconnect. The SQLite root/child/runtime test retains one snapshot
+  and feed per healthy edge, reopens the durable cursor, and still projects real
+  child loss immediately. Per-hop unknown command diagnostics cannot regress a
+  recovered known receipt or tear down that feed.
+
+Passing Docker receipts under
+`receipts/p2prpc-renewal/qualification-b357e43/`:
+
+- Tree: `tree/20260922-renewal-b357e43/`, image
+  `sha256:e6c1892930c31bbf82c40a58469caed0492ef1f3a50e32ede501493f933aad79`;
+  receipt checksums digest
+  `5759cc990f07abd664a12644459008d88969438258308b61f9a3931ab5756d49`.
+  Authority restart, warm-branch failover, metadata convergence, routing and
+  immutable image transfer assertions passed.
+- Scale: `scale/20260922-renewal-b357e43/`, image
+  `sha256:02cc1e15faf3d19b723deeee50a3deb8df4ed5d83d91e730053148004b1e2b82`;
+  receipt checksums digest
+  `43e5b77e317a7496db086f6f95a0b52744cff0e041a25ca73b57b8d7657e2517`.
+  Ten runtimes, 100 launches and sends, 3,600 events, zero gaps/duplicates,
+  cursor/network recovery, metadata and dashboard assertions passed.
+
+Both Docker suites record the actual candidate dependency and verified cleanup;
+their default TTL is not a three-period renewal soak. Accelerated real transport
+tests provide that coverage. The combined receipt is scrubbed and checksummed;
+all disposable endpoints, containers, networks and images were removed.
+Earlier failed attempts, including missing Docker-prune registry authentication,
+are diagnostics outside the passing receipt. Candidate preparation now preserves
+public source/package file modes regardless of the operator's private umask.
+
+No hosted CI, native Windows run, native model workload, publication, pin update,
+production action or other checkout change occurred. Irregular Windows/native
+Copilot stalls remain separately unqualified. Final published-graph and external
+consumer qualification, refreshed signed locators, and a 45-minute activation
+observation belong to the separately authorized coordinated maintenance window.
+
 ## Storage stall containment — 2026-09-11
 
 Signed [`hotfix-2026-09-11.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-11.1)
