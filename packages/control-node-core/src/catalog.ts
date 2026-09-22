@@ -4438,7 +4438,10 @@ function mergeCommandRecord(
     ) {
       return incoming;
     }
-    if (incoming.state === "received" || incoming.state === "started") {
+    // Transport ambiguity is an observation at each forwarding hop, not a
+    // terminal provider result. Its error and clock can differ legitimately.
+    if (incoming.state === "received" || incoming.state === "started" ||
+      incoming.state === "outcomeUnknown") {
       return current;
     }
     throw new ControlNodeCoreError(
@@ -4448,7 +4451,10 @@ function mergeCommandRecord(
   }
 
   if (isTerminalCommandState(current.state)) {
-    if (incoming.state === "received" || incoming.state === "started") {
+    // A delayed child-feed ambiguity cannot regress a receipt already recovered
+    // by an independent read. The exact request fence was checked above.
+    if (incoming.state === "received" || incoming.state === "started" ||
+      incoming.state === "outcomeUnknown") {
       return current;
     }
     throw new ControlNodeCoreError(
