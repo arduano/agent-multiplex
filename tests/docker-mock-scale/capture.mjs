@@ -88,7 +88,7 @@ try {
           sessionCount &&
         sessions.every((card) => {
           const text = card.textContent ?? "";
-          return text.includes("active") && text.includes("idle");
+          return text.includes("active") && text.includes("Ready");
         })
       );
     },
@@ -225,9 +225,9 @@ try {
         (card.textContent ?? "").includes("online"),
       ).length,
       sessionCardCount: sessions.length,
-      activeIdleSessionCardCount: sessions.filter((card) => {
+      activeReadySessionCardCount: sessions.filter((card) => {
         const text = card.textContent ?? "";
-        return text.includes("active") && text.includes("idle");
+        return text.includes("active") && text.includes("Ready");
       }).length,
       firstRuntimeNode: normalize(runtimeNodes[0]?.textContent),
       lastRuntimeNode: normalize(runtimeNodes.at(-1)?.textContent),
@@ -256,7 +256,7 @@ try {
           exactRuntimeNodeCards: true,
           everyRuntimeNodeOnline: true,
           exactSessionCards: true,
-          everySessionActiveAndIdle: true,
+          everySessionActiveAndReady: true,
           browserConsoleErrors: 0,
           fleetPinnedAndReachable: true,
           sessionAndFleetScrollIndependently: true,
