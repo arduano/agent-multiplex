@@ -108,6 +108,17 @@ disclosure.
 - Allowed-root validation is a path policy, not process, network, credential, or
   filesystem isolation.
 
+## Authenticated renewal review candidate
+
+The [candidate contract](docs/design/p2prpc-renewal-vnext.md) renews credentials
+before the unchanged hard expiry while retaining physical stream identity.
+Generation-bound mutual transcripts, active-operation reauthorization and a
+single pending handoff fence replacement. Invalid credentials, revoked endpoint
+admission/policy, authority changes and unfinished expiry fail closed. No RPC
+mutation is automatically replayed. Offline token revocation remains limited by
+the configured verifier/introspection policy. All p2prpc consumers must upgrade
+together; the candidate cannot be released with the old dependency pins.
+
 ## Required deployment practices
 
 - Keep control-node HTTP on explicit loopback and expose only an authenticated,

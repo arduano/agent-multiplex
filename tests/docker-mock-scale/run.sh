@@ -711,7 +711,7 @@ jq -n \
         mockSessions: 10, publishedPorts: []
       })),
       transport: {
-        protocol: "p2prpc v1 over Iroh",
+        protocol: "p2prpc v5 / authenticated renewal contract 1 over Iroh",
         controlNodeEndpointId: $endpoint,
         ticketRecorded: false,
         ticketSha256: $ticketDigest
@@ -726,11 +726,10 @@ NODE_VERSION=$(docker exec "$CONTROL_NODE_CONTAINER" node --version | tr -d '\r\
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}')
 IFS=$'\t' read -r P2PRPC_VERSION P2PRPC_INTEGRITY < <(
   node -e '
-    const lock = require(process.argv[1]);
-    const dependency = lock.packages?.["node_modules/@arduano/p2prpc-core"];
+    const dependency = require(process.argv[1]);
     if (!dependency?.version || !dependency?.integrity) process.exit(1);
     process.stdout.write(`${dependency.version}\t${dependency.integrity}\n`);
-  ' "$REPO_ROOT/package-lock.json"
+  ' "$REPO_ROOT/transport-candidate/artifact.json"
 )
 SOURCE_DIGEST=$(
   cd "$REPO_ROOT"

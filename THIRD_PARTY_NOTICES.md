@@ -41,6 +41,13 @@ SDK interfaces, including the already generated Codex declarations and locked
 Zod validator. It adds no third-party dependency or copied vendor implementation.
 The native components retain their terms above.
 
+The authenticated-renewal review candidate retains a patch to the MIT-licensed
+p2prpc core at exact upstream commit
+`6f0bac778d8944e846e50151b5e42a4a7f9982b0`. Candidate preparation preserves its
+license/notices and adds no dependency. The source patch and artifact digest are
+recorded independently from the unchanged published lockfile. See the
+[design/migration](docs/design/p2prpc-renewal-vnext.md).
+
 ## Web client code and assets
 
 The built dashboard includes declared packages and assets including:

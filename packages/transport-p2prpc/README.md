@@ -2,8 +2,10 @@
 
 The node-to-node transport for Agent Multiplex protocol v6. It wraps
 `@arduano/p2prpc-core` at an exact qualified version and fixes the protocol
-identity to `agent-multiplex` contract `4`. The sibling `../p2prpc` checkout is
-used only while developing and qualifying that independently released package.
+identity to `agent-multiplex` contract `6.renewal.1`. The local review candidate
+requires authenticated renewal contract 1. See
+[the migration design](../../docs/design/p2prpc-renewal-vnext.md) for the staged
+independent core patch, reproduction and coordinated upgrade boundary.
 
 Runtime nodes initiate one pinned connection to their control node. Both sides
 serve a tRPC router: the runtime node calls the composite control node's
@@ -38,7 +40,7 @@ node's transport-neutral `RuntimeNodeConnection` port.
 the receiver actually committed; it never advances its cursor merely because
 an item arrived from the network. Ingress-created logical connections resolve
 the current authenticated `Peer` for every RPC and subscription attempt. This
-keeps runtime and child bindings alive across p2prpc session renewal without
+keeps reverse routing current after genuine reconnection without
 weakening their endpoint, authenticated-principal, boot-ID, or attachment
 fences.
 
@@ -47,3 +49,8 @@ fences.
 Every recursive call resolves the currently committed attachment fence; an old
 physical peer cannot keep using a superseded attachment. The transport exposes
 no protocol-v2 compatibility aliases.
+
+Routine authentication renewal retains the physical QUIC connection and existing
+RPC/subscription streams. No subscription ends and no healthy child projection is
+marked unreachable. Credential/policy rejection and actual network loss still
+end streams; durable domain recovery remains required.

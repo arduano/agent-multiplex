@@ -328,8 +328,9 @@ export function childControlNodeConnectionFromPeer(
 
 /**
  * Adapt a logical child edge while resolving its current authenticated Peer
- * for every RPC and subscription attempt. An attachment outlives any one
- * p2prpc authentication epoch, but remains pinned to one endpoint key.
+ * for every RPC and subscription attempt. An attachment survives genuine
+ * p2prpc reconnection while remaining pinned to one endpoint key. Healthy
+ * authentication renewal retains the stream and needs no port replacement.
  */
 export function childControlNodeConnectionFromPeerResolver(
   endpointId: string,

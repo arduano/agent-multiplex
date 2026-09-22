@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-22.
+Last reconciled: 2026-09-23 (protocol-v6 lifecycle plus local transport review candidate).
 
 ## Unreleased protocol-v6 Copilot lifecycle candidate
 
@@ -31,19 +31,23 @@ upgrade appends control schema version 7 for those errors, runtime version 6 for
 the same boundary, and runtime version 7 for lifecycle evidence. Released
 migration identities remain immutable.
 
-The exact source still pins public `@arduano/p2prpc-core@0.2.1`. Seamless
-authenticated-session renewal is separate external work: it has not been
-inspected, merged, duplicated, or pinned in this candidate. Its required
-identity, cursor, generation, gap, and no-mutation-replay behavior is defined in
-the [normative lifecycle design](../design/copilot-session-lifecycle-vnext.md).
+The exact release pin remains public `@arduano/p2prpc-core@0.2.1`, while this
+branch now stages the reviewed authenticated-renewal core candidate and updates
+the maintained transport integration to require it. Ordinary renewal keeps the
+same RPC/feed streams while replacing short-lived authentication generations.
+Read the [transport handoff](Transport-Renewal-Handoff.md), the
+[renewal design](../design/p2prpc-renewal-vnext.md), and the
+[normative lifecycle design](../design/copilot-session-lifecycle-vnext.md).
 The [evidence audit](../audits/copilot-lifecycle-vnext-audit.md) records which
 SDK and repository assumptions are confirmed, disproved, conditional, or still
 blocked.
 
-This candidate has no live/native-model, production, Windows, or p2prpc-renewal
-qualification and has not been published or deployed. Deterministic source
-qualification must be read from the final exact-source receipts; historical
-protocol-v5 release evidence does not qualify this boundary.
+This combined candidate has no live/native-model, production, Windows, final
+published-transport-graph, or maintenance-window qualification and has not been
+published or deployed. Deterministic source qualification must be read from the
+final exact-source receipts; historical protocol-v5 release evidence does not
+qualify this boundary. The remaining release history below describes published
+boundaries, not this candidate.
 
 ## Retained catalog startup correction
 

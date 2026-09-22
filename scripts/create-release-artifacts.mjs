@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   mkdirSync,
+  existsSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -21,6 +22,12 @@ import {
   requiredPackageNoticePaths,
   repositoryRoot,
 } from "./release-config.mjs";
+
+const renewalManifest = resolve(repositoryRoot, "transport-candidate/manifest.json");
+assert(
+  !existsSync(renewalManifest) || JSON.parse(readFileSync(renewalManifest, "utf8")).releaseBlocked !== true,
+  "Transport renewal is an unpinned review candidate. Release its independent core and review exact pins before packaging Multiplex.",
+);
 
 const arguments_ = process.argv.slice(2);
 assert(

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "upstreamRepository": "https://github.com/arduano/p2prpc.git",
+  "upstreamCommit": "6f0bac778d8944e846e50151b5e42a4a7f9982b0",
+  "patch": "p2prpc-renewal.patch",
+  "candidateVersion": "0.3.0-renewal.0",
+  "renewalContract": 1,
+  "releaseBlocked": true
+}

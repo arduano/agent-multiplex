@@ -68,7 +68,9 @@
     "release:verify": "node scripts/verify-release-artifacts.mjs release-artifacts",
     "release:sbom": "node scripts/create-release-sbom.mjs release-artifacts",
     "release:native-status": "node scripts/record-native-qualification.mjs",
-    "release:publish": "node scripts/publish-release.mjs release-artifacts"
+    "release:publish": "node scripts/publish-release.mjs release-artifacts",
+    "prepare:transport-renewal": "node scripts/prepare-transport-renewal.mjs",
+    "install:transport-renewal": "node scripts/install-transport-renewal.mjs"
   },
   "dependencies": {
     "@trpc/client": "11.18.0",

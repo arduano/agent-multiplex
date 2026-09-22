@@ -586,6 +586,12 @@ broadcast. If the connection fails after dispatch and no definitive response is
 known, the gateway returns `OUTCOME_UNKNOWN` with the command/operation identity
 and does not automatically retry.
 
+Each forwarding hop may record different diagnostics for the same ambiguous
+command. Import preserves the local `outcomeUnknown` observation and never lets
+a delayed ambiguity regress a recovered terminal receipt. Request identity and
+known terminal result forks remain hard conflicts. Recovery reads the same
+command ID and never redispatches the native mutation.
+
 Command-to-source ownership is only a cache within one gateway feed. A source
 selection change clears it, so later read-only command recovery follows the new
 selected projection (including an ancestor-to-descendant warm failover) instead
@@ -692,6 +698,15 @@ refusal; immutable receipts are never truncated or silently rewritten. See
 operational schema remains at its unchanged v3 migration target; schema version
 is per store, not a claim about wire compatibility. Foreign, unversioned,
 future, corrupt, or rewritten migration histories fail closed.
+
+## Authenticated transport generations
+
+The [renewal contract](p2prpc-renewal-vnext.md) separates physical connection,
+authentication and domain lifetimes. Healthy renewal reauthenticates before
+expiry while retaining the same ordered RPC/feed streams. It does not change
+boots, attachment fences, feed IDs, durable cursors or mutation identities.
+A genuine stream failure still marks a child unavailable immediately and requires
+ordinary snapshot/cursor recovery; no transport grace period hides that failure.
 
 ## Trust boundaries
 

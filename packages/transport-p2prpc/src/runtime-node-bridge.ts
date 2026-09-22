@@ -98,10 +98,10 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
   }
 
   /**
-   * Resolve the authenticated reverse peer at dispatch time. p2prpc replaces
-   * its Peer object when an authenticated session is renewed, so retaining the
-   * object received during registration would permanently bind this logical
-   * runtime connection to an expired transport epoch.
+   * Resolve the authenticated reverse peer at dispatch time. Auth renewal
+   * preserves the connection and its streams; genuine connection loss can
+   * replace the inbound runtime, so durable reverse routes retain the pinned
+   * endpoint and reacquire its current authenticated peer.
    */
   public get peer(): Peer<RuntimeNodeRouter> {
     const peer = this.#resolvePeer();
@@ -499,7 +499,7 @@ interface ManagedRuntimeNodeSubscription {
   stopRequested: boolean;
 }
 
-/** Recreates a runtime-node subscription after p2prpc session replacement. */
+/** Recreates a runtime-node subscription after genuine transport loss. */
 export class RuntimeNodeEventPump {
   readonly #connection: P2PRuntimeNodeConnection;
   readonly #onItem: (item: RuntimeNodeEventItem) => Promise<boolean | void> | boolean | void;
