@@ -33,6 +33,30 @@ const authority = {
 };
 
 describe("access cursors", () => {
+  it("uses one monotonic cursor transition for duplicate and out-of-order same-epoch events", () => {
+    const initial = { feedId: newFeedId(), controlCursor: 3, native: {} };
+    const mutable = new AccessCursor(initial);
+    let immutable = initial as ReturnType<AccessCursor["snapshot"]>;
+    let maximum = 0;
+    for (const sequence of [4, 7, 2, 7, 6, 8]) {
+      maximum = Math.max(maximum, sequence);
+      const item = nativeItem(sequence);
+      mutable.observe(item);
+      immutable = advanceAccessCursor(immutable, item);
+      expect(mutable.snapshot()).toEqual(immutable);
+      expect(mutable.snapshot()?.native[sessionId]?.sequence).toBe(maximum);
+    }
+    expect(mutable.snapshot()?.native[sessionId]?.sequence).toBe(8);
+  });
+
+  it("does not regress early native positions before the feed identifies itself", () => {
+    const cursor = new AccessCursor();
+    cursor.observe(nativeItem(7));
+    cursor.observe(nativeItem(2));
+    cursor.observe(controlItem(newFeedId(), 1));
+    expect(cursor.snapshot()?.native[sessionId]?.sequence).toBe(7);
+  });
+
   it("waits for feed identity while retaining early native positions", () => {
     const feedId = newFeedId();
     const native = nativeItem(7);
@@ -146,12 +170,44 @@ describe("access cursors", () => {
     watcher.stop();
     await watcher.done;
   });
+
+  it("drains committed work before reconnect and rejects late callbacks from the retired subscription", async () => {
+    const procedure = new FakeSubscription();
+    const first = controlItem(newFeedId(), 3);
+    let release!: () => void;
+    const commit = new Promise<void>((resolve) => { release = resolve; });
+    const received: AccessStreamItem[] = [];
+    const watcher = watchAccess(procedure, {
+      onItem: async (item) => { await commit; received.push(item); },
+      initialRetryDelayMs: 0,
+      maxRetryDelayMs: 0,
+      retryJitter: 0,
+    });
+
+    procedure.emit(first);
+    await tick();
+    procedure.fail(new Error("fixture retirement"));
+    procedure.retiredCallbacks[0]!.onData(controlItem(first.feedId, 99));
+    expect(watcher.cursor).toBeUndefined();
+    expect(procedure.inputs).toHaveLength(1);
+    release();
+    await tick();
+    await tick();
+    expect(procedure.inputs).toHaveLength(2);
+    expect(procedure.inputs[1]?.cursor?.controlCursor).toBe(3);
+    procedure.retiredCallbacks[0]!.onData(controlItem(first.feedId, 100));
+    await tick();
+    expect(received).toEqual([first]);
+    watcher.stop();
+    await watcher.done;
+  });
 });
 
 class FakeSubscription
   implements SubscriptionProcedure<AccessAttachInput, AccessStreamItem>
 {
   readonly inputs: AccessAttachInput[] = [];
+  readonly retiredCallbacks: SubscriptionCallbacks<AccessStreamItem>[] = [];
   private callbacks: SubscriptionCallbacks<AccessStreamItem> | undefined;
 
   subscribe(
@@ -159,6 +215,7 @@ class FakeSubscription
     callbacks: SubscriptionCallbacks<AccessStreamItem>,
   ): { unsubscribe(): void } {
     this.inputs.push(input);
+    this.retiredCallbacks.push(callbacks);
     this.callbacks = callbacks;
     callbacks.onStarted?.();
     return { unsubscribe: () => undefined };

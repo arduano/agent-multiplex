@@ -42,6 +42,8 @@ import {
   imageTarget,
   uploadImage,
   watchAccess,
+  assertCommandReceipt,
+  readCommandReceipt,
   type AccessClient,
 } from "@arduano/agent-multiplex-client/browser";
 import type {
@@ -64,6 +66,7 @@ import {
   type SettingDraft,
 } from "./agent-settings.js";
 import { errorMessage, useApi } from "./api.js";
+import { maySettleCommandDraft, type SubmittedDraft } from "./command-draft.js";
 import { ImageSessionProvider, TranscriptImagePreview, prepareImageFile, isLocalImagePath, modelImageLimits } from "./image-media.js";
 import { pendingInteractionRefetchInterval } from "./interaction-refresh.js";
 import { InteractionCards } from "./interactions.js";
@@ -91,9 +94,14 @@ const TerminalPanel = lazy(async () => {
 interface CommandAction {
   readonly request: HarnessCommand;
   readonly success: string;
-  readonly optimistic?: TimelineEntry;
   readonly images?: CommandEnvelope["images"];
   readonly envelope?: CommandEnvelope;
+  readonly submittedDraft?: SubmittedDraft;
+}
+
+interface UncertainCommand {
+  readonly envelope: CommandEnvelope;
+  readonly submittedDraft?: SubmittedDraft;
 }
 
 interface DraftImage { id: string; file: File; url: string; descriptor?: ImageDescriptor; }
@@ -123,7 +131,6 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   const queryClient = useQueryClient();
   const [history, setHistory] = useState<TimelineEntry[]>([]);
   const [live, setLive] = useState<TimelineEntry[]>([]);
-  const [local, setLocal] = useState<TimelineEntry[]>([]);
   const [streamState, setStreamState] = useState("stopped");
   const [historyState, setHistoryState] = useState(
     session ? (nativeHistoryInitiallyReady(session) ? "loading" : "waiting") : "idle",
@@ -132,6 +139,8 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   const [historySignal, setHistorySignal] = useState<NativeHistorySignal | null>(null);
   const [recentEvents, setRecentEvents] = useState<AccessStreamItem[]>([]);
   const [prompt, setPrompt] = useState("");
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
   const [draftImages, setDraftImages] = useState<DraftImage[]>([]);
   const draftsRef = useRef(draftImages);
   draftsRef.current = draftImages;
@@ -141,7 +150,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   const imagePicker = useRef<HTMLInputElement>(null);
   const imageUpload = useRef<AbortController | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uncertain, setUncertain] = useState<CommandEnvelope | null>(null);
+  const [uncertain, setUncertain] = useState<UncertainCommand | null>(null);
   useEffect(() => { mounted.current = true; return () => {
     mounted.current = false;
     imageUpload.current?.abort();
@@ -204,7 +213,6 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
   useEffect(() => {
     setHistory([]);
     setLive([]);
-    setLocal([]);
     setRecentEvents([]);
     setHistorySignal(null);
     setHistoryState(
@@ -350,37 +358,34 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
     mutationFn: async (action: CommandAction) => {
       if (!session) throw new Error("Select a session first");
       const envelope = action.envelope ?? await sessionCommand(session, action.request, action.images);
-      setUncertain(envelope);
-      if (action.optimistic && !action.envelope) {
-        setLocal((current) => [...current, { ...action.optimistic!, id: `local:${envelope.commandId}` }]);
-      }
-      const record = await client.sessions.execute.mutate(envelope);
+      setUncertain({ envelope, ...(action.submittedDraft ? { submittedDraft: action.submittedDraft } : {}) });
+      const record = action.envelope
+        ? await readCommandReceipt(client, envelope)
+        : await client.sessions.execute.mutate(envelope);
+      if (!record) throw new Error("No receipt is available yet; the original command remains unresolved");
+      assertCommandReceipt(envelope, record);
+      if (!mounted.current) return { action, record };
       if (record.state !== "outcomeUnknown" && record.state !== "received" && record.state !== "started") setUncertain(null);
       return { action, record };
     },
     onSuccess: ({ action, record }) => {
+      if (!mounted.current) return;
       setActionStatus(commandStatus(action.success, record));
-      if (record.state === "succeeded" && (action.request.command.type === "send" || action.request.command.type === "steer")) {
+      if (maySettleCommandDraft({
+        bindingIdentity,
+        prompt: promptRef.current,
+        imageIds: draftsRef.current.map((image) => image.id),
+      }, action.submittedDraft, record)) {
         setPrompt("");
         for (const image of draftsRef.current) URL.revokeObjectURL(image.url);
         setDraftImages([]);
       }
       void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     },
-    onError: (error) => setActionStatus(errorMessage(error)),
+    onError: (error) => { if (mounted.current) setActionStatus(errorMessage(error)); },
   });
 
-  const nativeTimeline = useMemo(() => mergeTimeline(history, live), [history, live]);
-  const timeline = useMemo(() => {
-    const unreconciled = local.filter((candidate) => !nativeTimeline.some((entry) =>
-      entry.kind === candidate.kind && entry.body === candidate.body &&
-      (candidate.images ?? []).length === (entry.images ?? []).length &&
-      (candidate.images ?? []).every((image, index) => image.image && !("unavailable" in image.image) &&
-        entry.images?.[index]?.image && !("unavailable" in entry.images[index]!.image!) &&
-        image.image.sha256 === (entry.images[index]!.image as ImageDescriptor).sha256),
-    ));
-    return mergeTimeline(nativeTimeline, unreconciled);
-  }, [local, nativeTimeline]);
+  const timeline = useMemo(() => mergeTimeline(history, live), [history, live]);
 
   useEffect(() => {
     const tail = timeline.at(-1);
@@ -430,10 +435,10 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
     ? (models.data ?? []).find((model) => model.id === session.harnessSettings?.model)
     : preferredModel(models.data ?? []));
 
-  function dispatch(request: HarnessCommand, success: string, optimistic?: TimelineEntry): void {
+  function dispatch(request: HarnessCommand, success: string): void {
     if (uncertain || uploading || mutation.isPending) return;
     setActionStatus("Dispatching command once…");
-    mutation.mutate({ request, success, ...(optimistic ? { optimistic } : {}) });
+    mutation.mutate({ request, success });
   }
 
   async function attachImages(files: readonly File[]): Promise<void> {
@@ -466,6 +471,11 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
     forceFollow.current = true;
     setUnreadCount(0);
     const body = prompt.trim();
+    const submittedDraft: SubmittedDraft = {
+      bindingIdentity,
+      prompt,
+      imageIds: draftImages.map((image) => image.id),
+    };
     let request: HarnessCommand = session.harness === "codex"
       ? kind === "send"
         ? { harness: "codex", command: { type: "send", input: body } }
@@ -503,17 +513,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
       if (!mounted.current) return;
     }
     setActionStatus("Dispatching command once…");
-    mutation.mutate({ request, images, success: kind === "send" ? "Message sent" : "Steering message sent", optimistic: {
-      id: "local:pending",
-      kind: "user",
-      title: kind === "send" ? "You" : "You · steer",
-      body,
-      timestamp: new Date().toISOString(),
-      raw: { local: true, kind },
-      sequence: 2_000_000_000 + Date.now(),
-      pending: true,
-      images: descriptors.map((image) => ({ image })),
-    } });
+    mutation.mutate({ request, images, submittedDraft, success: kind === "send" ? "Message accepted" : "Steering message accepted" });
   }
 
   function keyboardSend(event: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -683,6 +683,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
               onKeyDown={keyboardSend}
               onPaste={(event) => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); void attachImages(files); } }}
               placeholder={active ? "Message this agent…" : "Resume this session before sending a message"}
+              aria-label="Message this agent"
               disabled={!active || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
               data-testid="prompt-input"
             />
@@ -755,9 +756,9 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability }: {
             </div>
           </div>
           {uploading ? <button className="col-span-full min-h-9 text-xs text-[var(--accent)]" onClick={() => imageUpload.current?.abort()}>Cancel upload</button> : null}
-          {uncertain && !mutation.isPending ? <button className="col-span-full min-h-9 text-xs text-[var(--accent)]" onClick={() => mutation.mutate({ request: uncertain.request, envelope: uncertain, success: "Command reconciled" })} data-testid="reconcile-command">Check the original command</button> : null}
+          {uncertain && !mutation.isPending ? <button className="col-span-full min-h-9 text-xs text-[var(--accent)]" onClick={() => mutation.mutate({ request: uncertain.envelope.request, ...uncertain, success: "Command receipt recovered" })} data-testid="reconcile-command">Check the original command</button> : null}
           <div className="col-span-full mt-1.5 flex min-h-6 items-center justify-between gap-3 [@media(max-height:500px)]:mt-0 [@media(max-height:500px)]:min-h-0">
-            <p className="min-w-0 truncate text-xs text-[var(--text-secondary)]" role="status" title={actionStatus} data-testid="action-status">{actionStatus}</p>
+            <p className="min-w-0 break-words text-xs text-[var(--text-secondary)]" role="status" title={actionStatus} data-testid="action-status">{actionStatus}</p>
             <span className="hidden shrink-0 text-xs text-[var(--text-secondary)] sm:inline [@media(max-height:500px)]:hidden">Enter to send · Shift+Enter for newline</span>
           </div>
           <details className="group mt-0.5 text-xs text-[var(--text-secondary)] [@media(max-height:500px)]:hidden">
@@ -1095,7 +1096,7 @@ function commandStatus(success: string, record: CommandRecord): string {
   if (record.state === "outcomeUnknown") {
     return `Outcome unknown for command ${record.commandId}; it will not be retried automatically.`;
   }
-  if (record.state === "failed") return `Command failed: ${record.error ?? record.commandId}`;
+  if (record.state === "failed") return `Command failed: ${record.error?.message ?? record.commandId}`;
   return `Command ${record.state}: ${record.commandId}`;
 }
 

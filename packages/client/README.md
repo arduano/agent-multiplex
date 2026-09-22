@@ -12,6 +12,13 @@ bounded serialized consumption, application-level retry, cursor advancement, and
 suppression. A `nativeGap` is passed through: recovery always uses the native
 `readNativeHistory` operation.
 
+`readCommandReceipt(client, savedEnvelope)` reads `commands.get` once and
+validates the full immutable command identity/body before returning its receipt.
+Missing and `outcomeUnknown` receipts never dispatch the saved mutation.
+Successful send/steer receipts establish acceptance, not native message display
+or completion. `assertCommandReceipt` applies the same validation to an initial
+mutation response.
+
 Launch helpers construct retry-stable protocol-v5 requests against an exact
 runtime/profile schema fence. Launch and archive responses may be intermediate;
 recover them by ID or the bounded operation/watch APIs. `sessions.search` is

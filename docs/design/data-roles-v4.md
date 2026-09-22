@@ -557,6 +557,16 @@ Read-only identity recovery may query multiple disjoint selected sources. If
 more than one returns a different record for the same identity, the gateway
 fails closed with a conflict.
 
+The access client's `readCommandReceipt` performs only an original-ID lookup
+and validates the complete saved command envelope against the returned request,
+in addition to its command, hash, session and runtime identities. A missing
+receipt is absence of evidence, not proof of no side effect. Client controls
+labelled as receipt checks must never invoke `sessions.execute`. An accepted
+send/steer can settle only the exact submitted draft in the same binding; it
+does not establish display, consumption or native settlement. Text/image
+equality is not command-to-native causality. The reference console renders
+native history/events independently and has no durable browser command journal.
+
 Metadata proposals always carry `expectedAuthority`. The authority fence is
 checked at the gateway and again by the committing control node.
 

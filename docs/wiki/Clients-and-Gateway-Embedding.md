@@ -57,6 +57,16 @@ command, archive, or metadata operation ID and byte-equivalent immutable body
 while reconciling an interrupted call; generating a new ID may duplicate the
 domain action.
 
+For command receipt recovery, call `readCommandReceipt(client, savedEnvelope)`.
+It reads the original `commands.get` identity and verifies the receipt's full
+immutable request, session and runtime. A missing receipt or `outcomeUnknown`
+does not authorize redispatch. The reference console's **Check the original
+command** action uses this read-only path. Send/steer success is displayed as
+acceptance; native transcript events establish display independently. Native
+messages are never matched to commands by their text or images. The reference
+console retains uncertainty only for its current mounted binding; durable
+reload and cross-tab draft recovery remain embedding-application work.
+
 For browser request construction, import the asynchronous helpers from
 `@arduano/agent-multiplex-client/browser`. They use Web Crypto SHA-256 when it
 is available and fall back to `@noble/hashes` when an HTTP origin or embedded
