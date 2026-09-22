@@ -127,7 +127,8 @@ try {
   await writeFile(resolve(receiptDir, "summary.json"), JSON.stringify({
     success: true, startedAt, finishedAt: new Date().toISOString(),
     sourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
-    sourceDiffSha256: createHash("sha256").update(execFileSync("git", ["diff", "--", "apps/web", "packages/client", "tests/browser-lifecycle-vnext.mjs", "tests/fixtures/lifecycle-console.tsx"])).digest("hex"),
+    sourceDiffSha256: createHash("sha256").update(execFileSync("git", ["diff", "HEAD"])).digest("hex"),
+    workingTreeStatus: execFileSync("git", ["status", "--short"], { encoding: "utf8" }).trim().split("\n").filter(Boolean),
     packageLockSha256: createHash("sha256").update(await readFile("package-lock.json")).digest("hex"),
     scope: "Reference console deterministic fixtures; no native SDK, no model, no transport qualification",
     checks, dispatches, receiptReads, pageErrors,
