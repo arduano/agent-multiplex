@@ -35,6 +35,7 @@ import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
+import { copilotLifecycleFacts } from "./lifecycle.js";
 
 const HISTORY_CURSOR_PREFIX = "copilot:event-index:";
 const REVERSE_HISTORY_CURSOR_PREFIX = "copilot:event-before:";
@@ -130,6 +131,13 @@ export class CopilotSessionBridge {
   #closed = false;
   #status: SessionRuntimeStatus = "idle";
   #activityRevision = 0;
+  #taskRevision = 0;
+  #queueRevision = 0;
+
+  /** Adapter observation fences; native snapshots do not carry a log cursor. */
+  public nativeStateRevision(view: NativeStateRequest["view"]): number {
+    return view === "pendingMessages" ? this.#queueRevision : this.#taskRevision;
+  }
 
   public status(): SessionRuntimeStatus {
     return this.#status;
@@ -147,12 +155,15 @@ export class CopilotSessionBridge {
 
   public nativeEvent(event: SessionEvent): void {
     if (this.#closed) return;
+    if (event.type === "session.background_tasks_changed") this.#taskRevision += 1;
+    if (event.type === "pending_messages.modified") this.#queueRevision += 1;
     this.emit({
       kind: "native",
       nativeType: event.type,
       payload: copilotJson(event),
       ephemeral: event.ephemeral === true,
     });
+    for (const fact of copilotLifecycleFacts(event.type, event)) this.emit({ kind: "lifecycle", fact });
     const child = eventOwner(event) !== undefined;
     if (event.type === "permission.requested") { this.permissionRequested(event); return; }
     if (event.type === "permission.completed" && !this.permissionCompleted(event)) return;
@@ -255,6 +266,7 @@ export class CopilotSessionBridge {
     if (this.#closed || expectedRevision !== this.#activityRevision) return;
     if (!isObject(value) || typeof value.hasActiveWork !== "boolean") { this.activityUnavailable(expectedRevision); return; }
     this.setStatus(this.waitingForInput() ? "waitingForInput" : value.hasActiveWork ? "running" : "idle");
+    this.emit({ kind: "lifecycle", fact: { type: "rootObserved", active: value.hasActiveWork } });
   }
 
   public activityUnavailable(expectedRevision: number): void {
@@ -704,12 +716,17 @@ export class CopilotAdapterSession implements AdapterSession {
         case "tasks": {
           if (typeof tasks?.list !== "function" || typeof tasks.refresh !== "function") throw new Error("Copilot task observation is unavailable");
           const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
-          value = await this.read("tasks", "", async () => {
+          const observation = await this.read("tasks", String(this.#bridge.nativeStateRevision("tasks")), async () => {
             await tasks.refresh();
             this.assertActive();
             if (Date.now() >= deadlineAt) throw new Error("Copilot task observation timed out before listing refreshed tasks");
-            return tasks.list();
+            const revision = this.#bridge.nativeStateRevision("tasks");
+            return { revision, payload: await tasks.list() };
           }, deadlineAt);
+          if (observation.revision !== this.#bridge.nativeStateRevision("tasks")) {
+            throw new Error("Copilot task snapshot was invalidated during the native read");
+          }
+          value = observation.payload;
           break;
         }
         case "taskProgress":
@@ -728,8 +745,12 @@ export class CopilotAdapterSession implements AdapterSession {
     }
     const queue = this.#native.rpc.queue;
     if (typeof queue?.pendingItems !== "function") throw new Error("Copilot pending queue observation is unavailable");
-    const value = await this.read("pendingMessages", "", () => queue.pendingItems());
+    const revision = this.#bridge.nativeStateRevision("pendingMessages");
+    const value = await this.read("pendingMessages", String(revision), () => queue.pendingItems());
     this.assertActive();
+    if (revision !== this.#bridge.nativeStateRevision("pendingMessages")) {
+      throw new Error("Copilot pending queue snapshot was invalidated during the native read");
+    }
     if (!isObject(value) || !Array.isArray(value.items) || !Array.isArray(value.steeringMessages) ||
       value.items.some(item => !isObject(item) || typeof item.id !== "string" || !item.id || typeof item.kind !== "string" ||
         typeof item.displayText !== "string" || typeof item.agentMode !== "string" || item.messageId !== undefined && typeof item.messageId !== "string") ||

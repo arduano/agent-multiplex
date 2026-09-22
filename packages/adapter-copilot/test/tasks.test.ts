@@ -71,8 +71,39 @@ describe("native Copilot task observations", () => {
     const f = fixture(); const seen: unknown[] = []; f.session.subscribe(event => seen.push(event));
     const event = { type: "session.background_tasks_changed", id: "changed", parentId: null, data: {}, timestamp: shell.startedAt } as SessionEvent;
     f.bridge.nativeEvent(event);
-    expect(seen).toEqual([{ kind: "native", nativeType: event.type, payload: event, ephemeral: false }]);
+    expect(seen).toEqual([{ kind: "native", nativeType: event.type, payload: event, ephemeral: false },
+      { kind: "lifecycle", fact: { type: "tasksInvalidated" } }]);
     expect(f.session.status()).toBe("idle");
+  });
+  it("rejects a delayed empty task snapshot invalidated by newer native work", async () => {
+    const response = deferred<unknown>();
+    const f = fixture({ list: vi.fn(() => response.promise) });
+    const read = f.session.readNativeState({ harness: "copilot", view: "tasks" });
+    const result = expect(read).rejects.toThrow("invalidated");
+    await vi.waitFor(() => expect(f.tasks.list).toHaveBeenCalledOnce());
+    f.bridge.nativeEvent({ type: "session.background_tasks_changed", id: "new-work", parentId: null,
+      data: {}, timestamp: shell.startedAt } as SessionEvent);
+    // A read in the new generation must not join the older snapshot.
+    await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toThrow("already in progress");
+    response.resolve({ tasks: [] });
+    await result;
+    expect(f.tasks.list).toHaveBeenCalledOnce();
+    expect(f.session.status()).toBe("idle");
+  });
+  it("accepts refresh-triggered invalidation before listing, then coalesces identical observations", async () => {
+    const response = deferred<unknown>();
+    const f = fixture({ list: vi.fn(() => response.promise) });
+    f.tasks.refresh.mockImplementationOnce(async () => {
+      f.bridge.nativeEvent({ type: "session.background_tasks_changed", id: "refresh", parentId: null,
+        data: {}, timestamp: shell.startedAt } as SessionEvent);
+      return {};
+    });
+    const first = f.session.readNativeState({ harness: "copilot", view: "tasks" });
+    const second = f.session.readNativeState({ harness: "copilot", view: "tasks" });
+    await vi.waitFor(() => expect(f.tasks.list).toHaveBeenCalledOnce());
+    response.resolve({ tasks: [shell] });
+    expect((await first).payload).toEqual({ tasks: [shell] });
+    expect((await second).payload).toEqual({ tasks: [shell] });
   });
   it("fences stopped and unsupported native sessions without dispatch", async () => {
     const f = fixture(); f.rpc.tasks = undefined;

@@ -115,6 +115,23 @@ describe("Copilot native pending queue", () => {
     expect(f.received).toContainEqual(expect.objectContaining({ kind: "native", nativeType: "pending_messages.modified" }));
   });
 
+  it("rejects a stale empty queue after a native invalidation without inferring delivery", async () => {
+    const f = await fixture(); const pending = deferred<unknown>();
+    const pendingItems = vi.fn(() => pending.promise);
+    f.rpc.queue = { pendingItems, sendNow: async () => ({ steered: true }) };
+    const read = f.session.readNativeState(request);
+    const result = expect(read).rejects.toThrow("invalidated");
+    await vi.waitFor(() => expect(pendingItems).toHaveBeenCalledOnce());
+    f.emit("pending_messages.modified");
+    await expect(f.session.readNativeState(request)).rejects.toThrow("already in progress");
+    pending.resolve({ items: [], steeringMessages: [] });
+    await result;
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.received.filter(item => item.kind === "lifecycle")).toEqual([
+      { kind: "lifecycle", fact: { type: "queueInvalidated" } },
+    ]);
+  });
+
   it.each([true, false])("uses the atomic native transition and preserves its steered=%s acknowledgement", async steered => {
     const f = await fixture(); const sendNow = vi.fn(async () => ({ steered }));
     f.rpc.queue = { pendingItems: vi.fn(async () => snapshot), sendNow };
