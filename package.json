@@ -1,6 +1,6 @@
 {
   "name": "agent-multiplex",
-  "version": "0.2.4-hotfix.16",
+  "version": "0.2.4-hotfix.17",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.17.0",
@@ -68,9 +68,7 @@
     "release:verify": "node scripts/verify-release-artifacts.mjs release-artifacts",
     "release:sbom": "node scripts/create-release-sbom.mjs release-artifacts",
     "release:native-status": "node scripts/record-native-qualification.mjs",
-    "release:publish": "node scripts/publish-release.mjs release-artifacts",
-    "prepare:transport-renewal": "node scripts/prepare-transport-renewal.mjs",
-    "install:transport-renewal": "node scripts/install-transport-renewal.mjs"
+    "release:publish": "node scripts/publish-release.mjs release-artifacts"
   },
   "dependencies": {
     "@trpc/client": "11.18.0",

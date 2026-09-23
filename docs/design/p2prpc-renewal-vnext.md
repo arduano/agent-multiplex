@@ -1,9 +1,11 @@
-# Authenticated transport renewal, candidate contract 1
+# Authenticated transport renewal, contract 1
 
-Status: local review candidate based on Multiplex `c28811b320f436acbec332b00199716a3c62cfa7`.
-This branch deliberately requires coordinated replacement of every p2prpc peer.
-It is not a published or deployment-ready dependency graph. See the
-[handoff](../wiki/Transport-Renewal-Handoff.md) for exact validation and remaining work.
+Status: independent core `@arduano/p2prpc-core@0.3.0-renewal.0` was published
+from [`ca7bb6fb7b791813c937ddbf9bde62423d097373`](https://github.com/arduano/p2prpc/commit/ca7bb6fb7b791813c937ddbf9bde62423d097373)
+at tag [`v0.3.0-renewal.0`](https://github.com/arduano/p2prpc/releases/tag/v0.3.0-renewal.0).
+This branch requires coordinated replacement of every p2prpc peer. Core
+publication alone does not qualify the combined framework and consumer graph;
+see the [handoff](../wiki/Transport-Renewal-Handoff.md).
 
 ## Problem and maintained boundary
 
@@ -24,7 +26,7 @@ invocation, with no mirrored writer, subscription restart, snapshot or replay.
 
 ## Contract and security
 
-The independent core candidate is `0.3.0-renewal.0`, exports
+The independently published core is `0.3.0-renewal.0`, exports
 `SESSION_RENEWAL_CONTRACT = 1`, uses transport wire/ALPN v5 and handshake format v4.
 Multiplex domain protocol is v6, and its p2prpc application contract becomes
 `6.renewal.1`. Older peers fail negotiation. No mixed-version fallback exists.
@@ -99,49 +101,33 @@ operation payload hashes, stable IDs, journals and read-only receipt recovery
 continue to own that boundary. Aborting a noncooperative handler does not undo
 its side effects; retained work remains accounted for until settlement.
 
-## Reviewable source without pin changes
+## Published package and dependency boundary
 
-The owner prohibits modifying the independent checkout or changing release pins
-in this task. The implementation is therefore retained as
-[`transport-candidate/p2prpc-renewal.patch`](../../transport-candidate/p2prpc-renewal.patch)
-against exact upstream `6f0bac778d8944e846e50151b5e42a4a7f9982b0`.
-The manifest declares the independent candidate version and release block.
-Preparation reads a Git archive from the sibling checkout, applies the patch in
-a new directory under this worktree's ignored receipts, builds and packs it,
-and installs only into this worktree's disposable `node_modules`.
+The independent core was built and published by [run
+`35841435029`](https://github.com/arduano/p2prpc/actions/runs/35841435029).
+Its candidate validation, GitHub Packages publication, registry-byte/downstream
+install verification, and GitHub release jobs all passed. The release has nine
+assets, including a tarball, manifest, SHA-256 inventory, SBOM, registry
+signatures, provenance bundle, and publication verification. The release
+`SHA256SUMS` verifies all five inventoried artifacts. The tarball SHA-256 is
+`e2b13239b9337ddb5ea1b28542e1d8fcd28bde37f469c18541967b60d6d9b69f`;
+GitHub Packages reports integrity
+`sha512-Gr1yK8rE22VKOwz6Hzrg7RpkZIpOjOOForks+kCKOACbTMAn4yF3Y2u4ngnGT8IJFIpYISXFRzxSQP+RgFeVnA==`.
+A downstream registry download reproduced the tarball SHA-256. GitHub Packages,
+not the public npm registry, is the installation source.
 
-```bash
-npm ci
-npm run prepare:transport-renewal -- ../p2prpc
-npm run typecheck
-npm test
-npm run check:checkpoint
-npm run check:docs
-npm run check:release
-npm run check:secrets
-```
-
-The package manifests and lockfile intentionally keep their released pins.
-`npm ci` restores the old dependency and must be followed by candidate preparation
-or `npm run install:transport-renewal` against the already verified local tarball.
-A plain build against 0.2.1 fails the explicit renewal contract import. Release
-packaging refuses while `releaseBlocked` is true. This is staging machinery,
-not a production patch-at-startup strategy. The future release must publish the
-reviewed core independently, update exact pins in a separate authorized change,
-remove this temporary artifact injection, and repeat qualification on the final
-release graph.
-
-All three maintained Docker build targets install the same verified candidate
-before build and after pruning. Their manifests record the candidate digest;
-they must not label evidence as a run of the unchanged lockfile dependency.
-The real native four-container target is updated but is not authorized to run
-model workloads as part of this task.
+The maintained transport wrapper and lockfile must pin this exact released
+version. CI, Docker and release builds must install the locked package directly;
+the earlier local candidate patch, injection scripts, Docker reinstall steps,
+and release block are superseded. Qualify the final framework and Leo graph
+from clean installs and record the resulting exact-source receipts. Successful
+candidate-patch tests remain historical evidence, not qualification of the
+published graph. Native model workloads require their own authorization.
 
 ## Coordinated migration and rollback
 
-Every service using p2prpc must change in one maintenance window. Publishing
-packages and upgrading application consumers are separate future authorized
-steps. There is no rolling old/new service compatibility promise.
+Every service using p2prpc must change in one maintenance window. Publication
+of the core does not permit rolling old/new service compatibility.
 
 | Deployment unit | Components to rebuild/update together |
 | --- | --- |
@@ -151,7 +137,7 @@ steps. There is no rolling old/new service compatibility promise.
 | Access gateways | All control-source clients, including NAS and laptop localhost gateways and observer workers |
 | Personal combined hosts | work-windows, work-wsl, main-pc, home-nas; embedded runtime and control in each |
 | Other personal p2prpc services | Work-command/recovery services and direct consumers of the independent core, even when they do not import Multiplex |
-| Browser/HTTP clients | Rebuild the coherent Multiplex graph; HTTP/WS wire API remains domain v5 |
+| Browser/HTTP clients | Rebuild the coherent Multiplex graph; the public domain wire API moves to protocol v6 |
 | Qualification images | Control tree, mock scale, native four-container build targets |
 
 Maintenance order: stage and verify every signed artifact first; record current
@@ -185,15 +171,19 @@ loss to confirm that real unavailability still appears and recovery completes.
 Record irregular native stalls independently rather than dismissing them as
 renewal.
 
-Rollback is the whole compatible p2prpc graph, not one service. Quiesce again,
-retain unknown operation IDs and journals, reinstall the previous coherent
-artifacts, then restart in the same dependency order. This change introduces no
-SQLite migration, so rollback must not restore an older database over newly
-committed operations. Mint and distribute fresh tickets from the restored
-listeners in dependency order and replace the new-protocol ticket caches before
-restarting their consumers. If any consumer introduces its own migrations, its
-rollback constraints must be reviewed separately. Failure to stage a compatible
-artifact for any listed unit blocks beginning the window.
+Rollback is the whole compatible service graph, not one p2prpc peer. For the
+combined protocol-v6 lifecycle window, use the [lifecycle migration and
+rollback procedure](copilot-session-lifecycle-vnext.md#coordinated-maintenance-window-and-rollback):
+stop all v6 roles, restore the matching stopped-state pre-upgrade **control and
+runtime** store units together, reinstall the complete matching prior graph,
+discard v6 feed/client cursors, and mint fresh protocol-bound tickets from each
+restored listener in dependency order. The transport package itself adds no
+SQLite migration, but the combined change appends control v7/v8 and runtime
+v6-v10 migrations. Old binaries cannot open upgraded stores. If v6 admitted
+commands or native side effects after the backup, restoring it would discard
+receipts; reconcile original IDs and prefer a forward fix. Never blindly replay
+an ambiguous command. Failure to stage matching artifacts and rehearsed
+control/runtime backup restoration blocks beginning the window.
 
 ## Resource and credential-provider obligations
 

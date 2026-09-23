@@ -676,9 +676,9 @@ restart therefore binds Iroh to a stable UDP address/port (or is provisioned
 with another supported discovery mechanism). The endpoint secret preserves
 identity; the stable listener preserves the ticket's direct route.
 
-The protocol-v6 source still pins public `@arduano/p2prpc-core@0.2.1`; the
-separate renewal work is neither merged nor duplicated here. A future transport
-upgrade must preserve authority/feed, runtime boot, binding, native epoch,
+The protocol-v6 source pins the independently published
+`@arduano/p2prpc-core@0.3.0-renewal.0`. Its transport renewal must preserve
+authority/feed, runtime boot, binding, native epoch,
 operation identity/hash, and consumer cursor continuity across renewal. It must
 fence retired generations, report a gap/reset when continuity is unproved, and
 never replay an uncertain mutation. Transport connection generation is not a

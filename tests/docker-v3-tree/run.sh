@@ -508,7 +508,7 @@ jq -e '.cleanupCompleted == true' "$RECEIPT_DIR/cleanup.json" >/dev/null \
 
 jq -n \
   --arg runId "$RUN_ID" --arg imageId "$IMAGE_ID" \
-  --slurpfile transport "$REPO_ROOT/transport-candidate/artifact.json" \
+  --slurpfile lockfile "$REPO_ROOT/package-lock.json" \
   --arg authorityId "$AUTHORITY_ID" --arg branchId "$BRANCH_ID" \
   --arg authorityEndpoint "$AUTHORITY_ENDPOINT" --arg branchEndpoint "$BRANCH_ENDPOINT" \
   --arg authorityTicketDigest "$(printf '%s' "$AUTHORITY_TICKET" | sha256sum | awk '{print $1}')" \
@@ -518,7 +518,7 @@ jq -n \
     imageId:$imageId,
     passed:true,
     multiplexProtocol:6,
-    transport:$transport[0],
+    transport:($lockfile[0].packages["node_modules/@arduano/p2prpc-core"] | {version,resolved,integrity}),
     topology:{authorityControlNodeId:$authorityId,branchControlNodeId:$branchId,runtimeNodes:1,gatewaySources:2},
     endpointPins:{authority:$authorityEndpoint,branch:$branchEndpoint,preservedAcrossRestart:true},
     receiptSecurity:{rawSecretsRecorded:false,rawTicketsRecorded:false,

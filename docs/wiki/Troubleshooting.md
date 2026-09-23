@@ -50,8 +50,8 @@ Inspect the owning runtime and adapter rather than reading vendor files.
 - Confirm the session's runtime is online and its boot/binding revision is
   current.
 - Check runtime heartbeat/reconnect and the app server or SDK process.
-- Published p2prpc 0.2.1 can cause periodic 15-minute transport gaps. The local
-  [renewal candidate](../design/p2prpc-renewal-vnext.md) requires healthy renewal
+- Older p2prpc 0.2.1 can cause periodic 15-minute transport gaps. The pinned
+  [renewal contract](../design/p2prpc-renewal-vnext.md) requires healthy renewal
   to preserve streams and reachability; do not extend the auth TTL to hide gaps.
 - A persistent error or `INTERNAL_SERVER_ERROR` is not normal renewal. Preserve
   the three role logs and verify endpoint enrollment and native history calls.

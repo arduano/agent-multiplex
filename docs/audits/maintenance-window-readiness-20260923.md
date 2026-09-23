@@ -5,13 +5,54 @@ window yet**. This is a source and local-test audit, not a native Windows or
 deployed-service qualification. No live session, credential, production service,
 or native model workload was accessed.
 
+## Closure update, 2026-09-23
+
+The original findings below describe the clean `de0ca6d` audit source and
+remain an evidence record. Current framework source fixes the two confirmed
+Copilot lifecycle defects: persisted startup reattachment intent survives
+repeated failures and partial multi-session recovery, and SDK aggregate
+`hasActiveWork` no longer overwrites root-specific phase. Admission and public
+action availability now share degraded state; task/queue observation refreshes
+periodically, and prolonged degradation requests a runtime-only supervisor
+retry after verified native-owner closure. Regressions cover those transitions.
+The independent renewal core is published at
+`ca7bb6fb7b791813c937ddbf9bde62423d097373`; its exact
+`0.3.0-renewal.0` registry integrity is pinned in the framework manifest and
+lockfile. The temporary local patch and injection paths were deleted.
+
+A fresh install of this source passed typecheck, 1,050 tests/114 files,
+checkpoint, documentation, release-metadata, and source-secret checks. The
+published-core Docker control tree and 10-runtime/100-session mock scale passed
+with checksummed receipts under `receipts/protocol-v4-control-tree/20260923T092203Z-1d42606337be/`
+and `receipts/protocol-v4-mock-docker-scale/20260923T092533Z-9673e1d283cd/`.
+These tests are deterministic and contain no model turns. The readiness
+decision remains **no-go for live cutover** until a signed full framework graph,
+exact consumer pins and clean-install checks, disposable Windows UAT,
+stopped-state control **and** runtime backup/rollback rehearsal, ticket and
+locator rotation, and the 45-minute three-generation observation pass.
+
+## Band-aid deletion inventory
+
+| Area | Delete or retire | State and boundary |
+| --- | --- | --- |
+| Transport candidate overlay | Local patch, preparation/install scripts, Docker reinstall steps, release block, candidate receipt branches | Deleted in framework source; the lockfile now identifies the independently published package. Historical candidate receipts remain labeled as historical evidence. |
+| Browser lifecycle inference | Text/image equality, catalog idle, queue disappearance, generic receipt success, and local completion markers as proof of native completion | Removed from the v6 host/reference and companion Leo lifecycle paths. The UI consumes the compact host view and original command observation. |
+| Leo gateway task polling | Separate Copilot task-count poller in `apps/server/src/copilot-task-activity.ts` and observer wiring | Deleted at Leo `c2ba0cf`; exact task details and controls remain for users who open them. |
+| Leo mobile completion | Native-event-derived completion notices and legacy mobile Copilot markers | Replaced with host lifecycle notices; an append-only migration clears legacy markers without touching Codex entries or device settings. |
+| Leo browser status helpers | Dead composer-intent and task-status helper paths and their mirror tests | Deleted at Leo `c2ba0cf`; the remaining task view reports exact native details without inventing overall completion. |
+| Cutover configuration | Old ALPN-bound signed tickets, configured/bootstrap locators, and renewed-ticket caches | Rotate only during the stopped, coordinated window; preserve endpoint identity pins and matching backups. Retire old installed graph after rollback safety is established. |
+
+The SDK read timeout, `Unknown` projection, degraded admission, and exact-ID
+receipt reconciliation are intentional safety contracts, not cleanup targets.
+Retain them until upstream SDK evidence supports a simpler truthful state.
+
 ## Audited source and evidence
 
 | Repository/boundary | Exact audited state | What passed |
 | --- | --- | --- |
 | Agent Multiplex | Clean `de0ca6dc0bf285adaa78ec6b5b30273bdcc3511c`; implementation at `1af20f651e8d5733946154178d8c7f51b738d605`; base `c28811b320f436acbec332b00199716a3c62cfa7` | 1,041 tests/114 files, typecheck, checkpoint/docs/release/secret gates, deterministic control tree and 100-session mock scale. See the [checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23). |
 | Leo Multiplex | Clean `21280febf603e7c8e5eb398a32f074500dfc5c82`, branch `feat/copilot-lifecycle-vnext-20260923` | Disposable staged graph: typecheck, build, 1,163 tests/one skip, and 13 browser checks across six viewports with no serious/critical axe finding. Local checksummed receipt: `receipts/copilot-lifecycle-packed-graph/qualification-1af20f6-21280fe/`. |
-| p2prpc | Independent `main` remains clean at `6f0bac778d8944e846e50151b5e42a4a7f9982b0`; renewal is the [reviewed patch](../../transport-candidate/p2prpc-renewal.patch), not a commit or release in that repository | The patch applies cleanly to that upstream. Candidate `0.3.0-renewal.0` tarball SHA-256 is `789da942e6902121a86a12f644c747acb2454dcb8e6bd2448803e16cfbfe05d5`. A fresh local run passed 413 unit tests/15 files and 26 local Iroh integration tests/2 files. Local checksummed receipt: `receipts/maintenance-window-audit-20260923/`. |
+| p2prpc | Independent `main` remained at `6f0bac778d8944e846e50151b5e42a4a7f9982b0`; renewal was a reviewed local patch, not yet a commit or release in that repository | The patch applied cleanly to that upstream. Candidate `0.3.0-renewal.0` tarball SHA-256 was `789da942e6902121a86a12f644c747acb2454dcb8e6bd2448803e16cfbfe05d5`. A fresh local run passed 413 unit tests/15 files and 26 local Iroh integration tests/2 files. Local checksummed receipt: `receipts/maintenance-window-audit-20260923/`. |
 
 The local packed test physically extracted all 16 framework packages and the
 candidate core. It reused installed third-party packages and a same-version

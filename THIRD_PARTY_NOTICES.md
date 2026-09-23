@@ -41,11 +41,11 @@ SDK interfaces, including the already generated Codex declarations and locked
 Zod validator. It adds no third-party dependency or copied vendor implementation.
 The native components retain their terms above.
 
-The authenticated-renewal review candidate retains a patch to the MIT-licensed
-p2prpc core at exact upstream commit
-`6f0bac778d8944e846e50151b5e42a4a7f9982b0`. Candidate preparation preserves its
-license/notices and adds no dependency. The source patch and artifact digest are
-recorded independently from the unchanged published lockfile. See the
+Authenticated renewal uses the independently published MIT-licensed
+`@arduano/p2prpc-core@0.3.0-renewal.0` from exact source commit
+`ca7bb6fb7b791813c937ddbf9bde62423d097373`. Its license and notices remain
+in the package; the framework manifest and lockfile pin its registry integrity.
+The temporary local source patch and injection scripts were removed. See the
 [design/migration](docs/design/p2prpc-renewal-vnext.md).
 
 ## Web client code and assets

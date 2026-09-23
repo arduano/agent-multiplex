@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-23 (protocol-v6 lifecycle plus local transport review candidate).
+Last reconciled: 2026-09-23 (protocol-v6 lifecycle with published transport renewal pinned).
 
 ## Unreleased protocol-v6 Copilot lifecycle candidate
 
@@ -28,6 +28,11 @@ native hydration remain Unknown; catalog idle, elapsed time, text equality,
 queue disappearance, or a successful generic command receipt cannot
 manufacture completion. Runtime startup reattaches persisted active Copilot
 bindings before control registration, with native pending work disabled.
+The runtime now refreshes task and queue observations every minute, blocks
+mutations after a 45-second stalled observation, and requests a runtime-only
+supervisor retry after 120 more seconds of degradation. Automatic retry requires
+verified closure of the old native CLI owner; an unproved forced stop fails
+closed while sidecar and control stay online.
 The companion Leo branch migrates browser actions and delivery to these host
 views, fixes hidden-tab receipt checks and the compaction/terminal-receipt race,
 and supervises runtime restart separately from recovery sidecar and control
@@ -36,12 +41,13 @@ readiness.
 Generic durable command receipts also use typed `CommandError` records with an
 allowlisted code, stage, certainty, diagnostic ID, and fixed public text. The
 upgrade appends control schema v7 for typed errors, runtime v6 for the same
-boundary, runtime v7 for lifecycle evidence, and control/runtime v8 for the
-version-2 public contract. Released migration identities remain immutable.
+boundary, runtime v7 for lifecycle evidence, control/runtime v8 for the
+version-2 public contract, runtime v9 for crash-safe startup reattachment
+intent, and runtime v10 for activity/admission state. Released migration
+identities remain immutable.
 
-The exact release pin remains public `@arduano/p2prpc-core@0.2.1`, while this
-branch now stages the reviewed authenticated-renewal core candidate and updates
-the maintained transport integration to require it. Ordinary renewal keeps the
+This branch pins the independently published
+`@arduano/p2prpc-core@0.3.0-renewal.0` in its manifest and lockfile. Ordinary renewal keeps the
 same RPC/feed streams while replacing short-lived authentication generations.
 Read the [transport handoff](Transport-Renewal-Handoff.md), the
 [renewal design](../design/p2prpc-renewal-vnext.md), and the
@@ -51,7 +57,7 @@ SDK and repository assumptions are confirmed, disproved, conditional, or still
 blocked.
 
 This combined candidate has no live/native-model, production, Windows, final
-published-transport-graph, or maintenance-window qualification and has not been
+published-framework-graph, or maintenance-window qualification and has not been
 published or deployed. Deterministic source qualification must be read from the
 final exact-source receipts in the [checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23);
 historical protocol-v5 release evidence does not qualify this boundary. The
@@ -59,9 +65,9 @@ remaining release history below describes published
 boundaries, not this candidate.
 
 The [three-repository readiness audit](../audits/maintenance-window-readiness-20260923.md)
-is a **no-go** for the full maintenance window at this source revision. It found
-two Copilot lifecycle correctness defects and an unreleased dependency graph;
-the audit owns the exact findings and closure criteria.
+records the initial **no-go** findings and dated closure updates. The lifecycle
+defects are fixed in current source, but exact published framework/consumer
+artifacts, Windows and stopped-state rollback still determine cutover readiness.
 
 ## Retained catalog startup correction
 
@@ -314,7 +320,7 @@ Suggested first prompt for a new session:
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
 | Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.3` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
-| Node transport | Exact public `@arduano/p2prpc-core@0.2.1`; separate renewal work is not merged or pinned |
+| Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 source pins published `0.3.0-renewal.0` |
 | Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.14` and optional CLI `1.0.88`; GPT-6 Sol availability is publicly documented but not account-qualified here |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
@@ -327,8 +333,8 @@ is separate from a passing native-model receipt. The
 identities, workflow links and artifact verification.
 
 The signed release facts in the preceding paragraphs remain protocol-v5
-history. Transport and native pins are unchanged in protocol-v6 source, while
-the new control/runtime migrations are unreleased.
+history. Protocol-v6 source advances the transport pin to `0.3.0-renewal.0`;
+native pins are unchanged and new control/runtime migrations are unreleased.
 The prior `v0.2.1` Windows patch had an owner-authorized five-minute native soak;
 that evidence remains historical and does not requalify later patches or the transport
 renewal boundary.
@@ -568,9 +574,9 @@ and gitignored.
   present.
 - Full lifecycle state stays private to the runtime. Catalog streams and the
   public read carry the same compact view; the reference web consumes that view.
-- The independently prepared p2prpc renewal candidate is adopted in this local
-  graph. The public pin remains `@arduano/p2prpc-core@0.2.1` until separate
-  publication; final published-graph and installed-host qualification remain open.
+- The independently published p2prpc renewal release is pinned in this local
+  graph. Final published framework/consumer graph and installed-host
+  qualification remain open.
 
 Protocol v6 is an explicit compatibility boundary; released v4/v5 evidence
 remains historical. There is no partially adopted v2/v3 architecture to finish.

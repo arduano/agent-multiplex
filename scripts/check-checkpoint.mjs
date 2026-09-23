@@ -144,7 +144,7 @@ for (const dockerfilePath of maintainedDockerBuilds) {
 const transportManifest = readJson("packages/transport-p2prpc/package.json");
 const p2prpcVersion = transportManifest.dependencies?.["@arduano/p2prpc-core"];
 assert(
-  p2prpcVersion === "0.2.1",
+  p2prpcVersion === "0.3.0-renewal.0",
   "@arduano/p2prpc-core must remain pinned to the exact independently released transport version",
 );
 assert(

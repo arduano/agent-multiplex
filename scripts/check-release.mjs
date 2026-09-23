@@ -250,7 +250,7 @@ for (const entry of releasePackages) {
         );
       }
       if (dependency === "@arduano/p2prpc-core") {
-        assert(specification === "0.2.1", `${label}: p2prpc must use exact 0.2.1`);
+        assert(specification === "0.3.0-renewal.0", `${label}: p2prpc must use exact 0.3.0-renewal.0`);
       }
       assert(!dependency.startsWith("@agent-multiplex/"), `${label}: stale package scope ${dependency}`);
       assert(dependency !== "@p2prpc/core", `${label}: stale p2prpc package name`);

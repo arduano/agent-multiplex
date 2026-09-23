@@ -50,7 +50,7 @@ consumers should serve or compose the packaged output rather than rebuilding it.
 | Qualification container base | `node:24.19.0-bookworm-slim` at OCI index digest `sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df` |
 | Module system | TypeScript/JavaScript ESM |
 | Wire contract | Agent Multiplex protocol 6 in current source; coordinated break from the published protocol-v5 graph |
-| Node transport | Exact `@arduano/p2prpc-core@0.2.1` package (p2prpc v1 API) |
+| Node transport | Exact `@arduano/p2prpc-core@0.3.0-renewal.0` package (authenticated renewal contract 1) |
 | Qualified OS | Linux x86-64 Docker |
 | Qualified Codex | `@openai/codex` / CLI `0.152.0` |
 | Pinned Copilot source | CLI package `1.0.88`; SDK `1.0.14`; protocol-v6 native/model qualification is not claimed |

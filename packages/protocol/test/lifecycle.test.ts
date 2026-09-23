@@ -11,7 +11,7 @@ const fence = () => ({ sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeI
 const step = (s: LifecycleState, fact: LifecycleFact, sequence = s.nextSequence) => reduceLifecycle(s, { version: LIFECYCLE_VERSION, fence: s.fence, sequence, fact });
 function ready() {
   let s = initialLifecycle(fence());
-  s = step(s, { type: "rootObserved", active: false });
+  s = step(s, { type: "rootIdle", aborted: false });
   s = step(s, { type: "tasksObserved", revision: 0, items: [] });
   s = step(s, { type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 0, inFlightSteering: 0 });
   s = step(s, { type: "childrenHydrated", items: [], complete: true });
@@ -226,17 +226,36 @@ describe("runtime-owned lifecycle dimensions", () => {
     s = step(s, { type: "interactionOpened", interaction: { id: "child-request", owner: "agent:child", kind: "permission" } });
     expect(projectLifecycle(s)).toBe("Unknown");
   });
-  it("does not revive a prior Finished result after unidentified recovered activity", () => {
+  it("keeps task-only aggregate activity separate from a finished root cycle", () => {
     let s = ready();
     s = step(s, { type: "rootStarted", cycleId: "cycle-one" });
     s = step(s, { type: "rootIdle", aborted: false });
     expect(projectLifecycle(s)).toBe("Finished");
-    s = step(s, { type: "rootObserved", active: true });
-    expect(s.root).toEqual({ phase: "working", cycle: null, outcome: "none" });
-    expect(projectLifecycle(s)).toBe("Working");
-    s = step(s, { type: "rootObserved", active: false });
-    expect(s.root).toEqual({ phase: "idle", cycle: null, outcome: "none" });
-    expect(projectLifecycle(s)).toBe("Ready");
+    s = step(s, { type: "sessionActivityObserved", active: true });
+    expect(s.root).toEqual({ phase: "idle", cycle: "cycle-one", outcome: "finished" });
+    expect(projectLifecycle(s)).toBe("Unknown");
+    s = step(s, { type: "tasksObserved", revision: 0, items: [{ id: "background", kind: "agent", status: "running" }] });
+    expect(projectLifecycle(s)).toBe("Waiting for child/task");
+    s = step(s, { type: "sessionActivityObserved", active: false });
+    s = step(s, { type: "tasksObserved", revision: 0, items: [] });
+    expect(s.root.outcome).toBe("finished");
+    expect(projectLifecycle(s)).toBe("Finished");
+  });
+  it("uses one degraded admission state for the public action view", () => {
+    let s = ready();
+    s = step(s, { type: "tasksInvalidated" });
+    s = step(s, { type: "tasksInvalidated" });
+    s = step(s, { type: "nativeObservationDegraded", diagnosticId: "84c69093-610b-470b-b49b-a17aa1f53446" });
+    s = step(s, { type: "observationFailed", view: "tasks", revision: 1, failures: 1,
+      diagnosticId: "84c69093-610b-470b-b49b-a17aa1f53446", stalled: true });
+    expect(s.tasks.revision).toBe(2);
+    expect(lifecycleProjection(s).view.health.state).toBe("degraded");
+    expect(lifecycleProjection(s).view.actions.send.available).toBe(false);
+    s = step(s, { type: "nativeObservationRecovered" });
+    expect(lifecycleProjection(s).view.actions.send.available).toBe(false);
+    s = step(s, { type: "tasksObserved", revision: 2, items: [] });
+    s = step(s, { type: "nativeObservationRecovered" });
+    expect(lifecycleProjection(s).view.actions.send.available).toBe(true);
   });
   it("keeps model pause and terminal outcomes distinct until a new root cycle", () => {
     let s = ready();

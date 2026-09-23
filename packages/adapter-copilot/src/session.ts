@@ -279,7 +279,7 @@ export class CopilotSessionBridge {
     if (this.#closed || expectedRevision !== this.#activityRevision) return;
     if (!isObject(value) || typeof value.hasActiveWork !== "boolean") { this.activityUnavailable(expectedRevision); return; }
     this.setStatus(this.waitingForInput() ? "waitingForInput" : value.hasActiveWork ? "running" : "idle");
-    this.emit({ kind: "lifecycle", fact: { type: "rootObserved", active: value.hasActiveWork } });
+    this.emit({ kind: "lifecycle", fact: { type: "sessionActivityObserved", active: value.hasActiveWork } });
   }
 
   public activityUnavailable(expectedRevision: number): void {

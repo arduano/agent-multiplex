@@ -432,11 +432,22 @@ export class CopilotAgentAdapter implements AgentAdapter {
       }
     }
     if (force) {
+      // The pinned SDK's forceStop() suppresses child.kill() errors and clears
+      // cliProcess without waiting for exit. Capture the owned child first;
+      // a fulfilled forceStop alone cannot authorize another native owner.
+      const exitProof = captureOwnedCliExit(this.#client);
       const forced = await settleWithin(this.#client.forceStop(), COPILOT_GRACEFUL_SHUTDOWN_MS);
       if (forced.status !== "fulfilled") {
+        exitProof?.cancel();
         errors.push(forced.status === "timedOut"
           ? new Error("Copilot CLI process termination could not be proved")
           : forced.reason);
+      } else if (exitProof && await exitProof.wait) {
+        // The old native owner is gone. Earlier disconnect/stop failures no
+        // longer prevent the runtime supervisor from safely reattaching.
+        errors.length = 0;
+      } else {
+        errors.push(new Error("Copilot CLI process termination could not be proved"));
       }
     }
     if (errors.length > 0) throw new AggregateError(errors, "Failed to close Copilot adapter cleanly");
@@ -787,6 +798,49 @@ function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<TimedS
       reason => finish({ status: "rejected", reason }),
     );
   });
+}
+
+interface OwnedCliExitProof {
+  wait: Promise<boolean>;
+  cancel(): void;
+}
+
+/** Only the pinned SDK's locally spawned CLI can establish process ownership. */
+function captureOwnedCliExit(client: CopilotAdapterClient): OwnedCliExitProof | undefined {
+  if (Reflect.get(client, "isExternalServer") !== false) return undefined;
+  const child: unknown = Reflect.get(client, "cliProcess");
+  if (!child || typeof child !== "object") return undefined;
+  const process = child as {
+    pid?: unknown;
+    exitCode?: unknown;
+    signalCode?: unknown;
+    once?: (event: string, listener: () => void) => void;
+    removeListener?: (event: string, listener: () => void) => void;
+  };
+  if (!Number.isSafeInteger(process.pid) || Number(process.pid) < 1 ||
+    typeof process.once !== "function" || typeof process.removeListener !== "function") return undefined;
+  const exited = (): boolean => process.exitCode !== null && process.exitCode !== undefined ||
+    process.signalCode !== null && process.signalCode !== undefined;
+  let finish!: (value: boolean) => void;
+  const wait = new Promise<boolean>(resolve => { finish = resolve; });
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settle = (value: boolean): void => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    process.removeListener?.("exit", onExit);
+    finish(value);
+  };
+  const onExit = (): void => settle(exited());
+  if (exited()) {
+    settle(true);
+  } else {
+    process.once("exit", onExit);
+    if (exited()) settle(true);
+    else timer = setTimeout(() => settle(false), COPILOT_GRACEFUL_SHUTDOWN_MS);
+  }
+  return { wait, cancel: () => settle(false) };
 }
 
 function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabilities"] {

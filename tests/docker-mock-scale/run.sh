@@ -726,10 +726,10 @@ NODE_VERSION=$(docker exec "$CONTROL_NODE_CONTAINER" node --version | tr -d '\r\
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}')
 IFS=$'\t' read -r P2PRPC_VERSION P2PRPC_INTEGRITY < <(
   node -e '
-    const dependency = require(process.argv[1]);
+    const dependency = require(process.argv[1]).packages?.["node_modules/@arduano/p2prpc-core"];
     if (!dependency?.version || !dependency?.integrity) process.exit(1);
     process.stdout.write(`${dependency.version}\t${dependency.integrity}\n`);
-  ' "$REPO_ROOT/transport-candidate/artifact.json"
+  ' "$REPO_ROOT/package-lock.json"
 )
 SOURCE_DIGEST=$(
   cd "$REPO_ROOT"

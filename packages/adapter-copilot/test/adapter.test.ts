@@ -5,6 +5,7 @@ import type {
   SessionEvent,
   SessionMetadata,
 } from "@github/copilot-sdk";
+import { EventEmitter } from "node:events";
 import { RuntimeConnection } from "@github/copilot-sdk";
 import { runtimeEpochSchema, type RuntimeEpoch } from "@arduano/agent-multiplex-protocol";
 import { AdapterOutcomeUnknownError, type AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
@@ -190,6 +191,31 @@ describe("CopilotAgentAdapter", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("accepts a forced stop only after the owned CLI emits an exit", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const child = Object.assign(new EventEmitter(), {
+        pid: 42,
+        exitCode: null as number | null,
+        signalCode: null as NodeJS.Signals | null,
+      });
+      Object.assign(client, { isExternalServer: false, cliProcess: child });
+      client.forceStop = async () => {
+        client.forceStops += 1;
+        child.signalCode = "SIGKILL";
+        child.emit("exit");
+      };
+      const adapter = adapterFor(client);
+      const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "forced-exit" } });
+      vi.spyOn(client.sessions.get(session.vendorSessionId)!, "disconnect").mockImplementation(() => new Promise(() => {}));
+      const closing = adapter.close();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(closing).resolves.toBeUndefined();
+      expect(client.forceStops).toBe(1);
+    } finally { vi.useRealTimers(); }
   });
 
   it("passes newly discovered stock Copilot models through without a static allowlist", async () => {

@@ -124,6 +124,14 @@ export class RuntimeNodeStore {
         version: 8,
         name: "runtime-node-store-v8-lifecycle-contract",
         apply: migrateRuntimeNodeLifecycleContract,
+      }, {
+        version: 9,
+        name: "runtime-node-store-v9-copilot-startup-intent",
+        apply: (database) => database.exec("CREATE TABLE copilot_startup_intent (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT"),
+      }, {
+        version: 10,
+        name: "runtime-node-store-v10-lifecycle-activity-admission",
+        apply: migrateRuntimeNodeLifecycleActivityAdmission,
       }],
     });
     this.#db = this.#sqlite.database;
@@ -253,6 +261,62 @@ export class RuntimeNodeStore {
       .prepare("SELECT record_json FROM bindings ORDER BY updated_at DESC")
       .all() as Row[];
     return rows.map((row) => runtimeNodeSessionRecordSchema.parse(decode(row.record_json)));
+  }
+
+  /** Persist the previous process's exact Copilot binding before making it
+   * resumable. An interrupted recovery retains this intent on every boot. */
+  public prepareStartupBindings(): {
+    pendingCopilot: RuntimeNodeSessionRecord[];
+    normalized: RuntimeNodeSessionRecord[];
+  } {
+    const normalized: RuntimeNodeSessionRecord[] = [];
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const record of this.listSessions()) {
+        if (record.availability !== "active" && record.runtimeEpoch === null) continue;
+        const { lifecycle: _lifecycle, ...withoutLifecycle } = record;
+        const timestamp = new Date().toISOString();
+        const stopped = runtimeNodeSessionRecordSchema.parse({
+          ...withoutLifecycle,
+          availability: "resumable",
+          runtimeStatus: "stopped",
+          runtimeEpoch: null,
+          updatedAt: timestamp,
+          lastSeenAt: timestamp,
+        });
+        this.#putParsedSession(stopped);
+        if (record.harness === "copilot") {
+          this.#db.prepare(`INSERT INTO copilot_startup_intent(session_id, record_json) VALUES (?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json`)
+            .run(record.sessionId, encode(record));
+        }
+        normalized.push(stopped);
+      }
+      const pendingCopilot = (this.#db.prepare("SELECT record_json FROM copilot_startup_intent ORDER BY session_id").all() as Row[])
+        .map((row) => runtimeNodeSessionRecordSchema.parse(decode(row.record_json)));
+      this.#db.exec("COMMIT");
+      return { pendingCopilot, normalized };
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** An accepted native handle and removal of recovery intent are one commit. */
+  public commitStartupCopilotReattachment(record: RuntimeNodeSessionRecord): void {
+    const parsed = runtimeNodeSessionRecordSchema.parse(record);
+    if (parsed.harness !== "copilot" || parsed.availability !== "active" || parsed.runtimeEpoch === null) {
+      throw new Error("startup Copilot reattachment requires an active native binding");
+    }
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#putParsedSession(parsed);
+      this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(parsed.sessionId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   public deleteSession(sessionId: SessionId): boolean {
@@ -1098,6 +1162,24 @@ function migrateRuntimeNodeLifecycleContract(database: DatabaseSync): void {
     value.version = 2;
     value.tasks = tasks;
     value.queue = queue;
+    value.aggregateActivity = "unknown";
+    value.nativeAdmission = { state: tasks.observation && (tasks.observation as Record<string, unknown>).stalled === true ||
+      queue.observation && (queue.observation as Record<string, unknown>).stalled === true ? "degraded" : "open" };
+    update.run(encode(lifecycleStateSchema.parse(value)), String(row.session_id));
+  }
+}
+
+function migrateRuntimeNodeLifecycleActivityAdmission(database: DatabaseSync): void {
+  const update = database.prepare("UPDATE lifecycle_state SET record_json=? WHERE session_id=?");
+  for (const row of database.prepare("SELECT session_id, record_json FROM lifecycle_state").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (value.version !== 2) throw new Error("lifecycle admission migration refused an unknown contract version");
+    if (value.aggregateActivity !== undefined && value.nativeAdmission !== undefined) continue;
+    const tasks = lifecycleDimension(value.tasks, "tasks");
+    const queue = lifecycleDimension(value.queue, "queue");
+    value.aggregateActivity = "unknown";
+    value.nativeAdmission = { state: (tasks.observation as Record<string, unknown>).stalled === true ||
+      (queue.observation as Record<string, unknown>).stalled === true ? "degraded" : "open" };
     update.run(encode(lifecycleStateSchema.parse(value)), String(row.session_id));
   }
 }

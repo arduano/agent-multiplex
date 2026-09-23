@@ -210,6 +210,14 @@ remain authoritative; no read failure invents completion.
 These deadlines do not cancel native work, repair a stalled shared SDK server,
 resume sessions or retry commands. Sends, steering, settings, interrupts and
 lifecycle mutations keep their existing acknowledgement/unknown-outcome rules.
+The runtime owns task and queue refresh on activation, invalidation and a
+60-second repair interval. A read that remains occupied for 45 seconds degrades
+the binding and blocks new Copilot mutations while Stop remains available. If
+the binding is still degraded 120 seconds later, the runtime daemon shuts down
+for its process supervisor to retry. The old owned CLI must exit before a new
+runtime attaches; if native termination cannot be proved, the supervisor stops
+retrying. This recovery never resends an uncertain command or restarts the
+control node.
 The runtime daemon's presence heartbeat remains independent of inventory and
 metadata maintenance; see [process supervision](Operations.md#process-supervision).
 

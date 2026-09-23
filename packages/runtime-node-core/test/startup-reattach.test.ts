@@ -72,7 +72,9 @@ class CopilotAdapter implements AgentAdapter {
   readonly adapterScopeId = adapterScopeIdSchema.parse("startup-reattach-test");
   readonly resumes: HarnessResumeOptions[] = [];
   readonly handles: CopilotSession[] = [];
-  returnedVendorSessionId = "native-startup-reattach";
+  returnedVendorSessionId: string | undefined;
+  failResumeForVendorSessionId: string | undefined;
+  spawnVendorSessionIds: string[] = [];
   constructor(readonly cwd: string) {}
   describe(): Promise<HarnessCatalogEntry> {
     return Promise.resolve({ harness: "copilot", adapterScopeId: this.adapterScopeId, available: true, capabilities: [] });
@@ -80,13 +82,16 @@ class CopilotAdapter implements AgentAdapter {
   listModels(): Promise<NativeModel[]> { return Promise.resolve([]); }
   listSessions(): Promise<NativeInventoryItem[]> { return Promise.resolve([]); }
   spawn(_options: HarnessSpawnOptions): Promise<AdapterSession> {
-    const session = new CopilotSession(this.cwd);
+    const session = new CopilotSession(this.cwd, this.spawnVendorSessionIds.shift());
     this.handles.push(session);
     return Promise.resolve(session);
   }
   resume(options: HarnessResumeOptions): Promise<AdapterSession> {
     this.resumes.push(options);
-    const session = new CopilotSession(this.cwd, this.returnedVendorSessionId);
+    if (options.vendorSessionId === this.failResumeForVendorSessionId) {
+      return Promise.reject(new Error("injected native resume failure"));
+    }
+    const session = new CopilotSession(this.cwd, this.returnedVendorSessionId ?? options.vendorSessionId);
     this.handles.push(session);
     return Promise.resolve(session);
   }
@@ -170,6 +175,62 @@ describe("trusted Copilot startup reattachment", () => {
       } finally { await second.close(); }
     } finally {
       store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("retains exact reattachment intent through two interrupted boots and partial recovery", async () => {
+    const root = mkdtempSync(join(tmpdir(), "multiplex-copilot-reattach-retry-"));
+    const filename = join(root, "runtime.sqlite");
+    const runtimeNodeId = newRuntimeNodeId();
+    const firstStore = new RuntimeNodeStore(filename);
+    const originalAdapter = new CopilotAdapter(root);
+    originalAdapter.spawnVendorSessionIds = ["native-a", "native-b"];
+    const first = new RuntimeNodeService({ store: firstStore, adapters: [originalAdapter], runtimeNodeId,
+      runtimeNodeBootId: newRuntimeNodeBootId(), name: "first", allowedRoots: [root] });
+    const ids = [newSessionId(), newSessionId()].sort();
+    try {
+      const profile = first.launchProfiles()[0]!;
+      for (const sessionId of ids) {
+        const launch: LaunchRequest = { launchId: newLaunchId(), sessionId, runtimeNodeId,
+          payloadHash: `startup-reattach-${sessionId}`, profile: { providerId: profile.providerId,
+            profileId: profile.profileId, contractVersion: profile.contractVersion,
+            requestSchemaHash: profile.requestSchemaHash }, harness: "copilot", input: { cwd: root } };
+        first.createLaunch(launch);
+        await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"));
+      }
+    } finally { await first.close(); firstStore.close(); }
+
+    const secondStore = new RuntimeNodeStore(filename);
+    const second = new RuntimeNodeService({ store: secondStore, adapters: [new CopilotAdapter(root)], runtimeNodeId,
+      runtimeNodeBootId: newRuntimeNodeBootId(), name: "second", allowedRoots: [root] });
+    try {
+      for (const sessionId of ids) expect(secondStore.getSession(sessionId)).toMatchObject({ availability: "resumable", runtimeEpoch: null });
+      // Simulate a process loss after durable normalization but before resume.
+    } finally { await second.close(); secondStore.close(); }
+
+    const thirdStore = new RuntimeNodeStore(filename);
+    const thirdAdapter = new CopilotAdapter(root);
+    thirdAdapter.failResumeForVendorSessionId = "native-b";
+    const third = new RuntimeNodeService({ store: thirdStore, adapters: [thirdAdapter], runtimeNodeId,
+      runtimeNodeBootId: newRuntimeNodeBootId(), name: "third", allowedRoots: [root] });
+    try {
+      await expect(third.reattachPersistedCopilotSessions()).rejects.toThrow("injected native resume failure");
+      expect(thirdAdapter.resumes).toHaveLength(2);
+      expect(thirdStore.listSessions().filter((record) => record.availability === "active")).toHaveLength(1);
+    } finally { await third.close(); thirdStore.close(); }
+
+    const fourthStore = new RuntimeNodeStore(filename);
+    const fourthAdapter = new CopilotAdapter(root);
+    const fourth = new RuntimeNodeService({ store: fourthStore, adapters: [fourthAdapter], runtimeNodeId,
+      runtimeNodeBootId: newRuntimeNodeBootId(), name: "fourth", allowedRoots: [root] });
+    try {
+      await fourth.reattachPersistedCopilotSessions();
+      expect(fourthAdapter.resumes.map((item) => item.vendorSessionId).sort()).toEqual(["native-a", "native-b"]);
+      expect(fourthAdapter.resumes.every((item) => item.continuePendingWork === false)).toBe(true);
+      for (const sessionId of ids) expect(fourthStore.getSession(sessionId)?.availability).toBe("active");
+    } finally {
+      await fourth.close(); fourthStore.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

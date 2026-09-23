@@ -768,7 +768,7 @@ describe("runtime v4 launch providers", () => {
   });
 });
 
-describe("runtime store v3 to v5", () => {
+describe("runtime store v3 to v10", () => {
   it("adds launch journals and backfills runtime session fields", () => {
     const filename = join(
       mkdtempSync(join(tmpdir(), "multiplex-v4-migration-")),
@@ -804,14 +804,14 @@ describe("runtime store v3 to v5", () => {
     downgrade.prepare("UPDATE bindings SET record_json=? WHERE session_id=?")
       .run(JSON.stringify(legacyJson), legacyCompatible.sessionId);
     downgrade.exec(
-      "DROP TABLE images; DROP TABLE launch_journal; DROP TABLE archive_journal; DROP TABLE archived_native_bindings; DROP TABLE IF EXISTS lifecycle_state",
+      "DROP TABLE images; DROP TABLE launch_journal; DROP TABLE archive_journal; DROP TABLE archived_native_bindings; DROP TABLE IF EXISTS lifecycle_state; DROP TABLE IF EXISTS copilot_startup_intent",
     );
     downgrade.prepare("DELETE FROM schema_migrations WHERE version>=4").run();
     downgrade.exec("PRAGMA user_version=3");
     downgrade.close();
 
     const migrated = new RuntimeNodeStore(filename);
-    expect(migrated.diagnostics().userVersion).toBe(8);
+    expect(migrated.diagnostics().userVersion).toBe(10);
     expect(migrated.getSession(legacyCompatible.sessionId)).toMatchObject({
       launchProvenance: null,
       lastActivityAt: timestamp,

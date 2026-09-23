@@ -98,14 +98,17 @@ node_modules/.bin/codex app-server generate-ts --experimental \
 Protocol v6 is a coordinated upgrade of controls, runtimes, gateways, clients,
 and adapters; mixed v5/v6 peers are rejected. It retains every released
 migration identity, appends control schema version 7 for typed command errors,
-and appends runtime versions 6 and 7 for typed command errors and durable
-Copilot lifecycle evidence. Command-error migration replaces legacy terminal
+and appends runtime versions 6 through 10 for typed command errors, durable
+Copilot lifecycle evidence, contract rotation, crash-safe startup intent, and
+lifecycle activity/admission state. Control version 8 rotates incompatible
+lifecycle feeds. Command-error migration replaces legacy terminal
 error strings with fixed typed recovery records; it refuses a nonterminal
 legacy error instead of guessing its certainty. The earlier v5 image migration
 and control authority-handoff migration remain immutable historical entries.
 
-Keep a complete pre-upgrade backup. A migrated database is a future schema to
-older binaries, so rollback means restoring the complete pre-upgrade role unit,
+Keep a complete stopped-state backup of both control and runtime stores before
+the cutover. A migrated database is a future schema to older binaries, so
+rollback means restoring both complete pre-upgrade role units together,
 not editing `user_version`, dropping the lifecycle table, or rewriting the
 migration ledger. Resolve incompatible records through an explicit
 upgrade/export decision; never truncate receipts. See
@@ -119,10 +122,11 @@ v4/v5 receipts qualify only their recorded source. The lifecycle work has no
 live/native protocol-v6 receipt; do not infer one from deterministic mock
 qualification.
 
-The current source still pins public `@arduano/p2prpc-core@0.2.1`. The separate
-renewal work is an external dependency and has not been merged or substituted by
-a local package. Its eventual upgrade must preserve the lifecycle transport
-contract and be qualified before an exact pin/lockfile update here.
+The current release candidate uses a checksummed local transport overlay for
+source qualification. It must be removed before release packing, after the
+separate renewal package is published and its exact public version is pinned
+in the manifest and lockfile. No local/file dependency may enter the released
+package graph.
 
 ## Recovery decisions
 

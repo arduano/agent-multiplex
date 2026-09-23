@@ -1,6 +1,7 @@
 import {
   canonicalJson,
   lifecycleProjection,
+  lifecycleNativeObservationDegraded,
   lifecycleFactSchema,
   sameLifecycleFence,
   type LifecycleFact,
@@ -174,9 +175,12 @@ export interface RuntimeNodeServiceOptions {
   images?: RuntimeImageOptions;
   nativeEventQueueLimit?: number;
   nativeEventQueueBytes?: number;
+  /** Trusted process supervisor hook. It must stop this runtime before retrying. */
+  onCopilotObservationRecoveryRequired?: (sessionId: SessionId) => void;
 }
 
 interface ActiveBinding {
+  sessionId: SessionId;
   session: AdapterSession;
   unsubscribe: () => void;
   sequence: number;
@@ -202,10 +206,13 @@ interface LifecycleRefreshLane {
 interface LifecycleObservationCoordinator {
   retired: boolean;
   running: boolean;
-  degraded: boolean;
+  startedAt: number;
   generation: number;
   timer: ReturnType<typeof setTimeout> | undefined;
   stallTimer: ReturnType<typeof setTimeout> | undefined;
+  refreshTimer: ReturnType<typeof setInterval> | undefined;
+  recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  recoveryRequested: boolean;
   lanes: Record<LifecycleRefreshView, LifecycleRefreshLane>;
 }
 
@@ -245,6 +252,7 @@ export class RuntimeNodeService {
   readonly #nativeEventTasks = new Map<Promise<void>, SessionId>();
   readonly #nativeEventQueueLimit: number;
   readonly #nativeEventQueueBytes: number;
+  readonly #onCopilotObservationRecoveryRequired: ((sessionId: SessionId) => void) | undefined;
   #acceptingNativeEvents = true;
   #lastSnapshot: InventorySnapshot | undefined;
   #closed = false;
@@ -260,6 +268,7 @@ export class RuntimeNodeService {
     this.#runtimeNodeBootId = options.runtimeNodeBootId;
     this.#name = options.name;
     this.#endpointId = options.endpointId;
+    this.#onCopilotObservationRecoveryRequired = options.onCopilotObservationRecoveryRequired;
     this.#resolvedInteractionCacheSize = options.resolvedInteractionCacheSize ?? 1_024;
     if (
       !Number.isSafeInteger(this.#resolvedInteractionCacheSize) ||
@@ -307,16 +316,9 @@ export class RuntimeNodeService {
     // Native handles belong to one runtime process. Persisted active rows are
     // resume bindings after startup, never evidence that this boot can execute
     // commands. Normalize before the reverse feed can replay durable bindings.
-    const persistedSessions = this.#store.listSessions();
-    this.#startupCopilotBindings = persistedSessions.filter((record) =>
-      record.harness === "copilot" &&
-      (record.availability === "active" || record.runtimeEpoch !== null)
-    );
-    for (const record of persistedSessions) {
-      if (record.availability === "active" || record.runtimeEpoch !== null) {
-        this.#persistStopped(record);
-      }
-    }
+    const startup = this.#store.prepareStartupBindings();
+    this.#startupCopilotBindings = startup.pendingCopilot;
+    for (const record of startup.normalized) this.#publishSession(record);
     queueMicrotask(() => this.#recoverDurableOperations());
   }
 
@@ -351,7 +353,7 @@ export class RuntimeNodeService {
             const session = await plan.backend.adapter.resume(request);
             await this.#validateResumedHandle(current, request, plan.backend, session);
             const record = this.#recordForHandle(persisted.sessionId, session, { existing: current });
-            this.#store.putSession(record);
+            this.#store.commitStartupCopilotReattachment(record);
             this.#activate(persisted.sessionId, session);
             this.#publishSession(record);
           });
@@ -1608,20 +1610,27 @@ export class RuntimeNodeService {
     this.#acceptingNativeEvents = false;
     await Promise.allSettled(this.#nativeEventTasks.keys());
     const errors = await collectCleanupErrors([() => this.#terminals.close()]);
-    errors.push(...await collectCleanupErrors(
-      [...this.#active.values()].map(({ session, unsubscribe }) => async () => {
-        const sessionErrors = await collectCleanupErrors([unsubscribe]);
-        sessionErrors.push(...await collectCleanupErrors([() => session.stop()]));
-        if (sessionErrors.length > 0) {
-          throw new AggregateError(sessionErrors, "runtime session cleanup failed");
-        }
-      }),
-    ));
+    const sessionCleanup = await Promise.all([...this.#active.values()].map(async ({ session, unsubscribe }) => ({
+      harness: session.harness,
+      unsubscribeErrors: await collectCleanupErrors([unsubscribe]),
+      stopErrors: await collectCleanupErrors([() => session.stop()]),
+    })));
+    for (const result of sessionCleanup) errors.push(...result.unsubscribeErrors);
     this.#active.clear();
     this.#pendingInteractions.clear();
     this.#resolvedInteractions.clear();
     // Backend processes may depend on provider-owned resources during close.
-    errors.push(...await collectCleanupErrors([() => this.#launchRegistry.closeBackends()]));
+    const backendErrors = await collectCleanupErrors([() => this.#launchRegistry.closeBackends()]);
+    errors.push(...backendErrors);
+    for (const result of sessionCleanup) {
+      for (const error of result.stopErrors) {
+        // A timed-out Copilot session disconnect is uncertain until its owning
+        // adapter closes. Successful backend cleanup proves the old CLI owner
+        // is gone; an unproved forced stop makes closeBackends fail instead.
+        if (result.harness === "copilot" && error instanceof AdapterOutcomeUnknownError && backendErrors.length === 0) continue;
+        errors.push(error);
+      }
+    }
     errors.push(...await collectCleanupErrors([() => this.#launchRegistry.closeProviders()]));
     errors.push(...await collectCleanupErrors([() => this.#images.close()]));
     if (errors.length > 0) throw new AggregateError(errors, "runtime node cleanup failed");
@@ -2433,12 +2442,33 @@ export class RuntimeNodeService {
   }
 
   #assertLifecycleMutationAvailable(binding: ActiveBinding): void {
-    if (binding.session.harness === "copilot" && binding.lifecycleObservations.degraded) {
+    const fence = this.#lifecycleFence(binding.sessionId, binding);
+    if (fence && lifecycleNativeObservationDegraded(this.#lifecycle.read(fence))) {
       throw new RuntimeNodeProtocolError(
         "UNAVAILABLE",
         "Copilot native observation is stalled; stop or recover this runtime before dispatching another mutation",
       );
     }
+  }
+
+  #markLifecycleObservationDegraded(sessionId: SessionId, binding: ActiveBinding, diagnosticId: string): void {
+    const fence = this.#lifecycleFence(sessionId, binding);
+    if (!fence) return;
+    if (this.#lifecycle.read(fence).nativeAdmission.state !== "degraded") {
+      this.#appendLifecycle(sessionId, binding, { type: "nativeObservationDegraded", diagnosticId });
+    }
+    const coordinator = binding.lifecycleObservations;
+    if (coordinator.recoveryTimer || coordinator.recoveryRequested || !this.#onCopilotObservationRecoveryRequired) return;
+    coordinator.recoveryTimer = setTimeout(() => {
+      coordinator.recoveryTimer = undefined;
+      if (coordinator.retired || this.#closed || this.#active.get(sessionId) !== binding) return;
+      const currentFence = this.#lifecycleFence(sessionId, binding);
+      if (currentFence && this.#lifecycle.read(currentFence).nativeAdmission.state === "degraded") {
+        coordinator.recoveryRequested = true;
+        this.#onCopilotObservationRecoveryRequired?.(sessionId);
+      }
+    }, 120_000);
+    coordinator.recoveryTimer.unref?.();
   }
 
   #appendLifecycle(sessionId: SessionId, binding: ActiveBinding, fact: LifecycleFact): void {
@@ -2512,6 +2542,7 @@ export class RuntimeNodeService {
     lane.pending = false;
     coordinator.running = true;
     const generation = ++coordinator.generation;
+    coordinator.startedAt = Date.now();
     const fence = this.#lifecycleFence(sessionId, binding);
     const revision = fence === undefined ? undefined
       : view === "tasks" ? this.#lifecycle.read(fence).tasks.revision : this.#lifecycle.read(fence).queue.revision;
@@ -2521,17 +2552,18 @@ export class RuntimeNodeService {
     }
     coordinator.stallTimer = setTimeout(() => {
       if (coordinator.retired || !coordinator.running || coordinator.generation !== generation || this.#active.get(sessionId) !== binding) return;
-      coordinator.degraded = true;
       const failures = Math.max(1, lane.failures + 1);
+      const diagnosticId = newOperationId();
+      this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
       this.#appendLifecycle(sessionId, binding, {
         type: "observationFailed",
         view: view === "tasks" ? "tasks" : "queue",
         revision,
         failures,
-        diagnosticId: newOperationId(),
+        diagnosticId,
         stalled: true,
       });
-    }, Math.max(0, LIFECYCLE_OBSERVATION_STALLED_MS - (Date.now() - lane.requestedAt)));
+    }, LIFECYCLE_OBSERVATION_STALLED_MS);
     coordinator.stallTimer.unref?.();
 
     // This read deliberately runs outside the per-session mutation lock and is
@@ -2573,14 +2605,16 @@ export class RuntimeNodeService {
       lane.dueAt = lane.requestedAt;
     } else if (failed) {
       lane.failures += 1;
-      const stalled = coordinator.degraded || Date.now() - lane.requestedAt >= LIFECYCLE_OBSERVATION_STALLED_MS;
-      coordinator.degraded ||= stalled;
+      const stalled = state.nativeAdmission.state === "degraded" ||
+        Date.now() - coordinator.startedAt >= LIFECYCLE_OBSERVATION_STALLED_MS;
+      const diagnosticId = newOperationId();
+      if (stalled) this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
       this.#appendLifecycle(sessionId, binding, {
         type: "observationFailed",
         view: view === "tasks" ? "tasks" : "queue",
         revision,
         failures: lane.failures,
-        diagnosticId: newOperationId(),
+        diagnosticId,
         stalled,
       });
       lane.pending = true;
@@ -2592,10 +2626,15 @@ export class RuntimeNodeService {
       lane.failures = 0;
       lane.requestedAt = 0;
       lane.dueAt = 0;
-      // A successful observation recovers mutation availability once both
-      // dimensions no longer carry a stalled marker.
+      // The same durable state controls admission and the public action view.
       const recovered = this.#lifecycle.read(fence);
-      coordinator.degraded = recovered.tasks.observation.stalled || recovered.queue.observation.stalled;
+      if (recovered.nativeAdmission.state === "degraded" &&
+        recovered.tasks.observation.state === "observed" && recovered.queue.observation.state === "observed") {
+        this.#appendLifecycle(sessionId, binding, { type: "nativeObservationRecovered" });
+        if (coordinator.recoveryTimer) clearTimeout(coordinator.recoveryTimer);
+        coordinator.recoveryTimer = undefined;
+        coordinator.recoveryRequested = false;
+      }
     }
     this.#pumpLifecycleObservations(sessionId, binding);
   }
@@ -2607,8 +2646,12 @@ export class RuntimeNodeService {
     coordinator.generation += 1;
     if (coordinator.timer) clearTimeout(coordinator.timer);
     if (coordinator.stallTimer) clearTimeout(coordinator.stallTimer);
+    if (coordinator.refreshTimer) clearInterval(coordinator.refreshTimer);
+    if (coordinator.recoveryTimer) clearTimeout(coordinator.recoveryTimer);
     coordinator.timer = undefined;
     coordinator.stallTimer = undefined;
+    coordinator.refreshTimer = undefined;
+    coordinator.recoveryTimer = undefined;
     for (const lane of Object.values(coordinator.lanes)) lane.pending = false;
   }
 
@@ -2861,6 +2904,7 @@ export class RuntimeNodeService {
       this.#retireInteractions(sessionId, existing.session.runtimeEpoch);
     }
     const binding: ActiveBinding = {
+      sessionId,
       session,
       sequence: 0,
       lastActivityPersistedAt: Date.now(),
@@ -2873,10 +2917,13 @@ export class RuntimeNodeService {
       lifecycleObservations: {
         retired: false,
         running: false,
-        degraded: false,
+        startedAt: 0,
         generation: 0,
         timer: undefined,
         stallTimer: undefined,
+        refreshTimer: undefined,
+        recoveryTimer: undefined,
+        recoveryRequested: false,
         lanes: {
           tasks: { pending: false, failures: 0, requestedAt: 0, dueAt: 0 },
           pendingMessages: { pending: false, failures: 0, requestedAt: 0, dueAt: 0 },
@@ -2895,6 +2942,11 @@ export class RuntimeNodeService {
       if (this.#active.get(sessionId) !== binding) unsubscribe();
       this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
       this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
+      binding.lifecycleObservations.refreshTimer = setInterval(() => {
+        this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
+        this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
+      }, 60_000);
+      binding.lifecycleObservations.refreshTimer.unref?.();
     } catch (error) {
       this.#retireLifecycleObservations(binding);
       if (this.#active.get(sessionId) === binding) this.#active.delete(sessionId);

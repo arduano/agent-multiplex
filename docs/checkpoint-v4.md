@@ -1,5 +1,39 @@
 # Release qualification checkpoint
 
+## Published-core protocol-v6 source gate — 2026-09-23
+
+The `0.2.4-hotfix.17` framework source pins the independently published
+`@arduano/p2prpc-core@0.3.0-renewal.0` through its manifest and lockfile.
+The GitHub Packages integrity is
+`sha512-Gr1yK8rE22VKOwz6Hzrg7RpkZIpOjOOForks+kCKOACbTMAn4yF3Y2u4ngnGT8IJFIpYISXFRzxSQP+RgFeVnA==`.
+Independent p2prpc main/tag `ca7bb6fb7b791813c937ddbf9bde62423d097373`
+passed publication run
+[`35841435029`](https://github.com/arduano/p2prpc/actions/runs/35841435029),
+registry-byte/downstream verification, and a nine-asset GitHub release. Its
+registry tarball SHA-256 is
+`e2b13239b9337ddb5ea1b28542e1d8fcd28bde37f469c18541967b60d6d9b69f`.
+
+After a clean `npm ci --strict-allow-scripts`, Node 24.19.0/npm 11.17.0 passed
+typecheck, production build, **1,050 tests/114 files**, checkpoint, docs,
+release metadata, source-secret checks, `npm ls --workspaces --depth=0`, and
+high-severity npm audit. The audit found two moderate Vitest development
+dependency advisories, with no high/critical result. The no-model Docker
+control tree and 10-runtime/100-session mock scale passed against the
+published-core lockfile:
+
+| Suite | Local checksummed receipt | `SHA256SUMS` SHA-256 |
+| --- | --- | --- |
+| Control tree | `receipts/protocol-v4-control-tree/20260923T092203Z-1d42606337be/` | `531db2c2e07d39827a6887dc106b724822da4fa7d67b637de0dc5a1bbe43cb4a` |
+| Mock scale | `receipts/protocol-v4-mock-docker-scale/20260923T092533Z-9673e1d283cd/` | `24b947399643c099c431b51950fef5032eb5a472a115e5bbb43844dce80473f1` |
+
+Both receipt inventories passed `sha256sum -c SHA256SUMS`; the Docker images
+used the exact locked core version/integrity and made zero real inference
+requests. These source tests ran before the final clean release commit and do
+not claim exact-tag or native Windows qualification. The earlier patch-overlay
+candidate section below remains historical. Final artifact, consumer, Windows,
+backup/rollback and live three-generation receipts must be recorded separately
+before cutover.
+
 ## Unpublished protocol-v6 Copilot lifecycle and consumer candidate — 2026-09-23
 
 The clean framework implementation commit

@@ -11,8 +11,10 @@ current publication state. The [checkpoint](../checkpoint-v4.md#protocol-v5-rele
 owns immutable source/tag identities, workflow results, receipt digests, and
 artifact verification. Historical `v0.1.0` evidence is retained separately there.
 
-The public graph contains 16 packages under `@arduano/agent-multiplex-*` and
-pins `@arduano/p2prpc-core@0.2.1` exactly. GitHub Packages requires
+The released protocol-v5 graph contains 16 packages under
+`@arduano/agent-multiplex-*` and pins `@arduano/p2prpc-core@0.2.1` exactly.
+Current protocol-v6 source pins independently published
+`@arduano/p2prpc-core@0.3.0-renewal.0`. GitHub Packages requires
 authentication even for public installs. Local readers need a classic token
 with `read:packages`. This repository's CI and Dependabot use the
 `PACKAGES_READ_TOKEN` secret because their repository-scoped tokens do not

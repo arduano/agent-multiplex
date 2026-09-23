@@ -27,6 +27,7 @@ import {
   RuntimeNodeService,
   RuntimeNodeStore,
   RuntimeLifecycleJournal,
+  AdapterOutcomeUnknownError,
   type AdapterEvent,
   type AdapterNativeStateResult,
   type AdapterSession,
@@ -107,22 +108,29 @@ afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
 });
 
-async function fixture(read: (session: RefreshSession, request: NativeStateRequest) => Promise<AdapterNativeStateResult>) {
+async function fixture(
+  read: (session: RefreshSession, request: NativeStateRequest) => Promise<AdapterNativeStateResult>,
+  onRecoveryRequired?: (sessionId: string) => void,
+  expectCloseFailure = false,
+) {
   const cwd = mkdtempSync(join(tmpdir(), "multiplex-lifecycle-refresh-"));
   const store = new RuntimeNodeStore(":memory:");
   const runtimeNodeId = newRuntimeNodeId();
   let session!: RefreshSession;
   session = new RefreshSession(cwd, request => read(session, request));
+  const adapter = new RefreshAdapter(session);
   const service = new RuntimeNodeService({
     store,
     runtimeNodeId,
     runtimeNodeBootId: newRuntimeNodeBootId(),
     name: "lifecycle refresh test",
     allowedRoots: [cwd],
-    adapters: [new RefreshAdapter(session)],
+    adapters: [adapter],
+    ...(onRecoveryRequired ? { onCopilotObservationRecoveryRequired: onRecoveryRequired } : {}),
   });
   cleanup.push(async () => {
-    await service.close();
+    if (expectCloseFailure) await service.close().catch(() => undefined);
+    else await service.close();
     store.close();
     rmSync(cwd, { recursive: true, force: true });
   });
@@ -143,7 +151,7 @@ async function fixture(read: (session: RefreshSession, request: NativeStateReque
   };
   service.createLaunch(launch);
   await vi.waitFor(() => expect(service.getLaunch(launch.launchId)?.state).toBe("succeeded"));
-  return { service, store, session, launch };
+  return { service, store, session, adapter, launch };
 }
 
 async function lifecycleState(
@@ -478,6 +486,121 @@ describe("server-owned Copilot lifecycle refresh", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps admission and the public actions degraded when a stale revision owns the stuck SDK lane", async () => {
+    vi.useFakeTimers();
+    try {
+      let blocked: Deferred<AdapterNativeStateResult> | undefined;
+      const f = await fixture(async (_session, request) => {
+        if (request.harness === "copilot" && request.view === "tasks") return blocked?.promise ?? tasksResult;
+        return queueResult;
+      });
+      await vi.waitFor(async () => {
+        const state = await lifecycleState(f);
+        expect(state.tasks.observation.state).toBe("observed");
+        expect(state.queue.observation.state).toBe("observed");
+      });
+      blocked = deferred<AdapterNativeStateResult>();
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.revision).toBe(1));
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.revision).toBe(2));
+      await vi.advanceTimersByTimeAsync(45_000);
+      const stalled = await f.service.readLifecycle(f.launch.sessionId);
+      expect(stalled.view.health.state).toBe("degraded");
+      expect(stalled.view.actions.send).toEqual({ available: false, reason: "nativeObservationDegraded" });
+      expect((await lifecycleState(f)).tasks.observation.state).toBe("pending");
+      const command = await f.service.execute({ commandId: newCommandId(), payloadHash: "stale-read-admission",
+        sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1,
+        request: { harness: "copilot", command: { type: "setMode", mode: "interactive" } } });
+      expect(command).toMatchObject({ state: "failed", error: { code: "UNAVAILABLE" } });
+      const first = blocked;
+      blocked = undefined;
+      first.resolve(tasksResult);
+      await vi.waitFor(async () => expect((await f.service.readLifecycle(f.launch.sessionId)).view.health.state).not.toBe("degraded"));
+      expect((await f.service.readLifecycle(f.launch.sessionId)).view.actions.send.available).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("requests runtime-only recovery after persistent degraded observation, once per binding", async () => {
+    vi.useFakeTimers();
+    try {
+      const blocked = deferred<AdapterNativeStateResult>();
+      const recovery = vi.fn();
+      const f = await fixture(async (_session, request) =>
+        request.harness === "copilot" && request.view === "tasks" ? blocked.promise : queueResult,
+      recovery);
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect((await lifecycleState(f)).nativeAdmission.state).toBe("degraded");
+      await vi.advanceTimersByTimeAsync(110_000);
+      expect(recovery).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(recovery).toHaveBeenCalledExactlyOnceWith(f.launch.sessionId);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(recovery).toHaveBeenCalledTimes(1);
+      blocked.resolve(tasksResult);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("cancels the recovery deadline when fresh observations heal or the binding stops", async () => {
+    vi.useFakeTimers();
+    try {
+      let blocked: Deferred<AdapterNativeStateResult> | undefined;
+      const recovery = vi.fn();
+      const f = await fixture(async (_session, request) =>
+        request.harness === "copilot" && request.view === "tasks" ? blocked?.promise ?? tasksResult : queueResult,
+      recovery);
+      await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+      blocked = deferred<AdapterNativeStateResult>();
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.advanceTimersByTimeAsync(45_000);
+      expect((await lifecycleState(f)).nativeAdmission.state).toBe("degraded");
+      blocked.resolve(tasksResult);
+      blocked = undefined;
+      await vi.waitFor(async () => expect((await lifecycleState(f)).nativeAdmission.state).toBe("open"));
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(recovery).not.toHaveBeenCalled();
+
+      blocked = deferred<AdapterNativeStateResult>();
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.advanceTimersByTimeAsync(45_000);
+      await f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "cancel-recovery-on-stop",
+        sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1 });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(recovery).not.toHaveBeenCalled();
+      blocked.resolve(tasksResult);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("refreshes both native views every minute without a UI poller", async () => {
+    vi.useFakeTimers();
+    try {
+      const reads: NativeStateRequest[] = [];
+      const f = await fixture(async (_session, request) => {
+        reads.push(request);
+        return request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult;
+      });
+      await vi.waitFor(async () => expect((await lifecycleState(f)).queue.observation.state).toBe("observed"));
+      const initial = reads.length;
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(reads.length).toBe(initial + 2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("allows supervisor retry after a Copilot disconnect timeout only when backend closure succeeds", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
+    vi.spyOn(f.session, "stop").mockRejectedValue(new AdapterOutcomeUnknownError("native disconnect was not acknowledged"));
+    const adapterClose = vi.spyOn(f.adapter, "close");
+    await expect(f.service.close()).resolves.toBeUndefined();
+    expect(adapterClose).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when the Copilot owner could not be terminated", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult, undefined, true);
+    vi.spyOn(f.session, "stop").mockRejectedValue(new AdapterOutcomeUnknownError("native disconnect was not acknowledged"));
+    vi.spyOn(f.adapter, "close").mockRejectedValue(new Error("native termination unproved"));
+    await expect(f.service.close()).rejects.toThrow("runtime node cleanup failed");
   });
 
   it("closes with an unresolved SDK observation and ignores its late reply", async () => {

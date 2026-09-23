@@ -33,16 +33,13 @@ RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
     npm ci --include=dev
 
 COPY scripts/ ./scripts/
-COPY transport-candidate/ ./transport-candidate/
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
     --mount=type=cache,id=agent-multiplex-deterministic-npm,target=/root/.npm,sharing=locked \
-    node scripts/install-transport-renewal.mjs \
-    && npm run build -- --force \
+    npm run build -- --force \
     && npm prune --omit=dev \
-    && node scripts/install-transport-renewal.mjs \
     && test -f apps/control-node/dist/main.js \
     && test -f apps/runtime-node/dist/main.js \
     && test -f apps/gateway/dist/main.js \

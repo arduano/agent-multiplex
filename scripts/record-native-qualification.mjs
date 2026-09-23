@@ -25,12 +25,6 @@ import {
 } from "./github-commit-status.mjs";
 import { nativeStreamSummaryPassed } from "./native-stream-evidence.mjs";
 
-const renewalManifest = resolve(repositoryRoot, "transport-candidate/manifest.json");
-assert(
-  !existsSync(renewalManifest) || readJson("transport-candidate/manifest.json").releaseBlocked !== true,
-  "Native release qualification cannot attest an unpinned transport review candidate. Publish and pin its independent core before recording release qualification.",
-);
-
 const repository = "arduano/agent-multiplex";
 const repositoryOwner = "arduano";
 const statusContext = "Agent Multiplex / Native four-container qualification";
@@ -483,10 +477,10 @@ function validateReceipt(snapshot, directory, expectedCommit) {
   assertLockedVersion(lockfile, "@github/copilot", copilotVersion);
   assertLockedVersion(lockfile, "@github/copilot-sdk", copilotSdkVersion);
   assert(
-    p2prpc?.version === "0.2.1" &&
+    p2prpc?.version === "0.3.0-renewal.0" &&
       typeof p2prpc.integrity === "string" &&
       p2prpc.integrity.startsWith("sha512-"),
-    "source lockfile does not contain the qualified p2prpc 0.2.1 dependency",
+    "source lockfile does not contain the qualified p2prpc 0.3.0-renewal.0 dependency",
   );
 
   assertExactKeys(manifest, [

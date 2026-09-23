@@ -1272,12 +1272,10 @@ COPILOT_VERSION=$(jq -r '.[] | select(.harness == "copilot") | .runtimeVersion /
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}')
 IFS=$'\t' read -r P2PRPC_VERSION P2PRPC_INTEGRITY < <(
   docker exec "$CONTROL_CONTAINER" node --input-type=module -e '
-    import { existsSync, readFileSync } from "node:fs";
+    import { readFileSync } from "node:fs";
     const json = (path) => JSON.parse(readFileSync(path, "utf8"));
-    const candidate = "transport-candidate/artifact.json";
     const installed = json("node_modules/@arduano/p2prpc-core/package.json");
-    const dependency = existsSync(candidate) ? json(candidate)
-      : json("package-lock.json").packages?.["node_modules/@arduano/p2prpc-core"];
+    const dependency = json("package-lock.json").packages?.["node_modules/@arduano/p2prpc-core"];
     if (!dependency?.version || !dependency?.integrity || installed.version !== dependency.version) process.exit(1);
     process.stdout.write(`${dependency.version}\t${dependency.integrity}\n`);
   '

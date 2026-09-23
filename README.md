@@ -103,7 +103,7 @@ npm run check:checkpoint
 ```
 
 The exact transport is the independently released
-`@arduano/p2prpc-core@0.2.1`. Use the sibling `../p2prpc` checkout only for
+`@arduano/p2prpc-core@0.3.0-renewal.0`. Use the sibling `../p2prpc` checkout only for
 source development; release candidates must not use a `file:` dependency.
 
 ## Operating boundary

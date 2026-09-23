@@ -44,6 +44,8 @@ export type LifecycleCommand = z.infer<typeof commandSchema>;
 export const lifecycleStateSchema = z.object({
   version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema,
   nextSequence: counter, continuity: z.enum(["continuous", "gap"]),
+  aggregateActivity: z.enum(["unknown", "active", "inactive"]),
+  nativeAdmission: z.object({ state: z.enum(["open", "degraded"]), diagnosticId: diagnosticId.optional() }).strict(),
   root: z.object({ phase: z.enum(["unknown", "paused", "idle", "working"]), cycle: opaqueId.nullable(), outcome: z.enum(["none", "finished", "interrupted", "failed"]) }).strict(),
   tasks: z.object({ revision: counter, observation: observationHealthSchema, items: z.array(taskSchema).max(1_000) }).strict(),
   children: z.object({ completeness: z.enum(["complete", "partial"]), items: z.array(childSchema).max(256) }).strict(),
@@ -67,7 +69,9 @@ export const lifecycleFactSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("rootModelIdle") }).strict(),
   z.object({ type: z.literal("rootIdle"), aborted: z.boolean() }).strict(),
   z.object({ type: z.literal("rootFailed") }).strict(),
-  z.object({ type: z.literal("rootObserved"), active: z.boolean() }).strict(),
+  z.object({ type: z.literal("sessionActivityObserved"), active: z.boolean() }).strict(),
+  z.object({ type: z.literal("nativeObservationDegraded"), diagnosticId }).strict(),
+  z.object({ type: z.literal("nativeObservationRecovered") }).strict(),
   z.object({ type: z.literal("child"), id: childIdentitySchema, state: z.enum(["running", "completed", "failed"]) }).strict(),
   z.object({ type: z.literal("childrenHydrated"), items: z.array(childSchema).max(256), complete: z.boolean() }).strict(),
   z.object({ type: z.literal("tasksInvalidated") }).strict(),
@@ -105,6 +109,7 @@ export type LifecycleEvidence = z.infer<typeof lifecycleEvidenceSchema>;
 
 export function initialLifecycle(fence: LifecycleFence): LifecycleState {
   return { version: LIFECYCLE_VERSION, fence, nextSequence: 0, continuity: "continuous",
+    aggregateActivity: "unknown", nativeAdmission: { state: "open" },
     root: { phase: "unknown", cycle: null, outcome: "none" },
     tasks: { revision: 0, observation: pendingObservation(), items: [] }, children: { completeness: "partial", items: [] },
     queue: { revision: 0, observation: pendingObservation(), items: [], unidentifiedSteering: 0, inFlightSteering: null },
@@ -115,7 +120,7 @@ export function sameLifecycleFence(a: LifecycleFence, b: LifecycleFence): boolea
   return a.sessionId === b.sessionId && a.runtimeNodeId === b.runtimeNodeId && a.runtimeNodeBootId === b.runtimeNodeBootId && a.bindingRevision === b.bindingRevision && a.runtimeEpoch === b.runtimeEpoch;
 }
 function invalidate(s: LifecycleState): LifecycleState {
-  return { ...s, continuity: "gap", root: { ...s.root, phase: "unknown", cycle: null, outcome: "none" },
+  return { ...s, continuity: "gap", aggregateActivity: "unknown", root: { ...s.root, phase: "unknown", cycle: null, outcome: "none" },
     tasks: { ...s.tasks, revision: s.tasks.revision + 1, observation: pendingObservation() },
     queue: { ...s.queue, revision: s.queue.revision + 1, observation: pendingObservation() },
     children: { completeness: "partial", items: s.children.items.map((c) => ({ ...c, state: "unknown" })) },
@@ -125,7 +130,7 @@ function invalidate(s: LifecycleState): LifecycleState {
 }
 
 function startRootCycle(s: LifecycleState, cycleId: string): LifecycleState {
-  return { ...s, continuity: "continuous", root: { phase: "working", cycle: cycleId, outcome: "none" } };
+  return { ...s, continuity: "continuous", aggregateActivity: "active", root: { phase: "working", cycle: cycleId, outcome: "none" } };
 }
 
 /** Pure single-writer reducer. A gap requires a replacement snapshot, never an idle guess. */
@@ -146,18 +151,18 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
     // complete task/queue snapshot cannot accidentally project Ready while an
     // attached shell or background agent may still be winding down.
     case "rootModelIdle": return { ...s, root: { ...s.root, phase: "paused" } };
-    case "rootObserved": {
-      // metadata.activity carries no cycle identity. Activity discovered after
-      // a terminal/idle observation starts an unidentified cycle and therefore
-      // must discard the old cycle's outcome rather than revive it on the next
-      // inactive sample.
-      if (f.active && s.root.phase !== "working") {
-        return { ...s, root: { phase: "working", cycle: null, outcome: "none" } };
-      }
-      return { ...s, root: { ...s.root, phase: f.active ? "working" : "idle" } };
-    }
+    case "sessionActivityObserved":
+      // The SDK bit includes turns OR tasks. It cannot identify a root cycle.
+      // Inactivity can pause a known root but cannot settle its outcome.
+      return { ...s, aggregateActivity: f.active ? "active" : "inactive",
+        root: !f.active && s.root.phase === "working" ? { ...s.root, phase: "paused" } : s.root };
+    case "nativeObservationDegraded":
+      return { ...s, nativeAdmission: { state: "degraded", diagnosticId: f.diagnosticId } };
+    case "nativeObservationRecovered":
+      return s.tasks.observation.state === "observed" && s.queue.observation.state === "observed"
+        ? { ...s, nativeAdmission: { state: "open" } } : s;
     case "rootFailed": return { ...s, root: { ...s.root, phase: "idle", outcome: "failed" } };
-    case "rootIdle": return { ...s, continuity: "continuous",
+    case "rootIdle": return { ...s, continuity: "continuous", aggregateActivity: "inactive",
       root: { ...s.root, phase: "idle", outcome: s.root.outcome !== "none" ? s.root.outcome
         : f.aborted ? "interrupted" : s.root.cycle === null ? "none" : "finished" },
       // The SDK defines root session.idle as having no background agents or
@@ -289,6 +294,7 @@ export function projectLifecycle(s: LifecycleState, online = true): LifecycleLab
   if (s.root.phase === "working") return "Working";
   if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
   if (s.queue.observation.state === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
+  if (s.aggregateActivity === "active") return "Unknown";
   if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
   return s.root.outcome === "finished" ? "Finished" : "Ready";
 }
@@ -308,7 +314,7 @@ export type LifecycleStatus = z.infer<typeof lifecycleStatusSchema>;
 
 const lifecycleIssueSchema = z.object({
   scope: z.enum(["lifecycle", "tasks", "queue"]),
-  code: z.enum(["continuityGap", "observationPending", "observationRetrying", "observationStalled", "incompleteNativeState", "hostUnavailable"]),
+  code: z.enum(["continuityGap", "observationPending", "observationRetrying", "observationStalled", "nativeReadStalled", "incompleteNativeState", "hostUnavailable"]),
   diagnosticId: diagnosticId.optional(),
 }).strict();
 export type LifecycleIssue = z.infer<typeof lifecycleIssueSchema>;
@@ -358,10 +364,18 @@ export type RuntimeLifecycleProjection = z.infer<typeof runtimeLifecycleProjecti
 
 const observationNamespace = "bfb0cd00-6374-4c04-b7bf-f62f8fcedf79";
 
+/** Binding-level admission must agree with the published action view. */
+export function lifecycleNativeObservationDegraded(state: LifecycleState): boolean {
+  return state.nativeAdmission.state === "degraded" ||
+    state.tasks.observation.stalled || state.queue.observation.stalled;
+}
+
 export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProjection {
   const label = projectLifecycle(state);
-  const stalled = state.tasks.observation.stalled || state.queue.observation.stalled;
+  const stalled = lifecycleNativeObservationDegraded(state);
   const issues: LifecycleIssue[] = [];
+  if (state.nativeAdmission.state === "degraded") issues.push({ scope: "lifecycle", code: "nativeReadStalled",
+    ...(state.nativeAdmission.diagnosticId === undefined ? {} : { diagnosticId: state.nativeAdmission.diagnosticId }) });
   if (state.continuity === "gap") issues.push({ scope: "lifecycle", code: "continuityGap" });
   for (const [scope, observation] of [["tasks", state.tasks.observation], ["queue", state.queue.observation]] as const) {
     if (observation.state === "pending") issues.push({ scope, code: "observationPending" });
