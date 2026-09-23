@@ -58,6 +58,11 @@ historical protocol-v5 release evidence does not qualify this boundary. The
 remaining release history below describes published
 boundaries, not this candidate.
 
+The [three-repository readiness audit](../audits/maintenance-window-readiness-20260923.md)
+is a **no-go** for the full maintenance window at this source revision. It found
+two Copilot lifecycle correctness defects and an unreleased dependency graph;
+the audit owns the exact findings and closure criteria.
+
 ## Retained catalog startup correction
 
 The `.15` candidate corrects a latent restart defect when a catalog has compacted
