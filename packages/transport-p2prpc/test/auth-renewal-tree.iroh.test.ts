@@ -29,6 +29,7 @@ import {
   RuntimeNodeStore,
   type RuntimeNodeRouter,
 } from "@arduano/agent-multiplex-runtime-node-core";
+import { ensurePrivateDirectorySync } from "@arduano/agent-multiplex-storage-sqlite";
 import type { PeerContext } from "@arduano/p2prpc-core";
 import { initTRPC } from "@trpc/server";
 import { expect, it, vi } from "vitest";
@@ -42,7 +43,9 @@ const t = initTRPC.context<PeerContext>().create();
 it("keeps a real root/child/runtime tree reachable with durable cursor continuity through three auth generations", {
   timeout: 30_000,
 }, async () => {
-  const directory = mkdtempSync(join(tmpdir(), "multiplex-auth-renewal-tree-"));
+  const temporary = mkdtempSync(join(tmpdir(), "multiplex-auth-renewal-tree-"));
+  const directory = join(temporary, "private");
+  ensurePrivateDirectorySync(directory);
   const rootFile = join(directory, "root.sqlite");
   const rootCatalog = new ControlNodeCatalog({ filename: rootFile });
   const childCatalog = new ControlNodeCatalog({ filename: join(directory, "child.sqlite") });
@@ -356,7 +359,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     if (!rootCatalogClosed) rootCatalog.close();
     childCatalog.close();
     runtimeStore.close();
-    rmSync(directory, { recursive: true, force: true });
+    rmSync(temporary, { recursive: true, force: true });
   }
 });
 
