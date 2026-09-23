@@ -35,7 +35,7 @@ async function fixture(options: {
   });
   const client: CopilotAdapterClient = {
     start: async () => {}, stop: async () => [], forceStop: async () => {},
-    getStatus: async () => ({ version: "1.0.81", protocolVersion: 7 }),
+    getStatus: async () => ({ version: "1.0.88", protocolVersion: 7 }),
     listModels: async () => [], listSessions: async () => [],
     createSession: async config => {
       configuration = config;

@@ -496,7 +496,7 @@ prefer a forward fix. Ambiguous commands are never replayed during rollback.
 
 ## Explicit native SDK limitations
 
-Pinned SDK `1.0.13` / selected CLI `1.0.81` do not provide:
+Pinned SDK `1.0.14` / selected CLI `1.0.88` do not provide:
 
 - a caller-supplied operation/idempotency ID echoed by send, queue, consumption
   and compaction evidence;
@@ -508,6 +508,11 @@ Pinned SDK `1.0.13` / selected CLI `1.0.81` do not provide:
 - a supported alias map across task, agent and tool-call identity domains; or
 - a guaranteed consumption marker on every displayed message, or per-command
   settlement evidence.
+
+SDK 1.0.14's optional assistant `originatingMessageId` can correlate assistant
+output to the native message ID returned by `send()`. It does not accept or
+echo a caller-owned operation ID, and it does not close any of the recovery or
+settlement gaps above.
 
 Exact-ID UI response RPCs exist, but without a complete pending snapshot they
 cannot safely replace callbacks. Permission hydration is also incomplete for

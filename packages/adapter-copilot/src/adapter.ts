@@ -47,7 +47,7 @@ import {
   userInputResponse,
 } from "./session.js";
 
-export const COPILOT_SDK_VERSION = "1.0.13";
+export const COPILOT_SDK_VERSION = "1.0.14";
 
 export interface CopilotRuntimeStatus {
   version: string;
@@ -118,7 +118,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       : configuredExecutable;
     const clientOptions: CopilotClientOptions = {
       mode: "copilot-cli",
-      // @github/copilot@1.0.81 tightened its platform-package exports and the
+      // @github/copilot@1.0.88 keeps the tightened platform-package exports and the
       // pinned SDK's automatic `@github/copilot-<platform>/sdk` resolver can
       // no longer see that subpath. Resolve the executable exported by the
       // package explicitly; embedders can still override `connection` below.
@@ -333,7 +333,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native = await this.#client.resumeSession(options.vendorSessionId, config);
     } catch (cause) {
       bridge.close();
-      // CLI 1.0.81 deliberately keeps a never-used session in memory only.
+      // Copilot can keep a never-used session in memory only.
       // Its explicit load refusal means no resume effect occurred; retaining
       // outcomeUnknown here would unnecessarily wedge the durable lifecycle.
       // Keep the predicate exact: timeouts, transport failures and unrelated
@@ -699,7 +699,7 @@ function codexLbModelInfo(id: string): ModelInfo | undefined {
 
 // Exact non-policy/non-billing entries reported by the pinned Copilot 1.0.79
 // runtime. Its wire catalog includes `none` and several capability properties
-// that are absent from the narrower SDK 1.0.13 TypeScript declaration.
+// that are absent from the narrower SDK 1.0.14 TypeScript declaration.
 const COPILOT_CODEX_LB_MODELS: Record<string, {
   name: string;
   efforts: readonly string[];

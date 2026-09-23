@@ -91,7 +91,7 @@
     "ws": "8.21.3"
   },
   "overrides": {
-    "@github/copilot": "1.0.81",
+    "@github/copilot": "1.0.88",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0"
   },

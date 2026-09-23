@@ -193,11 +193,11 @@ receipt as part of the deployment qualification.
 
 Copilot stock TUI support is off by default because Copilot has no supported
 TUI-attach command. To test the hidden UI-server integration, provision the
-exact CLI `1.0.81` on that worker and opt in explicitly:
+exact CLI `1.0.88` on that worker and opt in explicitly:
 
 ```bash
 export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_EXPERIMENTAL_UI_SERVER=1
-export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_BINARY=/opt/copilot-1.0.81/copilot
+export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_BINARY=/opt/copilot-1.0.88/copilot
 ```
 
 The runtime probes the executable version, passes `--no-auto-update`, and
@@ -206,12 +206,14 @@ the probe or startup fails. The TUI owns the shared SDK runtime, so remote
 terminate/restart is intentionally unavailable and foreground-session changes
 require confirmation.
 
-Hidden UI-server `1.0.81` returns `AUTHENTICATION_NOT_CONFIGURED` when its SDK
-client uses `COPILOT_CONNECTION_TOKEN`. The experimental implementation
-therefore binds an unadvertised random port strictly to `127.0.0.1` without
-that token. Do not publish, forward, or broaden this listener, and treat other
-processes in the runtime's OS/container boundary as trusted. Always leave the
-feature disabled where that trust assumption is unacceptable.
+The previously qualified hidden UI server returned
+`AUTHENTICATION_NOT_CONFIGURED` when its SDK client used
+`COPILOT_CONNECTION_TOKEN`. The credential-free 1.0.88 pin update did not start
+this hidden server, so its native behavior remains unqualified. The experimental
+implementation binds an unadvertised random port strictly to `127.0.0.1`
+without that token. Do not publish, forward, or broaden this listener, and treat
+other processes in the runtime's OS/container boundary as trusted. Always leave
+the feature disabled where that trust assumption is unacceptable.
 
 ## Branches and failure behavior
 

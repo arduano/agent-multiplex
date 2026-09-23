@@ -93,7 +93,7 @@ try {
   await new Promise(resolve => provider.close(resolve)); await rm(scratch, { recursive: true, force: true });
 }
 const receipt = { result: "passed", source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
-  sourceHashes: before, node: process.version, platform: process.platform, arch: process.arch, native: { sdk: "1.0.13", cli: "1.0.81" },
+  sourceHashes: before, node: process.version, platform: process.platform, arch: process.arch, native: { sdk: "1.0.14", cli: "1.0.88" },
   modelCalls: 0, providerRequests, checks, retainedAuthHomes: false, retainedNativePayloads: false,
   scope: "Disposable Linux sync shell task API verification. Native model-driven agent/client tasks and corporate Windows behavior remain separate UAT." };
 const output = join(root, "receipts/copilot-native-tasks", new Date().toISOString().replaceAll(":", "-"));

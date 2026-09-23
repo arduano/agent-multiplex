@@ -36,8 +36,8 @@
     "zod": "4.1.5",
     "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.16",
     "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.16",
-    "@github/copilot": "1.0.81",
-    "@github/copilot-sdk": "1.0.13",
+    "@github/copilot": "1.0.88",
+    "@github/copilot-sdk": "1.0.14",
     "@types/node": "24.3.0",
     "node-pty": "1.1.0"
   }

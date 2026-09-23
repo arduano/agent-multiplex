@@ -14,11 +14,12 @@ ownership and progress semantics. See [adapter guidance](../../docs/wiki/Adapter
 
 ## Empty sessions and restart
 
-Pinned Copilot CLI `1.0.81` does not durably save a session that has never received
-a user message. Its public native save operation does not force those empty
-events to disk. The session remains controllable while its native handle exists,
-but may be missing after native shutdown or a host restart. Multiplex does not
-insert a dummy message, parse vendor files, or recreate that session silently.
+Copilot CLI `1.0.81` was observed not to durably save a session that had never
+received a user message. Its public native save operation did not force those
+empty events to disk. The 1.0.88 pin update used no native session and does not
+claim this behavior was requalified or fixed. The adapter conservatively retains
+the exact missing-session recovery path and never inserts a dummy message,
+parses vendor files, or recreates that session silently.
 
 The exact native missing-session load refusal is a failed resume with a recovery
 message, rather than an ambiguous operation that blocks lifecycle recovery.
@@ -73,10 +74,17 @@ it is stalled. The adapter caps retained pending reads across session handles at
 256. Primary-history page-size reductions share one deadline. Mutations are never
 timed out or retried by this helper. See [stalled reads and recovery limits](../../docs/wiki/Adapters-and-Terminals.md#stalled-copilot-reads).
 
-The implementation is pinned and tested against `@github/copilot-sdk@1.0.13`.
+The implementation is pinned and tested against `@github/copilot-sdk@1.0.14`.
 The optional stock-TUI integration additionally pins
-`@github/copilot@1.0.81`; it does not accept an auto-updated or merely
+`@github/copilot@1.0.88`; it does not accept an auto-updated or merely
 SDK-reported version.
+
+GitHub's [September 22, 2026 model announcement](https://github.blog/changelog/2026-09-22-openais-gpt-6-sol-and-gpt-6-luna-now-available/)
+lists GPT-6 Sol in the Copilot CLI model picker for Pro+, Max, Business, and
+Enterprise plans. Rollout is gradual and organization policy can disable it.
+The adapter therefore relies on native, account-scoped model discovery and
+preserves the returned model ID. This repository's credential-free checks do
+not claim that a particular account has received the rollout.
 
 ## Native allow-all permissions
 
@@ -116,13 +124,14 @@ across the adapter scope, foreground-session changes require confirmation, and
 terminate/restart are disabled because they would also kill structured
 sessions.
 
-The runtime probes the actual executable for exact CLI version `1.0.81` and
-always passes `--no-auto-update`. Current UI-server builds reject
-`COPILOT_CONNECTION_TOKEN` with `AUTHENTICATION_NOT_CONFIGURED`, so this path
-uses a random, unadvertised listener bound strictly to `127.0.0.1` and no
-connection token. It must remain inside a trusted runtime OS/container and
-must never be port-forwarded. The reference runtime keeps this mode disabled by
-default and falls back to the normal structured adapter without terminal
+The runtime probes the actual executable for exact CLI version `1.0.88` and
+always passes `--no-auto-update`. The no-token loopback design responds to the
+`AUTHENTICATION_NOT_CONFIGURED` behavior observed on the prior qualified hidden
+UI server. The credential-free pin update did not start the 1.0.88 UI server,
+so that native path remains unqualified. It uses a random, unadvertised listener
+bound strictly to `127.0.0.1`, must stay inside a trusted runtime OS/container,
+and must never be port-forwarded. The reference runtime keeps this mode disabled
+by default and falls back to the normal structured adapter without terminal
 capability if its version/startup probe fails.
 
 The PTY and all output/replay/keyboard-lease state remain in runtime memory.
@@ -169,7 +178,7 @@ credential or replace the runtime node's provider. Adapter model descriptions do
 include the provider object.
 
 See GitHub's pinned
-[custom-provider documentation](https://github.com/github/copilot-sdk/blob/v1.0.13/nodejs/README.md#custom-providers)
+[custom-provider documentation](https://github.com/github/copilot-sdk/blob/v1.0.14/nodejs/README.md#custom-providers)
 for the upstream `ProviderConfig` surface.
 
 

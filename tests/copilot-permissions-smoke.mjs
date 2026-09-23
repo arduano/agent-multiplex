@@ -68,7 +68,7 @@ const files = ["package.json", "package-lock.json", "packages/adapter-copilot/sr
 const sourceHashes = Object.fromEntries(await Promise.all(files.map(async file => [file, sha256(await readFile(join(root, file)))])));
 const dirty = execFileSync("git", ["status", "--porcelain"], { cwd: root, encoding: "utf8" }).trim().length > 0;
 const receipt = { result: "passed", source, dirty, sourceHashes, node: process.version, platform: process.platform, arch: process.arch,
-  native: { sdk: "1.0.13", cli: "1.0.81" }, modelCalls: 0, providerRequests, retainedCredentials: false, checks,
+  native: { sdk: "1.0.14", cli: "1.0.88" }, modelCalls: 0, providerRequests, retainedCredentials: false, checks,
   scope: "Native permission RPC only; corporate managed policy, persisted-session resume and in-flight model permission requests require separate qualification." };
 const output = join(root, "receipts/copilot-permissions", new Date().toISOString().replaceAll(":", "-"));
 await mkdir(output, { recursive: true });

@@ -38,7 +38,7 @@ const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
 
 /** The hidden UI-server integration is tested only against this exact CLI. */
-export const EXPERIMENTAL_COPILOT_UI_SERVER_VERSION = "1.0.81";
+export const EXPERIMENTAL_COPILOT_UI_SERVER_VERSION = "1.0.88";
 
 const START_TIMEOUT_MS = 10_000;
 const FOREGROUND_TIMEOUT_MS = 5_000;

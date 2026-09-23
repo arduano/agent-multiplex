@@ -34,7 +34,7 @@ async function fixture(options: { beforeAttach?: (rpc: CopilotSessionRpc, emit: 
   const createNative = (sessionId: string): CopilotNativeSession => ({ sessionId, rpc, send: vi.fn(async () => "message"),
     abort: vi.fn(async () => {}), setModel: vi.fn(async () => {}), getEvents: vi.fn(async () => []), disconnect: vi.fn(async () => {}) });
   const client: CopilotAdapterClient = {
-    start: async () => {}, stop: async () => [], forceStop: async () => {}, getStatus: async () => ({ version: "1.0.81", protocolVersion: 7 }),
+    start: async () => {}, stop: async () => [], forceStop: async () => {}, getStatus: async () => ({ version: "1.0.88", protocolVersion: 7 }),
     listModels: async () => [], listSessions: async () => [],
     createSession: async config => {
       configuration = config; options.beforeAttach?.(rpc, item => config.onEvent?.(item));

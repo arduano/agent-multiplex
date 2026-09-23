@@ -1,4 +1,8 @@
-import { CopilotSession, type MessageOptions } from "@github/copilot-sdk";
+import {
+  CopilotSession,
+  type AssistantMessageData,
+  type MessageOptions,
+} from "@github/copilot-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 // Exercise the installed pinned SDK's serialization/dispatch against an inert
@@ -14,17 +18,41 @@ const ProbeSession = CopilotSession as unknown as new (
 ) => SdkProbe;
 
 describe("pinned Copilot SDK lifecycle limitations (no native process)", () => {
-  it("does not forward a caller causal/message ID through session.send", async () => {
+  it("forwards source but not a caller causal/message ID through session.send", async () => {
     const sendRequest = vi.fn(async () => ({ messageId: "native-assigned" }));
     const session = new ProbeSession("disposable", { sendRequest });
-    const options = { prompt: "synthetic fixture", mode: "enqueue" as const,
-      operationId: "multiplex-command", messageId: "caller-message", causalOperationId: "causal" };
+    const options = {
+      prompt: "synthetic fixture",
+      source: "agent-multiplex" as const,
+      mode: "enqueue" as const,
+      operationId: "multiplex-command",
+      messageId: "caller-message",
+      causalOperationId: "causal",
+    };
     await expect(session.send(options)).resolves.toBe("native-assigned");
     expect(sendRequest).toHaveBeenCalledOnce();
     const [method, wire] = sendRequest.mock.calls[0] as unknown as [string, Record<string, unknown>];
     expect(method).toBe("session.send");
-    expect(wire).toMatchObject({ sessionId: "disposable", prompt: "synthetic fixture", mode: "enqueue" });
-    for (const key of ["operationId", "messageId", "causalOperationId"]) expect(wire).not.toHaveProperty(key);
+    expect(wire).toMatchObject({
+      sessionId: "disposable", prompt: "synthetic fixture", source: "agent-multiplex", mode: "enqueue",
+    });
+    for (const key of ["operationId", "messageId", "causalOperationId"]) {
+      expect(wire).not.toHaveProperty(key);
+    }
+  });
+
+  it("declares assistant origin as optional partial send correlation", () => {
+    const correlated = {
+      content: "synthetic response",
+      messageId: "assistant-message",
+      originatingMessageId: "native-assigned",
+    } satisfies AssistantMessageData;
+    const uncorrelated = {
+      content: "synthetic response without a send origin",
+      messageId: "assistant-message-2",
+    } satisfies AssistantMessageData;
+    expect(correlated.originatingMessageId).toBe("native-assigned");
+    expect(uncorrelated).not.toHaveProperty("originatingMessageId");
   });
 
   it("offers exact UI response RPCs but no pending UI snapshot or atomic task snapshot cursor", () => {

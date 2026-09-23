@@ -147,7 +147,7 @@ re-run the adapter and live acceptance suites before changing that pin. See the
 Copilot exposes no supported command that attaches its stock TUI to an already
 running headless SDK server. When
 `AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_EXPERIMENTAL_UI_SERVER=1`, the runtime
-instead starts the exact GitHub Copilot CLI version `1.0.81` with hidden
+instead starts the exact GitHub Copilot CLI version `1.0.88` with hidden
 `--ui-server`, `--no-auto-update`, and a random loopback-only TCP port. The TUI
 owns that runtime and the structured adapter connects as a sibling SDK client.
 Changing the terminal's foreground session is asynchronous and requires an
@@ -157,17 +157,18 @@ session in that adapter scope.
 
 The executable is probed with `--version`; use
 `AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_BINARY` only to select a worker-local
-`1.0.81` binary. The implementation never relies on auto-update or the SDK's
+`1.0.88` binary. The implementation never relies on auto-update or the SDK's
 possibly stale status version. If the opt-in is absent, or the version/startup
 probe fails, the runtime gracefully uses the normal structured Copilot adapter
 and advertises no Copilot terminal capability.
 
-Current hidden UI-server builds reject an SDK connection when
-`COPILOT_CONNECTION_TOKEN` is configured (`AUTHENTICATION_NOT_CONFIGURED`). The
-experimental path therefore does not set a connection token. Its random
+The previously qualified hidden UI server rejected an SDK connection when
+`COPILOT_CONNECTION_TOKEN` was configured (`AUTHENTICATION_NOT_CONFIGURED`).
+The credential-free 1.0.88 pin update did not start that server. The experimental
+path therefore remains opt-in and does not set a connection token. Its random
 listener is bound strictly to `127.0.0.1`, the address is never advertised, and
 the runtime must remain inside a trusted OS/container boundary. Do not publish
-or forward that port. This limitation is why the feature stays opt-in.
+or forward that port.
 
 ## Runtime-node-local Copilot BYOK
 

@@ -151,13 +151,13 @@ history or automatically send another compaction request. See the
 
 ## Copilot
 
-Pinned CLI `1.0.81` keeps a never-used session in memory without durable native
-history. It can disappear from native inventory after a host restart even when
-`sessions.save` acknowledged; that operation does not force empty sessions to
-disk. An exact native missing-session resume refusal reports a known failure
-with an explicit stop/archive-and-replace recovery path. Network failures remain
-ambiguous. The adapter never creates fake history or silently replaces a missing
-session. See [empty sessions](../../packages/adapter-copilot/README.md#empty-sessions-and-restart).
+CLI `1.0.81` was observed keeping a never-used session in memory without durable
+native history. The credential-free 1.0.88 pin update did not requalify that
+behavior. The adapter retains its conservative handling: an exact native
+missing-session resume refusal reports a known failure with an explicit
+stop/archive-and-replace recovery path, while network failures remain ambiguous.
+It never creates fake history or silently replaces a missing session. See
+[empty sessions](../../packages/adapter-copilot/README.md#empty-sessions-and-restart).
 
 The supported path uses the Copilot SDK for session creation, native modes,
 prompts, interrupts, interactions, events, and history. Provider/model selection
@@ -307,7 +307,7 @@ unknown, and native completion retires only its exact pending permission
 request. See the [adapter guide](../../packages/adapter-copilot/README.md#native-allow-all-permissions).
 
 Copilot has no supported stock-TUI attach command. The optional TUI bridge is
-therefore experimental and disabled by default. It pins CLI `1.0.81`, starts its
+therefore experimental and disabled by default. It pins CLI `1.0.88`, starts its
 hidden `--ui-server --no-auto-update` mode on a random loopback-only port, and
 connects the structured adapter as a sibling SDK client. A failed probe falls
 back to structured Copilot with no terminal capability.

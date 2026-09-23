@@ -448,13 +448,14 @@ Codex uses one runtime-local app server on a private Unix socket. Its structured
 adapter connects directly to that socket; a managed stock TUI connects to the
 same session with `codex resume --remote`. Copilot has no supported
 equivalent attach command. Its stock TUI backend is an explicitly opt-in
-experimental integration: CLI `1.0.81`, hidden `--ui-server`,
+experimental integration: CLI `1.0.88`, hidden `--ui-server`,
 `--no-auto-update`, and a random loopback-only listener. The TUI owns the
-Copilot runtime while the structured adapter is a sibling SDK client. Current
-UI-server builds cannot authenticate that SDK connection with
-`COPILOT_CONNECTION_TOKEN`, so the port must never be published and the
-runtime's OS/container boundary is part of the experiment's trust boundary.
-Probe failure falls back to structured Copilot with no terminal capability.
+Copilot runtime while the structured adapter is a sibling SDK client. The
+previously qualified UI server could not authenticate that SDK connection with
+`COPILOT_CONNECTION_TOKEN`; the credential-free 1.0.88 pin update did not start
+the hidden server. The port must never be published, and the runtime's
+OS/container boundary is part of the experiment's trust boundary. Probe failure
+falls back to structured Copilot with no terminal capability.
 
 Copilot may retain an empty new native session only in memory. After restart,
 only its exact missing-session load refusal establishes that resume had no

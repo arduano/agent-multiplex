@@ -297,7 +297,7 @@ Suggested first prompt for a new session:
 | Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.3` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Exact public `@arduano/p2prpc-core@0.2.1`; separate renewal work is not merged or pinned |
-| Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.13` and optional CLI `1.0.81`; no native/model protocol-v6 qualification |
+| Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.14` and optional CLI `1.0.88`; GPT-6 Sol availability is publicly documented but not account-qualified here |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
 The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains

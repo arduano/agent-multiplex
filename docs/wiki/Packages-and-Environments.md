@@ -53,7 +53,7 @@ consumers should serve or compose the packaged output rather than rebuilding it.
 | Node transport | Exact `@arduano/p2prpc-core@0.2.1` package (p2prpc v1 API) |
 | Qualified OS | Linux x86-64 Docker |
 | Qualified Codex | `@openai/codex` / CLI `0.152.0` |
-| Pinned Copilot source | CLI package `1.0.81`; SDK `1.0.13`; protocol-v6 native/model qualification is not claimed |
+| Pinned Copilot source | CLI package `1.0.88`; SDK `1.0.14`; protocol-v6 native/model qualification is not claimed |
 | Browser | Modern browser with WebSocket; SHA-256 uses Web Crypto or the bundled `@noble/hashes` fallback |
 | Persistence | Local filesystem with SQLite locking and durable rename semantics |
 
