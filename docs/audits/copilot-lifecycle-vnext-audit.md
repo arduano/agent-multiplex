@@ -150,9 +150,9 @@ message target, 20-request/8 MiB backfill budget, 64 child stores with 400 entri
 task-polling cadences, 256 MiB IndexedDB budget, seven delayed receipt checks and
 local compaction marker describe the external Leo revision named by
 `CURRENT-AUDIT.md`. The maintained reference web has different history,
-interaction and recovery behavior. This worktree did not inspect or modify that
-external checkout, so the supplied checksummed audit is the only evidence for
-those exact values.
+interaction and recovery behavior. The later coordinated consumer migration
+inspected and changed a separate Leo worktree. These exact numerical policies
+remain Leo-specific and are not protocol-v6 lifecycle rules.
 
 ## Stability-context assumptions
 

@@ -1,5 +1,50 @@
 # Release qualification checkpoint
 
+## Unpublished protocol-v6 Copilot lifecycle and consumer candidate — 2026-09-23
+
+The clean framework implementation commit
+`1af20f651e8d5733946154178d8c7f51b738d605` on
+`feat/copilot-session-lifecycle-vnext-20260922` is based on
+`c28811b320f436acbec332b00199716a3c62cfa7`. It introduces the
+[normative lifecycle contract](design/copilot-session-lifecycle-vnext.md),
+[evidence audit](audits/copilot-lifecycle-vnext-audit.md), protocol-v6 wire and
+store boundary, and lockstep maintained-role implementation. The coordinated
+Leo consumer work is a separate local branch; neither branch is deployed.
+
+On Node 24.19.0 / npm 11.17.0, the implementation source passed full
+typecheck, build, **1,041 tests across 114 files**, checkpoint, documentation,
+release-metadata and source-secret checks. The executable lifecycle reducer
+includes a 4,096-schedule invariant run. The host and reference client tests
+cover exact command receipts, durable task/queue recovery, lifecycle freshness,
+startup reattachment and no causal inference from text or catalog idle.
+
+Two credential-free Docker runs used an empty npm configuration and the
+checksummed local p2prpc renewal candidate:
+
+| Deterministic run | Receipt | Result | `SHA256SUMS` SHA-256 |
+| --- | --- | --- | --- |
+| Control tree | `receipts/protocol-v4-control-tree/20260923T054356Z-dc1c3b994a3d/` | Protocol v6; authority/branch failover, native replay, metadata recovery, image immutability and browser/accessibility assertions pass. Image `sha256:dbabd741d6bf0ac3df73c0b74ec2ff2593d93c04528a3fb2443ce9b1143ec2de`. | `ab7e8a67153685313167d3b42342a8b0b4ff71fe8eef740a35eeb3d34151e719` |
+| Mock scale | `receipts/protocol-v4-mock-docker-scale/20260923T054503Z-442702afc55f/` | Protocol v6; 10 runtimes, 100 sessions and sends, 3,600 native events, zero gaps/duplicates, reconnect, metadata, dashboard, cleanup and accessibility pass. Image `sha256:d707e2972341455ce629e830634328dbae88fa4c87955b3c97a33e97bff0cd71`. | `261e597c706c7effdb18dc8425084837458891e46d5c7c497f81b8f215d81622` |
+
+Both receipt trees passed `sha256sum -c SHA256SUMS`. The image identities and
+scale manifest source-tree hash identify the executed Docker snapshots; those
+runs preceded the final implementation commit and do not claim a later
+exact-HEAD Docker rerun. The deterministic suites use a mock harness, not a
+native Copilot session.
+
+The independently reviewed core candidate is `@arduano/p2prpc-core`
+`0.3.0-renewal.0`, tarball SHA-256
+`789da942e6902121a86a12f644c747acb2454dcb8e6bd2448803e16cfbfe05d5`
+and source patch SHA-256
+`c10c42e68be3807bcedd77e85b127ce5cf2eb218cad10793596b1cf559128cca`.
+The public dependency remains pinned to `0.2.1`; the candidate is a local
+overlay, not the final published package graph. Release packing deliberately
+blocks until independent publication and exact pin review. SDK `1.0.14` and CLI
+`1.0.88` are the selected current Copilot pins. Native Windows behavior,
+account-specific GPT-6 Sol entitlement, native model turns, installed-host
+behavior and the coordinated maintenance window remain unqualified. No push,
+publication, production action or credential access was used.
+
 ## Authenticated renewal review candidate — 2026-09-22
 
 Local, unpublished implementation source
