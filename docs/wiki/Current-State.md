@@ -7,9 +7,10 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-23 (protocol-v6 lifecycle with published transport renewal pinned).
 
-## Unreleased protocol-v6 Copilot lifecycle candidate
+## Protocol-v6 Copilot lifecycle prerelease
 
-The maintained source now declares protocol v6 as a coordinated clean break
+The signed [`0.2.4-hotfix.17` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-23.1)
+from source `6bb053cd05be66151114ecf397fd4143a0004512` declares protocol v6 as a coordinated clean break
 from protocol v5. Controls, runtimes, gateways, clients, and adapters must move
 together; there is no mixed-version compatibility branch. The latest published
 protocol-v5 packages and every retained release receipt keep their original
@@ -56,18 +57,18 @@ The [evidence audit](../audits/copilot-lifecycle-vnext-audit.md) records which
 SDK and repository assumptions are confirmed, disproved, conditional, or still
 blocked.
 
-This combined candidate has no live/native-model, production, Windows, final
-published-framework-graph, or maintenance-window qualification and has not been
-published or deployed. Deterministic source qualification must be read from the
-final exact-source receipts in the [checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23);
+This signed graph has no live/native-model, production, Windows, installed-host,
+or maintenance-window qualification and has not been deployed. Its 16 tarballs
+and three metadata assets were independently downloaded and matched to the
+local verified bytes. Deterministic source qualification must be read from the
+published-core source and artifact receipts in the [checkpoint](../checkpoint-v4.md#published-core-protocol-v6-source-gate--2026-09-23);
 historical protocol-v5 release evidence does not qualify this boundary. The
-remaining release history below describes published
-boundaries, not this candidate.
+remaining release history below describes earlier published boundaries.
 
 The [three-repository readiness audit](../audits/maintenance-window-readiness-20260923.md)
 records the initial **no-go** findings and dated closure updates. The lifecycle
-defects are fixed in current source, but exact published framework/consumer
-artifacts, Windows and stopped-state rollback still determine cutover readiness.
+defects and published framework/consumer pins are fixed; Windows, stopped-state
+rollback and live renewal observation still determine cutover readiness.
 
 ## Retained catalog startup correction
 

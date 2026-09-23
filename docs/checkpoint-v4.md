@@ -31,11 +31,27 @@ used the exact locked core version/integrity and made zero real inference
 requests. All 16 packed packages passed separate role-scoped consumer import,
 declaration, executable, publint and Are the Types Wrong checks. The release
 build SBOM contained 507 components, including all 16 packages and 125 web
-bundle component identities. These source tests ran before the final clean
-release commit and do not claim exact-tag or native Windows qualification.
-The earlier patch-overlay candidate section below remains historical. Final
-signed artifact, external consumer, Windows, backup/rollback and live
-three-generation receipts must be recorded separately before cutover.
+bundle component identities. The deterministic suites ran before the final
+clean release commit and do not claim exact-tag or native Windows qualification.
+
+The signed [`hotfix-2026-09-23.1` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-23.1)
+peels to `6bb053cd05be66151114ecf397fd4143a0004512`. Its pack manifest
+binds all 16 `0.2.4-hotfix.17` tarballs to that commit. Exact-commit build,
+pack, 16 isolated packed-consumer checks, 507-component SBOM, source-secret
+scan and local `SHA256SUMS` verification passed. All 19 GitHub release assets
+were downloaded through the release-assets REST API and compared byte-for-byte
+to the local verified set; the SHA-256 of `SHA256SUMS` is
+`bbe7075d1ab2e1ee5feadb9d989c4f977755f81d70e21749a085ad8880229e53`.
+The hotfix exception distributes exact prerelease tarballs; it does not promote
+a registry dist-tag or claim native-model qualification.
+
+Leo commit `d202e6a77be5c09c07cf439e6beaa9bff361ebf1` pins all 16 release
+URLs and overrides plus the independent core release. The clean URL graph
+passed typecheck, build, 1,123 tests/124 files (one skip), high-severity audit,
+and 17/13/14 no-model browser task/delivery/status checks. Every locked
+framework SHA-512 matched this release manifest. The earlier patch-overlay
+candidate section below remains historical. Windows, stopped-state
+backup/rollback and live three-generation receipts remain cutover gates.
 
 ## Unpublished protocol-v6 Copilot lifecycle and consumer candidate — 2026-09-23
 

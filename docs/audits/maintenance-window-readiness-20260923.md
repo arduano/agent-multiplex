@@ -25,9 +25,15 @@ checkpoint, documentation, release-metadata, and source-secret checks. The
 published-core Docker control tree and 10-runtime/100-session mock scale passed
 with checksummed receipts under `receipts/protocol-v4-control-tree/20260923T092203Z-1d42606337be/`
 and `receipts/protocol-v4-mock-docker-scale/20260923T092533Z-9673e1d283cd/`.
-These tests are deterministic and contain no model turns. The readiness
-decision remains **no-go for live cutover** until a signed full framework graph,
-exact consumer pins and clean-install checks, disposable Windows UAT,
+These tests are deterministic and contain no model turns. The signed framework
+graph at `hotfix-2026-09-23.1` was independently downloaded: all 19 release
+assets match the local verified bytes, and `SHA256SUMS` SHA-256 is
+`bbe7075d1ab2e1ee5feadb9d989c4f977755f81d70e21749a085ad8880229e53`.
+Leo commit `d202e6a77be5c09c07cf439e6beaa9bff361ebf1` pins all 16 `.17`
+URLs/overrides and the published core; its clean install, typecheck, build,
+1,123 tests (one skip), high-severity audit gate, and 17/13/14 no-model browser
+checks pass. The readiness decision remains **no-go for live cutover** until
+disposable Windows UAT,
 stopped-state control **and** runtime backup/rollback rehearsal, ticket and
 locator rotation, and the 45-minute three-generation observation pass.
 
