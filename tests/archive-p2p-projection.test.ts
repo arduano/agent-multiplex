@@ -168,7 +168,6 @@ describe("archive projection over real p2prpc transport", () => {
 
       const sharedSecret = "archive-event-transport-regression".padEnd(64, "x");
       const iroh = {
-        bindAddress: "127.0.0.1:0",
         relay: { mode: "disabled" as const },
         allowAdvertisedAddress: () => true,
         allowDirectAddress: () => true,
