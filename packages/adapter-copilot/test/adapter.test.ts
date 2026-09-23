@@ -167,6 +167,33 @@ describe("CopilotAgentAdapter", () => {
     await adapter.close();
   });
 
+  it("passes newly discovered stock Copilot models through without a static allowlist", async () => {
+    const client = new Client();
+    client.listModels = async () => [{
+      id: "gpt-6-sol",
+      name: "GPT-6 Sol",
+      capabilities: {
+        supports: { vision: true, reasoningEffort: true },
+        limits: { max_context_window_tokens: 256_000 },
+      },
+    }];
+    const adapter = adapterFor(client);
+    await expect(adapter.listModels()).resolves.toEqual([{
+      harness: "copilot",
+      id: "gpt-6-sol",
+      name: "GPT-6 Sol",
+      native: {
+        id: "gpt-6-sol",
+        name: "GPT-6 Sol",
+        capabilities: {
+          supports: { vision: true, reasoningEffort: true },
+          limits: { max_context_window_tokens: 256_000 },
+        },
+      },
+    }]);
+    await adapter.close();
+  });
+
   it("projects initial settings and emits complete snapshots after acknowledged changes", async () => {
     const client = new Client();
     const adapter = adapterFor(client);
