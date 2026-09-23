@@ -404,6 +404,7 @@ describe("control-node v4 session catalog", () => {
       DROP TABLE launch_operations;
       DROP TABLE archive_operations;
       DROP TABLE attachment_authority_handoffs;
+      DROP TABLE runtime_lifecycle_cursors;
       ALTER TABLE sessions DROP COLUMN catalog_state;
       ALTER TABLE sessions DROP COLUMN catalog_revision;
       ALTER TABLE sessions DROP COLUMN archived_at;
@@ -416,7 +417,7 @@ describe("control-node v4 session catalog", () => {
     downgrade.close();
 
     const migrated = new ControlNodeCatalog({ filename, now: () => new Date(later) });
-    expect(migrated.diagnostics().userVersion).toBe(7);
+    expect(migrated.diagnostics().userVersion).toBe(8);
     expect(migrated.localControlNode()).toMatchObject({ protocolVersion: 6 });
     expect(migrated.localControlNode().feedId).not.toBe(previousFeedId);
     expect(migrated.getRuntimeNode(runtimeNodeId)).toMatchObject({
@@ -474,10 +475,10 @@ describe("control-node protocol-v6 storage upgrade", () => {
       .run(commandId, command.payloadHash, command.state, first, JSON.stringify(command));
     legacy.prepare("INSERT INTO interactions(interaction_id,session_id,state,created_at,record_json) VALUES(?,?,?,?,?)")
       .run(interactionId, sessionId, interaction.state, first, JSON.stringify(interaction));
-    legacy.exec("DROP TABLE attachment_authority_handoffs; DELETE FROM schema_migrations WHERE version>=5; PRAGMA user_version=4;");
+    legacy.exec("DROP TABLE attachment_authority_handoffs; DROP TABLE runtime_lifecycle_cursors; DELETE FROM schema_migrations WHERE version>=5; PRAGMA user_version=4;");
     legacy.close();
     const upgraded = new ControlNodeCatalog({ filename, now: () => new Date(later) });
-    expect(upgraded.diagnostics().userVersion).toBe(7);
+    expect(upgraded.diagnostics().userVersion).toBe(8);
     expect(upgraded.localControlNode().feedId).not.toBe(previousFeed);
     expect(upgraded.getCommand(commandId)).toEqual({ ...command, result: packNativePayload(nativeResult) });
     expect(upgraded.getInteraction(interactionId)).toEqual({

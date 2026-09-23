@@ -10,8 +10,9 @@ import { Badge, Button, Input, Select, Textarea } from "./ui.js";
 type JsonRecord = Record<string, JsonValue>;
 const OTHER_ANSWER = "__agent_multiplex_other_answer__";
 
-export function InteractionCards({ interactions }: {
+export function InteractionCards({ interactions, enabled = true }: {
   readonly interactions: readonly InteractionRecord[];
+  readonly enabled?: boolean;
 }) {
   if (interactions.length === 0) return null;
   return (
@@ -21,13 +22,16 @@ export function InteractionCards({ interactions }: {
       data-testid="interactions"
     >
       {interactions.map((interaction) => (
-        <InteractionCard interaction={interaction} key={interaction.interactionId} />
+        <InteractionCard interaction={interaction} enabled={enabled} key={interaction.interactionId} />
       ))}
     </section>
   );
 }
 
-function InteractionCard({ interaction }: { readonly interaction: InteractionRecord }) {
+function InteractionCard({ interaction, enabled }: {
+  readonly interaction: InteractionRecord;
+  readonly enabled: boolean;
+}) {
   const { client } = useApi();
   const queryClient = useQueryClient();
   const [answer, setAnswer] = useState("");
@@ -60,6 +64,7 @@ function InteractionCard({ interaction }: { readonly interaction: InteractionRec
       : null;
 
   function resolve(response: JsonValue): void {
+    if (!enabled) return;
     setStatus("");
     mutation.mutate(response);
   }
@@ -73,6 +78,7 @@ function InteractionCard({ interaction }: { readonly interaction: InteractionRec
   }
 
   const headingId = `interaction-${interaction.interactionId}-heading`;
+  const busy = !enabled || mutation.isPending;
 
   return (
     <article
@@ -109,25 +115,25 @@ function InteractionCard({ interaction }: { readonly interaction: InteractionRec
           ) : (
             <Input className="min-w-44 flex-1" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Your answer" aria-label="Answer" data-testid="interaction-answer" />
           )}
-          <Button tone="primary" icon={Check} disabled={!answer || mutation.isPending} onClick={() => resolve({ answer, wasFreeform: !copilotChoices.includes(answer) })} data-testid="answer-button">Answer</Button>
+          <Button tone="primary" icon={Check} disabled={!answer || busy} onClick={() => resolve({ answer, wasFreeform: !copilotChoices.includes(answer) })} data-testid="answer-button">Answer</Button>
         </div>
       ) : interaction.requestType === "permission" && interaction.harness === "copilot" ? (
         <div className="flex flex-wrap gap-2 border-t border-[var(--status-waiting)]/10 px-3.5 py-3">
-          <Button tone="primary" icon={Check} disabled={mutation.isPending} onClick={() => resolve({ kind: "approve-once", approvedInteractively: true })} data-testid="approval-accept">Approve once</Button>
-          <Button tone="danger" icon={X} disabled={mutation.isPending} onClick={() => resolve({ kind: "denied", reason: "Declined in Agent Multiplex" })} data-testid="approval-decline">Decline</Button>
+          <Button tone="primary" icon={Check} disabled={busy} onClick={() => resolve({ kind: "approve-once", approvedInteractively: true })} data-testid="approval-accept">Approve once</Button>
+          <Button tone="danger" icon={X} disabled={busy} onClick={() => resolve({ kind: "denied", reason: "Declined in Agent Multiplex" })} data-testid="approval-decline">Decline</Button>
         </div>
       ) : interaction.requestType === "exitPlan" && interaction.harness === "copilot" ? (
         <div className="flex flex-wrap gap-2 border-t border-[var(--status-waiting)]/10 px-3.5 py-3">
-          <Button tone="primary" icon={Check} disabled={mutation.isPending} onClick={() => resolve({ approved: true, selectedAction: recommendedAction(interaction) })} data-testid="plan-approve">Approve plan</Button>
-          <Button tone="danger" icon={X} disabled={mutation.isPending} onClick={() => resolve({ approved: false, feedback: "Plan declined in Agent Multiplex" })} data-testid="plan-decline">Decline</Button>
+          <Button tone="primary" icon={Check} disabled={busy} onClick={() => resolve({ approved: true, selectedAction: recommendedAction(interaction) })} data-testid="plan-approve">Approve plan</Button>
+          <Button tone="danger" icon={X} disabled={busy} onClick={() => resolve({ approved: false, feedback: "Plan declined in Agent Multiplex" })} data-testid="plan-decline">Decline</Button>
         </div>
       ) : interaction.harness === "codex" && interaction.requestType === "userInput" && codexQuestions.length > 0 ? (
-        <CodexQuestions interaction={interaction} questions={codexQuestions} busy={mutation.isPending} onResolve={resolve} />
+        <CodexQuestions interaction={interaction} questions={codexQuestions} busy={busy} onResolve={resolve} />
       ) : interaction.harness === "codex" && interaction.requestType === "approval" ? (
         <div className="flex flex-wrap gap-2 border-t border-[var(--status-waiting)]/10 px-3.5 py-3">
-          <Button tone="primary" icon={Check} disabled={mutation.isPending} onClick={() => resolve(codexApproval(interaction, "accept"))} data-testid="approval-accept">Approve once</Button>
-          <Button disabled={mutation.isPending} onClick={() => resolve(codexApproval(interaction, "session"))} data-testid="approval-session">Approve session</Button>
-          <Button tone="danger" icon={X} disabled={mutation.isPending} onClick={() => resolve(codexApproval(interaction, "decline"))} data-testid="approval-decline">Decline</Button>
+          <Button tone="primary" icon={Check} disabled={busy} onClick={() => resolve(codexApproval(interaction, "accept"))} data-testid="approval-accept">Approve once</Button>
+          <Button disabled={busy} onClick={() => resolve(codexApproval(interaction, "session"))} data-testid="approval-session">Approve session</Button>
+          <Button tone="danger" icon={X} disabled={busy} onClick={() => resolve(codexApproval(interaction, "decline"))} data-testid="approval-decline">Decline</Button>
         </div>
       ) : null}
 
@@ -140,7 +146,7 @@ function InteractionCard({ interaction }: { readonly interaction: InteractionRec
         </label>
         <div className="mt-2 flex items-center justify-between gap-3">
           <span className="min-w-0 flex-1 break-words" role="status" aria-live="polite" data-testid="interaction-status">{status}</span>
-          <Button onClick={resolveRaw} disabled={mutation.isPending} data-testid="resolve-button">Resolve raw JSON</Button>
+          <Button onClick={resolveRaw} disabled={busy} data-testid="resolve-button">Resolve raw JSON</Button>
         </div>
       </details>
     </article>

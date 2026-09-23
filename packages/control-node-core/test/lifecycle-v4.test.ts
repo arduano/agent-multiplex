@@ -8,6 +8,7 @@ import { TRPC_ERROR_CODES_BY_KEY } from "@trpc/server/rpc";
 import {
   canonicalJson,
   initialLifecycle,
+  lifecycleProjection,
   emptyMetadataSnapshot,
   newArchiveOperationId,
   newCommandId,
@@ -314,6 +315,41 @@ function rejection(code: keyof typeof TRPC_ERROR_CODES_BY_KEY): TRPCClientError<
 }
 
 describe("protocol-v4 launch binding durability", () => {
+  it("keeps the durable receipt observable when its runtime disconnects", async () => {
+    const catalog = new ControlNodeCatalog({ filename: stateFile("offline-command-observation"), now: clock });
+    const service = new ControlNodeService({ catalog, now: clock });
+    const runtime = registration();
+    runtime.harnesses = runtime.harnesses.map((entry) => ({ ...entry, harness: "copilot" }));
+    const input = launch(runtime, "offline-command-observation");
+    input.harness = "copilot";
+    const connectionInfo = connection(runtime, async () => accepted(input));
+    try {
+      register(service, runtime, connectionInfo);
+      catalog.recordLaunch(succeeded(input, "offline-command-observation"));
+      const bound = boundSession(input, "offline-command-observation");
+      catalog.mergeRuntimeSession({ ...bound, lifecycle: lifecycleProjection(initialLifecycle({
+        sessionId: input.sessionId, runtimeNodeId: runtime.runtimeNodeId,
+        runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: bound.bindingRevision,
+        runtimeEpoch: bound.runtimeEpoch!,
+      })) });
+      const command = {
+        commandId: newCommandId(), payloadHash: "offline-observation-hash",
+        sessionId: input.sessionId, runtimeNodeId: runtime.runtimeNodeId,
+        state: "succeeded" as const,
+        request: { request: { harness: "copilot", command: { type: "send", input: "fixture" } } },
+        createdAt: now, updatedAt: now,
+      };
+      catalog.acceptCommand(command);
+      service.detachRuntimeNodeConnection(runtime.runtimeNodeId, runtime.runtimeNodeBootId);
+      await expect(service.readLifecycle(input.sessionId)).resolves.toMatchObject({
+        version: 2, status: "offline", health: { state: "offline" },
+      });
+      await expect(service.observeCommand(command.commandId)).resolves.toMatchObject({
+        receipt: command, delivery: "accepted", continuation: "complete",
+      });
+    } finally { service.close(); catalog.close(); }
+  });
+
   it.each(["direct", "child"] as const)("routes a lifecycle snapshot/cursor through the %s owner and rejects stale identity", async route => {
     const catalog = new ControlNodeCatalog({ filename: stateFile(`lifecycle-root-${route}`), now: clock });
     const childCatalog = new ControlNodeCatalog({ filename: stateFile(`lifecycle-child-${route}`), now: clock });
@@ -323,8 +359,8 @@ describe("protocol-v4 launch binding durability", () => {
     const owner = route === "direct" ? service : child;
     const ownerCatalog = route === "direct" ? catalog : childCatalog;
     const bound = boundSession(input, "lifecycle-snapshot");
-    const snapshot = { state: initialLifecycle({ sessionId: input.sessionId, runtimeNodeId: runtime.runtimeNodeId,
-      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: bound.bindingRevision, runtimeEpoch: bound.runtimeEpoch! }), nextNativeSequence: 7 };
+    const snapshot = lifecycleProjection(initialLifecycle({ sessionId: input.sessionId, runtimeNodeId: runtime.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: bound.bindingRevision, runtimeEpoch: bound.runtimeEpoch! }));
     let reads = 0;
     const connectionInfo = connection(runtime, async () => accepted(input));
     connectionInfo.readLifecycle = async sessionId => { expect(sessionId).toBe(input.sessionId); reads++; return snapshot; };
@@ -335,13 +371,13 @@ describe("protocol-v4 launch binding durability", () => {
       if (route === "child") await connectChild(service, child);
       const before = catalog.sourceManifest().controlCursor;
       const reader = createAccessRouter(service).createCaller({ grantedScopes: ["read"] });
-      expect(await reader.sessions.readLifecycle({ sessionId: input.sessionId })).toEqual(snapshot);
+      expect(await reader.sessions.readLifecycle({ sessionId: input.sessionId })).toEqual(snapshot.view);
       expect(reads).toBe(1);
       expect(catalog.sourceManifest().controlCursor).toBe(before);
       const noRead = createAccessRouter(service).createCaller({ grantedScopes: ["agent-control"] });
       await expect(noRead.sessions.readLifecycle({ sessionId: input.sessionId })).rejects.toMatchObject({ code: "FORBIDDEN" });
       expect(reads).toBe(1);
-      snapshot.state.fence.runtimeEpoch = newRuntimeEpoch();
+      snapshot.fence.runtimeEpoch = newRuntimeEpoch();
       await expect(reader.sessions.readLifecycle({ sessionId: input.sessionId })).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
     } finally { service.close(); child.close(); catalog.close(); childCatalog.close(); }
   });

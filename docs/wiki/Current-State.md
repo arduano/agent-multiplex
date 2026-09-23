@@ -18,18 +18,26 @@ scope.
 Protocol v6 adds a runtime-owned, durable Copilot lifecycle state under an exact
 session/runtime/boot/binding/native-epoch fence. Its executable reducer keeps
 root work, tasks, children, queue, interactions, command delivery, compaction,
-and stream continuity independent. Catalog rows carry a bounded label/fence
-projection. The routed `sessions.readLifecycle` query returns the full
-payload-free state with an exclusive native-event sequence for a subscribe-first
-snapshot/stream handoff. Missing continuity and incomplete native hydration
-remain Unknown; catalog idle, elapsed time, text equality, queue disappearance,
-or a successful generic command receipt cannot manufacture completion.
+and stream continuity independent. Catalog rows and `sessions.readLifecycle`
+expose only the compact version-2 host view: opaque observation ID, status,
+typed health/issues, and action availability. `commands.observe` combines an
+original durable receipt with exact delivery evidence and a continuation hint;
+`commands.get` remains the raw receipt query. Private fences, reducer revisions
+and native sequence are not browser inputs. Missing continuity and incomplete
+native hydration remain Unknown; catalog idle, elapsed time, text equality,
+queue disappearance, or a successful generic command receipt cannot
+manufacture completion. Runtime startup reattaches persisted active Copilot
+bindings before control registration, with native pending work disabled.
+The companion Leo branch migrates browser actions and delivery to these host
+views, fixes hidden-tab receipt checks and the compaction/terminal-receipt race,
+and supervises runtime restart separately from recovery sidecar and control
+readiness.
 
 Generic durable command receipts also use typed `CommandError` records with an
 allowlisted code, stage, certainty, diagnostic ID, and fixed public text. The
-upgrade appends control schema version 7 for those errors, runtime version 6 for
-the same boundary, and runtime version 7 for lifecycle evidence. Released
-migration identities remain immutable.
+upgrade appends control schema v7 for typed errors, runtime v6 for the same
+boundary, runtime v7 for lifecycle evidence, and control/runtime v8 for the
+version-2 public contract. Released migration identities remain immutable.
 
 The exact release pin remains public `@arduano/p2prpc-core@0.2.1`, while this
 branch now stages the reviewed authenticated-renewal core candidate and updates
@@ -387,10 +395,10 @@ generations, and immutable-record forks fail closed. Read the
   Stop preserves resumability. Archive is never inferred from age, inventory,
   or connectivity, and there is no unarchive/restore operation yet.
 - Copilot work lifecycle is a separate runtime-owned evidence state. Session
-  rows expose its bounded projection and `sessions.readLifecycle` exposes the
-  full fenced dimensions plus native-stream handoff cursor. Offline and Unknown
-  remain distinct, and delivery/settlement never derives from transcript text or
-  elapsed time.
+  rows and `sessions.readLifecycle` expose its bounded host view with status,
+  typed health and action availability. Private dimensions and cursors stay at
+  the runtime. Offline and Unknown remain distinct, and delivery/settlement
+  never derives from transcript text or elapsed time.
 - Native history is always requested from the owning Codex app server or
   Copilot SDK. Never parse vendor session files or promote terminal scrollback
   into history.
@@ -552,11 +560,11 @@ and gitignored.
   or per-command settlement event. Protocol v6 preserves those unknowns and
   correlates display/consumption only when the exact native message identity is
   present.
-- Full lifecycle state is query-only; catalog streams carry its bounded label.
-  The reference web consumes that label but does not yet perform the complete
-  snapshot/native-stream handoff.
-- Seamless p2prpc renewal remains an external dependency. The current source
-  pins `@arduano/p2prpc-core@0.2.1` and claims no renewal qualification.
+- Full lifecycle state stays private to the runtime. Catalog streams and the
+  public read carry the same compact view; the reference web consumes that view.
+- The independently prepared p2prpc renewal candidate is adopted in this local
+  graph. The public pin remains `@arduano/p2prpc-core@0.2.1` until separate
+  publication; final published-graph and installed-host qualification remain open.
 
 Protocol v6 is an explicit compatibility boundary; released v4/v5 evidence
 remains historical. There is no partially adopted v2/v3 architecture to finish.

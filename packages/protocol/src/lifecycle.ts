@@ -1,10 +1,18 @@
+import { v5 as uuidv5 } from "uuid";
 import { z } from "zod";
 import { commandIdSchema, runtimeEpochSchema, runtimeNodeBootIdSchema, runtimeNodeIdSchema, sessionIdSchema } from "./ids.js";
 
 /** Independent contract version: transport/source epochs are not native generations. */
-export const LIFECYCLE_VERSION = 1 as const;
+export const LIFECYCLE_VERSION = 2 as const;
 const opaqueId = z.string().min(1).max(4_096);
 const counter = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+const diagnosticId = z.uuid();
+const observationHealthSchema = z.object({
+  state: z.enum(["pending", "retrying", "observed"]),
+  failures: counter,
+  diagnosticId: diagnosticId.optional(),
+  stalled: z.boolean(),
+}).strict();
 export const lifecycleFenceSchema = z.object({
   sessionId: sessionIdSchema,
   runtimeNodeId: runtimeNodeIdSchema,
@@ -37,11 +45,11 @@ export const lifecycleStateSchema = z.object({
   version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema,
   nextSequence: counter, continuity: z.enum(["continuous", "gap"]),
   root: z.object({ phase: z.enum(["unknown", "paused", "idle", "working"]), cycle: opaqueId.nullable(), outcome: z.enum(["none", "finished", "interrupted", "failed"]) }).strict(),
-  tasks: z.object({ revision: counter, freshness: z.enum(["unknown", "observed"]), items: z.array(taskSchema).max(1_000) }).strict(),
+  tasks: z.object({ revision: counter, observation: observationHealthSchema, items: z.array(taskSchema).max(1_000) }).strict(),
   children: z.object({ completeness: z.enum(["complete", "partial"]), items: z.array(childSchema).max(256) }).strict(),
   queue: z.object({
     revision: counter,
-    freshness: z.enum(["unknown", "observed"]),
+    observation: observationHealthSchema,
     items: z.array(queueItemSchema).max(1_000),
     unidentifiedSteering: counter,
     inFlightSteering: counter.nullable(),
@@ -72,6 +80,14 @@ export const lifecycleFactSchema = z.discriminatedUnion("type", [
     unidentifiedSteering: counter,
     inFlightSteering: counter.nullable(),
   }).strict(),
+  z.object({
+    type: z.literal("observationFailed"),
+    view: z.enum(["tasks", "queue"]),
+    revision: counter,
+    failures: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    diagnosticId,
+    stalled: z.boolean(),
+  }).strict(),
   z.object({ type: z.literal("interactionOpened"), interaction: interactionSchema }).strict(),
   z.object({ type: z.literal("interactionClosed"), id: opaqueId }).strict(),
   z.object({ type: z.literal("interactionsHydrated"), items: z.array(interactionSchema).max(256), complete: z.boolean() }).strict(),
@@ -90,8 +106,8 @@ export type LifecycleEvidence = z.infer<typeof lifecycleEvidenceSchema>;
 export function initialLifecycle(fence: LifecycleFence): LifecycleState {
   return { version: LIFECYCLE_VERSION, fence, nextSequence: 0, continuity: "continuous",
     root: { phase: "unknown", cycle: null, outcome: "none" },
-    tasks: { revision: 0, freshness: "unknown", items: [] }, children: { completeness: "partial", items: [] },
-    queue: { revision: 0, freshness: "unknown", items: [], unidentifiedSteering: 0, inFlightSteering: null },
+    tasks: { revision: 0, observation: pendingObservation(), items: [] }, children: { completeness: "partial", items: [] },
+    queue: { revision: 0, observation: pendingObservation(), items: [], unidentifiedSteering: 0, inFlightSteering: null },
     interactions: { completeness: "partial", items: [] }, commands: [],
     displayedMessageIds: [], consumedMessageIds: [], compaction: "unknown" };
 }
@@ -100,8 +116,8 @@ export function sameLifecycleFence(a: LifecycleFence, b: LifecycleFence): boolea
 }
 function invalidate(s: LifecycleState): LifecycleState {
   return { ...s, continuity: "gap", root: { ...s.root, phase: "unknown", cycle: null, outcome: "none" },
-    tasks: { ...s.tasks, revision: s.tasks.revision + 1, freshness: "unknown" },
-    queue: { ...s.queue, revision: s.queue.revision + 1, freshness: "unknown" },
+    tasks: { ...s.tasks, revision: s.tasks.revision + 1, observation: pendingObservation() },
+    queue: { ...s.queue, revision: s.queue.revision + 1, observation: pendingObservation() },
     children: { completeness: "partial", items: s.children.items.map((c) => ({ ...c, state: "unknown" })) },
     // A close may be among the lost facts. Retaining an item would turn stale
     // positive evidence into a false blocking request after recovery.
@@ -159,16 +175,31 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
       for (const child of s.children.items) hydrated.set(child.id, child);
       return { ...s, children: { completeness: "partial", items: [...hydrated.values()] } };
     }
-    case "tasksInvalidated": return { ...s, tasks: { ...s.tasks, revision: s.tasks.revision + 1, freshness: "unknown" } };
-    case "tasksObserved": return f.revision !== s.tasks.revision ? s : { ...s, tasks: { ...s.tasks, freshness: "observed", items: f.items } };
-    case "queueInvalidated": return { ...s, queue: { ...s.queue, revision: s.queue.revision + 1, freshness: "unknown" } };
+    case "tasksInvalidated": return { ...s, tasks: { ...s.tasks, revision: s.tasks.revision + 1, observation: pendingObservation() } };
+    case "tasksObserved": return f.revision !== s.tasks.revision ? s : { ...s, tasks: { ...s.tasks, observation: observedObservation(), items: f.items } };
+    case "queueInvalidated": return { ...s, queue: { ...s.queue, revision: s.queue.revision + 1, observation: pendingObservation() } };
     case "queueObserved": return f.revision !== s.queue.revision ? s : { ...s, queue: {
       ...s.queue,
-      freshness: "observed",
+      observation: observedObservation(),
       items: f.items,
       unidentifiedSteering: f.unidentifiedSteering,
       inFlightSteering: f.inFlightSteering,
     } };
+    case "observationFailed": {
+      const dimension = f.view === "tasks" ? s.tasks : s.queue;
+      // A failure belongs to one exact invalidation revision. It cannot regress
+      // a successful observation or a newer generation.
+      if (dimension.revision !== f.revision || dimension.observation.state === "observed") return s;
+      const observation = {
+        state: "retrying" as const,
+        failures: Math.max(dimension.observation.failures, f.failures),
+        diagnosticId: f.diagnosticId,
+        stalled: dimension.observation.stalled || f.stalled,
+      };
+      return f.view === "tasks"
+        ? { ...s, tasks: { ...s.tasks, observation } }
+        : { ...s, queue: { ...s.queue, observation } };
+    }
     case "interactionOpened": {
       const items = s.interactions.items.filter((i) => i.id !== f.interaction.id);
       if (items.length >= 256) return invalidate(s);
@@ -256,30 +287,151 @@ export function projectLifecycle(s: LifecycleState, online = true): LifecycleLab
   if (s.root.outcome === "failed") return "Failed";
   if (s.root.outcome === "interrupted") return "Interrupted";
   if (s.root.phase === "working") return "Working";
-  if (s.tasks.freshness === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
-  if (s.queue.freshness === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
-  if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.freshness === "unknown" || s.queue.freshness === "unknown" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
+  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
+  if (s.queue.observation.state === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
+  if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
   return s.root.outcome === "finished" ? "Finished" : "Ready";
 }
 export function projectDelivery(command: LifecycleCommand, state: LifecycleState): "Prepared" | "Dispatched" | "Accepted" | "Queued" | "Displayed" | "Consumed" | "Settled" | "Failed" | "Unknown" {
   if (command.settled) return "Settled";
   if (command.consumed) return "Consumed";
   if (command.displayed) return "Displayed";
-  if (command.messageId !== undefined && state.queue.freshness === "observed" && state.queue.items.some((i) => i.messageId === command.messageId)) return "Queued";
+  if (command.messageId !== undefined && state.queue.observation.state === "observed" && state.queue.items.some((i) => i.messageId === command.messageId)) return "Queued";
   return ({ prepared: "Prepared", dispatched: "Dispatched", accepted: "Accepted", failed: "Failed", outcomeUnknown: "Unknown" } as const)[command.admission];
 }
 
-/** Atomic runtime-owned observation and native-stream handoff, not a vendor task cursor. */
-export const lifecycleSnapshotSchema = z.object({
-  state: lifecycleStateSchema,
-  nextNativeSequence: counter,
+export const lifecycleStatusSchema = z.enum([
+  "ready", "working", "waitingForInput", "waitingForBackground",
+  "interrupted", "failed", "finished", "unknown", "offline",
+]);
+export type LifecycleStatus = z.infer<typeof lifecycleStatusSchema>;
+
+const lifecycleIssueSchema = z.object({
+  scope: z.enum(["lifecycle", "tasks", "queue"]),
+  code: z.enum(["continuityGap", "observationPending", "observationRetrying", "observationStalled", "incompleteNativeState", "hostUnavailable"]),
+  diagnosticId: diagnosticId.optional(),
 }).strict();
-export type LifecycleSnapshot = z.infer<typeof lifecycleSnapshotSchema>;
-export const lifecycleProjectionSchema = z.object({
-  version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema, nextSequence: counter,
-  label: z.enum(["Unknown", "Waiting for input", "Failed", "Interrupted", "Working", "Waiting for child/task", "Queued", "Finished", "Ready", "Offline"]),
+export type LifecycleIssue = z.infer<typeof lifecycleIssueSchema>;
+
+export const lifecycleHealthSchema = z.object({
+  state: z.enum(["healthy", "recovering", "degraded", "offline"]),
+  issues: z.array(lifecycleIssueSchema).max(8),
 }).strict();
-export type LifecycleProjection = z.infer<typeof lifecycleProjectionSchema>;
-export function lifecycleProjection(state: LifecycleState): LifecycleProjection {
-  return { version: LIFECYCLE_VERSION, fence: state.fence, nextSequence: state.nextSequence, label: projectLifecycle(state) };
+export type LifecycleHealth = z.infer<typeof lifecycleHealthSchema>;
+
+export const lifecycleActionReasonSchema = z.enum([
+  "available", "hostOffline", "nativeObservationDegraded", "waitingForInput", "notWorking", "noPendingInteraction",
+]);
+export const lifecycleActionAvailabilitySchema = z.object({
+  available: z.boolean(),
+  reason: lifecycleActionReasonSchema,
+}).strict().refine((value) => value.available === (value.reason === "available"), {
+  message: "available lifecycle actions must use the available reason",
+});
+export type LifecycleActionAvailability = z.infer<typeof lifecycleActionAvailabilitySchema>;
+
+export const sessionLifecycleViewSchema = z.object({
+  version: z.literal(LIFECYCLE_VERSION),
+  /** Equality/refresh token only. Consumers must never parse this identifier. */
+  observationId: z.uuid(),
+  status: lifecycleStatusSchema,
+  health: lifecycleHealthSchema,
+  actions: z.object({
+    send: lifecycleActionAvailabilitySchema,
+    steer: lifecycleActionAvailabilitySchema,
+    interrupt: lifecycleActionAvailabilitySchema,
+    changeSettings: lifecycleActionAvailabilitySchema,
+    resolveInteraction: lifecycleActionAvailabilitySchema,
+    stop: lifecycleActionAvailabilitySchema,
+  }).strict(),
+}).strict();
+export type SessionLifecycleView = z.infer<typeof sessionLifecycleViewSchema>;
+
+/** Runtime-to-control fence. This shape never appears in a public session record. */
+export const runtimeLifecycleProjectionSchema = z.object({
+  version: z.literal(LIFECYCLE_VERSION),
+  fence: lifecycleFenceSchema,
+  nextSequence: counter,
+  view: sessionLifecycleViewSchema,
+}).strict();
+export type RuntimeLifecycleProjection = z.infer<typeof runtimeLifecycleProjectionSchema>;
+
+const observationNamespace = "bfb0cd00-6374-4c04-b7bf-f62f8fcedf79";
+
+export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProjection {
+  const label = projectLifecycle(state);
+  const stalled = state.tasks.observation.stalled || state.queue.observation.stalled;
+  const issues: LifecycleIssue[] = [];
+  if (state.continuity === "gap") issues.push({ scope: "lifecycle", code: "continuityGap" });
+  for (const [scope, observation] of [["tasks", state.tasks.observation], ["queue", state.queue.observation]] as const) {
+    if (observation.state === "pending") issues.push({ scope, code: "observationPending" });
+    if (observation.state === "retrying") issues.push({
+      scope,
+      code: observation.stalled ? "observationStalled" : "observationRetrying",
+      ...(observation.diagnosticId === undefined ? {} : { diagnosticId: observation.diagnosticId }),
+    });
+  }
+  if (state.interactions.completeness === "partial" || state.children.completeness === "partial") {
+    issues.push({ scope: "lifecycle", code: "incompleteNativeState" });
+  }
+  const health: LifecycleHealth = {
+    state: stalled ? "degraded" : issues.length > 0 ? "recovering" : "healthy",
+    issues,
+  };
+  const rootWaiting = state.interactions.items.some((item) => item.owner === "root");
+  const available = (): LifecycleActionAvailability => ({ available: true, reason: "available" });
+  const unavailable = (reason: Exclude<z.infer<typeof lifecycleActionReasonSchema>, "available">): LifecycleActionAvailability => ({ available: false, reason });
+  const mutable = stalled ? unavailable("nativeObservationDegraded") : rootWaiting ? unavailable("waitingForInput") : available();
+  const view: SessionLifecycleView = {
+    version: LIFECYCLE_VERSION,
+    observationId: uuidv5(`${state.fence.sessionId}:${state.fence.runtimeNodeId}:${state.fence.runtimeNodeBootId}:${state.fence.bindingRevision}:${state.fence.runtimeEpoch}:${state.nextSequence}`, observationNamespace),
+    status: label === "Waiting for input" ? "waitingForInput"
+      : label === "Waiting for child/task" ? "waitingForBackground"
+        : label === "Failed" ? "failed"
+          : label === "Interrupted" ? "interrupted"
+            : label === "Finished" ? "finished"
+              : label === "Ready" ? "ready"
+                : label === "Working" || label === "Queued" ? "working" : "unknown",
+    health,
+    actions: {
+      send: mutable,
+      steer: stalled ? unavailable("nativeObservationDegraded")
+        : rootWaiting ? unavailable("waitingForInput")
+          : state.root.phase === "working" ? available() : unavailable("notWorking"),
+      interrupt: stalled ? unavailable("nativeObservationDegraded")
+        : state.root.phase === "working" ? available() : unavailable("notWorking"),
+      changeSettings: mutable,
+      resolveInteraction: stalled ? unavailable("nativeObservationDegraded")
+        : rootWaiting ? available() : unavailable("noPendingInteraction"),
+      stop: available(),
+    },
+  };
+  return { version: LIFECYCLE_VERSION, fence: state.fence, nextSequence: state.nextSequence, view };
+}
+
+/** Host-owned reachability overlay. It preserves no internal binding identity. */
+export function offlineLifecycleView(current: SessionLifecycleView): SessionLifecycleView {
+  const unavailable: LifecycleActionAvailability = { available: false, reason: "hostOffline" };
+  return sessionLifecycleViewSchema.parse({
+    version: LIFECYCLE_VERSION,
+    observationId: uuidv5(`${current.observationId}:offline`, observationNamespace),
+    status: "offline",
+    health: { state: "offline", issues: [{ scope: "lifecycle", code: "hostUnavailable" }] },
+    actions: {
+      send: unavailable,
+      steer: unavailable,
+      interrupt: unavailable,
+      changeSettings: unavailable,
+      resolveInteraction: unavailable,
+      stop: unavailable,
+    },
+  });
+}
+
+function pendingObservation(): z.infer<typeof observationHealthSchema> {
+  return { state: "pending", failures: 0, stalled: false };
+}
+
+function observedObservation(): z.infer<typeof observationHealthSchema> {
+  return { state: "observed", failures: 0, stalled: false };
 }

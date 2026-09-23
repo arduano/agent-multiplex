@@ -167,6 +167,7 @@ describe("standalone authority receipt handoff", () => {
         database.exec(`
           UPDATE control_nodes SET record_json=json_set(record_json, '$.protocolVersion', 5);
           UPDATE runtime_nodes SET record_json=json_set(record_json, '$.protocolVersion', 5);
+          DROP TABLE runtime_lifecycle_cursors;
           DELETE FROM schema_migrations WHERE version>=7;
           PRAGMA user_version=6;
         `);

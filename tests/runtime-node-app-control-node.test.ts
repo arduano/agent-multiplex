@@ -102,10 +102,11 @@ function maintenanceFixture() {
     locator: { kind: "ticket", ticket: "disposable-maintenance-locator" },
   });
   const abort = new AbortController();
-  const start = () => superviseControlNodeConnection(
+  const start = (onReady?: () => void) => superviseControlNodeConnection(
     node, service, runtimeNodeBootId, locator,
     { heartbeatMs: 1_000, inventoryRefreshMs: 2_000, metadataFlushMs: 1_000, reconnectMaxMs: 1 },
     abort.signal,
+    onReady,
   );
   return { inventory, patch, service, first, second, node, abort, start };
 }
@@ -114,6 +115,29 @@ describe("runtime-node independent maintenance", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("reports startup ready only after control registration and once across reconnects", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const fixture = maintenanceFixture();
+    const admission = deferred<{ accepted: boolean }>();
+    fixture.first.register.mockImplementationOnce(() => admission.promise);
+    fixture.first.heartbeat.mockResolvedValueOnce({ accepted: false });
+    fixture.node.connect.mockResolvedValueOnce(fixture.first.peer).mockResolvedValue(fixture.second.peer);
+    const onReady = vi.fn();
+    const running = fixture.start(onReady);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onReady).not.toHaveBeenCalled();
+    admission.resolve({ accepted: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onReady).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_005);
+    expect(fixture.second.register).toHaveBeenCalledOnce();
+    expect(onReady).toHaveBeenCalledOnce();
+    fixture.abort.abort();
+    await running;
   });
 
   it("keeps heartbeats independent of initial stalled inventory and metadata, with bounded in-flight slots", async () => {

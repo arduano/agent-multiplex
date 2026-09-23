@@ -15,6 +15,7 @@ import {
   type HarnessSpawnOptions,
   type JsonValue,
   type LaunchRequest,
+  type LifecycleState,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeInventoryItem,
@@ -25,6 +26,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeNodeService,
   RuntimeNodeStore,
+  RuntimeLifecycleJournal,
   type AdapterEvent,
   type AdapterNativeStateResult,
   type AdapterSession,
@@ -144,6 +146,13 @@ async function fixture(read: (session: RefreshSession, request: NativeStateReque
   return { service, store, session, launch };
 }
 
+async function lifecycleState(
+  value: Awaited<ReturnType<typeof fixture>>,
+): Promise<LifecycleState> {
+  const projection = await value.service.readLifecycle(value.launch.sessionId);
+  return new RuntimeLifecycleJournal(value.store).read(projection.fence);
+}
+
 const tasksResult = {
   harness: "copilot" as const,
   vendorSessionId: "native-lifecycle-refresh",
@@ -156,6 +165,85 @@ const queueResult = {
 };
 
 describe("server-owned Copilot lifecycle refresh", () => {
+  it("retries failed observations with bounded backoff until success without another invalidation", async () => {
+    let taskReads = 0;
+    const f = await fixture(async (_session, request) => {
+      if (request.harness === "copilot" && request.view === "tasks") {
+        taskReads += 1;
+        if (taskReads <= 2) throw new Error(`transient task read ${taskReads}`);
+        return tasksResult;
+      }
+      return queueResult;
+    });
+
+    await vi.waitFor(async () => {
+      expect((await lifecycleState(f)).tasks.observation).toEqual({
+        state: "observed",
+        failures: 0,
+        stalled: false,
+      });
+    }, { timeout: 3_000 });
+    expect(taskReads).toBe(3);
+  });
+
+  it("treats malformed successful observations as failures and retries them", async () => {
+    let taskReads = 0;
+    const f = await fixture(async (_session, request) => {
+      if (request.harness === "copilot" && request.view === "tasks") {
+        taskReads += 1;
+        return taskReads === 1
+          ? { ...tasksResult, payload: {} }
+          : tasksResult;
+      }
+      return queueResult;
+    });
+
+    await vi.waitFor(async () => {
+      expect((await lifecycleState(f)).tasks.observation.state).toBe("observed");
+    }, { timeout: 2_000 });
+    expect(taskReads).toBe(2);
+  });
+
+  it("runs at most one task or queue observation for a binding", async () => {
+    let block: Deferred<void> | undefined;
+    let activeReads = 0;
+    let maximumReads = 0;
+    let blockMode = false;
+    const f = await fixture(async (_session, request) => {
+      if (blockMode) {
+        activeReads += 1;
+        maximumReads = Math.max(maximumReads, activeReads);
+        try {
+          if (block) await block.promise;
+        } finally {
+          activeReads -= 1;
+        }
+      }
+      return request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult;
+    });
+    await vi.waitFor(async () => {
+      const state = await lifecycleState(f);
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
+    });
+
+    block = deferred<void>();
+    blockMode = true;
+    f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+    f.session.emit({ kind: "lifecycle", fact: { type: "queueInvalidated" } });
+    await vi.waitFor(() => expect(activeReads).toBe(1));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(maximumReads).toBe(1);
+    block.resolve();
+    block = undefined;
+    await vi.waitFor(async () => {
+      const state = await lifecycleState(f);
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
+    });
+    expect(maximumReads).toBe(1);
+  });
+
   it("hydrates both views on activation and follows a refresh-time invalidation once", async () => {
     const reads: NativeStateRequest[] = [];
     let taskReads = 0;
@@ -169,9 +257,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
       return queueResult;
     });
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks).toMatchObject({ revision: 1, freshness: "observed", items: [{ id: "task-1" }] });
-      expect(state.queue).toMatchObject({ revision: 0, freshness: "observed", items: [{ id: "queue-1", messageId: "message-1" }] });
+      const state = (await lifecycleState(f));
+      expect(state.tasks).toMatchObject({ revision: 1, observation: { state: "observed" }, items: [{ id: "task-1" }] });
+      expect(state.queue).toMatchObject({ revision: 0, observation: { state: "observed" }, items: [{ id: "queue-1", messageId: "message-1" }] });
     });
     expect(reads.filter(request => request.harness === "copilot" && request.view === "tasks")).toHaveLength(2);
     expect(reads.filter(request => request.harness === "copilot" && request.view === "pendingMessages")).toHaveLength(1);
@@ -189,9 +277,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
       return queueResult;
     });
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks.freshness).toBe("observed");
-      expect(state.queue.freshness).toBe("observed");
+      const state = (await lifecycleState(f));
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
     });
     const taskReadsBefore = reads.filter(request => request.harness === "copilot" && request.view === "tasks").length;
     const queueReadsBefore = reads.filter(request => request.harness === "copilot" && request.view === "pendingMessages").length;
@@ -206,8 +294,8 @@ describe("server-owned Copilot lifecycle refresh", () => {
     first.resolve(tasksResult);
 
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks).toMatchObject({ revision: 3, freshness: "observed" });
+      const state = (await lifecycleState(f));
+      expect(state.tasks).toMatchObject({ revision: 3, observation: { state: "observed" } });
     });
     expect(reads.filter(request => request.harness === "copilot" && request.view === "tasks")).toHaveLength(taskReadsBefore + 2);
     expect(reads.filter(request => request.harness === "copilot" && request.view === "pendingMessages")).toHaveLength(queueReadsBefore);
@@ -220,9 +308,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
       return request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult;
     });
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks.freshness).toBe("observed");
-      expect(state.queue.freshness).toBe("observed");
+      const state = (await lifecycleState(f));
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
     });
     const taskReadsBefore = reads.filter(request => request.harness === "copilot" && request.view === "tasks").length;
     const queueReadsBefore = reads.filter(request => request.harness === "copilot" && request.view === "pendingMessages").length;
@@ -230,11 +318,11 @@ describe("server-owned Copilot lifecycle refresh", () => {
     f.session.emit({ kind: "lifecycle", fact: { type: "gap" } });
 
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
+      const state = (await lifecycleState(f));
       expect(state).toMatchObject({
         continuity: "gap",
-        tasks: { revision: 1, freshness: "observed" },
-        queue: { revision: 1, freshness: "observed" },
+        tasks: { revision: 1, observation: { state: "observed" } },
+        queue: { revision: 1, observation: { state: "observed" } },
       });
     });
     expect(reads.filter(request => request.harness === "copilot" && request.view === "tasks")).toHaveLength(taskReadsBefore + 1);
@@ -253,9 +341,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
       return queueResult;
     });
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks.freshness).toBe("observed");
-      expect(state.queue.freshness).toBe("observed");
+      const state = (await lifecycleState(f));
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
     });
     const taskReadsBefore = reads.filter(request => request.harness === "copilot" && request.view === "tasks").length;
 
@@ -266,8 +354,8 @@ describe("server-owned Copilot lifecycle refresh", () => {
     pendingTask.reject(new Error("native observation failed"));
     pendingTask = undefined;
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks).toMatchObject({ revision: 2, freshness: "observed" });
+      const state = (await lifecycleState(f));
+      expect(state.tasks).toMatchObject({ revision: 2, observation: { state: "observed" } });
     });
     expect(reads.filter(request => request.harness === "copilot" && request.view === "tasks")).toHaveLength(taskReadsBefore + 2);
   });
@@ -276,9 +364,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
     let queue: AdapterNativeStateResult = queueResult;
     const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queue);
     await vi.waitFor(async () => {
-      const state = (await f.service.readLifecycle(f.launch.sessionId)).state;
-      expect(state.tasks.freshness).toBe("observed");
-      expect(state.queue.freshness).toBe("observed");
+      const state = (await lifecycleState(f));
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
     });
     const before = await f.service.readLifecycle(f.launch.sessionId);
     queue = { ...queueResult, payload: { items: [{ id: "caller-only-queue" }], steeringMessages: ["caller-only"] } };
@@ -291,7 +379,7 @@ describe("server-owned Copilot lifecycle refresh", () => {
 
   it("removes the active lifecycle projection before the first inactive durable write", async () => {
     const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
-    await vi.waitFor(async () => expect((await f.service.readLifecycle(f.launch.sessionId)).state.queue.freshness).toBe("observed"));
+    await vi.waitFor(async () => expect((await lifecycleState(f)).queue.observation.state).toBe("observed"));
     const writes = vi.spyOn(f.store, "putSession");
 
     await f.service.stop({
@@ -306,6 +394,110 @@ describe("server-owned Copilot lifecycle refresh", () => {
     const inactive = writes.mock.calls.map(([record]) => record).filter(record => record.availability === "resumable");
     expect(inactive.length).toBeGreaterThan(0);
     expect(inactive.every(record => record.lifecycle === undefined)).toBe(true);
+  });
+
+  it("retires an unresolved read so mutations and stop are never serialized behind it", async () => {
+    let blocked: Deferred<AdapterNativeStateResult> | undefined;
+    const f = await fixture(async (_session, request) => {
+      if (request.harness === "copilot" && request.view === "tasks" && blocked) return blocked.promise;
+      return request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult;
+    });
+    await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+    blocked = deferred<AdapterNativeStateResult>();
+    f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+    await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("pending"));
+
+    const command = await f.service.execute({
+      commandId: newCommandId(),
+      payloadHash: "mutation-during-observation",
+      sessionId: f.launch.sessionId,
+      runtimeNodeId: f.launch.runtimeNodeId,
+      bindingRevision: 1,
+      request: { harness: "copilot", command: { type: "setMode", mode: "interactive" } },
+    });
+    expect(command.state).toBe("succeeded");
+    const stop = f.service.stop({
+      operation: "stop",
+      commandId: newCommandId(),
+      payloadHash: "stop-during-observation",
+      sessionId: f.launch.sessionId,
+      runtimeNodeId: f.launch.runtimeNodeId,
+      bindingRevision: 1,
+    });
+    await expect(Promise.race([
+      stop,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("stop waited for native observation")), 500)),
+    ])).resolves.toMatchObject({ state: "succeeded" });
+
+    blocked.resolve(tasksResult);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const stopped = f.store.getSession(f.launch.sessionId);
+    expect(stopped).toMatchObject({ availability: "resumable", runtimeStatus: "stopped" });
+    expect(stopped?.lifecycle).toBeUndefined();
+  });
+
+  it("marks a 45-second occupied observation degraded, freezes mutations, and still permits stop", async () => {
+    vi.useFakeTimers();
+    try {
+      const blocked = deferred<AdapterNativeStateResult>();
+      let taskReadStarted = false;
+      const f = await fixture(async (_session, request) => {
+        if (request.harness === "copilot" && request.view === "tasks") {
+          taskReadStarted = true;
+          return blocked.promise;
+        }
+        return queueResult;
+      });
+      await vi.waitFor(() => expect(taskReadStarted).toBe(true));
+      await vi.advanceTimersByTimeAsync(45_000);
+      const projection = await f.service.readLifecycle(f.launch.sessionId);
+      expect(projection.view.health.state).toBe("degraded");
+      expect(projection.view.actions.send).toEqual({ available: false, reason: "nativeObservationDegraded" });
+      expect(projection.view.actions.stop).toEqual({ available: true, reason: "available" });
+
+      const command = await f.service.execute({
+        commandId: newCommandId(),
+        payloadHash: "mutation-after-stall",
+        sessionId: f.launch.sessionId,
+        runtimeNodeId: f.launch.runtimeNodeId,
+        bindingRevision: 1,
+        request: { harness: "copilot", command: { type: "setMode", mode: "interactive" } },
+      });
+      expect(command).toMatchObject({ state: "failed", error: { code: "UNAVAILABLE", certainty: "definiteFailure" } });
+
+      await expect(f.service.stop({
+        operation: "stop",
+        commandId: newCommandId(),
+        payloadHash: "stop-after-stall",
+        sessionId: f.launch.sessionId,
+        runtimeNodeId: f.launch.runtimeNodeId,
+        bindingRevision: 1,
+      })).resolves.toMatchObject({ state: "succeeded" });
+      blocked.resolve(tasksResult);
+      await f.service.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("closes with an unresolved SDK observation and ignores its late reply", async () => {
+    let blocked: Deferred<AdapterNativeStateResult> | undefined;
+    const f = await fixture(async (_session, request) => {
+      if (request.harness === "copilot" && request.view === "tasks" && blocked) return blocked.promise;
+      return request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult;
+    });
+    await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+    blocked = deferred<AdapterNativeStateResult>();
+    f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+    await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("pending"));
+    const beforeClose = f.store.getSession(f.launch.sessionId)?.lifecycle;
+    await expect(Promise.race([
+      f.service.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("close waited for native observation")), 500)),
+    ])).resolves.toBeUndefined();
+    blocked.resolve(tasksResult);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(f.store.getSession(f.launch.sessionId)?.lifecycle).toEqual(beforeClose);
   });
 });
 
@@ -322,7 +514,7 @@ describe("runtime lifecycle identity projection", () => {
     f.session.emit({ ...interaction, nativeRequestId: "tool-request", payload: { parentToolCallId: "same-native-id" } });
 
     await vi.waitFor(async () => {
-      const owners = (await f.service.readLifecycle(f.launch.sessionId)).state.interactions.items.map(item => item.owner).sort();
+      const owners = (await lifecycleState(f)).interactions.items.map(item => item.owner).sort();
       expect(owners).toEqual(["agent:same-native-id", "tool:same-native-id"]);
     });
   });

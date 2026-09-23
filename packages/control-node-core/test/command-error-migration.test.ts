@@ -34,6 +34,7 @@ describe("command-error clean-break migration", () => {
       // Simulate the old schema while remaining valid when lifecycle migration
       // is included in this same coordinated maintenance window.
       if (table === "command_journal") legacy.exec("DROP TABLE IF EXISTS lifecycle_state");
+      else legacy.exec("DROP TABLE IF EXISTS runtime_lifecycle_cursors");
       legacy.close();
     }
 

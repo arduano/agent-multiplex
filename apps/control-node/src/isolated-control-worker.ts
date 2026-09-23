@@ -18,7 +18,7 @@ let progress: ReturnType<typeof setInterval> | undefined;
 let closing = false;
 const invocations = new Set<Promise<unknown>>();
 const connectionMethods = new Set<string>([
-  "readSubtreeSnapshot", "subscribeAggregate", "listModels", "listLaunchProfileModels", "refreshInventory", "createLaunch", "getLaunch", "listLaunches", "searchSessions", "getSession", "resume", "stop", "archive", "getArchive", "execute", "readLifecycle", "readNativeState", "readNativeHistory", "beginImageUpload", "writeImageUpload", "commitImageUpload", "abortImageUpload", "resolveImagePath", "readImage", "imageLimits", "getTerminal", "openTerminal", "attachTerminal", "acquireTerminalLease", "renewTerminalLease", "releaseTerminalLease", "sendTerminalInput", "terminateTerminal", "resolveInteraction", "getCommand", "applyMetadata", "applyDetachment",
+  "readSubtreeSnapshot", "subscribeAggregate", "listModels", "listLaunchProfileModels", "refreshInventory", "createLaunch", "getLaunch", "listLaunches", "searchSessions", "getSession", "resume", "stop", "archive", "getArchive", "execute", "readLifecycle", "readNativeState", "readNativeHistory", "beginImageUpload", "writeImageUpload", "commitImageUpload", "abortImageUpload", "resolveImagePath", "readImage", "imageLimits", "getTerminal", "openTerminal", "attachTerminal", "acquireTerminalLease", "renewTerminalLease", "releaseTerminalLease", "sendTerminalInput", "terminateTerminal", "resolveInteraction", "getCommand", "observeCommand", "applyMetadata", "applyDetachment",
 ] satisfies Array<keyof ChildControlNodeConnection>);
 const rpc = new IsolatedRpc(port, async (method, args) => {
   await ready;
@@ -102,6 +102,6 @@ function childConnection(controlNodeId: ControlNodeId, controlNodeBootId: Contro
     if (Object.hasOwn(target, key)) return Reflect.get(target, key);
     if (typeof key !== "string" || !connectionMethods.has(key as keyof ChildControlNodeConnection)) return undefined;
     if (key === "subscribeAggregate" || key === "attachTerminal") return (input: unknown, signal?: AbortSignal) => isolatedStream(rpc, "reverse", [descriptor(), key, [input]], signal);
-    return (...args: unknown[]) => rpc.call("reverse.call", [descriptor(), key, args], { mutation: !["readSubtreeSnapshot", "listModels", "listLaunchProfileModels", "refreshInventory", "getLaunch", "listLaunches", "searchSessions", "getSession", "getArchive", "readLifecycle", "readNativeState", "readNativeHistory", "readImage", "imageLimits", "getTerminal", "getCommand"].includes(key) });
+    return (...args: unknown[]) => rpc.call("reverse.call", [descriptor(), key, args], { mutation: !["readSubtreeSnapshot", "listModels", "listLaunchProfileModels", "refreshInventory", "getLaunch", "listLaunches", "searchSessions", "getSession", "getArchive", "readLifecycle", "readNativeState", "readNativeHistory", "readImage", "imageLimits", "getTerminal", "getCommand", "observeCommand"].includes(key) });
   } }) as ChildControlNodeConnection;
 }

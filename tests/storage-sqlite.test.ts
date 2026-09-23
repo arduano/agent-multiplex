@@ -267,7 +267,7 @@ describe("RuntimeNodeStore SQLite schema", () => {
     const store = new RuntimeNodeStore(filename);
     expect(store.diagnostics()).toMatchObject({
       applicationId: 0x414d_5254,
-      userVersion: 7,
+      userVersion: 8,
       foreignKeys: true,
       synchronous: "full",
     });

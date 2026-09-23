@@ -19,7 +19,8 @@ then checked the maintained source, lifecycle implementation,
 pinned SDK/CLI declarations and JavaScript, and deterministic test sources. It
 did not inspect the separate p2prpc renewal worktree, credentials, private
 conversation content, production services, or live native sessions. No model
-request, deployment, restart or dependency-pin change was used.
+request, deployment or restart was used. The owner-authorized Copilot update
+pins SDK `1.0.14` and CLI `1.0.88`; the public p2prpc pin remains unchanged.
 
 Verdicts mean:
 
@@ -70,9 +71,9 @@ handoff receipt.
 | --- | --- | --- |
 | Full task state is an authoritative pushed record stream | **Disproved.** | The supported path calls `tasks.refresh()` then `tasks.list()` through `sessions.readNativeState`; `session.background_tasks_changed` is only invalidation (`packages/adapter-copilot/src/session.ts:720-740`, `packages/adapter-copilot/src/lifecycle.ts`). |
 | The SDK task snapshot is atomic with a native cursor or sequenced delta feed | **Disproved.** | Pinned SDK exposes separate refresh/list and no snapshot cursor/watch primitive. Actual installed surface is exercised in `packages/adapter-copilot/test/sdk-lifecycle-contract.test.ts:30-38`. |
-| Task invalidation plus coalesced reads prevents a delayed empty snapshot from erasing newer evidence | **Confirmed.** | The implemented adapter/runtime fences reject the race. Adapter native revisions reject invalidation during the read; runtime lifecycle revisions reject an observation invalidated before event drain. Runtime activation schedules task and queue reads, while invalidations and gaps schedule affected coalesced refresh lanes (`packages/adapter-copilot/src/session.ts`, `packages/runtime-node-core/src/service.ts:917-957,2343-2410,2684-2685`). Regressions: `packages/adapter-copilot/test/tasks.test.ts`, `packages/runtime-node-core/test/lifecycle-refresh.test.ts`, and `packages/protocol/test/lifecycle.test.ts:78-92`. Missed native notifications remain a limitation. |
+| Task invalidation plus coalesced reads prevents a delayed empty snapshot from erasing newer evidence | **Confirmed.** | Adapter native revisions reject invalidation during an SDK read; runtime lifecycle revisions reject an observation invalidated before event drain. The server schedules both reads at activation, serializes them per binding and retries failed or malformed replies indefinitely with bounded backoff. At 45 seconds without success it degrades the binding and freezes Copilot mutation admission. Regressions: `packages/adapter-copilot/test/tasks.test.ts`, `packages/runtime-node-core/test/lifecycle-refresh.test.ts`, and `packages/protocol/test/lifecycle.test.ts`. Missed native notifications remain a limitation. |
 | Task polling is the new lifecycle authority | **Disproved.** | The runtime writer installs revision-fenced explicit observations. It proactively schedules them on binding activation, native invalidation and lifecycle gaps; `readLifecycle` itself performs no SDK call, and ordinary caller `readNativeState` results do not mutate lifecycle evidence. External fleet/browser polling policies remain consumer repair mechanisms, not authority. |
-| Only fresh native `running` tasks can override Ready/Finished | **Confirmed.** | `projectLifecycle` tests `tasks.freshness === "observed"` before a running item (`packages/protocol/src/lifecycle.ts`). Unknown/stale data projects Unknown once no stronger positive state wins. |
+| Only fresh native `running` tasks can override Ready/Finished | **Confirmed.** | `projectLifecycle` requires `tasks.observation.state === "observed"` before a running item can project Waiting for child/task (`packages/protocol/src/lifecycle.ts`). Unknown/stale data projects Unknown once no stronger positive state wins. |
 | Exact-ID cancel/promotion is durable; native false is definite refusal/no-op and a missing reply is uncertain | **Confirmed.** | `packages/adapter-copilot/src/tasks.ts`, command handling in `session.ts`, task command regressions, and `docs/wiki/Adapters-and-Terminals.md:217-263`. No PID/text fallback exists. |
 | Queue disappearance proves message display or consumption | **Disproved.** | Queue observation is independent. The reducer uses an exact queue item `messageId` only for the temporary Queued projection; drain returns to the underlying admission state. Queue invalidation regression: `packages/adapter-copilot/test/session-state.test.ts:118-134`; reducer regression: `packages/protocol/test/lifecycle.test.ts`. |
 | Text-only steering entries have stable queue identity | **Disproved.** | Runtime preserves them only as `unidentifiedSteering` count and never synthesizes IDs from text or array position (`packages/runtime-node-core/src/service.ts:956-965`). |
@@ -110,14 +111,14 @@ handoff receipt.
 
 | Defect / limit from the evidence input | Verdict at this worktree | Scope and exact anchor |
 | --- | --- | --- |
-| Hidden browser tabs spend finite receipt-check attempts while skipping the read | **Conditional external defect.** | Confirmed by the supplied Leo source audit, but the named scheduler files are absent from this repository. The reference console uses manual original-ID checking. No Leo fix is claimed (`docs/copilot-lifecycle-browser-audit.md:12-15,51-66`). |
-| A local native-compaction marker blocks later terminal receipt persistence | **Conditional external defect.** | Confirmed for the supplied Leo consumer and absent from this reference UI. This repository has no `nativeCompactionRecovery` store. External migration must keep local conflict settlement separate from authoritative receipt progression. |
+| Hidden browser tabs spend finite receipt-check attempts while skipping the read | **Conditional Leo defect; fixed in the companion migration.** | The supplied Leo source audit identified the bug. The companion Leo branch uses a visibility-aware read scheduler, so hidden time does not spend finite receipt checks (`apps/web/src/client/visible-read-scheduler.ts` in that branch). Framework receipt checks remain original-ID reads. |
+| A local native-compaction marker blocks later terminal receipt persistence | **Conditional Leo defect; fixed in the companion migration.** | The supplied Leo audit identified the race. The companion branch lets a terminal durable receipt outrank incomplete local compaction interpretation, preserving the draft and allowing composer release (`apps/web/src/client/operation-recovery.ts` in that branch). |
 | Control replay omits a requested-ahead native cursor gap | **Confirmed at the base; fixed in scope.** | Control now reports requested-ahead, missing-ring and expired gaps before live delivery (`packages/control-node-core/src/event-hub.ts:266-310`; regression `packages/control-node-core/test/event-hub-native-dedup-v3.test.ts:53-97`). |
 | Generic durable receipts store untyped arbitrary error strings while thrown RPC errors are sanitized/flattened | **Confirmed at the base; generic command receipts fixed in scope.** | Typed fixed-message `CommandError` is `packages/protocol/src/command-error.ts`; runtime/control migrations and secret-sentinel regressions are described in `docs/audits/copilot-lifecycle-vnext-errors.md`. Arbitrary native-read and launch/archive thrown-error boundaries remain separate. |
 | Native `user.message` can omit originating command identity | **Confirmed unresolved SDK limit.** | Optional native message ID prevents exact display/consumption correlation for those events. The reducer preserves Accepted/Unknown rather than matching text. |
 | Compaction events omit originating Multiplex command identity | **Confirmed unresolved SDK limit.** | Phase is observable, command causality is not. A local temporal marker never rewrites a durable receipt. |
 | Callback-only input/elicitation/plan recovery lacks exact reconnect hydration | **Confirmed unresolved SDK limit.** | Exact response methods exist, but no complete pending snapshot exists. Lifecycle interaction completeness remains partial. |
-| p2prpc authenticated-session retirement is break/reconnect rather than seamless renewal | **Conditional on pinned p2prpc 0.2.1 and historical evidence; external dependency.** | Supplied stability evidence recorded the 900-second boundary. This work defines the required continuity/no-replay contract in the normative design and does not inspect or duplicate the renewal worktree. |
+| p2prpc authenticated-session retirement is break/reconnect rather than seamless renewal | **Conditional on public p2prpc 0.2.1; adopted local candidate.** | Supplied stability evidence recorded the 900-second boundary. The branch stages the independently prepared renewal patch and requires application contract `6.renewal.1` at the transport integration. The public `0.2.1` pin remains unchanged pending separate core publication; it does not qualify the final published graph. |
 
 ## Additional base defects found and fixed in scope
 
@@ -129,6 +130,9 @@ handoff receipt.
 | Mutable cursor could regress same-epoch native sequence | **Confirmed at base; fixed.** | `packages/client/src/cursor.ts` delegates established-feed transitions to the shared monotonic function and preserves maximum pending positions; regression `packages/client/test/fleet-watch.test.ts`. |
 | Delayed empty task/queue reads could erase a newer invalidation | **Confirmed at base; fixed in the Copilot adapter/runtime lifecycle path.** | Dual revision fences are described above; regressions are `packages/adapter-copilot/test/tasks.test.ts` and `session-state.test.ts`. |
 | A protocol-v6 feed rotation left a pending authority-handoff request encoded as protocol v5 | **Confirmed during migration replay; fixed.** | Control migration v7 now rewrites the pending durable request, and lost-reply reconciliation admits the child's migration-rotated feed and boot without replacing the authority admission. Regression: `packages/control-node-core/test/authority-handoff-v5.test.ts`. |
+| Persisted active Copilot bindings became resumable after runtime restart without a native handle | **Confirmed during integration; fixed for embedded runtime startup.** | `RuntimeNodeService.reattachPersistedCopilotSessions` captures exact previous active bindings before normalization, validates provider/backend and workspace identity, forces `continuePendingWork:false`, installs one handle, and rejects startup on failure. Registration follows reattachment; `tests/runtime-node-app-control-node.test.ts` checks readiness ordering and `packages/runtime-node-core/test/startup-reattach.test.ts` checks reattachment and mismatched-handle cleanup. |
+| A send or steer succeeded without a native message ID and stayed in delivery polling forever | **Confirmed during integration; fixed.** | `commandObservationView` ends continuation at the accepted durable receipt when no exact ID can correlate later native facts. Focused regression: `packages/protocol/test/command-observation.test.ts`. |
+| A cached lifecycle stayed online when its runtime descriptor disappeared | **Confirmed during integration; fixed.** | Gateway now overlays offline under the same source-generation and binding fence for a missing or unreachable runtime descriptor. Regression: `packages/gateway-core/test/projection.test.ts`. |
 
 ## Browser, client and routing assumptions
 
@@ -137,7 +141,7 @@ handoff receipt.
 | HTTP queries/mutations share the subscription WebSocket failure boundary | **Disproved.** | `packages/client/src/client.ts` builds independent HTTP requests for queries/mutations and uses WS only for subscriptions. Regression: `packages/client/test/access-http-independence.test.ts`. |
 | Receipt recovery is allowed to choose another route and retry a mutation | **Disproved.** | `readCommandReceipt` issues one read by original ID. Gateway dispatches a mutation once and converts unclassified post-dispatch failure to unknown (`packages/gateway-core/src/projection.ts:2306-2323`). |
 | Reconnect cursor commits before asynchronous consumer work finishes | **Disproved for the maintained client contract.** | Access watch serializes callback completion and fences retired subscriptions; see `packages/client/src/access-watch.ts`, `resilient-subscription.ts`, and fleet-watch regression sources. A React setter is not durable browser storage or a paint transaction. |
-| Reference web already consumes the full vNext lifecycle snapshot/reducer | **Disproved.** | The web consumes the bounded runtime-produced `SessionRecord.lifecycle` label in the session rail and console header, derives Offline from runtime/binding presence, fails an active Copilot row without a projection to Unknown, and ranks actionable labels (`apps/web/src/client/session-lifecycle.ts`, `app.tsx`, `session-console.tsx`). It has no full-state `readLifecycle` consumer; that separate query remains the dimensional/native-cursor handoff path. |
+| Reference web already consumes the full vNext lifecycle snapshot/reducer | **Disproved.** | The web consumes the bounded host-produced `SessionLifecycleView` status, health and action availability (`apps/web/src/client/session-lifecycle.ts`, `session-console.tsx`, `interactions.tsx`). The full state and private native sequence stay inside the runtime; `readLifecycle` returns the same compact public view. |
 | Browser disconnection is native completion | **Disproved.** | Offline derives from selected source/runtime/binding availability. Native work can continue; lifecycle projection gains no completion fact. |
 
 Consumer-specific quantitative claims in the supplied audit are **Conditional**,
@@ -158,7 +162,7 @@ those exact values.
 | The stability bundle proves repeated simultaneous Windows and WSL runtime crashes | **Disproved by the supplied bundle itself.** | Different binding times and successful WSL reads refute one demonstrated shared runtime crash. Shared route/power effects remained plausible. |
 | Work-Windows had repeated session-specific task-read failures while catalog/runtime presence remained healthy | **Conditional historical evidence.** | The sanitized bundle records 321 failures, but exact downstream SDK/IPC cause was flattened and is not attributable from this worktree. |
 | Those Windows failures prove a Copilot SDK bug | **Untestable.** | No preserved typed downstream cause and no authorized live/native reproduction. |
-| The archived work-host launcher can leave a recovery sidecar healthy after control/runtime failure | **Conditional historical structural risk, outside the maintained boundary.** | The supplied audit inspected exact deployed archived source. `apps/host` and `packages/host-core` must not be changed or reused for protocol v6. |
+| The archived work-host launcher can leave a recovery sidecar healthy after control/runtime failure | **Conditional historical structural risk; addressed in the companion Leo host.** | The supplied audit inspected exact deployed archived source. Framework `apps/host` and `packages/host-core` remain archived. The maintained Leo supervisor separates sidecar, control and runtime readiness, retries failed runtimes with bounded backoff/cooldown, and refuses another owner when native termination is unproved. |
 | Lifecycle/compaction caused the observed WTG stability symptom | **Untestable; no supporting evidence.** | The stability audit explicitly deferred lifecycle mutation and compaction. This work performed no live probe. |
 
 ## Executable lifecycle implementation audit
@@ -172,11 +176,11 @@ invariant sources are in `packages/protocol/test/lifecycle.test.ts`.
 | --- | --- |
 | Exact authority/binding generation fence | **Confirmed.** Five-part fence equality; late other-generation facts are ignored. Control and gateway revalidate current binding/runtime boot on lifecycle reads. |
 | Runtime-owned durable reducer | **Confirmed.** `packages/runtime-node-core/src/lifecycle.ts` persists the state through the runtime store; store migration `runtime-node-store-v7-lifecycle-evidence` appends one strict JSON state table. |
-| Atomic lifecycle/native cursor handoff | **Confirmed at runtime observation scope.** `RuntimeNodeService.readLifecycle` drains admitted event work and returns state plus the next raw native sequence. It is not a vendor task/event-log transaction. |
+| Atomic lifecycle/native cursor handoff | **Conditional, private runtime boundary only.** `RuntimeNodeService.readLifecycle` drains admitted event work and returns a fenced projection with private reducer sequence. Control validates and strips those fields. Public `readLifecycle` has no native cursor; access-feed recovery uses its own committed cursor and native epoch. This is not a vendor task/event-log transaction. |
 | Crash repair without redispatch | **Confirmed for a command already represented in the bounded lifecycle state under the same fence.** It reads terminal durable command receipts by exact identity. Runtime-store startup separately converts `received`/`started` commands to outcome unknown. |
 | Task/queue sequenced delta stream | **Disproved as implemented and unsupported by the pin.** vNext uses revision-fenced complete observations after native invalidation. This is safe but does not meet the aspirational native-delta recommendation. |
 | Exact child and interaction hydration | **Conditional.** Fresh creation emits complete empty child and interaction baselines before buffered callbacks because the adapter observes the binding from its beginning. Resume emits partial baselines; root whole-session idle can later prove child quiescence, but the Copilot pin has no complete reconnect pending-interaction snapshot (`packages/adapter-copilot/src/adapter.ts`, `session.ts`, `test/lifecycle-races.test.ts`). |
-| Shared projection reducer | **Confirmed.** Protocol exports pure reducer and session/delivery projection functions; runtime uses the projection for session rows, and the reference web consumes that bounded row projection. Full-state web query adoption remains incomplete. |
+| Shared projection reducer | **Confirmed.** Protocol exports the private pure reducer and compact public session/command projections. The runtime computes action availability and health; controls and gateway route/fence that view. Browser reducers for task/queue/transcript lifecycle status are superseded. |
 | Typed sanitized generic command errors | **Confirmed in scope.** Object-only fixed messages and deterministic migration; native-read/launch/archive error surfaces are not claimed migrated. |
 
 ## Deliberate partial boundaries and remaining inconsistencies
@@ -192,42 +196,46 @@ invariant sources are in `packages/protocol/test/lifecycle.test.ts`.
 3. Runtime activation schedules both task and queue observations; native
    invalidations schedule the affected coalesced lane, and a lifecycle gap
    schedules both. `readLifecycle` intentionally performs no SDK reads. A failed
-   scheduled read leaves the dimension unknown until another trigger.
+   scheduled read retries under the same revision with bounded backoff; a
+   stalled observation degrades health and freezes Copilot mutations.
 4. A lifecycle gap clears root/interactions and invalidates task, queue and child
    certainty. A later uniquely identified root start establishes continuity for
    its new foreground boundary. A root whole-session idle can establish a
    quiescent root boundary and complete children without recovering the lost
    cycle or interaction set. Other dimensions still require refresh; there is no
    general native-history-to-lifecycle reconstruction path.
-5. Full lifecycle state is query-only. Catalog streams carry a bounded label and
-   fence, while raw native events remain the detailed live stream. Consumers must
-   use the prescribed subscribe-before-snapshot handoff instead of assuming a
-   separate lifecycle-fact subscription.
+5. Full lifecycle state stays private to the runtime. Catalog streams and
+   `readLifecycle` carry the bounded host view; raw native events remain the
+   detailed live stream. Consumers recover from a committed access cursor and
+   exact native epoch without interpreting private lifecycle revisions.
 6. A command can become durable `started` before it enters the bounded lifecycle
    correlation window. Startup safely converts that receipt to outcome unknown,
    but lifecycle projection may omit it; recovery remains `commands.get` by the
    original ID.
-7. `Offline` is part of the UI label schema, but runtime publication calls the
-   online projection and removes lifecycle data for an inactive binding. Clients
-   derive Offline from routing/presence, as the normative design requires.
+7. `offline` is a host reachability overlay. Control and gateway produce it
+   when a cached binding's runtime is unreachable or its descriptor is missing;
+   browsers do not infer native completion from an outage.
 
 ## Fixed versus external-only summary
 
 Implemented in this worktree: protocol-v6 lifecycle state/reducer/projections;
-runtime persistence, fencing, snapshot/native-cursor handoff and proactive
+runtime persistence, fencing, private runtime observation and proactive
 coalesced task/queue refresh; Copilot exact event normalization, fresh-session
 child/interaction hydration and stale observation rejection; namespaced
-interaction owners; generation-fenced routing; bounded lifecycle labels in the
-reference web; control requested-ahead/missing-ring gap signaling; typed generic
+interaction owners; generation-fenced routing; bounded host lifecycle views and
+actions in the reference web; control requested-ahead/missing-ring gap signaling; typed generic
 command receipt errors and migrations; original-ID read-only browser recovery;
-exact draft settlement; and monotonic mutable cursors.
+exact draft settlement; monotonic mutable cursors; trusted Copilot startup
+reattachment; and a version-2 `commands.observe` view that does not keep waiting
+when the SDK gave no exact native message ID.
 
-External-only or still blocked: Leo hidden-tab budget and compaction-marker
-defects; Leo IndexedDB/Web Locks cross-tab migration; complete Copilot interaction
+External-only or still blocked: Leo IndexedDB/Web Locks cross-tab migration;
+complete Copilot interaction
 hydration after resume/reconnect or a gap; universal native causal IDs;
 guaranteed logical IDs; native task/queue snapshot cursors or deltas;
-per-command settlement; typed arbitrary native-read errors; full-state web
-query adoption; and seamless p2prpc renewal.
+per-command settlement; and typed arbitrary native-read errors. The reviewed
+p2prpc renewal candidate is staged locally, while public graph publication and
+installed-host qualification remain outside this evidence.
 
 The separate renewal implementation must preserve command identity/hash, control
 authority/feed, runtime boot, binding revision, runtime epoch and consumer-committed
@@ -239,7 +247,7 @@ rollback and transport contract is in
 ## Qualification boundary
 
 No native model behavior, Windows behavior, live production state, cross-tab Leo
-storage, or seamless transport renewal is qualified by this audit. The pinned SDK
+storage, or published transport graph is qualified by this audit. The pinned SDK
 tests use an inert connection and no native process. Native task-control UAT and
 model-driven child behavior remain explicit limitations. Final test commands,
 source identity, local commit IDs and checksummed receipts belong to the final

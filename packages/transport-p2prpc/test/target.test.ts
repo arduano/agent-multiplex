@@ -12,7 +12,7 @@ describe("p2prpc transport identity", () => {
   it("binds the exact protocol-v6 application identity", () => {
     expect(AGENT_MULTIPLEX_P2P_PROTOCOL).toEqual({
       applicationId: "agent-multiplex",
-      contractVersion: "6",
+      contractVersion: "6.renewal.1",
     });
   });
 

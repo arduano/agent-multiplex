@@ -1,12 +1,35 @@
-import type { LifecycleLabel, SessionRecord } from "@arduano/agent-multiplex-protocol";
+import type { SessionLifecycleView, SessionRecord } from "@arduano/agent-multiplex-protocol";
 
 export type LifecycleTone = "good" | "warn" | "bad" | "neutral";
+export type SessionLifecycleLabel =
+  | "Offline"
+  | "Unknown"
+  | "Waiting for input"
+  | "Failed"
+  | "Interrupted"
+  | "Working"
+  | "Waiting for child/task"
+  | "Finished"
+  | "Ready";
+
+const labels = {
+  ready: "Ready",
+  working: "Working",
+  waitingForInput: "Waiting for input",
+  waitingForBackground: "Waiting for child/task",
+  interrupted: "Interrupted",
+  failed: "Failed",
+  finished: "Finished",
+  unknown: "Unknown",
+  offline: "Offline",
+} as const satisfies Record<SessionLifecycleView["status"], SessionLifecycleLabel>;
 
 /** Use the runtime-owned Copilot projection and fail closed if it is absent. */
-export function sessionLifecycleLabel(session: SessionRecord, online = true): LifecycleLabel {
+export function sessionLifecycleLabel(session: SessionRecord, online = true): SessionLifecycleLabel {
+  if (session.harness === "copilot") {
+    return session.lifecycle ? labels[session.lifecycle.status] : "Unknown";
+  }
   if (!online || session.availability !== "active") return "Offline";
-  if (session.lifecycle) return session.lifecycle.label;
-  if (session.harness === "copilot") return "Unknown";
   switch (session.runtimeStatus) {
     case "running": return "Working";
     case "waitingForInput": return "Waiting for input";
@@ -17,24 +40,32 @@ export function sessionLifecycleLabel(session: SessionRecord, online = true): Li
   }
 }
 
-export function lifecycleTone(label: LifecycleLabel): LifecycleTone {
+export function lifecycleActionAvailable(
+  session: SessionRecord,
+  action: keyof SessionLifecycleView["actions"],
+): boolean {
+  return session.harness === "copilot"
+    ? session.lifecycle?.actions[action].available === true
+    : session.availability === "active";
+}
+
+export function lifecycleTone(label: SessionLifecycleLabel): LifecycleTone {
   if (label === "Failed") return "bad";
   if (label === "Waiting for input" || label === "Waiting for child/task" ||
-      label === "Queued" || label === "Interrupted") return "warn";
+      label === "Interrupted") return "warn";
   if (label === "Working" || label === "Finished" || label === "Ready") return "good";
   return "neutral";
 }
 
-export function lifecycleRank(label: LifecycleLabel): number {
+export function lifecycleRank(label: SessionLifecycleLabel): number {
   if (label === "Waiting for input") return 0;
   if (label === "Working" || label === "Waiting for child/task") return 1;
-  if (label === "Queued") return 2;
   if (label === "Failed" || label === "Interrupted" || label === "Unknown") return 3;
   if (label === "Ready" || label === "Finished") return 4;
   return 5;
 }
 
-export function lifecycleDot(label: LifecycleLabel): "live" | "waiting" | "error" | "muted" {
+export function lifecycleDot(label: SessionLifecycleLabel): "live" | "waiting" | "error" | "muted" {
   const tone = lifecycleTone(label);
   return tone === "good" ? "live" : tone === "warn" ? "waiting" : tone === "bad" ? "error" : "muted";
 }

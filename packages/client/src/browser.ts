@@ -4,7 +4,6 @@
  */
 export * from "./images.js";
 export * from "./command-recovery.js";
-export * from "./lifecycle-handoff.js";
 export {
   createAccessClient,
   type AccessClient,

@@ -38,7 +38,6 @@ import type {
   LaunchRequest,
   LineageId,
   MetadataOperationRecord,
-  LifecycleSnapshot,
   NativeStateRequest,
   NativeStateResult,
   NativeHistoryRequest,
@@ -47,6 +46,7 @@ import type {
   ResolveInteractionInput,
   RuntimeNodeBootId,
   RuntimeNodeId,
+  SessionLifecycleView,
   SessionId,
   SessionRecord,
   SessionSearchInput,
@@ -185,7 +185,7 @@ interface ControlNodeLinkPeerRpc {
       ): Promise<ArchiveRecord>;
     };
     readLifecycle: {
-      query(input: ControlNodeLinkFence & { sessionId: SessionId }): Promise<LifecycleSnapshot>;
+      query(input: ControlNodeLinkFence & { sessionId: SessionId }): Promise<SessionLifecycleView>;
     };
     readNativeState: {
       query(
@@ -260,6 +260,15 @@ interface ControlNodeLinkPeerRpc {
           >[0];
         },
       ): ReturnType<NonNullable<ChildControlNodeConnection["getCommand"]>>;
+    };
+    observe: {
+      query(
+        input: ControlNodeLinkFence & {
+          commandId: Parameters<
+            NonNullable<ChildControlNodeConnection["observeCommand"]>
+          >[0];
+        },
+      ): ReturnType<NonNullable<ChildControlNodeConnection["observeCommand"]>>;
     };
   };
   interactions: {
@@ -466,6 +475,8 @@ export function childControlNodeConnectionFromPeerResolver(
       rpc().interactions.resolve.mutate({ ...fence(), interaction }),
     getCommand: (commandId) =>
       rpc().commands.get.query({ ...fence(), commandId }),
+    observeCommand: (commandId) =>
+      rpc().commands.observe.query({ ...fence(), commandId }),
     applyMetadata: (operation) =>
       rpc().metadata.settle.mutate({ ...fence(), operation }),
     applyDetachment: (receipt) =>

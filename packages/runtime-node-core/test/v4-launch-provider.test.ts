@@ -811,7 +811,7 @@ describe("runtime store v3 to v5", () => {
     downgrade.close();
 
     const migrated = new RuntimeNodeStore(filename);
-    expect(migrated.diagnostics().userVersion).toBe(7);
+    expect(migrated.diagnostics().userVersion).toBe(8);
     expect(migrated.getSession(legacyCompatible.sessionId)).toMatchObject({
       launchProvenance: null,
       lastActivityAt: timestamp,

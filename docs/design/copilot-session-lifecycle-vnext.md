@@ -1,6 +1,6 @@
 # Copilot Session Lifecycle vNext
 
-Status: normative for lifecycle contract version 1 in Agent Multiplex protocol
+Status: normative for lifecycle contract version 2 in Agent Multiplex protocol
 v6. The executable definition is
 [`packages/protocol/src/lifecycle.ts`](../../packages/protocol/src/lifecycle.ts).
 The protocol reducer wins if prose and code disagree.
@@ -29,9 +29,11 @@ mixed.
 | Transport connection generation | p2prpc integration | Carries authenticated RPC and subscriptions. A transport generation is neither a native runtime epoch nor lifecycle authority. |
 
 Control nodes and gateways validate and route `sessions.readLifecycle`; they do
-not independently reduce Copilot evidence. A session catalog record carries only
-the bounded lifecycle projection. The full state is read from the owning runtime
-through the selected control path.
+not independently reduce Copilot evidence. A runtime-to-control update carries
+the exact private fence and sequence so the control can reject regression. The
+catalog and public query expose only the compact lifecycle view: an opaque
+observation ID, status, typed health/issues, and host-computed action
+availability. Internal reducer fields and cursors are not a browser contract.
 
 ## Normative state vector
 
@@ -43,7 +45,7 @@ The state is:
  commands, displayedMessageIds, consumedMessageIds, compaction)
 ```
 
-`version` is lifecycle contract version `1`. It is independent of wire protocol
+`version` is lifecycle contract version `2`. It is independent of wire protocol
 version `6` so a later lifecycle revision can be negotiated deliberately.
 
 | Dimension | Shape | Meaning, monotonicity and recovery |
@@ -52,9 +54,9 @@ version `6` so a later lifecycle revision can be negotiated deliberately.
 | `nextSequence` | Nonnegative integer | Next runtime lifecycle-evidence sequence for this exact fence. Duplicate/old evidence is ignored. A jump invalidates certainty. |
 | `continuity` | `continuous \| gap` | Whether projection has an unbroken baseline for the current foreground cycle. An authoritative replacement snapshot or new fence can clear a gap. A uniquely identified later root start establishes continuity for its new foreground cycle; a later root whole-session idle establishes a quiescent root boundary. Other invalidated dimensions retain their own unknown markers. |
 | `root` | `{phase, cycle, outcome}` | Root model/session dimension. `phase` is `unknown`, `paused`, `idle`, or `working`; `paused` means only the model loop is idle, while `idle` requires a whole-session idle or fresh inactive activity observation. `cycle` is the unique observed root-start event ID or `null`; `outcome` is `none`, `finished`, `interrupted`, or `failed`. A new explicit root start clears the prior outcome. |
-| `tasks` | `{revision, freshness, items}` | Complete bounded task observation for one invalidation revision. `freshness` is `unknown` or `observed`. Retained items under `unknown` are diagnostic only and cannot prove current presence or absence. |
+| `tasks` | `{revision, observation, items}` | Complete bounded task observation for one invalidation revision. `observation` is `pending`, `retrying`, or `observed`, with a failure count, optional safe diagnostic ID, and monotonic `stalled` marker for that revision. Retained items before `observed` are diagnostic only and cannot prove current presence or absence. |
 | `children` | `{completeness, items}` | Bounded native subagent/child observations, independently keyed and in `running`, `completed`, `failed`, `settled`, or `unknown`. `partial` means absence is unproved. `settled` means a newer whole-session idle proved no child remained in flight without claiming that child's outcome. These are members of the owning Copilot session, never catalog sessions. |
-| `queue` | `{revision, freshness, items, unidentifiedSteering, inFlightSteering}` | Complete bounded pending-message observation for one invalidation revision. Identified items retain native queue ID and optional logical message ID. Text-only steering is represented only by a count. `null` in-flight count means the native version did not establish it. |
+| `queue` | `{revision, observation, items, unidentifiedSteering, inFlightSteering}` | Complete bounded pending-message observation for one invalidation revision. Observation health has the same revision-fenced shape as tasks. Identified items retain native queue ID and optional logical message ID. Text-only steering is represented only by a count. `null` in-flight count means the native version did not establish it. |
 | `interactions` | `{completeness, items}` | Exact known pending requests. `partial` means absence is unproved. Each item has a Multiplex interaction ID, explicit owner and native kind. |
 | `commands` | At most 256 correlation records | Bounded working set for command admission, optional native message identity and independent `displayed`, `consumed`, and `settled` evidence. The unbounded original receipt source remains the durable command journal. |
 | `displayedMessageIds` | At most 512 native logical message IDs | Allows an exact root display observed before its command acknowledgement to correlate later. It is not history retention. |
@@ -62,7 +64,8 @@ version `6` so a later lifecycle revision can be negotiated deliberately.
 | `compaction` | `unknown \| running \| observedComplete` | Uncorrelated native compaction observation. It never settles a compact command by itself. |
 
 Initial state is sequence zero with continuous delivery but uncertified native
-dimensions: root, tasks, queue and compaction are unknown; child and interaction
+dimensions: root and compaction are unknown, task and queue observations are
+pending, and child and interaction
 hydration are partial; correlation sets are empty. `continuous` at initialization
 means no runtime facts have been skipped. It does not make absence-sensitive
 dimensions fresh.
@@ -114,7 +117,7 @@ For an incoming lifecycle evidence envelope:
 | Exact `gap` fact | Apply the same invalidation after consuming its exact sequence. |
 
 Invalidation clears root phase/cycle/outcome certainty; advances task and queue
-revisions and marks both unknown; marks children unknown; clears interactions
+revisions and marks both pending; marks children unknown; clears interactions
 and makes their completeness partial; and makes compaction unknown. It retains
 command correlation, exact display/consumption IDs and old task/queue records.
 Retained task/queue records are diagnostic only until their dimension is fresh.
@@ -126,17 +129,29 @@ the reply, and installs the observation only if the lifecycle revision still
 matches. A delayed empty response therefore cannot erase a newer invalidation.
 The runtime schedules both observations when it activates a Copilot binding and
 schedules the affected observation again after an invalidation. A lifecycle gap
-schedules both. Independent per-view lanes coalesce bursts and run one follow-up
-generation when a successful in-flight read was invalidated; a failed read
-contributes no evidence and is not retried until another trigger.
+schedules both. One coordinator per binding serializes its task and queue reads,
+coalesces bursts, and retries failures indefinitely with bounded exponential
+delay from 250 ms to 30 seconds. A malformed response is a failed observation,
+never an empty snapshot. The SDK call has no `AbortSignal`; after the caller's
+15-second bound the adapter retains that exact native request until it settles,
+so retries cannot pile onto the same native lane.
 
-`sessions.readLifecycle` drains already admitted native payload work, rechecks
-the installed binding, then returns `{state, nextNativeSequence}`. The lifecycle
-sequence and raw native sequence are independent. A client performing a
-snapshot/stream handoff subscribes first, buffers native items, reads the
-snapshot, discards buffered native items below `nextNativeSequence` for the exact
-runtime epoch, and commits the rest in order. Gateway source generation must stay
-unchanged across the read.
+At 45 seconds without a successful requested observation, the runtime marks the
+binding degraded with a safe diagnostic ID. It rejects further Copilot
+mutations for that binding while retaining Stop and shutdown recovery. A later
+successful exact-revision task and queue observation clears the degraded state.
+Stop, binding replacement, and runtime close retire timers and fence late
+replies. Observation reads run outside the session mutation lock, so an
+uncooperative SDK read cannot prevent bounded adapter shutdown.
+
+`sessions.readLifecycle` drains already admitted lifecycle work, rechecks the
+installed binding, and returns the compact `SessionLifecycleView`. The direct
+runtime response temporarily includes its exact private fence and reducer
+sequence; the owning control validates and strips them. Controls and gateways
+fence the read against binding and selected-source changes. Raw native stream
+recovery remains on the access feed's committed cursor and runtime epoch;
+bounded native history repairs transcript content. No client receives or must
+interpret the lifecycle reducer's sequence, task revision, or queue revision.
 
 ## Exhaustive fact transition table
 
@@ -209,6 +224,12 @@ native source enumerates every pending kind and owner for this exact binding.
 They never arise from elapsed time, an empty queue, root idle or a successful
 generic receipt.
 
+`commands.observe` always retains the original control-journal receipt. If the
+runtime or child route is unavailable, it returns that receipt with no native
+delivery refinement. A successful send or steer with no exact native message
+ID ends at Accepted because later evidence cannot be joined safely. An
+`outcomeUnknown` receipt requires manual review and never authorizes replay.
+
 ## UI projections
 
 Session state and per-command delivery are two projections. A UI should display
@@ -232,16 +253,15 @@ The first matching row wins:
 | 10 | **Finished** | Root outcome is `finished` and every absence-sensitive dimension is known with no higher-priority blocker. This means an observed non-aborted whole-session idle followed an observed root cycle. It is not a business-level success assertion. |
 | 11 | **Ready** | Root is idle with outcome `none`, all absence-sensitive dimensions are fresh/complete, and there is no queued, child/task or input work. It means ready to accept work. |
 
-The runtime-published catalog projection is online-only and is removed when the
-binding is inactive. Clients derive Offline from source, runtime and binding
-availability; they must not expect an Offline lifecycle row from an unreachable
-runtime.
-
-The reference web consumes this bounded `SessionRecord.lifecycle` label in its
-session rail and console header, derives Offline from runtime/binding presence,
-and treats an active Copilot row without a projection as Unknown. It does not
-currently query the full `readLifecycle` state; consumers that need individual
-dimensions or the native-sequence handoff use that separate read.
+The runtime publishes a bounded `SessionLifecycleView`, not this private label
+or reducer state. It maps Queued to `working`, Waiting for child/task to
+`waitingForBackground`, and includes typed health issues and host-computed
+availability for send, steer, interrupt, settings, interaction resolution, and
+stop. Control strips the private fence and sequence before exposing the view.
+Control and gateway overlay `offline` when the owner is unreachable, including
+when its runtime descriptor is missing. The reference web consumes that host
+view directly and does not reduce task, queue, transcript, or elapsed-time facts
+into a second lifecycle authority.
 
 ### Delivery label precedence
 
@@ -283,9 +303,11 @@ command-specific fact.
 6. Consumption and settlement require later exact facts. Whole-session idle does
    not settle the command automatically.
 
-If the native root echo omits `messageId`, the transcript can render the native
-message while this command remains Accepted or Unknown. Same text, images, event
-UUID and timing cannot close that causal gap.
+If the native acknowledgement omits `messageId`, the durable successful receipt
+ends automatic observation at Accepted because no exact later link exists. If
+the native root echo omits `messageId`, the transcript can render the native
+message while a command with an acknowledged ID remains Accepted or Unknown.
+Same text, images, event UUID and timing cannot close either causal gap.
 
 ### Root plus children and tasks
 
@@ -347,7 +369,8 @@ the consumer's projection. Clients must:
 1. retain original command receipts and drafts without replay;
 2. obtain a fresh validated catalog/source snapshot;
 3. call `readLifecycle` for the exact current binding;
-4. re-establish raw native stream order using `nextNativeSequence`;
+4. re-establish raw native stream order from the consumer-committed access cursor
+   and exact runtime epoch, treating an unproved gap as a reset;
 5. use bounded native history for transcript repair;
 6. let the runtime-owned coalesced task and queue observations refresh under
    their current invalidation revisions; and
@@ -409,17 +432,18 @@ fallback or compatibility branch.
 
 | Package / process | Protocol-v6 responsibility | Persistence / migration |
 | --- | --- | --- |
-| `@arduano/agent-multiplex-protocol` | Lifecycle schemas, reducer, projections, `readLifecycle`, typed command errors and exact v6 descriptors | Wire break; lifecycle contract version is 1. |
+| `@arduano/agent-multiplex-protocol` | Private lifecycle reducer, public version-2 view, `commands.observe`, typed command errors and exact v6 descriptors | Wire break; lifecycle contract version is 2. |
 | `@arduano/agent-multiplex-adapter-copilot` | Emit exact root/child/invalidation/display/compaction facts; fence task and queue reads; preserve raw native envelopes | No adapter-owned store. SDK/CLI pins remain qualification boundaries. |
-| `@arduano/agent-multiplex-runtime-node-core` | Single writer, full lifecycle read, native-cursor handoff, command-receipt repair and catalog projection | Append runtime store v6 typed-error migration and v7 `lifecycle_state`. Old binaries must not open the upgraded store. |
-| Runtime app | Advertise protocol v6 and expose the runtime contract | Restart into the lockstep package graph during the maintenance window. |
-| `@arduano/agent-multiplex-control-node-core` | Route/fence lifecycle reads; carry bounded session projections; preserve catalog authority | Control store v7 converts command errors and rotates the feed. Obtain a new snapshot; discard old replay/import checkpoints as the migration does. |
+| `@arduano/agent-multiplex-runtime-node-core` | Single writer, private fenced read, automatic revision-fenced Copilot observations, trusted startup reattachment and command-receipt repair | Append runtime store v6 typed-error, v7 lifecycle, and v8 contract-rotation migrations. Old binaries must not open the upgraded store. |
+| Runtime app | Reattach exact persisted active Copilot bindings before control registration; signal ready only after first registration | Restart into the lockstep package graph during the maintenance window. A failed reattachment rejects startup. |
+| `@arduano/agent-multiplex-control-node-core` | Route/fence lifecycle reads and command observations; carry bounded public views; preserve catalog authority | Control v7 converts command errors; v8 rotates incompatible lifecycle feeds. Obtain a new snapshot; discard old replay/import checkpoints as the migrations direct. |
 | Control app / isolated worker | Forward `readLifecycle` as a read and reject non-v6 peers | Main and worker must use identical package bytes. |
 | `@arduano/agent-multiplex-transport-p2prpc` | Bind the new read procedure and exact v6 descriptors | No local/file dependency may be committed. Seamless renewal is the external boundary below. |
 | `@arduano/agent-multiplex-client-p2prpc` | Forward lifecycle reads and typed receipts over the selected control source | No domain store. Late transport generations must be fenced. |
 | `@arduano/agent-multiplex-gateway-core` and gateway app | Generation-fence lifecycle reads and validate runtime/binding/boot identity | No authoritative migration. Require a fresh validated source snapshot after control feed rotation. |
-| `@arduano/agent-multiplex-client` | Preserve monotonic access cursors and read original command receipts without dispatch | No authoritative migration. Product-owned durable draft/receipt stores require their own CAS migration. |
-| Web client and CLI | The web renders lifecycle labels and derives Offline from routing state; the CLI consumes the v6 wire contract and typed command errors | The reference web consumes the bounded `SessionRecord.lifecycle` label in its rail/header and fails active Copilot rows without it to Unknown. It does not yet query full lifecycle snapshots. The CLI does not currently render lifecycle labels. External consumers must replace duplicate reducers in the same cutover. |
+| `@arduano/agent-multiplex-client` | Preserve monotonic access cursors and read original command receipts without dispatch | Removed the public raw-fence/native-cursor lifecycle helper. Product-owned durable draft/receipt stores require their own CAS migration. |
+| Web client and CLI | Web renders host status, health and available actions; `commands.observe` separates receipt from exact delivery. CLI keeps raw `commands.get` for original-ID recovery | External consumers replace duplicate task/queue/transcript lifecycle reducers in the same cutover. |
+| Companion Leo host and browser | Host supervises separate sidecar, control and runtime readiness; browser consumes host lifecycle/actions and exact `commands.observe` delivery, preserving original IDs and drafts | Its direct Copilot pins move with this cutover. Visibility-aware receipt checks and terminal-receipt precedence replace local timing/text/compaction heuristics. Cross-tab storage still needs its own durable CAS review. |
 | Codex/mock adapters | Compile against v6 while leaving the Copilot-specific lifecycle read unsupported unless explicitly implemented | No Copilot inference is shared into other harnesses. |
 | `@arduano/agent-multiplex-storage-sqlite` | Execute append-only owner migrations and backup/integrity policy | Contains no lifecycle-domain authority of its own. |
 | Archived `apps/host` / `packages/host-core` | None | Protocol-v2 evidence; do not build, migrate or use as a compatibility layer. |
@@ -456,9 +480,12 @@ The separately owned p2prpc renewal implementation must satisfy this contract:
 7. Keep source selection and aggregate authority rules unchanged. Transport
    continuity alone does not mint authority or prove native health.
 
-Current p2prpc `0.2.1` retires an authenticated session and reconnects at its
-boundary; seamless renewal is not qualified by this lifecycle work. This design
-does not inspect, duplicate or merge the external renewal implementation.
+Public p2prpc `0.2.1` retires an authenticated session and reconnects at its
+boundary. This branch adopts the independently prepared `0.3.0-renewal.0`
+candidate through the tracked, checksummed integration patch. The public
+dependency pin remains `0.2.1` until separate publication authorization.
+Renewal keeps authenticated streams while replacing grant generations; it does
+not change lifecycle authority or turn an uncertain command into a retry.
 
 ## Coordinated maintenance window and rollback
 
@@ -477,8 +504,10 @@ Upgrade in this order:
 4. Migrate runtime stores, adding typed command errors and lifecycle state.
 5. Start authority controls, then attached branch controls from parent to child;
    reject every v5 peer.
-6. Start runtimes against their owning v6 controls. Validate runtime boot,
-   binding revisions and command-journal recovery before admitting commands.
+6. Start runtimes against their owning v6 controls. Reattach persisted active
+   Copilot bindings locally with `continuePendingWork:false`, validate exact
+   native identity and workspace, then register with control. Validate runtime
+   boot, binding revisions and original command receipts before admitting work.
 7. Start gateways, require fresh validated source snapshots and new feed cursors,
    then start web, CLI and other consumers.
 8. For active Copilot bindings, subscribe before snapshot, read lifecycle, verify
@@ -507,7 +536,9 @@ Pinned SDK `1.0.14` / selected CLI `1.0.88` do not provide:
 - callback request identity plus an acknowledgement within the callback promise;
 - a supported alias map across task, agent and tool-call identity domains; or
 - a guaranteed consumption marker on every displayed message, or per-command
-  settlement evidence.
+  settlement evidence; or
+- an `AbortSignal` for task/queue SDK reads, so timed-out native calls must be
+  retained in a bounded lane until they settle.
 
 SDK 1.0.14's optional assistant `originatingMessageId` can correlate assistant
 output to the native message ID returned by `send()`. It does not accept or

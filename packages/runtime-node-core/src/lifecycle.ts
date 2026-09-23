@@ -1,5 +1,7 @@
 import {
-  initialLifecycle, lifecycleEvidenceSchema, reduceLifecycle, sameLifecycleFence,
+  LIFECYCLE_VERSION, commandObservationView, initialLifecycle, lifecycleEvidenceSchema,
+  lifecycleProjection, reduceLifecycle, sameLifecycleFence,
+  type CommandId, type CommandObservationView, type RuntimeLifecycleProjection,
   type LifecycleFact, type LifecycleFence, type LifecycleState,
 } from "@arduano/agent-multiplex-protocol";
 import type { RuntimeNodeStore } from "./store.js";
@@ -23,7 +25,7 @@ export class RuntimeLifecycleJournal {
       if (admission === command.admission) continue;
       const result = receipt.result?.json;
       const messageId = result && typeof result === "object" && !Array.isArray(result) && typeof result.messageId === "string" ? result.messageId : undefined;
-      state = reduceLifecycle(state, { version: 1, fence, sequence: state.nextSequence, fact: {
+      state = reduceLifecycle(state, { version: LIFECYCLE_VERSION, fence, sequence: state.nextSequence, fact: {
         type: "commandReceipt", commandId: command.commandId, payloadHash: command.payloadHash, admission,
         ...(messageId ? { messageId } : {}),
       } });
@@ -34,9 +36,19 @@ export class RuntimeLifecycleJournal {
 
   public append(fence: LifecycleFence, fact: LifecycleFact): LifecycleState {
     const current = this.read(fence);
-    const evidence = lifecycleEvidenceSchema.parse({ version: 1, fence, sequence: current.nextSequence, fact });
+    const evidence = lifecycleEvidenceSchema.parse({ version: LIFECYCLE_VERSION, fence, sequence: current.nextSequence, fact });
     const next = reduceLifecycle(current, evidence);
     this.store.putLifecycle(next);
     return next;
+  }
+
+  public projection(fence: LifecycleFence): RuntimeLifecycleProjection {
+    return lifecycleProjection(this.read(fence));
+  }
+
+  public command(commandId: CommandId, fence?: LifecycleFence): CommandObservationView | null {
+    const receipt = this.store.getCommand(commandId);
+    if (!receipt) return null;
+    return commandObservationView(receipt, fence ? this.read(fence) : undefined);
   }
 }

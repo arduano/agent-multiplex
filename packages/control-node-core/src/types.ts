@@ -7,6 +7,7 @@ import type {
   CommandEnvelope,
   CommandId,
   CommandRecord,
+  CommandObservationView,
   ControlNodeAttachmentRequest,
   ControlNodeBootId,
   ControlNodeId,
@@ -25,7 +26,8 @@ import type {
   LineageId,
   MetadataOperationRecord,
   MetadataPatch,
-  LifecycleSnapshot,
+  RuntimeLifecycleProjection,
+  SessionLifecycleView,
   NativeStateRequest,
   NativeStateResult,
   NativeHistoryRequest,
@@ -79,7 +81,7 @@ export interface RuntimeNodeConnection extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
-  readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot>;
+  readLifecycle(sessionId: SessionId): Promise<RuntimeLifecycleProjection>;
   readNativeState?(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult>;
   readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   getTerminal?(input: TerminalGetInput): Promise<TerminalDescriptor | null>;
@@ -93,6 +95,7 @@ export interface RuntimeNodeConnection extends ImagePort {
   resolveInteraction(input: ResolveInteractionInput): Promise<InteractionRecord>;
   applyMetadata?(operation: MetadataOperationRecord): Promise<MetadataOperationRecord>;
   getCommand?(commandId: CommandId): Promise<CommandRecord | null>;
+  observeCommand?(commandId: CommandId): Promise<CommandObservationView | null>;
   subscribeEvents?(
     cursor: import("@arduano/agent-multiplex-protocol").RuntimeNodeEventCursor,
     signal?: AbortSignal,
@@ -128,7 +131,7 @@ export interface ChildControlNodeConnection extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
-  readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot>;
+  readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView>;
   readNativeState?(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult>;
   readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   getTerminal?(input: TerminalGetInput): Promise<TerminalDescriptor | null>;
@@ -141,6 +144,7 @@ export interface ChildControlNodeConnection extends ImagePort {
   terminateTerminal?(input: TerminalTerminateInput): Promise<TerminalDescriptor>;
   resolveInteraction(input: ResolveInteractionInput): Promise<InteractionRecord>;
   getCommand?(commandId: CommandId): Promise<CommandRecord | null>;
+  observeCommand?(commandId: CommandId): Promise<CommandObservationView | null>;
   applyMetadata?(operation: MetadataOperationRecord): Promise<MetadataOperationRecord>;
   applyDetachment?(
     receipt: import("@arduano/agent-multiplex-protocol").TopologyDetachmentReceipt,

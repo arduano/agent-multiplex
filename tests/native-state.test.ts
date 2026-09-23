@@ -6,7 +6,7 @@ import {
   packNativePayload, type LaunchRequest, type NativeStateRequest,
 } from "@arduano/agent-multiplex-protocol";
 import {
-  AdapterOutcomeUnknownError, RuntimeNodeService, RuntimeNodeStore, createRuntimeNodeRouter,
+  AdapterOutcomeUnknownError, RuntimeLifecycleJournal, RuntimeNodeService, RuntimeNodeStore, createRuntimeNodeRouter,
   type AdapterSession, type AgentAdapter,
 } from "@arduano/agent-multiplex-runtime-node-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +19,7 @@ async function fixture() {
   const cwd = mkdtempSync(join(tmpdir(), "multiplex-native-state-"));
   const store = new RuntimeNodeStore(":memory:");
   const runtimeNodeId = newRuntimeNodeId(); const runtimeNodeBootId = newRuntimeNodeBootId();
-  const payload = { items: [{ id: "queue-id", messageId: "message-id", displayText: "hello", agentMode: "interactive", kind: "message" }], steeringMessages: [] };
+  const payload = { items: [{ id: "queue-id", messageId: "message-id", displayText: "hello", agentMode: "interactive", kind: "message" }], steeringMessages: [], inFlightSteeringCount: 0 };
   const readNativeState = vi.fn(async (input: NativeStateRequest) => ({ harness: "copilot" as const, vendorSessionId: "native-state",
     payload: input.harness === "copilot" && input.view === "tasks" ? { tasks: [] } : payload }));
   const readNativeHistory = vi.fn(async () => { throw new Error("history must not run"); });
@@ -41,22 +41,25 @@ async function fixture() {
     harness: "copilot", input: { cwd } };
   service.createLaunch(launch);
   await vi.waitFor(() => expect(service.getLaunch(launch.launchId)?.state).toBe("succeeded"));
-  await vi.waitFor(async () => expect((await service.readLifecycle(launch.sessionId)).state).toMatchObject({
-    tasks: { freshness: "observed" }, queue: { freshness: "observed" },
-  }));
+  await vi.waitFor(async () => {
+    const projection = await service.readLifecycle(launch.sessionId);
+    expect(new RuntimeLifecycleJournal(store).read(projection.fence)).toMatchObject({
+      tasks: { observation: { state: "observed" } }, queue: { observation: { state: "observed" } },
+    });
+  });
   readNativeState.mockClear();
   const caller = createRuntimeNodeRouter(service).createCaller({});
   return { service, store, session, launch, runtimeNodeBootId, readNativeState, readNativeHistory, resume, caller, payload };
 }
 
 describe("active-only native session observations", () => {
-  it("exposes the atomic lifecycle snapshot/cursor under the runtime boot fence without native reads", async () => {
+  it("exposes the private fenced lifecycle projection without another native read", async () => {
     const f = await fixture();
     const snapshot = await f.caller.sessions.readLifecycle({ sessionId: f.launch.sessionId, runtimeNodeBootId: f.runtimeNodeBootId });
-    expect(snapshot).toMatchObject({ nextNativeSequence: 0, state: { version: 1, fence: {
+    expect(snapshot).toMatchObject({ version: 2, nextSequence: expect.any(Number), fence: {
       sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, runtimeNodeBootId: f.runtimeNodeBootId,
       runtimeEpoch: f.session.runtimeEpoch, bindingRevision: 1,
-    } } });
+    }, view: { version: 2, status: "working", health: { state: "recovering" } } });
     expect(f.readNativeState).not.toHaveBeenCalled(); expect(f.readNativeHistory).not.toHaveBeenCalled();
     expect(f.resume).not.toHaveBeenCalled(); expect(f.session.execute).not.toHaveBeenCalled();
     await expect(f.caller.sessions.readLifecycle({ sessionId: f.launch.sessionId, runtimeNodeBootId: newRuntimeNodeBootId() }))

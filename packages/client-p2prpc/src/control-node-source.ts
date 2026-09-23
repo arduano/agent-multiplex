@@ -26,7 +26,7 @@ import {
   type LaunchProfileIdentity,
   type LaunchProviderId,
   type LaunchRequest,
-  type LifecycleSnapshot,
+  type SessionLifecycleView,
   type NativeStateRequest,
   type NativeStateResult,
   type NativeHistoryRequest,
@@ -223,7 +223,7 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
       (await this.#access()).sessions.execute.mutate(command));
   }
 
-  public async readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+  public async readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView> {
     return this.#query(async () => (await this.#access()).sessions.readLifecycle.query({ sessionId }));
   }
 
@@ -356,6 +356,11 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
   public async getCommand(commandId: CommandId) {
     return this.#query(async () =>
       (await this.#access()).commands.get.query(commandId));
+  }
+
+  public async observeCommand(commandId: CommandId) {
+    return this.#query(async () =>
+      (await this.#access()).commands.observe.query(commandId));
   }
 
   public async detach(input: TopologyDetachInput) {

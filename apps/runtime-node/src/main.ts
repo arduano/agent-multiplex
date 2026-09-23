@@ -198,6 +198,10 @@ export async function runRuntimeNode(
   signal.addEventListener("abort", closeTransport, { once: true });
 
   try {
+    // Install the previous boot's active Copilot bindings before this boot can
+    // register with control. Resume is trusted local recovery with pending
+    // native work disabled; it never manufactures a public command receipt.
+    await service.reattachPersistedCopilotSessions();
     // Resolve every configured root before opening the network listener. The
     // service repeats this policy for every spawn/resume path it accepts.
     const descriptor = await service.describe();
@@ -237,6 +241,7 @@ export async function runRuntimeNode(
       controlNodeLocator,
       config,
       signal,
+      options.onReady,
     );
   } finally {
     signal.removeEventListener("abort", closeTransport);
@@ -265,8 +270,10 @@ export async function superviseControlNodeConnection(
   controlNodeLocator: PersistentControlNodeLocator,
   config: MaintenanceConfig,
   signal: AbortSignal,
+  onReady?: () => void,
 ): Promise<void> {
   let attempt = 0;
+  let readyNotified = false;
   // Keep the slots across connection epochs. Expiring a read does not cancel
   // native work, so a reconnect must not start another unresolved discovery.
   const jobs: MaintenanceJobs = {};
@@ -285,6 +292,10 @@ export async function superviseControlNodeConnection(
       if (signal.aborted) return;
       await register(peer, service);
       if (signal.aborted) return;
+      if (!readyNotified) {
+        onReady?.();
+        readyNotified = true;
+      }
       console.log(`Connected to control node ${controlNodeLocator.endpointId}`);
       attempt = 0;
       await maintainControlNodeConnection(
@@ -533,6 +544,8 @@ export interface RuntimeNodeAppOptions {
   createComponents?: (config: RuntimeNodeAppConfig) => RuntimeComponents | Promise<RuntimeComponents>;
   /** Trusted static admission policy shared by startup, service and native path validation. */
   pathPolicy?: RuntimePathPolicy;
+  /** Called once after startup reattachment and first control registration. */
+  onReady?: () => void;
 }
 
 export async function createRuntimeComponents(

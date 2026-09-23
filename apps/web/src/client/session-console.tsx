@@ -70,7 +70,12 @@ import { maySettleCommandDraft, type SubmittedDraft } from "./command-draft.js";
 import { ImageSessionProvider, TranscriptImagePreview, prepareImageFile, isLocalImagePath, modelImageLimits } from "./image-media.js";
 import { pendingInteractionRefetchInterval } from "./interaction-refresh.js";
 import { InteractionCards } from "./interactions.js";
-import { lifecycleTone, sessionLifecycleLabel, type LifecycleTone } from "./session-lifecycle.js";
+import {
+  lifecycleActionAvailable,
+  lifecycleTone,
+  sessionLifecycleLabel,
+  type LifecycleTone,
+} from "./session-lifecycle.js";
 import {
   advanceNativeHistorySignal,
   nativeHistoryInitiallyReady,
@@ -426,8 +431,15 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
   }
 
   const active = session.availability === "active";
-  const running = session.runtimeStatus === "running";
   const lifecycleLabel = sessionLifecycleLabel(session, online);
+  const running = session.harness === "copilot"
+    ? lifecycleLabel === "Working"
+    : session.runtimeStatus === "running";
+  const canSend = lifecycleActionAvailable(session, "send");
+  const canSteer = lifecycleActionAvailable(session, "steer");
+  const canInterrupt = lifecycleActionAvailable(session, "interrupt");
+  const canChangeSettings = lifecycleActionAvailable(session, "changeSettings");
+  const canResolveInteraction = lifecycleActionAvailable(session, "resolveInteraction");
   const pendingInteractions = interactions.data?.filter((item) => item.state === "pending") ?? [];
   const title = sessionTitle(session);
   const settingsSummary = appliedSettingsSummary(
@@ -442,6 +454,10 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
 
   function dispatch(request: HarnessCommand, success: string): void {
     if (uncertain || uploading || mutation.isPending) return;
+    if (request.harness === "copilot") {
+      if (request.command.type === "interrupt" && !canInterrupt) return;
+      if (["setModel", "setMode", "setPermissionMode"].includes(request.command.type) && !canChangeSettings) return;
+    }
     setActionStatus("Dispatching command once…");
     mutation.mutate({ request, success });
   }
@@ -468,6 +484,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
 
   async function send(kind: "send" | "steer"): Promise<void> {
     if (!session || (!prompt.trim() && !draftImages.length) || uploading || uncertain || preparing.current) return;
+    if (kind === "send" ? !canSend : !canSteer) return;
     if (draftImages.length && (imageLimits.support === "unsupported" || draftImages.length > imageLimits.count ||
       draftImages.some((image) => image.file.size > imageLimits.bytes || imageLimits.mediaTypes && !imageLimits.mediaTypes.includes(image.file.type)))) {
       setActionStatus("Attachments exceed the applied model's image capabilities");
@@ -524,7 +541,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
   function keyboardSend(event: KeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
-    if (!mutation.isPending && !uploading && active && (prompt.trim() || draftImages.length)) void send("send");
+    if (!mutation.isPending && !uploading && canSend && (prompt.trim() || draftImages.length)) void send("send");
   }
 
   function trackTranscriptPosition(event: UIEvent<HTMLDivElement>): void {
@@ -597,7 +614,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
               className="h-8 min-h-8 px-2.5 py-1 text-xs"
               tone="danger"
               icon={CircleStop}
-              disabled={!active || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
+              disabled={!canInterrupt || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
               onClick={() => dispatch(
                 session.harness === "codex"
                   ? { harness: "codex", command: { type: "interrupt" } }
@@ -665,7 +682,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
           aria-label="Pending agent interactions"
           tabIndex={0}
         >
-          <InteractionCards interactions={pendingInteractions} />
+          <InteractionCards interactions={pendingInteractions} enabled={canResolveInteraction} />
         </div>
       ) : null}
 
@@ -697,7 +714,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
               <Button icon={ImagePlus} disabled={!active || mutation.isPending || uploading || preparingImages || Boolean(uncertain) || imageLimits.support === "unsupported"} aria-label="Attach images" title={imageLimits.support === "unsupported" ? "The applied model does not accept images" : "Attach images"} onClick={() => imagePicker.current?.click()} data-testid="attach-images-button" />
               <AgentSettings
                 session={session}
-                active={active}
+                active={canChangeSettings}
                 busy={mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
                 loadingModels={models.isPending}
                 models={models.data ?? []}
@@ -741,7 +758,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
               <div className="ml-auto flex gap-1.5">
                 <Button
                   icon={CornerDownRight}
-                  disabled={!active || !running || (!prompt.trim() && !draftImages.length) || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
+                  disabled={!canSteer || (!prompt.trim() && !draftImages.length) || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
                   onClick={() => send("steer")}
                   data-testid="steer-button"
                 >
@@ -751,7 +768,7 @@ function BoundSessionConsole({ session, bindingIdentity, terminalCapability, onl
                   tone="primary"
                   icon={mutation.isPending ? LoaderCircle : Send}
                   className={mutation.isPending ? "[&_svg]:animate-spin" : undefined}
-                  disabled={!active || (!prompt.trim() && !draftImages.length) || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
+                  disabled={!canSend || (!prompt.trim() && !draftImages.length) || mutation.isPending || uploading || preparingImages || Boolean(uncertain)}
                   onClick={() => send("send")}
                   data-testid="send-button"
                 >

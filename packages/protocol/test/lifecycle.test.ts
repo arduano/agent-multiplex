@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  initialLifecycle, lifecycleFactSchema, lifecycleStateSchema, newCommandId, newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId, newSessionId,
-  projectDelivery, projectLifecycle, reconcileLifecycle, reduceLifecycle,
+  initialLifecycle, lifecycleFactSchema, lifecycleProjection, lifecycleStateSchema,
+  LIFECYCLE_VERSION, newCommandId, newRuntimeEpoch, newRuntimeNodeBootId,
+  newRuntimeNodeId, newSessionId, offlineLifecycleView, projectDelivery,
+  projectLifecycle, reconcileLifecycle, reduceLifecycle,
   type LifecycleFact, type LifecycleState,
 } from "../src/index.js";
 
 const fence = () => ({ sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), runtimeEpoch: newRuntimeEpoch(), bindingRevision: 1 });
-const step = (s: LifecycleState, fact: LifecycleFact, sequence = s.nextSequence) => reduceLifecycle(s, { version: 1, fence: s.fence, sequence, fact });
+const step = (s: LifecycleState, fact: LifecycleFact, sequence = s.nextSequence) => reduceLifecycle(s, { version: LIFECYCLE_VERSION, fence: s.fence, sequence, fact });
 function ready() {
   let s = initialLifecycle(fence());
   s = step(s, { type: "rootObserved", active: false });
@@ -82,7 +84,7 @@ describe("runtime-owned lifecycle dimensions", () => {
     s = step(s, { type: "tasksInvalidated" });
     s = step(s, { type: "tasksObserved", revision: 0, items: [] });
     s = step(s, { type: "rootIdle", aborted: false });
-    expect(s.tasks.freshness).toBe("unknown");
+    expect(s.tasks.observation.state).toBe("pending");
     expect(projectLifecycle(s)).toBe("Unknown");
     s = step(s, { type: "rootFailed" });
     s = step(s, { type: "rootIdle", aborted: false });
@@ -91,6 +93,82 @@ describe("runtime-owned lifecycle dimensions", () => {
     s = step(s, { type: "rootStarted", cycleId: "new-start" });
     s = step(s, { type: "rootIdle", aborted: true });
     expect(projectLifecycle(s)).toBe("Interrupted");
+  });
+  it("revision-fences observation failures and clears degraded health only after recovery", () => {
+    let s = ready();
+    s = step(s, { type: "tasksInvalidated" });
+    const revision = s.tasks.revision;
+    s = step(s, {
+      type: "observationFailed",
+      view: "tasks",
+      revision,
+      failures: 3,
+      diagnosticId: "00000000-0000-4000-8000-000000000001",
+      stalled: true,
+    });
+    expect(s.tasks.observation).toEqual({
+      state: "retrying",
+      failures: 3,
+      diagnosticId: "00000000-0000-4000-8000-000000000001",
+      stalled: true,
+    });
+    const degraded = lifecycleProjection(s).view;
+    expect(degraded.health).toMatchObject({
+      state: "degraded",
+      issues: [{ scope: "tasks", code: "observationStalled" }],
+    });
+    expect(degraded.actions.send).toEqual({ available: false, reason: "nativeObservationDegraded" });
+    expect(degraded.actions.stop).toEqual({ available: true, reason: "available" });
+
+    s = step(s, { type: "tasksInvalidated" });
+    const afterInvalidation = s;
+    s = step(s, {
+      type: "observationFailed",
+      view: "tasks",
+      revision,
+      failures: 4,
+      diagnosticId: "00000000-0000-4000-8000-000000000002",
+      stalled: true,
+    });
+    expect(s.tasks).toEqual(afterInvalidation.tasks);
+    s = step(s, { type: "tasksObserved", revision: s.tasks.revision, items: [] });
+    const observed = s;
+    s = step(s, {
+      type: "observationFailed",
+      view: "tasks",
+      revision: s.tasks.revision,
+      failures: 5,
+      diagnosticId: "00000000-0000-4000-8000-000000000003",
+      stalled: true,
+    });
+    expect(s.tasks).toEqual(observed.tasks);
+    expect(lifecycleProjection(s).view.health.state).toBe("healthy");
+  });
+  it("publishes an opaque compact view and applies host reachability centrally", () => {
+    const state = ready();
+    const projection = lifecycleProjection(state);
+    expect(projection).toMatchObject({
+      version: LIFECYCLE_VERSION,
+      fence: state.fence,
+      nextSequence: state.nextSequence,
+      view: {
+        version: LIFECYCLE_VERSION,
+        status: "ready",
+        health: { state: "healthy", issues: [] },
+      },
+    });
+    expect(Object.keys(projection.view).sort()).toEqual(["actions", "health", "observationId", "status", "version"]);
+    expect(projection.view).not.toHaveProperty("fence");
+    expect(projection.view).not.toHaveProperty("nextSequence");
+    expect(projection.view).not.toHaveProperty("root");
+
+    const offline = offlineLifecycleView(projection.view);
+    expect(offline).toMatchObject({
+      status: "offline",
+      health: { state: "offline", issues: [{ scope: "lifecycle", code: "hostUnavailable" }] },
+    });
+    expect(Object.values(offline.actions).every(action => !action.available && action.reason === "hostOffline")).toBe(true);
+    expect(offline.observationId).not.toBe(projection.view.observationId);
   });
   it("keeps outcomeUnknown independent of observed effects and later authoritative receipts", () => {
     let { s, commandId } = command();
@@ -120,10 +198,10 @@ describe("runtime-owned lifecycle dimensions", () => {
     const snapshot = { ...ready(), fence: s.fence, nextSequence: s.nextSequence + 1 };
     expect(reconcileLifecycle(s, snapshot, 1, 2)).toBe(s);
     expect(reconcileLifecycle(s, snapshot, 2, 2).continuity).toBe("continuous");
-    expect(reduceLifecycle(s, { version: 1, sequence: s.nextSequence, fence: { ...s.fence, runtimeEpoch: newRuntimeEpoch() }, fact: { type: "rootIdle", aborted: false } })).toBe(s);
+    expect(reduceLifecycle(s, { version: LIFECYCLE_VERSION, sequence: s.nextSequence, fence: { ...s.fence, runtimeEpoch: newRuntimeEpoch() }, fact: { type: "rootIdle", aborted: false } })).toBe(s);
     s = step(s, { type: "rootStarted", cycleId: "recovery-boundary" });
     expect(s).toMatchObject({ continuity: "continuous", root: { phase: "working", cycle: "recovery-boundary" },
-      tasks: { freshness: "unknown" }, queue: { freshness: "unknown" }, interactions: { completeness: "partial" } });
+      tasks: { observation: { state: "pending" } }, queue: { observation: { state: "pending" } }, interactions: { completeness: "partial" } });
     expect(projectLifecycle(s)).toBe("Working");
 
     s = step(s, { type: "child", id: "agent:post-gap-child", state: "running" });
@@ -136,7 +214,7 @@ describe("runtime-owned lifecycle dimensions", () => {
     let jumped = ready();
     jumped = step(jumped, { type: "rootStarted", cycleId: "observed-after-loss" }, jumped.nextSequence + 1);
     expect(jumped).toMatchObject({ continuity: "continuous", root: { phase: "working", cycle: "observed-after-loss" },
-      tasks: { freshness: "unknown" }, queue: { freshness: "unknown" } });
+      tasks: { observation: { state: "pending" } }, queue: { observation: { state: "pending" } } });
   });
   it("partial reconnect interaction hydration never proves absence", () => {
     let s = ready();

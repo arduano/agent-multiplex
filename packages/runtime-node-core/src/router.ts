@@ -324,6 +324,13 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
           assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
           return service.getCommand(input.commandId);
         }),
+      observe: t.procedure
+        .input(runtimeNodeContract.commands.observe.input)
+        .output(runtimeNodeContract.commands.observe.output)
+        .query(({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.observeCommand(input.commandId);
+        }),
     }),
     metadata: t.router({
       get: t.procedure

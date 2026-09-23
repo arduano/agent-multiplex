@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   emptyMetadataSnapshot,
   initialLifecycle,
+  lifecycleProjection,
   newRuntimeEpoch,
   safeCommandError,
   newAuthorityEpochId,
@@ -137,9 +138,8 @@ class FakeSource implements ControlNodeSourceClient {
     this.lifecycleReads++;
     const session = this.snapshot.sessions.find(item => item.sessionId === sessionId)!;
     const runtime = this.snapshot.runtimeNodes.find(item => item.runtimeNodeId === session.runtimeNodeId)!;
-    return { state: initialLifecycle({ sessionId, runtimeNodeId: session.runtimeNodeId,
-      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: session.bindingRevision, runtimeEpoch: session.runtimeEpoch! }),
-      nextNativeSequence: 9 };
+    return lifecycleProjection(initialLifecycle({ sessionId, runtimeNodeId: session.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: session.bindingRevision, runtimeEpoch: session.runtimeEpoch! })).view;
   }
   public readNativeState(): Promise<import("@arduano/agent-multiplex-protocol").NativeStateResult> {
     this.stateReads += 1;
@@ -768,6 +768,36 @@ describe("AccessGatewayProjection source selection", () => {
 });
 
 describe("AccessGatewayProjection routing and feed", () => {
+  it("projects a cached Copilot lifecycle offline when its selected runtime descriptor disappears", async () => {
+    const root = newControlNodeId();
+    const view = snapshot(authority(root), [root], { withSession: true });
+    const session = view.sessions[0]!;
+    const runtime = view.runtimeNodes[0]!;
+    session.harness = "copilot";
+    session.runtimeEpoch = newRuntimeEpoch();
+    session.lifecycle = lifecycleProjection(initialLifecycle({
+      sessionId: session.sessionId,
+      runtimeNodeId: runtime.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId,
+      bindingRevision: session.bindingRevision,
+      runtimeEpoch: session.runtimeEpoch,
+    })).view;
+    const selected = source("selected", view);
+    const gateway = new AccessGatewayProjection([selected]);
+    await gateway.refreshAll();
+
+    // A descriptor can disappear from the retained source projection between
+    // selection and an observation. The cached view remains safe to show.
+    view.runtimeNodes.splice(0);
+    const lifecycle = await gateway.readLifecycle(session.sessionId);
+    expect(lifecycle).toMatchObject({
+      status: "offline",
+      health: { state: "offline", issues: [{ code: "hostUnavailable" }] },
+      actions: { send: { available: false, reason: "hostOffline" } },
+    });
+    expect(selected.client.lifecycleReads).toBe(0);
+  });
+
   it("routes atomic lifecycle snapshots through the selected source and fences delayed failover replies", async () => {
     const root = newControlNodeId(); const child = newControlNodeId();
     const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
@@ -777,7 +807,7 @@ describe("AccessGatewayProjection routing and feed", () => {
     await gateway.refreshAll();
     const sessionId = views.descendant.sessions[0]!.sessionId;
     const snapshot = await gateway.readLifecycle(sessionId);
-    expect(snapshot).toMatchObject({ nextNativeSequence: 9, state: { fence: { sessionId } } });
+    expect(snapshot).toMatchObject({ version: 2, status: "unknown", health: { state: "recovering" } });
     expect(ancestor.client.lifecycleReads).toBe(1); expect(descendant.client.lifecycleReads).toBe(0);
     let release!: (value: typeof snapshot) => void;
     vi.spyOn(ancestor.client, "readLifecycle").mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
@@ -789,9 +819,20 @@ describe("AccessGatewayProjection routing and feed", () => {
     expect(await gateway.readLifecycle(sessionId)).toEqual(snapshot);
     expect(descendant.client.lifecycleReads).toBe(1);
     expect(ancestor.client.dispatches + descendant.client.dispatches).toBe(0);
-    vi.spyOn(descendant.client, "readLifecycle").mockResolvedValueOnce({ ...snapshot,
-      state: { ...snapshot.state, fence: { ...snapshot.state.fence, runtimeEpoch: newRuntimeEpoch() } } });
-    await expect(gateway.readLifecycle(sessionId)).rejects.toMatchObject({ code: "CONFLICT" });
+    let releaseBindingRead!: (value: typeof snapshot) => void;
+    vi.spyOn(descendant.client, "readLifecycle").mockImplementationOnce(() => new Promise(resolve => { releaseBindingRead = resolve; }));
+    const staleBinding = gateway.readLifecycle(sessionId);
+    const staleBindingRejected = expect(staleBinding).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(gateway.ingest("descendant" as SourceId, {
+      kind: "control",
+      eventId: "00000000-0000-4000-8000-000000000003",
+      feedId: descendant.client.snapshot.manifest.feedId,
+      cursor: 1,
+      provenance: { originControlNodeId: child, authority: views.descendant.manifest.authority },
+      change: { type: "session.upsert", session: { ...views.descendant.sessions[0]!, bindingRevision: 2 } },
+    })).toBe(true);
+    releaseBindingRead(snapshot);
+    await staleBindingRejected;
   });
 
   it("observes native state only through the selected source without durable dispatch", async () => {

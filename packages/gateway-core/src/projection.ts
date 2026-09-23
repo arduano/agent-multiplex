@@ -18,8 +18,10 @@ import { isDeepStrictEqual } from "node:util";
 
 import {
   accessSnapshotSchema,
-  lifecycleSnapshotSchema,
-  type LifecycleSnapshot,
+  commandObservationView,
+  commandObservationViewSchema,
+  offlineLifecycleView,
+  sessionLifecycleViewSchema,
   accessStreamItemSchema,
   archiveRecordSchema,
   canonicalJson,
@@ -37,6 +39,7 @@ import {
   type CommandEnvelope,
   type CommandId,
   type CommandRecord,
+  type CommandObservationView,
   type ControlNodeDescriptor,
   type ControlNodeId,
   type FeedId,
@@ -68,6 +71,7 @@ import {
   type RuntimeNodeDescriptor,
   type RuntimeNodeId,
   type SessionId,
+  type SessionLifecycleView,
   type SessionRecord,
   type SessionSearchInput,
   type SessionSearchPage,
@@ -149,7 +153,7 @@ export interface ControlNodeSourceClient extends ImagePort {
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
   getArchive(archiveOperationId: ArchiveOperationId): Promise<ArchiveRecord | null>;
   execute(command: CommandEnvelope): Promise<CommandRecord>;
-  readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot>;
+  readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView>;
   readNativeState?(
     sessionId: SessionId,
     request: NativeStateRequest,
@@ -169,6 +173,7 @@ export interface ControlNodeSourceClient extends ImagePort {
   patchMetadata(patch: MetadataPatch): Promise<MetadataOperationRecord>;
   resolveInteraction(input: ResolveInteractionInput): Promise<InteractionRecord>;
   getCommand(commandId: CommandId): Promise<CommandRecord | null>;
+  observeCommand?(commandId: CommandId): Promise<CommandObservationView | null>;
   detach(input: TopologyDetachInput): Promise<TopologyDetachmentReceipt>;
   forceDetach(input: TopologyForceDetachInput): Promise<TopologyDetachmentReceipt>;
   promote(input: AuthorityPromoteInput): Promise<AuthorityPromotionReceipt>;
@@ -976,23 +981,24 @@ export class AccessGatewayProjection {
     return this.#ownerForSession(sessionId).definition.client.readNativeHistory(sessionId, request);
   }
 
-  public async readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+  public async readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView> {
     const source = this.#ownerForSession(sessionId);
     const generation = source.generation;
     const owner = source.definition.client;
-    const snapshot = lifecycleSnapshotSchema.parse(await owner.readLifecycle(sessionId));
+    const before = source.snapshot?.sessions.find(item => item.sessionId === sessionId) ?? this.#sessionLookupRecords.get(sessionId);
+    const runtime = before && source.snapshot?.runtimeNodes.find(item => item.runtimeNodeId === before.runtimeNodeId);
+    const view = before?.lifecycle && (!runtime || runtime.presence !== "online" || runtime.reachability !== "reachable")
+      ? offlineLifecycleView(before.lifecycle)
+      : sessionLifecycleViewSchema.parse(await owner.readLifecycle(sessionId));
     if (source !== this.#ownerForSession(sessionId) || source.generation !== generation) {
       throw new GatewayRoutingError("CONFLICT", "lifecycle source changed during observation");
     }
-    const fence = snapshot.state.fence;
-    this.#ownerForSessionBinding({ sessionId, runtimeNodeId: fence.runtimeNodeId, bindingRevision: fence.bindingRevision });
     const current = source.snapshot?.sessions.find(item => item.sessionId === sessionId) ?? this.#sessionLookupRecords.get(sessionId);
-    const runtime = source.snapshot?.runtimeNodes.find(item => item.runtimeNodeId === fence.runtimeNodeId);
-    if (fence.sessionId !== sessionId || current?.catalogState === "archived" ||
-      fence.runtimeEpoch !== current?.runtimeEpoch || fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
+    if (!before || !current || current.catalogState === "archived" || before.runtimeNodeId !== current.runtimeNodeId ||
+      before.bindingRevision !== current.bindingRevision || before.runtimeEpoch !== current.runtimeEpoch) {
       throw new GatewayRoutingError("CONFLICT", "lifecycle snapshot does not match the selected runtime binding");
     }
-    return snapshot;
+    return view;
   }
 
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
@@ -1171,6 +1177,31 @@ export class AccessGatewayProjection {
       throw new GatewayRoutingError("CONFLICT", `sources returned conflicting command ${commandId}`);
     }
     return records[0] ?? null;
+  }
+
+  public async observeCommand(commandId: CommandId): Promise<CommandObservationView | null> {
+    const receipt = await this.getCommand(commandId);
+    if (!receipt) return null;
+    const known = this.#commandOwners.get(commandId);
+    const source = known !== undefined ? this.#source(known)
+      : receipt.sessionId === null ? undefined : this.#ownerForSession(receipt.sessionId);
+    const observed = source?.definition.client.observeCommand
+      ? await source.definition.client.observeCommand(commandId)
+      : null;
+    if (!observed) return commandObservationView(receipt);
+    if (observed.receipt.commandId !== receipt.commandId || observed.receipt.payloadHash !== receipt.payloadHash ||
+      observed.receipt.sessionId !== receipt.sessionId || observed.receipt.runtimeNodeId !== receipt.runtimeNodeId ||
+      canonicalJson(observed.receipt.request) !== canonicalJson(receipt.request)) {
+      throw new GatewayRoutingError("CONFLICT", `source returned a mismatched command observation ${commandId}`);
+    }
+    return commandObservationViewSchema.parse({
+      ...observed,
+      receipt,
+      continuation: receipt.state === "outcomeUnknown" ? "reviewRequired"
+        : receipt.state === "failed" ? "complete" : observed.continuation,
+      delivery: receipt.state === "outcomeUnknown" ? "unknown"
+        : receipt.state === "failed" ? "failed" : observed.delivery,
+    });
   }
 
   /** Accept a source event only while that exact source owns its projection. */

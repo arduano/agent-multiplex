@@ -120,6 +120,10 @@ export class RuntimeNodeStore {
         version: 7,
         name: "runtime-node-store-v7-lifecycle-evidence",
         apply: (database) => database.exec("CREATE TABLE lifecycle_state (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT"),
+      }, {
+        version: 8,
+        name: "runtime-node-store-v8-lifecycle-contract",
+        apply: migrateRuntimeNodeLifecycleContract,
       }],
     });
     this.#db = this.#sqlite.database;
@@ -1078,6 +1082,42 @@ function migrateRuntimeNodeCommandErrors(database: DatabaseSync): void {
     }
     update.run(encode(commandRecordSchema.parse(value)), String(row.command_id));
   }
+}
+
+function migrateRuntimeNodeLifecycleContract(database: DatabaseSync): void {
+  // Runtime session rows carried the old public fence projection. The durable
+  // lifecycle ledger below remains the authority and will republish the new
+  // opaque view after activation.
+  database.exec("UPDATE bindings SET record_json=json_remove(record_json, '$.lifecycle') WHERE json_type(record_json, '$.lifecycle') IS NOT NULL");
+  const update = database.prepare("UPDATE lifecycle_state SET record_json=? WHERE session_id=?");
+  for (const row of database.prepare("SELECT session_id, record_json FROM lifecycle_state").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (value.version !== 1) throw new Error("lifecycle migration refused an unknown contract version");
+    const tasks = lifecycleDimension(value.tasks, "tasks");
+    const queue = lifecycleDimension(value.queue, "queue");
+    value.version = 2;
+    value.tasks = tasks;
+    value.queue = queue;
+    update.run(encode(lifecycleStateSchema.parse(value)), String(row.session_id));
+  }
+}
+
+function lifecycleDimension(value: unknown, name: string): Record<string, unknown> {
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new Error(`lifecycle migration refused an invalid ${name} dimension`);
+  }
+  const dimension = { ...(value as Record<string, unknown>) };
+  const freshness = dimension.freshness;
+  if (freshness !== "unknown" && freshness !== "observed") {
+    throw new Error(`lifecycle migration refused an invalid ${name} freshness`);
+  }
+  delete dimension.freshness;
+  dimension.observation = {
+    state: freshness === "observed" ? "observed" : "pending",
+    failures: 0,
+    stalled: false,
+  };
+  return dimension;
 }
 
 function migrateRuntimeNodeSchemaV5(database: DatabaseSync): void {

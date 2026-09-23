@@ -1,6 +1,7 @@
 import {
   adapterScopeIdSchema,
   emptyMetadataSnapshot,
+  newCommandId,
   newRuntimeEpoch,
   newSessionId,
   newRuntimeNodeBootId,
@@ -13,6 +14,38 @@ import {
   RuntimeNodeEventPump,
 } from "../src/runtime-node-bridge.js";
 import { describe, expect, it, vi } from "vitest";
+
+describe("P2PRuntimeNodeConnection", () => {
+  it("forwards runtime lifecycle and command observation reads with the boot fence", async () => {
+    const runtimeNodeBootId = newRuntimeNodeBootId();
+    const sessionId = newSessionId();
+    const commandId = newCommandId();
+    const lifecycle = { version: 2, view: { observationId: "fixture" } };
+    const observation = { delivery: "accepted" };
+    const readLifecycle = vi.fn().mockResolvedValue(lifecycle);
+    const observe = vi.fn().mockResolvedValue(observation);
+    const endpointId = "runtime-observation-endpoint";
+    const connection = new P2PRuntimeNodeConnection(
+      newRuntimeNodeId(),
+      runtimeNodeBootId,
+      endpointId,
+      {
+        identity: { id: endpointId },
+        principal: { id: endpointId },
+        rpc: {
+          sessions: { readLifecycle: { query: readLifecycle } },
+          commands: { observe: { query: observe } },
+        },
+      } as never,
+      endpointId,
+    );
+
+    await expect(connection.readLifecycle(sessionId)).resolves.toBe(lifecycle);
+    expect(readLifecycle).toHaveBeenCalledWith({ runtimeNodeBootId, sessionId });
+    await expect(connection.observeCommand(commandId)).resolves.toBe(observation);
+    expect(observe).toHaveBeenCalledWith({ runtimeNodeBootId, commandId });
+  });
+});
 
 describe("RuntimeNodeEventPump", () => {
   it("opens a retried event subscription on the replacement authenticated peer", async () => {

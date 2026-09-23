@@ -6,6 +6,8 @@ import {
   newControlNodeBootId,
   newControlNodeId,
   newFeedId,
+  newCommandId,
+  newRuntimeNodeId,
   newRealmId,
   newSessionId,
 } from "@arduano/agent-multiplex-protocol";
@@ -153,6 +155,51 @@ describe("P2PControlNodeSourceClient", () => {
     expect((failure as { details?: unknown }).details).toBeUndefined();
     expect((failure as Error).message).not.toContain(secret);
     expect(query).toHaveBeenCalledOnce();
+  });
+
+  it("forwards public lifecycle and command observation reads", async () => {
+    const sessionId = newSessionId();
+    const commandId = newCommandId();
+    const lifecycle = {
+      version: 2 as const,
+      observationId: "64e9ec70-c96e-5c2b-a55b-cf8c51ce19bd",
+      status: "ready" as const,
+      health: { state: "healthy" as const, issues: [] },
+      actions: {
+        send: { available: true, reason: "available" as const },
+        steer: { available: false, reason: "notWorking" as const },
+        changeSettings: { available: true, reason: "available" as const },
+        resolveInteraction: { available: false, reason: "noPendingInteraction" as const },
+        stop: { available: true, reason: "available" as const },
+      },
+    };
+    const timestamp = "2026-09-23T04:00:00.000Z";
+    const receipt = {
+      commandId,
+      payloadHash: "fixture-command-payload-hash",
+      sessionId,
+      runtimeNodeId: newRuntimeNodeId(),
+      state: "succeeded" as const,
+      request: { operation: "fixture" },
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const observation = {
+      receipt,
+      delivery: "accepted" as const,
+      continuation: "complete" as const,
+    };
+    const readLifecycle = vi.fn().mockResolvedValue(lifecycle);
+    const observe = vi.fn().mockResolvedValue(observation);
+    const client = new P2PControlNodeSourceClient(sourceHandle({
+      sessions: { readLifecycle: { query: readLifecycle } },
+      commands: { observe: { query: observe } },
+    }));
+
+    await expect(client.readLifecycle(sessionId)).resolves.toBe(lifecycle);
+    expect(readLifecycle).toHaveBeenCalledWith({ sessionId });
+    await expect(client.observeCommand(commandId)).resolves.toBe(observation);
+    expect(observe).toHaveBeenCalledWith(commandId);
   });
 
   it("rejects forged remote shapes and preserves unknown-outcome precedence", () => {

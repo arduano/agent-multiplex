@@ -416,6 +416,10 @@ export function createAccessGatewayRouter(
         .input(accessContract.commands.get.input)
         .output(accessContract.commands.get.output)
         .query(({ input }) => guarded(() => projection.getCommand(input))),
+      observe: read
+        .input(accessContract.commands.observe.input)
+        .output(accessContract.commands.observe.output)
+        .query(({ input }) => guarded(() => projection.observeCommand(input))),
     }),
   });
 }

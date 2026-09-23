@@ -36,8 +36,11 @@ import {
   launchListPageSchema,
   launchRecordSchema,
   launchRequestSchema,
-  lifecycleSnapshotSchema,
-  type LifecycleSnapshot,
+  commandObservationView,
+  commandObservationViewSchema,
+  offlineLifecycleView,
+  runtimeLifecycleProjectionSchema,
+  sessionLifecycleViewSchema,
   metadataOperationRecordSchema,
   metadataPatchSchema,
   runtimeNodeEventItemSchema,
@@ -61,6 +64,7 @@ import {
   type CommandEnvelope,
   type CommandId,
   type CommandRecord,
+  type CommandObservationView,
   type ControlNodeAttachmentRequest,
   type ControlNodeBootId,
   type ControlNodeId,
@@ -94,6 +98,7 @@ import {
   type RuntimeNodeFence,
   type RuntimeNodeId,
   type RuntimeNodeRegistration,
+  type SessionLifecycleView,
   type SessionId,
   type SessionRecord,
   type SessionSearchInput,
@@ -523,6 +528,40 @@ export class ControlNodeService {
   public watchMetadataOperations(cursor: StreamCursor, signal?: AbortSignal) { return this.events.watchMetadataOperations(cursor, signal); }
   public listInteractions(options = {}) { return this.catalog.listInteractions(options); }
   public getCommand(id: CommandId) { return this.catalog.getCommand(id); }
+
+  public async observeCommand(id: CommandId): Promise<CommandObservationView | null> {
+    const receipt = this.catalog.getCommand(id);
+    if (!receipt) return null;
+    if (receipt.sessionId === null) return commandObservationView(receipt);
+    const session = this.catalog.getSession(receipt.sessionId);
+    if (!session || session.runtimeNodeId !== receipt.runtimeNodeId) return commandObservationView(receipt);
+    let observed: CommandObservationView | null = null;
+    try {
+      const route = this.#route(session.runtimeNodeId);
+      const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+      observed = owner.observeCommand ? await owner.observeCommand(id) : null;
+    } catch {
+      // The control journal remains receipt authority while the runtime or
+      // child is offline. A failed read supplies no delivery refinement.
+      return commandObservationView(receipt);
+    }
+    if (!observed) return commandObservationView(receipt);
+    if (observed.receipt.commandId !== receipt.commandId || observed.receipt.payloadHash !== receipt.payloadHash ||
+      observed.receipt.sessionId !== receipt.sessionId || observed.receipt.runtimeNodeId !== receipt.runtimeNodeId ||
+      canonicalJson(observed.receipt.request) !== canonicalJson(receipt.request)) {
+      throw new ControlNodeCoreError("PAYLOAD_MISMATCH", "command observation does not match the durable receipt identity");
+    }
+    // The control journal owns terminal certainty. Runtime delivery can refine
+    // presentation, but can never overwrite an outcomeUnknown review fence.
+    return commandObservationViewSchema.parse({
+      ...observed,
+      receipt,
+      continuation: receipt.state === "outcomeUnknown" ? "reviewRequired"
+        : receipt.state === "failed" ? "complete" : observed.continuation,
+      delivery: receipt.state === "outcomeUnknown" ? "unknown"
+        : receipt.state === "failed" ? "failed" : observed.delivery,
+    });
+  }
 
   public enrollGateway(inputValue: GatewayEnrollment, context: AccessContext = {}) {
     const input = gatewayEnrollmentSchema.parse(inputValue);
@@ -1145,24 +1184,33 @@ export class ControlNodeService {
       : this.#runtime(session.runtimeNodeId).readNativeHistory(sessionId, request);
   }
 
-  public async readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+  public async readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView> {
     const session = this.catalog.getSession(sessionId);
     if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
     if (session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "archived session resources have been released");
+    const cachedRuntime = this.catalog.getRuntimeNode(session.runtimeNodeId);
+    if (session.lifecycle && (!cachedRuntime || cachedRuntime.presence !== "online" ||
+      cachedRuntime.reachability !== "reachable")) {
+      return session.lifecycle.status === "offline" ? session.lifecycle : offlineLifecycleView(session.lifecycle);
+    }
     const route = this.#route(session.runtimeNodeId);
     const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
-    const snapshot = lifecycleSnapshotSchema.parse(await owner.readLifecycle(sessionId));
+    const observed = await owner.readLifecycle(sessionId);
     const current = this.catalog.getSession(sessionId);
     const runtime = this.catalog.getRuntimeNode(session.runtimeNodeId);
-    const fence = snapshot.state.fence;
     if (!current || current.catalogState === "archived" || current.runtimeNodeId !== session.runtimeNodeId ||
-      current.bindingRevision !== session.bindingRevision || current.runtimeEpoch !== session.runtimeEpoch ||
-      fence.sessionId !== sessionId || fence.runtimeNodeId !== session.runtimeNodeId ||
+      current.bindingRevision !== session.bindingRevision || current.runtimeEpoch !== session.runtimeEpoch) {
+      throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
+    }
+    if (route.immediateChildControlNodeId) return sessionLifecycleViewSchema.parse(observed);
+    const projection = runtimeLifecycleProjectionSchema.parse(observed);
+    const fence = projection.fence;
+    if (fence.sessionId !== sessionId || fence.runtimeNodeId !== session.runtimeNodeId ||
       fence.bindingRevision !== session.bindingRevision || fence.runtimeEpoch !== session.runtimeEpoch ||
       fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
       throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
     }
-    return snapshot;
+    return projection.view;
   }
 
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {

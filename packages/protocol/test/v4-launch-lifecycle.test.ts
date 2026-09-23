@@ -5,11 +5,13 @@ import {
   archiveRecordSchema,
   controlChangeSchema,
   gatewayEnrollmentSchema,
+  initialLifecycle,
   launchIdSchema,
   launchMetadataOperationId,
   launchProfileDescriptorSchema,
   launchListInputSchema,
   launchRecordSchema,
+  lifecycleProjection,
   newArchiveOperationId,
   newAuthorityEpochId,
   newControlNodeId,
@@ -343,31 +345,28 @@ describe("protocol v4 archive and catalog lifecycle", () => {
       runtimeStatus: "idle" as const,
       runtimeEpoch,
     };
-    const lifecycle = {
-      version: 1 as const,
-      fence: {
-        sessionId: active.sessionId,
-        runtimeNodeId: active.runtimeNodeId,
-        runtimeNodeBootId: newRuntimeNodeBootId(),
-        bindingRevision: active.bindingRevision,
-        runtimeEpoch,
-      },
-      nextSequence: 0,
-      label: "Unknown" as const,
-    };
-    expect(sessionRecordSchema.safeParse({ ...active, lifecycle }).success).toBe(true);
+    const lifecycle = lifecycleProjection(initialLifecycle({
+      sessionId: active.sessionId,
+      runtimeNodeId: active.runtimeNodeId,
+      runtimeNodeBootId: newRuntimeNodeBootId(),
+      bindingRevision: active.bindingRevision,
+      runtimeEpoch,
+    }));
+    expect(sessionRecordSchema.safeParse({ ...active, lifecycle: lifecycle.view }).success).toBe(true);
     for (const invalid of [
-      { ...active, availability: "resumable", runtimeEpoch: null, lifecycle },
-      { ...active, harness: "codex", lifecycle },
-      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, sessionId: newSessionId() } } },
-      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, runtimeNodeId: newRuntimeNodeId() } } },
-      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, bindingRevision: 2 } } },
-      { ...active, lifecycle: { ...lifecycle, fence: { ...lifecycle.fence, runtimeEpoch: newRuntimeEpoch() } } },
+      { ...active, availability: "resumable", runtimeEpoch: null, lifecycle: lifecycle.view },
+      { ...active, harness: "codex", lifecycle: lifecycle.view },
     ]) expect(sessionRecordSchema.safeParse(invalid).success).toBe(false);
 
     const { catalogState: _, catalogRevision: __, archivedAt: ___, ...runtime } = active;
     expect(runtimeNodeSessionRecordSchema.safeParse({ ...runtime, lifecycle }).success).toBe(true);
     expect(runtimeNodeSessionRecordSchema.safeParse({ ...runtime, availability: "resumable", runtimeEpoch: null, lifecycle }).success).toBe(false);
+    for (const invalidLifecycle of [
+      { ...lifecycle, fence: { ...lifecycle.fence, sessionId: newSessionId() } },
+      { ...lifecycle, fence: { ...lifecycle.fence, runtimeNodeId: newRuntimeNodeId() } },
+      { ...lifecycle, fence: { ...lifecycle.fence, bindingRevision: 2 } },
+      { ...lifecycle, fence: { ...lifecycle.fence, runtimeEpoch: newRuntimeEpoch() } },
+    ]) expect(runtimeNodeSessionRecordSchema.safeParse({ ...runtime, lifecycle: invalidLifecycle }).success).toBe(false);
   });
 });
 

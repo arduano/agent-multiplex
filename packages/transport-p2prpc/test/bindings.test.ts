@@ -39,6 +39,8 @@ describe("child control-node p2prpc binding", () => {
     const unsubscribe = vi.fn();
     const snapshot = vi.fn().mockResolvedValue({ nextPageToken: null });
     const execute = vi.fn().mockResolvedValue({ state: "succeeded" });
+    const getCommand = vi.fn().mockResolvedValue(null);
+    const observeCommand = vi.fn().mockResolvedValue(null);
     const applyMetadata = vi.fn().mockResolvedValue({ status: "accepted" });
     const subscribe = vi.fn((_input: unknown, next: SubscriptionCallbacks) => {
       callbacks = next;
@@ -60,7 +62,11 @@ describe("child control-node p2prpc binding", () => {
             get: { query: terminalGet },
             attach: { subscribe: terminalAttach },
           },
-          commands: { execute: { mutate: execute } },
+          commands: {
+            execute: { mutate: execute },
+            get: { query: getCommand },
+            observe: { query: observeCommand },
+          },
           metadata: { settle: { mutate: applyMetadata } },
         },
       },
@@ -92,6 +98,16 @@ describe("child control-node p2prpc binding", () => {
     });
     await connection.execute(command);
     expect(execute).toHaveBeenCalledWith({ ...binding, command });
+    await connection.getCommand?.(command.commandId);
+    expect(getCommand).toHaveBeenCalledWith({
+      ...binding,
+      commandId: command.commandId,
+    });
+    await connection.observeCommand?.(command.commandId);
+    expect(observeCommand).toHaveBeenCalledWith({
+      ...binding,
+      commandId: command.commandId,
+    });
 
     const now = new Date().toISOString();
     const operationId = newOperationId();

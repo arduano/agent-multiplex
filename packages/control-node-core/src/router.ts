@@ -313,6 +313,10 @@ export function createAccessRouter(service: ControlNodeService) {
         .input(accessContract.commands.get.input)
         .output(accessContract.commands.get.output)
         .query(({ input }) => service.recoverCommand(input)),
+      observe: scoped("read")
+        .input(accessContract.commands.observe.input)
+        .output(accessContract.commands.observe.output)
+        .query(({ input }) => guarded(() => service.observeCommand(input))),
     }),
   });
 }
@@ -541,6 +545,10 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
         .input(controlNodeLinkContract.commands.get.input)
         .output(controlNodeLinkContract.commands.get.output)
         .query(({ input, ctx }) => checked(ctx, input, () => service.recoverCommand(input.commandId))),
+      observe: t.procedure
+        .input(controlNodeLinkContract.commands.observe.input)
+        .output(controlNodeLinkContract.commands.observe.output)
+        .query(({ input, ctx }) => checked(ctx, input, () => service.observeCommand(input.commandId))),
     }),
     interactions: t.router({
       resolve: t.procedure

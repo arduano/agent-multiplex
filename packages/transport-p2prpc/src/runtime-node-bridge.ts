@@ -20,6 +20,7 @@ import type {
   ArchiveRequest,
   CommandEnvelope,
   CommandId,
+  CommandObservationView,
   CommandRecord,
   Harness,
   InteractionRecord,
@@ -31,7 +32,7 @@ import type {
   LaunchProfileIdentity,
   LaunchRecord,
   LaunchRequest,
-  LifecycleSnapshot,
+  RuntimeLifecycleProjection,
   NativeStateRequest,
   NativeStateResult,
   NativeHistoryRequest,
@@ -218,7 +219,7 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
     });
   }
 
-  public readLifecycle(sessionId: SessionId): Promise<LifecycleSnapshot> {
+  public readLifecycle(sessionId: SessionId): Promise<RuntimeLifecycleProjection> {
     return this.peer.rpc.sessions.readLifecycle.query({ runtimeNodeBootId: this.runtimeNodeBootId, sessionId });
   }
 
@@ -355,6 +356,13 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
 
   public getCommand(commandId: CommandId): Promise<CommandRecord | null> {
     return this.peer.rpc.commands.get.query({
+      runtimeNodeBootId: this.runtimeNodeBootId,
+      commandId,
+    });
+  }
+
+  public observeCommand(commandId: CommandId): Promise<CommandObservationView | null> {
+    return this.peer.rpc.commands.observe.query({
       runtimeNodeBootId: this.runtimeNodeBootId,
       commandId,
     });

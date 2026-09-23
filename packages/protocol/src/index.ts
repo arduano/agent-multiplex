@@ -1,4 +1,5 @@
 export * from "./command.js";
+export * from "./command-observation.js";
 export * from "./command-error.js";
 export * from "./archive.js";
 export * from "./access-snapshot.js";

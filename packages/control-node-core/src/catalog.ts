@@ -10,7 +10,6 @@ import {
 } from "@arduano/agent-multiplex-storage-sqlite";
 import {
   safeCommandError,
-  sameLifecycleFence,
   accessSnapshotSchema,
   archiveRecordSchema,
   authorityPromoteInputSchema,
@@ -46,7 +45,9 @@ import {
   newSessionId,
   newTopologyTransitionId,
   operationIdSchema,
+  offlineLifecycleView,
   runtimeNodeDescriptorSchema,
+  runtimeLifecycleProjectionSchema,
   runtimeNodeSessionRecordSchema,
   runtimeNodeRegistrationSchema,
   sessionRecordSchema,
@@ -93,6 +94,7 @@ import {
   type RuntimeNodeId,
   type RuntimeNodeRegistration,
   type RuntimeNodeSessionRecord,
+  type RuntimeLifecycleProjection,
   type SessionAvailability,
   type SessionId,
   type SessionRecord,
@@ -275,6 +277,11 @@ export class ControlNodeCatalog {
           version: 7,
           name: "control-node-v6-command-errors",
           apply: ControlNodeCatalog.#migrateCommandErrors,
+        },
+        {
+          version: 8,
+          name: "control-node-v6-lifecycle-contract",
+          apply: ControlNodeCatalog.#migrateLifecycleContract,
         },
       ],
       ...(options.now === undefined ? {} : { now: options.now }),
@@ -1309,6 +1316,16 @@ export class ControlNodeCatalog {
     this.#mutate(() => {
       this.#putRuntimeNode(updated, null);
       if (changed) this.#appendControl({ type: "runtimeNode.upsert", runtimeNode: updated });
+      if (changed) {
+        for (const session of this.listSessions({ runtimeNodeId, availability: ["active"] })) {
+          const projection = this.#runtimeLifecycleCursor(session.sessionId);
+          if (!projection || projection.fence.runtimeNodeBootId !== bootId || session.runtimeEpoch !== projection.fence.runtimeEpoch) continue;
+          const restored = sessionRecordSchema.parse({ ...session, lifecycle: projection.view });
+          if (sameCanonicalJson(session, restored)) continue;
+          this.#putSession(restored, null);
+          this.#appendControl({ type: "session.upsert", session: restored });
+        }
+      }
     });
     return true;
   }
@@ -1322,6 +1339,12 @@ export class ControlNodeCatalog {
     this.#mutate(() => {
       this.#putRuntimeNode(updated, null);
       this.#appendControl({ type: "runtimeNode.presence", runtimeNodeId, presence: "stale" });
+      for (const session of this.listSessions({ runtimeNodeId, availability: ["active"] })) {
+        if (!session.lifecycle || session.lifecycle.status === "offline") continue;
+        const offline = sessionRecordSchema.parse({ ...session, lifecycle: offlineLifecycleView(session.lifecycle) });
+        this.#putSession(offline, null);
+        this.#appendControl({ type: "session.upsert", session: offline });
+      }
     });
     return true;
   }
@@ -1574,6 +1597,7 @@ export class ControlNodeCatalog {
         for (const existing of this.listSessions({ runtimeNodeId: snapshot.runtimeNodeId })) {
           if (seen.has(nativeKey(existing))) continue;
           this.#stalePendingInteractionsForSession(existing.sessionId, timestamp);
+          this.#putRuntimeLifecycleCursor(existing.sessionId, undefined);
           const { lifecycle: _lifecycle, ...withoutLifecycle } = existing;
           const unavailable = sessionRecordSchema.parse({
             ...withoutLifecycle,
@@ -1621,8 +1645,17 @@ export class ControlNodeCatalog {
           fence.runtimeEpoch !== incoming.runtimeEpoch || incoming.harness !== "copilot" || incoming.availability !== "active") {
         throw new ControlNodeCoreError("FENCED", "lifecycle projection does not match the active runtime binding");
       }
-      if (current?.lifecycle && sameLifecycleFence(current.lifecycle.fence, fence) &&
-          current.lifecycle.nextSequence > incoming.lifecycle.nextSequence) return current;
+      const cursor = this.#runtimeLifecycleCursor(incoming.sessionId);
+      if (cursor && sameRuntimeLifecycleProjectionFence(cursor, incoming.lifecycle)) {
+        if (cursor.nextSequence > incoming.lifecycle.nextSequence) {
+          if (!current) throw new ControlNodeCoreError("FENCED", "lifecycle cursor has no canonical session row");
+          return current;
+        }
+        if (cursor.nextSequence === incoming.lifecycle.nextSequence &&
+            !sameCanonicalJson(cursor.view, incoming.lifecycle.view)) {
+          throw new ControlNodeCoreError("CONFLICT", "runtime returned divergent lifecycle views at one sequence");
+        }
+      }
     }
     if (current?.catalogState === "archived") return current;
     const nativeOwnerRow = this.#db.prepare(`
@@ -1656,6 +1689,7 @@ export class ControlNodeCatalog {
     }
     const record = sessionRecordSchema.parse({
       ...incoming,
+      ...(incoming.lifecycle === undefined ? {} : { lifecycle: incoming.lifecycle.view }),
       // Runtime nodes propose metadata through their durable outbox. A session
       // upsert owns liveness/native fields and cannot initialize authority data.
       metadata: current?.metadata ?? emptyMetadataSnapshot(),
@@ -1683,12 +1717,29 @@ export class ControlNodeCatalog {
       if (current && current.runtimeEpoch !== record.runtimeEpoch) {
         this.#stalePendingInteractionsForSession(current.sessionId, this.#timestamp());
       }
+      this.#putRuntimeLifecycleCursor(incoming.sessionId, incoming.lifecycle);
       if (!unchanged) this.#putSession(record, null);
       this.#settleLifecycleForSession(record);
       if (!unchanged) this.#appendControl({ type: "session.upsert", session: record });
     });
     this.applyPendingLifecycleMetadata(record.runtimeNodeId);
     return this.getSession(record.sessionId)!;
+  }
+
+  #runtimeLifecycleCursor(sessionId: SessionId): RuntimeLifecycleProjection | undefined {
+    const row = this.#db.prepare("SELECT projection_json FROM runtime_lifecycle_cursors WHERE session_id=?")
+      .get(sessionId) as Row | undefined;
+    return row ? runtimeLifecycleProjectionSchema.parse(decode(row.projection_json)) : undefined;
+  }
+
+  #putRuntimeLifecycleCursor(sessionId: SessionId, projection: RuntimeLifecycleProjection | undefined): void {
+    if (!projection) {
+      this.#db.prepare("DELETE FROM runtime_lifecycle_cursors WHERE session_id=?").run(sessionId);
+      return;
+    }
+    this.#db.prepare(`INSERT INTO runtime_lifecycle_cursors(session_id,projection_json)
+      VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET projection_json=excluded.projection_json`)
+      .run(sessionId, encode(projection));
   }
 
   public getSession(id: SessionId): SessionRecord | null {
@@ -1956,6 +2007,7 @@ export class ControlNodeCatalog {
         const timestamp = record.releasedAt ?? this.#timestamp();
         this.#stalePendingInteractionsForSession(session.sessionId, timestamp);
         this.#deleteMetadataDeliveryIntentsForSession(session.sessionId);
+        this.#putRuntimeLifecycleCursor(session.sessionId, undefined);
         const { lifecycle: _lifecycle, ...withoutLifecycle } = session;
         const archived = sessionRecordSchema.parse({
           ...withoutLifecycle,
@@ -2003,6 +2055,7 @@ export class ControlNodeCatalog {
     });
     this.#mutate(() => {
       this.#stalePendingInteractionsForSession(stopped.sessionId, stopped.updatedAt);
+      this.#putRuntimeLifecycleCursor(stopped.sessionId, undefined);
       this.#putSession(stopped, this.#projectionSource(
         "sessions",
         "session_id",
@@ -3256,6 +3309,29 @@ export class ControlNodeCatalog {
     `);
   }
 
+  static #migrateLifecycleContract(database: DatabaseSync): void {
+    database.exec(`
+      CREATE TABLE runtime_lifecycle_cursors (
+        session_id TEXT PRIMARY KEY,
+        projection_json TEXT NOT NULL CHECK(json_valid(projection_json))
+      ) STRICT;
+      UPDATE sessions SET record_json=json_remove(record_json, '$.lifecycle')
+        WHERE json_type(record_json, '$.lifecycle') IS NOT NULL;
+    `);
+    // A v1 lifecycle projection may be present in retained hot-feed events and
+    // imported hashes. Rotate the feed so every consumer takes a v2 snapshot.
+    const feedId = newFeedId();
+    database.prepare("UPDATE control_node_identity SET feed_id=? WHERE singleton=1").run(feedId);
+    database.prepare(`UPDATE control_nodes SET record_json=json_set(record_json, '$.feedId', ?)
+      WHERE control_node_id=(SELECT control_node_id FROM control_node_identity WHERE singleton=1)`).run(feedId);
+    database.exec(`
+      DELETE FROM imported_events;
+      DELETE FROM child_checkpoints;
+      DELETE FROM control_events;
+      UPDATE control_feed_state SET last_cursor=0, minimum_cursor=0 WHERE singleton=1;
+    `);
+  }
+
   #hasMetadataReceipts(): boolean {
     return this.#db.prepare("SELECT 1 FROM metadata_operations LIMIT 1").get() !== undefined;
   }
@@ -4337,6 +4413,17 @@ export class ControlNodeCatalog {
 
 function sameAuthority(left: AuthorityRef, right: AuthorityRef): boolean {
   return left.realmId === right.realmId && left.controlNodeId === right.controlNodeId && left.epochId === right.epochId;
+}
+
+function sameRuntimeLifecycleProjectionFence(
+  left: RuntimeLifecycleProjection,
+  right: RuntimeLifecycleProjection,
+): boolean {
+  return left.fence.sessionId === right.fence.sessionId &&
+    left.fence.runtimeNodeId === right.fence.runtimeNodeId &&
+    left.fence.runtimeNodeBootId === right.fence.runtimeNodeBootId &&
+    left.fence.bindingRevision === right.fence.bindingRevision &&
+    left.fence.runtimeEpoch === right.fence.runtimeEpoch;
 }
 
 /** Only active/running timestamp ticks are lossy observations. Status, native

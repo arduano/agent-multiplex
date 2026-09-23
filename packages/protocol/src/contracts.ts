@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { accessSnapshotSchema } from "./access-snapshot.js";
-import { lifecycleSnapshotSchema } from "./lifecycle.js";
+import {
+  runtimeLifecycleProjectionSchema,
+  sessionLifecycleViewSchema,
+} from "./lifecycle.js";
+import { commandObservationViewSchema } from "./command-observation.js";
 
 import {
   archiveRecordSchema,
@@ -260,7 +264,7 @@ export const accessContract = {
     execute: { input: commandEnvelopeSchema, output: commandRecordSchema },
     readLifecycle: {
       input: z.object({ sessionId: sessionIdSchema }).strict(),
-      output: lifecycleSnapshotSchema,
+      output: sessionLifecycleViewSchema,
     },
     readNativeState: {
       input: z.object({
@@ -357,6 +361,7 @@ export const accessContract = {
   },
   commands: {
     get: { input: commandIdSchema, output: commandRecordSchema.nullable() },
+    observe: { input: commandIdSchema, output: commandObservationViewSchema.nullable() },
   },
 } as const;
 
@@ -450,7 +455,7 @@ export const runtimeNodeContract = {
     },
     readLifecycle: {
       input: z.object({ runtimeNodeBootId: runtimeNodeBootIdSchema, sessionId: sessionIdSchema }).strict(),
-      output: lifecycleSnapshotSchema,
+      output: runtimeLifecycleProjectionSchema,
     },
     readNativeState: {
       input: z.object({
@@ -552,6 +557,13 @@ export const runtimeNodeContract = {
         commandId: commandIdSchema,
       }),
       output: commandRecordSchema.nullable(),
+    },
+    observe: {
+      input: z.object({
+        runtimeNodeBootId: runtimeNodeBootIdSchema,
+        commandId: commandIdSchema,
+      }),
+      output: commandObservationViewSchema.nullable(),
     },
   },
   metadata: {
@@ -795,7 +807,7 @@ export const controlNodeLinkContract = {
     },
     readLifecycle: {
       input: controlNodeLinkFenceSchema.extend({ sessionId: sessionIdSchema }).strict(),
-      output: lifecycleSnapshotSchema,
+      output: sessionLifecycleViewSchema,
     },
     readNativeState: {
       input: controlNodeLinkFenceSchema.extend({
@@ -876,6 +888,12 @@ export const controlNodeLinkContract = {
         commandId: commandIdSchema,
       }),
       output: commandRecordSchema.nullable(),
+    },
+    observe: {
+      input: controlNodeLinkFenceSchema.extend({
+        commandId: commandIdSchema,
+      }),
+      output: commandObservationViewSchema.nullable(),
     },
   },
   interactions: {

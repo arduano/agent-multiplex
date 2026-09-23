@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { Worker } from "node:worker_threads";
 import { once } from "node:events";
 import { ControlNodeCatalog, ControlNodeService, type ChildControlNodeConnection } from "@arduano/agent-multiplex-control-node-core";
-import { newRuntimeNodeId, newRuntimeNodeBootId, newRuntimeEpoch, newCommandId, packNativePayload, type CommandRecord } from "@arduano/agent-multiplex-protocol";
+import { commandObservationView, newRuntimeNodeId, newRuntimeNodeBootId, newRuntimeEpoch, newCommandId, packNativePayload, type CommandRecord } from "@arduano/agent-multiplex-protocol";
 import { describe, it, expect } from "vitest";
 import { IsolatedControlOwner, waitForIsolatedStorage } from "../apps/control-node/src/isolated-control.js";
 import { createIsolatedAccessRouter, createIsolatedControlRouter } from "../apps/control-node/src/isolated-router.js";
@@ -93,6 +93,7 @@ describe("isolated authority control", () => {
           throw new Error("fixture lost reply after native dispatch");
         },
         getCommand: async () => receipt,
+        observeCommand: async () => receipt ? commandObservationView(receipt) : null,
       } as ChildControlNodeConnection;
     });
     try {
@@ -119,6 +120,11 @@ describe("isolated authority control", () => {
         request: { harness: "codex" as const, command: { type: "setModel" as const, model: "fixture-model" } } };
       await expect(access.sessions.execute(command)).rejects.toMatchObject({ code: "BAD_GATEWAY" });
       expect(await access.commands.get(command.commandId)).toMatchObject({ state: "succeeded", commandId: command.commandId });
+      expect(await access.commands.observe(command.commandId)).toMatchObject({
+        receipt: { state: "succeeded", commandId: command.commandId },
+        delivery: "accepted",
+        continuation: "complete",
+      });
       expect(await access.commands.get(command.commandId)).toMatchObject({ state: "succeeded" });
       expect(dispatched).toBe(1);
     } finally { await owner.close(); service.close(); child.close(); await rm(directory, { recursive: true, force: true }); }
