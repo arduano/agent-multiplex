@@ -730,9 +730,11 @@ function codexLbModelInfo(id: string): ModelInfo | undefined {
   } as unknown as ModelInfo;
 }
 
-// Exact non-policy/non-billing entries reported by the pinned Copilot 1.0.79
-// runtime. Its wire catalog includes `none` and several capability properties
-// that are absent from the narrower SDK 1.0.14 TypeScript declaration.
+// Historical exact non-policy/non-billing entries reported by Copilot 1.0.79.
+// This table supplies conservative BYOK defaults only. Stock Copilot models,
+// including newly released models, always pass through native discovery above.
+// The wire catalog includes `none` and several capability properties that are
+// absent from the narrower SDK 1.0.14 TypeScript declaration.
 const COPILOT_CODEX_LB_MODELS: Record<string, {
   name: string;
   efforts: readonly string[];
