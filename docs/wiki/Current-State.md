@@ -74,6 +74,9 @@ records the initial **no-go** findings and dated closure updates. The lifecycle
 defects and published framework/consumer pins are fixed; synthetic Windows
 model UAT, stopped-state rollback and live renewal observation still determine
 cutover readiness.
+The [maintenance operator handoff](../audits/maintenance-window-operator-handoff-20260923.md)
+preserves the pre-cutover source boundary and recovery prompt for a replacement
+agent before the main-pc Leo runtime is restarted.
 
 ## Retained catalog startup correction
 
