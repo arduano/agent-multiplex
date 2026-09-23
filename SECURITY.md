@@ -58,10 +58,13 @@ disclosure.
   provider secrets, app-server output, and the runtime account's OS authority.
 - Gateways are zero-authority protocol actors but can observe all data granted by
   their sources and route powerful actions.
-- `sessions.readLifecycle` requires `read` access. Its state is payload-free but
-  exposes native task, queue, interaction, child, message, and command identities.
-  The runtime is its only writer; control and gateway routes must preserve the
-  runtime boot, binding, native epoch, sequence, and selected-source fences.
+- `sessions.readLifecycle` requires `read` access. Its public v2 view is
+  payload-free and contains only an opaque observation ID, status, typed health
+  and host-computed action availability. Native task, queue, interaction,
+  child, message and command correlation identities stay in the runtime's
+  private reducer. The runtime is its only writer; control and gateway routes
+  must preserve the runtime boot, binding, native epoch, sequence, and
+  selected-source fences before stripping private fields.
 - Gateway plugins, runtime providers/backends, and adapters are trusted
   in-process modules. They are not tenant sandboxes.
 - A statically injected runtime path policy is also trusted application code
