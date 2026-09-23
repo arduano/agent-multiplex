@@ -14,8 +14,8 @@ are separately authorized.
 
 The candidate keeps short authentication lifetimes and replaces authenticated
 generations before expiry while preserving ordered QUIC/RPC/feed streams.
-Multiplex domain protocol stays v5; its p2prpc application contract changes to
-`5.renewal.1`, using independent core `0.3.0-renewal.0`, wire v5 and handshake v4.
+Multiplex domain protocol is v6; its p2prpc application contract is
+`6.renewal.1`, using independent core `0.3.0-renewal.0`, wire v5 and handshake v4.
 The 16 Multiplex package versions and released dependency pins are unchanged.
 All p2prpc services must be updated together, including direct personal
 work-command/recovery consumers. Irregular Windows/native stalls remain separate.

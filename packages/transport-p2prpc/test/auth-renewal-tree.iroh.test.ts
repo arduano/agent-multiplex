@@ -50,11 +50,12 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
   const childEvents = new ControlNodeEventHub({ catalog: childCatalog, heartbeatMs: 40 });
   const runtimeStore = new RuntimeNodeStore(join(directory, "runtime.sqlite"));
   const runtimeEvents = new RuntimeNodeEventHub({ heartbeatMs: 40 });
-  const errors: unknown[] = [];
+  const childPumpErrors: unknown[] = [];
+  const runtimePumpErrors: unknown[] = [];
   const rootService = new ControlNodeService({
     catalog: rootCatalog,
     events: rootEvents,
-    onChildControlNodePumpError: (_id, error) => errors.push(error),
+    onChildControlNodePumpError: (_id, error) => childPumpErrors.push(error),
   });
   const childService = new ControlNodeService({ catalog: childCatalog, events: childEvents });
   const snapshotReads = vi.spyOn(childService, "readSubtreeSnapshot");
@@ -150,7 +151,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
       controlNodeBootId: childDescriptor.controlNodeBootId,
       feedId: childDescriptor.feedId,
       name: childDescriptor.name,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childDescriptor.capabilities,
       endpointId: child.id,
       expectedParentControlNodeId: rootCatalog.localControlNode().controlNodeId,
@@ -159,7 +160,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     childCatalog.applyParentAttachment(attachment, root.id);
     const runtimeRegistration = {
       runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(),
-      name: "renewal-runtime", allowedRoots: ["/work"], harnesses: [], launchProfiles: [], protocolVersion: 5 as const,
+      name: "renewal-runtime", allowedRoots: ["/work"], harnesses: [], launchProfiles: [], protocolVersion: 6 as const,
     };
     childCatalog.registerRuntimeNode(runtimeRegistration, runtime.id);
     const timestamp = new Date().toISOString();
@@ -181,7 +182,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     pump = new RuntimeNodeEventPump({
       connection: runtimeConnection,
       retryDelayMs: () => 10,
-      onError: (error) => errors.push(error),
+      onError: (error) => runtimePumpErrors.push(error),
       onItem: (event) => childService.publishRuntimeEvent({ ...runtimeRegistration, event }, {
         authenticatedRuntimeNodeId: runtimeRegistration.runtimeNodeId,
         endpointId: runtime!.id,
@@ -246,7 +247,8 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
       expect(child.getPeerAs<RuntimeNodeRouter>(runtime.id)?.session).toBe(runtimePeer.session);
       expect(rootCatalog.getControlNode(childDescriptor.controlNodeId)?.presence).toBe("online");
       expect(rootCatalog.getRuntimeNode(runtimeRegistration.runtimeNodeId)?.reachability).toBe("reachable");
-      expect(errors).toEqual([]);
+      expect(childPumpErrors).toEqual([]);
+      expect(runtimePumpErrors).toEqual([]);
       expect(snapshotReads).toHaveBeenCalledTimes(1);
       expect(runtimeSubscriptions).toHaveBeenCalledTimes(1);
       expect(commandDispatches).toHaveBeenCalledTimes(1);
@@ -270,7 +272,8 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
       item.change.type === "runtimeNode.presence" ||
       item.change.type === "runtimeNode.upsert" && item.change.runtimeNode.reachability !== "reachable"
     ))).toBe(false);
-    expect(errors).toEqual([]);
+    expect(childPumpErrors).toEqual([]);
+    expect(runtimePumpErrors).toEqual([]);
 
     // A genuine network loss after dispatch remains ambiguous. Renewal never
     // replays the mutation; recovery asks for the same durable command receipt.
@@ -290,7 +293,19 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
       runtimeEpoch: session.runtimeEpoch!, sequence: 2, nativeType: "renewal/tick",
       payload: packNativePayload({ sequence: 2 }), ephemeral: false,
     });
-    await expect.poll(() => observed.filter((item) => item.kind === "native").length).toBe(3);
+    await expect.poll(
+      () => pump?.cursor.native[session.sessionId]?.sequence,
+      { timeout: 5_000 },
+    ).toBe(2);
+    expect(childPumpErrors).toEqual([]);
+    expect(runtimePumpErrors.length).toBeGreaterThan(0);
+    expect(runtimePumpErrors.every((error) =>
+      errorCodeChain(error).some((code) => code === "OUTCOME_UNKNOWN" || code === "DISCONNECTED")
+    )).toBe(true);
+    await expect.poll(
+      () => observed.filter((item) => item.kind === "native").length,
+      { timeout: 5_000 },
+    ).toBe(3);
     expect(observed.filter((item) => item.kind === "native").map((item) => item.sequence)).toEqual([0, 1, 2]);
     expect(commandDispatches).toHaveBeenCalledTimes(1);
 
@@ -349,4 +364,16 @@ function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   const promise = new Promise<T>((complete) => { resolve = complete; });
   return { promise, resolve };
+}
+
+function errorCodeChain(error: unknown): unknown[] {
+  const codes: unknown[] = [];
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current !== null && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    codes.push(Object.getOwnPropertyDescriptor(current, "code")?.value);
+    current = Object.getOwnPropertyDescriptor(current, "cause")?.value;
+  }
+  return codes;
 }

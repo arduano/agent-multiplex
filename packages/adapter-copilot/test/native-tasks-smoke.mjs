@@ -43,7 +43,15 @@ try {
     assert.ok(description.capabilities.some(c => c.name === name && c.version === "v1"));
   session = await adapter.spawn({ harness: "copilot", cwd: scratch });
   session.subscribe(event => { if (event.kind === "native" && event.nativeType === "session.background_tasks_changed") taskEvents++; });
-  const read = async (view, extra = {}) => (await session.readNativeState({ harness: "copilot", view, ...extra })).payload;
+  const read = async (view, extra = {}) => {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try { return (await session.readNativeState({ harness: "copilot", view, ...extra })).payload; }
+      catch (error) {
+        if (error?.message !== "Copilot task snapshot was invalidated during the native read" || attempt === 19) throw error;
+      }
+    }
+    throw new Error("native task observation retry exhausted");
+  };
   const command = (type, id) => session.execute({ harness: "copilot", command: { type, id } });
   assert.deepEqual(await read("tasks"), { tasks: [] });
   assert.deepEqual(await read("currentPromotableTask"), {});
@@ -53,12 +61,16 @@ try {
   checks.push("empty native observations and exact absent-ID controls preserve explicit no-op results");
   await session.execute({ harness: "copilot", command: { type: "setPermissionMode", mode: "allow-all" } });
   await native.rpc.tools.initializeAndValidate();
+  const toolNames = new Set((await native.rpc.tools.getCurrentMetadata()).tools?.map(tool => tool.name));
+  const shellTool = process.platform === "win32" ? "powershell" : "bash";
+  assert.ok(toolNames.has(shellTool), `native ${process.platform} session must expose the ${shellTool} task fixture tool`);
   for (const promote of [true, false]) {
     const id = promote ? "disposable-promote" : "disposable-cancel";
     // Native tool execution creates the fixture only. Production controls expose
     // task APIs, never this arbitrary tool/shell surface.
-    const tool = native.rpc.tools.execute({ name: "bash", toolCallId: id + "-call", arguments: {
-      command: "sleep 30", description: "Disposable task control qualification", mode: "sync", initial_wait: 60, shellId: id,
+    const tool = native.rpc.tools.execute({ name: shellTool, toolCallId: id + "-call", arguments: {
+      command: process.platform === "win32" ? "Start-Sleep -Seconds 30" : "sleep 30",
+      description: "Disposable task control qualification", mode: "sync", initial_wait: 60, shellId: id,
     } });
     tool.catch(() => {});
     let task;
@@ -95,7 +107,7 @@ try {
 const receipt = { result: "passed", source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   sourceHashes: before, node: process.version, platform: process.platform, arch: process.arch, native: { sdk: "1.0.14", cli: "1.0.88" },
   modelCalls: 0, providerRequests, checks, retainedAuthHomes: false, retainedNativePayloads: false,
-  scope: "Disposable Linux sync shell task API verification. Native model-driven agent/client tasks and corporate Windows behavior remain separate UAT." };
+  scope: `Disposable ${process.platform} sync shell task API verification. Native model-driven agent/client tasks and corporate authentication/network policy remain separate UAT.` };
 const output = join(root, "receipts/copilot-native-tasks", new Date().toISOString().replaceAll(":", "-"));
 await mkdir(output, { recursive: true, mode: 0o700 }); const serialized = JSON.stringify(receipt, null, 2) + "\n";
 await writeFile(join(output, "receipt.json"), serialized, { mode: 0o600 });

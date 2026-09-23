@@ -26,8 +26,8 @@ invocation, with no mirrored writer, subscription restart, snapshot or replay.
 
 The independent core candidate is `0.3.0-renewal.0`, exports
 `SESSION_RENEWAL_CONTRACT = 1`, uses transport wire/ALPN v5 and handshake format v4.
-Multiplex domain protocol remains v5, but its p2prpc application contract becomes
-`5.renewal.1`. Older peers fail negotiation. No mixed-version fallback exists.
+Multiplex domain protocol is v6, and its p2prpc application contract becomes
+`6.renewal.1`. Older peers fail negotiation. No mixed-version fallback exists.
 Every authenticated session exposes a monotonic generation, starting at zero for
 each new physical connection. The fresh transcript binds the previous session
 identity and next generation as well as both endpoint identities, fresh nonces,

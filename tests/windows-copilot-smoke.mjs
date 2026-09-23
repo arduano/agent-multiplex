@@ -98,7 +98,13 @@ try {
         /^(?:COPILOT_CLI_PATH|COPILOT_CONNECTION_TOKEN|COPILOT_SDK_AUTH_TOKEN|COPILOT_GITHUB_TOKEN|GH_TOKEN|GITHUB_TOKEN|NODE_AUTH_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|COPILOT_OFFLINE)$/i.test(key)) delete env[key];
   }
   const binary = require.resolve("@github/copilot-win32-x64");
-  assert.match(execFileSync(binary, ["--version"], { env, encoding: "utf8", timeout: 30_000 }), /GitHub Copilot CLI 1\.0\.81\./);
+  const expectedCliVersion = JSON.parse(readFileSync("packages/adapter-copilot/package.json", "utf8"))
+    .devDependencies["@github/copilot"];
+  assert.equal(JSON.parse(readFileSync("node_modules/@github/copilot/package.json", "utf8")).version, expectedCliVersion);
+  assert.equal(JSON.parse(readFileSync("node_modules/@github/copilot-win32-x64/package.json", "utf8")).version, expectedCliVersion);
+  const reportedCliVersion = execFileSync(binary, ["--version"], { env, encoding: "utf8", timeout: 30_000 });
+  assert.ok(reportedCliVersion.includes(`GitHub Copilot CLI ${expectedCliVersion}.`),
+    `native Copilot version differs from the adapter pin: ${reportedCliVersion.trim()}`);
   const client = new CopilotClient({
     mode: "copilot-cli", useLoggedInUser: false, baseDirectory: copilotHome, env, logLevel: "none",
     connection: RuntimeConnection.forStdio({ path: binary }),

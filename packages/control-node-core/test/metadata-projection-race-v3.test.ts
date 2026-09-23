@@ -15,6 +15,7 @@ import {
   newRuntimeNodeBootId,
   newRuntimeNodeId,
   newSessionId,
+  safeCommandError,
   type AccessSnapshot,
   type AdapterScopeId,
   type ControlNodeAttachment,
@@ -620,9 +621,11 @@ describe("protocol-v4 child metadata projection ordering", () => {
     // Each forwarding hop can lose its reply with a different diagnostic.
     // These observations must not conflict or tear down the child feed.
     const parentUnknown = { ...parentStarted, state: "outcomeUnknown" as const,
-      error: "child reply lost", updatedAt: completedAt };
+      error: safeCommandError(new Error("child reply lost"), { stage: "dispatch", certainty: "outcomeUnknown" }),
+      updatedAt: completedAt };
     const childUnknown = { ...childStarted, state: "outcomeUnknown" as const,
-      error: "runtime reply lost", updatedAt: childStartedAt };
+      error: safeCommandError(new Error("runtime reply lost"), { stage: "dispatch", certainty: "outcomeUnknown" }),
+      updatedAt: childStartedAt };
     parent.updateCommand(parentUnknown);
     const beforeUnknown = child.controlCursor();
     child.updateCommand(childUnknown);
