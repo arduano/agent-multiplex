@@ -123,7 +123,9 @@ implicitly receive access to the independently published p2prpc package.
    and its declared transitive package dependencies. It runs publint, Are the
    Types Wrong, JavaScript import and TypeScript declaration checks, the public
    browser bundle check where applicable, and every packaged executable's
-   help/version path. It deliberately does not install one complete workspace
+   help/version path. CI passes its package-read token explicitly; a local run
+   may use an existing npm user configuration with GitHub Packages read access,
+   without copying its credential into the receipt. It deliberately does not install one complete workspace
    graph that could hide a missing published dependency.
 
    `release:sbom` creates a reproducible CycloneDX 1.6 release-build inventory.

@@ -28,11 +28,14 @@ published-core lockfile:
 
 Both receipt inventories passed `sha256sum -c SHA256SUMS`; the Docker images
 used the exact locked core version/integrity and made zero real inference
-requests. These source tests ran before the final clean release commit and do
-not claim exact-tag or native Windows qualification. The earlier patch-overlay
-candidate section below remains historical. Final artifact, consumer, Windows,
-backup/rollback and live three-generation receipts must be recorded separately
-before cutover.
+requests. All 16 packed packages passed separate role-scoped consumer import,
+declaration, executable, publint and Are the Types Wrong checks. The release
+build SBOM contained 507 components, including all 16 packages and 125 web
+bundle component identities. These source tests ran before the final clean
+release commit and do not claim exact-tag or native Windows qualification.
+The earlier patch-overlay candidate section below remains historical. Final
+signed artifact, external consumer, Windows, backup/rollback and live
+three-generation receipts must be recorded separately before cutover.
 
 ## Unpublished protocol-v6 Copilot lifecycle and consumer candidate — 2026-09-23
 

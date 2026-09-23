@@ -19,10 +19,6 @@ import { validateReleaseArtifactSet } from "./release-artifact-validation.mjs";
 
 const outputDirectory = resolve(repositoryRoot, process.argv[2] ?? "release-artifacts");
 const verifyRegistry = process.env.AGENT_MULTIPLEX_VERIFY_REGISTRY === "1";
-assert(
-  typeof process.env.NODE_AUTH_TOKEN === "string" && process.env.NODE_AUTH_TOKEN.length > 0,
-  "NODE_AUTH_TOKEN with GitHub Packages read access is required",
-);
 const { artifacts } = validateReleaseArtifactSet(outputDirectory);
 
 const publint = resolve(repositoryRoot, "node_modules/.bin/publint");
@@ -61,6 +57,7 @@ function verifyIsolatedConsumer(subject) {
           "esbuild@0.28.2": true,
           "fsevents@2.3.3": false,
           "koffi@3.2.1": true,
+          "koffi@3.3.1": true,
           "msgpackr-extract@3.0.4": true,
           "node-pty@1.1.0": true,
         },
@@ -85,7 +82,12 @@ function verifyIsolatedConsumer(subject) {
       "--strict-allow-scripts",
     ], {
       cwd: directory,
-      env: { ...process.env, NPM_CONFIG_USERCONFIG: npmrcPath },
+      // CI supplies NODE_AUTH_TOKEN through this temporary config. Local
+      // qualification may use npm's existing read-only user config instead.
+      env: {
+        ...process.env,
+        ...(process.env.NODE_AUTH_TOKEN ? { NPM_CONFIG_USERCONFIG: npmrcPath } : {}),
+      },
       timeout: 300_000,
     });
 
