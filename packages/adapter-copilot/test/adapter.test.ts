@@ -44,6 +44,7 @@ class NativeSession implements CopilotNativeSession {
 
 class Client implements CopilotAdapterClient {
   public started = false;
+  public forceStops = 0;
   public readonly created: SessionConfig[] = [];
   public readonly resumed: Array<{ sessionId: string; config: ResumeSessionConfig }> = [];
   public readonly sessions = new Map<string, NativeSession>();
@@ -52,7 +53,7 @@ class Client implements CopilotAdapterClient {
 
   public async start(): Promise<void> { this.started = true; }
   public async stop(): Promise<Error[]> { return []; }
-  public async forceStop(): Promise<void> {}
+  public async forceStop(): Promise<void> { this.forceStops += 1; }
   public async getStatus() { return { version: "1.0.79", protocolVersion: 7 }; }
   public async listModels(): Promise<ModelInfo[]> {
     return [{
@@ -165,6 +166,30 @@ describe("CopilotAgentAdapter", () => {
       },
     });
     await adapter.close();
+  });
+
+  it("force-stops the owned CLI when graceful native disconnect does not settle", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const adapter = adapterFor(client);
+      const session = await adapter.spawn({
+        harness: "copilot",
+        cwd: "/repo",
+        native: { sessionId: "stalled-disconnect" },
+      });
+      const native = client.sessions.get(session.vendorSessionId)!;
+      vi.spyOn(native, "disconnect").mockImplementation(() => new Promise(() => {}));
+      const closing = adapter.close();
+      const rejected = expect(closing).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+      expect(client.forceStops).toBe(1);
+      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      expect(client.forceStops).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("passes newly discovered stock Copilot models through without a static allowlist", async () => {

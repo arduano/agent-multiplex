@@ -48,6 +48,7 @@ import {
 } from "./session.js";
 
 export const COPILOT_SDK_VERSION = "1.0.14";
+export const COPILOT_GRACEFUL_SHUTDOWN_MS = 10_000;
 
 export interface CopilotRuntimeStatus {
   version: string;
@@ -98,6 +99,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #active = new Map<string, CopilotAdapterSession>();
   readonly #reads = new CopilotReadRequests();
   #startPromise: Promise<void> | undefined;
+  #closePromise: Promise<void> | undefined;
   #started = false;
   #closed = false;
 
@@ -382,28 +384,58 @@ export class CopilotAgentAdapter implements AgentAdapter {
     throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; the late native handle was detached");
   }
 
-  public async close(): Promise<void> {
-    if (this.#closed) return;
+  public close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
+    this.#closePromise = this.closeNativeRuntime();
+    return this.#closePromise;
+  }
+
+  private async closeNativeRuntime(): Promise<void> {
     const errors: unknown[] = [];
-    const stopped = await Promise.allSettled(
+    const gracefulDeadline = Date.now() + COPILOT_GRACEFUL_SHUTDOWN_MS;
+    const stopped = await settleWithin(
+      Promise.allSettled(
       [...this.#active.values()].map((session) => session.stop()),
+      ),
+      COPILOT_GRACEFUL_SHUTDOWN_MS,
     );
-    for (const result of stopped) {
-      if (result.status === "rejected") errors.push(result.reason);
+    let force = stopped.status !== "fulfilled";
+    if (stopped.status === "fulfilled") {
+      for (const result of stopped.value) {
+        if (result.status === "rejected") errors.push(result.reason);
+      }
+      force ||= errors.length > 0;
+    } else {
+      errors.push(stopped.status === "timedOut"
+        ? new Error("Copilot sessions did not disconnect within the graceful shutdown window")
+        : stopped.reason);
     }
     this.#active.clear();
     // A failed/eager UI-server probe may have constructed and started the
     // client without advancing this adapter's lazy-start flag. Always close
     // the client; stop implementations are required to be idempotent.
-    try {
-      errors.push(...(await this.#client.stop()));
-    } catch (error) {
-      errors.push(error);
-      try {
-        await this.#client.forceStop();
-      } catch (forceError) {
-        errors.push(forceError);
+    if (!force) {
+      const stoppedClient = await settleWithin(
+        this.#client.stop(),
+        Math.max(0, gracefulDeadline - Date.now()),
+      );
+      if (stoppedClient.status === "fulfilled") {
+        errors.push(...stoppedClient.value);
+        force = stoppedClient.value.length > 0;
+      } else {
+        force = true;
+        errors.push(stoppedClient.status === "timedOut"
+          ? new Error("Copilot CLI did not stop within the graceful shutdown window")
+          : stoppedClient.reason);
+      }
+    }
+    if (force) {
+      const forced = await settleWithin(this.#client.forceStop(), COPILOT_GRACEFUL_SHUTDOWN_MS);
+      if (forced.status !== "fulfilled") {
+        errors.push(forced.status === "timedOut"
+          ? new Error("Copilot CLI process termination could not be proved")
+          : forced.reason);
       }
     }
     if (errors.length > 0) throw new AggregateError(errors, "Failed to close Copilot adapter cleanly");
@@ -731,6 +763,28 @@ const COPILOT_CODEX_LB_MODELS: Record<string, {
     price: "medium",
   },
 };
+
+type TimedSettlement<T> =
+  | { status: "fulfilled"; value: T }
+  | { status: "rejected"; reason: unknown }
+  | { status: "timedOut" };
+
+function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<TimedSettlement<T>> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: TimedSettlement<T>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ status: "timedOut" }), Math.max(0, timeoutMs));
+    void promise.then(
+      value => finish({ status: "fulfilled", value }),
+      reason => finish({ status: "rejected", reason }),
+    );
+  });
+}
 
 function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabilities"] {
   const version = protocolVersion === undefined ? undefined : String(protocolVersion);
