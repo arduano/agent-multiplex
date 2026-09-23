@@ -39,8 +39,19 @@ and source patch SHA-256
 `c10c42e68be3807bcedd77e85b127ce5cf2eb218cad10793596b1cf559128cca`.
 The public dependency remains pinned to `0.2.1`; the candidate is a local
 overlay, not the final published package graph. Release packing deliberately
-blocks until independent publication and exact pin review. SDK `1.0.14` and CLI
-`1.0.88` are the selected current Copilot pins. Native Windows behavior,
+blocks until independent publication and exact pin review. A disposable Leo
+snapshot at clean commit `21280febf603e7c8e5eb398a32f074500dfc5c82`
+passed typecheck, build, **1,163 tests (one skip)** and 13 no-model Copilot
+delivery browser checks across six viewports with zero serious/critical axe
+findings. It physically extracted all 16 direct-packed framework artifacts
+from `1af20f6` and the renewed core. Its scrubbed receipt is
+`receipts/copilot-lifecycle-packed-graph/qualification-1af20f6-21280fe/`;
+`SHA256SUMS` SHA-256 is
+`8ce9375e7aeaf9f323ca00847c3473f1cedd9031f6d5c0f9cea5aa138473b632`.
+Third-party dependencies came from a local install, including a same-version
+compiled Linux `node-pty` binary, so this is a staged local graph test rather
+than a clean published-install qualification. SDK `1.0.14` and CLI `1.0.88`
+are the selected current Copilot pins. Native Windows behavior,
 account-specific GPT-6 Sol entitlement, native model turns, installed-host
 behavior and the coordinated maintenance window remain unqualified. No push,
 publication, production action or credential access was used.

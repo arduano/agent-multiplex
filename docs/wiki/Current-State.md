@@ -53,8 +53,9 @@ blocked.
 This combined candidate has no live/native-model, production, Windows, final
 published-transport-graph, or maintenance-window qualification and has not been
 published or deployed. Deterministic source qualification must be read from the
-final exact-source receipts; historical protocol-v5 release evidence does not
-qualify this boundary. The remaining release history below describes published
+final exact-source receipts in the [checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23);
+historical protocol-v5 release evidence does not qualify this boundary. The
+remaining release history below describes published
 boundaries, not this candidate.
 
 ## Retained catalog startup correction
