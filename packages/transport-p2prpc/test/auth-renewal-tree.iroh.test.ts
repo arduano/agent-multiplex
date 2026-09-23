@@ -143,7 +143,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     });
     await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: await root.createTicket() } });
     await runtime.connect({ endpointId: child.id, locator: { kind: "ticket", ticket: await child.createTicket() } });
-    await expect.poll(() => root?.getPeer(child!.id)).toBeDefined();
+    await expect.poll(() => root?.getPeer(child!.id), { timeout: 5_000 }).toBeDefined();
     await expect.poll(() => child?.getPeerAs<RuntimeNodeRouter>(runtime!.id)).toBeDefined();
     const childPeer = root.getPeer(child.id)!;
     const runtimePeer = child.getPeerAs<RuntimeNodeRouter>(runtime.id)!;
@@ -317,8 +317,12 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     await childPeer.close("disposable child network-loss test");
     await expect.poll(() => rootCatalog.getControlNode(childDescriptor.controlNodeId)?.presence).toBe("stale");
     expect(rootCatalog.getRuntimeNode(runtimeRegistration.runtimeNodeId)?.reachability).toBe("unreachable");
+    // The remote endpoint observes a physical close asynchronously. Reconnect
+    // only after its old outbound handle has retired; otherwise connect() can
+    // correctly return that still-live local handle before closure propagates.
+    await expect.poll(() => child?.getPeer(root!.id), { timeout: 5_000 }).toBeUndefined();
     await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: await root.createTicket() } });
-    await expect.poll(() => root?.getPeer(child!.id)).toBeDefined();
+    await expect.poll(() => root?.getPeer(child!.id), { timeout: 5_000 }).toBeDefined();
     await rootService.heartbeatChild({
       controlNodeId: childDescriptor.controlNodeId,
       controlNodeBootId: childDescriptor.controlNodeBootId,

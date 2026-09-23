@@ -1,6 +1,6 @@
 # Repository instructions for coding agents
 
-Agent Multiplex is a protocol-v5 distributed control plane. Before changing it,
+Agent Multiplex is a protocol-v6 distributed control plane. Before changing it,
 read the single fresh-session handoff at
 [`docs/wiki/Current-State.md`](docs/wiki/Current-State.md), then the topical
 guide and deep design for the role you are touching. Use
@@ -13,7 +13,7 @@ checkpoint is an evidence ledger, not a second onboarding document.
   harness adapter.
 - `apps/host` and `packages/host-core` are archived protocol-v2 evidence. Never
   import, repair, build, test, or use them as a v5 compatibility layer.
-- Protocol v5 has no `sessions.spawn`; public creation is `launches.create` via
+- Protocol v6 has no `sessions.spawn`; public creation is `launches.create` via
   an exact launch profile fence.
 - `@arduano/p2prpc-core` is an exact, independently released transport
   dependency. Use `../p2prpc` to develop and qualify transport changes, but do

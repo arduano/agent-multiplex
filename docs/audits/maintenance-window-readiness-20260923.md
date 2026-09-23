@@ -32,8 +32,29 @@ assets match the local verified bytes, and `SHA256SUMS` SHA-256 is
 Leo commit `d202e6a77be5c09c07cf439e6beaa9bff361ebf1` pins all 16 `.17`
 URLs/overrides and the published core; its clean install, typecheck, build,
 1,123 tests (one skip), high-severity audit gate, and 17/13/14 no-model browser
-checks pass. The readiness decision remains **no-go for live cutover** until
-disposable Windows UAT,
+checks pass. Framework CI
+[`35846878993`](https://github.com/arduano/agent-multiplex/actions/runs/35846878993)
+passed at `4e9cd7c89fd6a7c60f97ca09dbd98444a639a997`; hosted Docker
+[`35845951932`](https://github.com/arduano/agent-multiplex/actions/runs/35845951932)
+also passed. Leo's published-graph Windows
+[`35847256516`](https://github.com/arduano/leo-multiplex/actions/runs/35847256516)
+passed both npm 11.15.0 and 12.0.2 jobs at `d202e6a`; all eight downloaded
+receipt inventories passed `sha256sum -c SHA256SUMS`. Its later local Nix-only
+commit `92cf18aa8d461a81ea5ef16e893621f265c03a00` passed an offline
+`nix-build`, typecheck, build and 1,123 tests (one skip), but has no hosted
+exact-commit receipt.
+
+Framework Windows run
+[`35848271811`](https://github.com/arduano/agent-multiplex/actions/runs/35848271811)
+passed native startup, permission and task steps, then failed the real-Iroh
+tree's post-loss reconnect assertion. The test attempted reconnection before
+the remote endpoint had observed the asynchronously closing old handle. A
+local test correction waits for that closure and passed the focused Linux
+real-Iroh suite; Windows has not yet rerun on the corrected source. This is a
+failed diagnostic, not a passing Windows transport receipt.
+
+The readiness decision remains **no-go for live cutover** until the corrected
+framework Windows run, separately authorized synthetic Windows model UAT,
 stopped-state control **and** runtime backup/rollback rehearsal, ticket and
 locator rotation, and the 45-minute three-generation observation pass.
 
@@ -142,11 +163,9 @@ transport tests used local Iroh connections, not the live fleet.
   unproved. Portable tests do not establish Task Scheduler, job-object, ACL,
   sign-in, endpoint-security or installed CLI behavior. The historical
   session-specific Windows task-read failures have no proven native cause.
-- Leo's `apps/web/src/client/session-status.ts` status copy
-  describes Finished as a turn that "finished successfully". The lifecycle
-  contract establishes only observed non-aborted session settlement, not the
-  user's objective or per-command success. Correct that wording before operator
-  activation.
+- Leo's Copilot `Finished` copy now describes an observed settled turn and
+  invites result review. A separate Codex completion branch still says
+  "finished successfully"; it is not a Copilot lifecycle input.
 - SDK `1.0.14` / CLI `1.0.88` still lack a caller operation ID echoed across
   native work, a guaranteed root logical message ID, atomic task/queue cursors,
   complete pending-interaction hydration and per-command settlement. The
@@ -164,10 +183,12 @@ those facts proves that Copilot's irregular native Windows task-read stalls
 will disappear. In a degraded observation, mutation admission intentionally
 stops until the native state is fresh, trading availability for safe behavior.
 
-Before scheduling the window, fix and test the two confirmed lifecycle defects
-and the revision-race mismatch; publish and pin one complete graph; reconcile
-the combined migration/rollback guide; rehearse stopped-state backups and
-ticket/locator replacement; and qualify the exact installed bytes on Windows.
+The two confirmed lifecycle defects and revision-race mismatch are fixed and
+tested; one complete graph is published and pinned, and the combined rollback
+guide is reconciled. Before scheduling the window, complete corrected framework
+Windows qualification and synthetic model UAT, rehearse stopped-state backups
+and ticket/locator replacement, and qualify the exact installed bytes on the
+target Windows host.
 Observe real authentication generations across at least three expiry periods,
 unchanged logical boots/feeds, contiguous cursors, command receipts and native
 task reads. Any model-driven workload requires separate explicit authorization.

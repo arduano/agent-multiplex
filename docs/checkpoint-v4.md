@@ -53,6 +53,28 @@ framework SHA-512 matched this release manifest. The earlier patch-overlay
 candidate section below remains historical. Windows, stopped-state
 backup/rollback and live three-generation receipts remain cutover gates.
 
+Post-release framework CI
+[`35846878993`](https://github.com/arduano/agent-multiplex/actions/runs/35846878993)
+passed at `4e9cd7c89fd6a7c60f97ca09dbd98444a639a997`; hosted Docker
+[`35845951932`](https://github.com/arduano/agent-multiplex/actions/runs/35845951932)
+passed at `55c52ada16798a473e4fbf1e6bebd4a937e8fd6f`, with the same
+published package graph. Leo's published-graph Windows
+[`35847256516`](https://github.com/arduano/leo-multiplex/actions/runs/35847256516)
+passed at `d202e6a77be5c09c07cf439e6beaa9bff361ebf1` under npm 11.15.0
+and 12.0.2. Its eight downloaded installer, user-service, local-gateway and
+host receipt inventories passed `sha256sum -c SHA256SUMS`. Leo's later local
+Nix-only commit `92cf18aa8d461a81ea5ef16e893621f265c03a00` passed
+`nix-build nix/build-host.nix --no-out-link`, typecheck, build and 1,123 tests
+(one skip); it has no hosted exact-commit receipt.
+
+Framework Windows run
+[`35848271811`](https://github.com/arduano/agent-multiplex/actions/runs/35848271811)
+passed native startup, permission and task steps but failed the real-Iroh
+post-loss reconnect assertion. The corrected local test waits for the old
+outbound handle to retire before reconnecting; one focused Linux real-Iroh
+rerun passed. The failed workflow is diagnostic evidence, not Windows
+qualification for the corrected test or a native-model receipt.
+
 ## Unpublished protocol-v6 Copilot lifecycle and consumer candidate — 2026-09-23
 
 The clean framework implementation commit

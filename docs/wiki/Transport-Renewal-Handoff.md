@@ -90,8 +90,11 @@ No p2prpc consumer can remain on the old wire contract during the window.
    v6 commands or native side effects would discard receipts; reconcile those
    original IDs and prefer a forward fix. Never redispatch uncertain work.
 
-Remaining qualification: the final published framework/consumer graph,
-Windows/laptop behavior and the maintenance-window observation.
+The final published framework/consumer graph passed clean Linux checks and
+Leo's disposable no-model Windows host jobs. The framework's real-Iroh Windows
+post-loss reconnect test needs a passing rerun after its test synchronization
+fix. Installed Windows/laptop behavior, stopped-state control and runtime
+rollback rehearsal, and the maintenance-window observation remain open.
 Custom/OAuth providers must refresh early enough to advance grant expiry; scope
 changes or exhausted renewal deadlines fail closed. This release does not
 qualify or repair irregular Windows/native Copilot stalls.

@@ -12,7 +12,7 @@ Last reconciled: 2026-09-23 (protocol-v6 lifecycle with published transport rene
 The signed [`0.2.4-hotfix.17` prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-23.1)
 from source `6bb053cd05be66151114ecf397fd4143a0004512` declares protocol v6 as a coordinated clean break
 from protocol v5. Controls, runtimes, gateways, clients, and adapters must move
-together; there is no mixed-version compatibility branch. The latest published
+together; there is no mixed-version compatibility branch. Earlier published
 protocol-v5 packages and every retained release receipt keep their original
 scope.
 
@@ -57,8 +57,11 @@ The [evidence audit](../audits/copilot-lifecycle-vnext-audit.md) records which
 SDK and repository assumptions are confirmed, disproved, conditional, or still
 blocked.
 
-This signed graph has no live/native-model, production, Windows, installed-host,
-or maintenance-window qualification and has not been deployed. Its 16 tarballs
+This signed graph has no live/native-model, production, installed-host, or
+maintenance-window qualification and has not been deployed. Leo's published
+package graph passed disposable no-model Windows host jobs at its pinned source;
+the framework's real-Iroh Windows reconnect test still needs a passing rerun
+after a test synchronization fix. Its 16 tarballs
 and three metadata assets were independently downloaded and matched to the
 local verified bytes. Deterministic source qualification must be read from the
 published-core source and artifact receipts in the [checkpoint](../checkpoint-v4.md#published-core-protocol-v6-source-gate--2026-09-23);
@@ -67,18 +70,18 @@ remaining release history below describes earlier published boundaries.
 
 The [three-repository readiness audit](../audits/maintenance-window-readiness-20260923.md)
 records the initial **no-go** findings and dated closure updates. The lifecycle
-defects and published framework/consumer pins are fixed; Windows, stopped-state
-rollback and live renewal observation still determine cutover readiness.
+defects and published framework/consumer pins are fixed; corrected framework
+Windows qualification, synthetic Windows model UAT, stopped-state rollback and
+live renewal observation still determine cutover readiness.
 
 ## Retained catalog startup correction
 
-The `.15` candidate corrects a latent restart defect when a catalog has compacted
+The published `.15` prerelease corrected a latent restart defect when a catalog has compacted
 past cursor zero: publication initializes from its committed checkpoint before
 boot/recovery events. It also keeps slow authority initialization in one retained
 lane, exposes health during database open and rejects domain requests before
 initialization. Do not activate `.14` on retained roots; the previously published
 bytes remain immutable. Catalog, identities, receipts and durability are preserved.
-Validation/publication of the correction is in progress.
 
 ## Storage reliability prerelease
 
@@ -575,9 +578,9 @@ and gitignored.
   present.
 - Full lifecycle state stays private to the runtime. Catalog streams and the
   public read carry the same compact view; the reference web consumes that view.
-- The independently published p2prpc renewal release is pinned in this local
-  graph. Final published framework/consumer graph and installed-host
-  qualification remain open.
+- The independently published p2prpc renewal release and the signed framework
+  prerelease are pinned in the companion consumer graph. Installed-host
+  qualification remains open.
 
 Protocol v6 is an explicit compatibility boundary; released v4/v5 evidence
 remains historical. There is no partially adopted v2/v3 architecture to finish.
