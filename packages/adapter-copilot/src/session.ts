@@ -37,6 +37,8 @@ import { readPrimaryHistory, type CopilotEventLogReadRequest } from "./primary-h
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
 import { copilotLifecycleFacts } from "./lifecycle.js";
 
+export const COPILOT_SESSION_DISCONNECT_TIMEOUT_MS = 10_000;
+
 const HISTORY_CURSOR_PREFIX = "copilot:event-index:";
 const REVERSE_HISTORY_CURSOR_PREFIX = "copilot:event-before:";
 
@@ -786,14 +788,20 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#bridge.setStatus("stopped");
     this.#bridge.close();
     this.#onStopped();
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.#native.disconnect();
+      await Promise.race([
+        this.#native.disconnect(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("Copilot native disconnect timed out")), COPILOT_SESSION_DISCONNECT_TIMEOUT_MS);
+        }),
+      ]);
     } catch (cause) {
       throw new AdapterOutcomeUnknownError(
         `Copilot session ${this.vendorSessionId} may not have disconnected cleanly`,
         { cause },
       );
-    }
+    } finally { clearTimeout(timer); }
   }
 
   private assertActive(): void {

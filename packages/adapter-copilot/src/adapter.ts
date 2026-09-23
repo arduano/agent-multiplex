@@ -41,6 +41,7 @@ import { CopilotReadRequests } from "./reads.js";
 import {
   CopilotAdapterSession,
   CopilotSessionBridge,
+  COPILOT_SESSION_DISCONNECT_TIMEOUT_MS,
   elicitationResponse,
   exitPlanResponse,
   type CopilotNativeSession,
@@ -48,7 +49,7 @@ import {
 } from "./session.js";
 
 export const COPILOT_SDK_VERSION = "1.0.14";
-export const COPILOT_GRACEFUL_SHUTDOWN_MS = 10_000;
+export const COPILOT_GRACEFUL_SHUTDOWN_MS = COPILOT_SESSION_DISCONNECT_TIMEOUT_MS;
 
 export interface CopilotRuntimeStatus {
   version: string;
