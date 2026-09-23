@@ -72,7 +72,7 @@ describe("real-Iroh dynamic reverse bindings", () => {
       });
       const peer = await observer.connect({
         endpointId: source.id,
-        locator: { kind: "ticket", ticket: source.ticket() },
+        locator: { kind: "ticket", ticket: await source.createTicket() },
       });
 
       const reset = await peer.rpc.maximumReset.query();
@@ -157,7 +157,7 @@ describe("real-Iroh dynamic reverse bindings", () => {
       });
       const outboundPeer = await child.connect({
         endpointId: parent.id,
-        locator: { kind: "ticket", ticket: parent.ticket() },
+        locator: { kind: "ticket", ticket: await parent.createTicket() },
       });
       const firstInboundPeer = await waitForValue(
         () => parent?.getPeerAs<TestChildRouter>(child!.id),
@@ -294,7 +294,7 @@ describe("real-Iroh dynamic reverse bindings", () => {
       });
       const outboundPeer = await runtime.connect({
         endpointId: control.id,
-        locator: { kind: "ticket", ticket: control.ticket() },
+        locator: { kind: "ticket", ticket: await control.createTicket() },
       });
       const firstInboundPeer = await waitForValue(
         () => control?.getPeerAs<TestRuntimeRouter>(runtime!.id),

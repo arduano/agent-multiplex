@@ -187,7 +187,7 @@ describe("archive projection over real p2prpc transport", () => {
       });
       const peer = await controlNode.connect({
         endpointId: runtimeNode.id,
-        locator: { kind: "ticket", ticket: runtimeNode.ticket() },
+        locator: { kind: "ticket", ticket: await runtimeNode.createTicket() },
       });
       const connection = new P2PRuntimeNodeConnection(
         runtimeNodeId,

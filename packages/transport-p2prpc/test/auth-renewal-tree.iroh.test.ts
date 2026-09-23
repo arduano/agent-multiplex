@@ -138,8 +138,8 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
       limits: { shutdownTimeoutMs: 100 },
       createContext: (ctx) => ctx,
     });
-    await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: root.ticket() } });
-    await runtime.connect({ endpointId: child.id, locator: { kind: "ticket", ticket: child.ticket() } });
+    await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: await root.createTicket() } });
+    await runtime.connect({ endpointId: child.id, locator: { kind: "ticket", ticket: await child.createTicket() } });
     await expect.poll(() => root?.getPeer(child!.id)).toBeDefined();
     await expect.poll(() => child?.getPeerAs<RuntimeNodeRouter>(runtime!.id)).toBeDefined();
     const childPeer = root.getPeer(child.id)!;
@@ -283,7 +283,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     releaseCommand.resolve();
     await disconnection;
     await expect.poll(() => runtimeStore.getCommand(command.commandId)?.state).toBe("succeeded");
-    await runtime.connect({ endpointId: child.id, locator: { kind: "ticket", ticket: child.ticket() } });
+    await runtime.connect({ endpointId: child.id, locator: { kind: "ticket", ticket: await child.createTicket() } });
     await expect.poll(() => child?.getPeerAs<RuntimeNodeRouter>(runtime!.id)).toBeDefined();
     await expect(rootService.recoverCommand(command.commandId)).resolves.toMatchObject({ state: "succeeded" });
     expect(commandDispatches).toHaveBeenCalledTimes(1);
@@ -314,7 +314,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     await childPeer.close("disposable child network-loss test");
     await expect.poll(() => rootCatalog.getControlNode(childDescriptor.controlNodeId)?.presence).toBe("stale");
     expect(rootCatalog.getRuntimeNode(runtimeRegistration.runtimeNodeId)?.reachability).toBe("unreachable");
-    await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: root.ticket() } });
+    await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: await root.createTicket() } });
     await expect.poll(() => root?.getPeer(child!.id)).toBeDefined();
     await rootService.heartbeatChild({
       controlNodeId: childDescriptor.controlNodeId,
