@@ -60,19 +60,20 @@ blocked.
 This signed graph has no live/native-model, production, installed-host, or
 maintenance-window qualification and has not been deployed. Leo's published
 package graph passed disposable no-model Windows host jobs at its pinned source;
-the framework's real-Iroh Windows reconnect test still needs a passing rerun
-after a test synchronization fix. Its 16 tarballs
+the corrected framework source passed disposable no-model Windows startup,
+native task/permission, and real-Iroh renewal checks. Its 16 tarballs
 and three metadata assets were independently downloaded and matched to the
 local verified bytes. Deterministic source qualification must be read from the
-published-core source and artifact receipts in the [checkpoint](../checkpoint-v4.md#published-core-protocol-v6-source-gate--2026-09-23);
-historical protocol-v5 release evidence does not qualify this boundary. The
+published-core source and artifact receipts in the [checkpoint](../checkpoint-v4.md#published-core-protocol-v6-source-gate--2026-09-23).
+Follow-up CI is green at framework `2dde123` and Leo `a8b1a2f`.
+Historical protocol-v5 release evidence does not qualify this boundary. The
 remaining release history below describes earlier published boundaries.
 
 The [three-repository readiness audit](../audits/maintenance-window-readiness-20260923.md)
 records the initial **no-go** findings and dated closure updates. The lifecycle
-defects and published framework/consumer pins are fixed; corrected framework
-Windows qualification, synthetic Windows model UAT, stopped-state rollback and
-live renewal observation still determine cutover readiness.
+defects and published framework/consumer pins are fixed; synthetic Windows
+model UAT, stopped-state rollback and live renewal observation still determine
+cutover readiness.
 
 ## Retained catalog startup correction
 

@@ -41,20 +41,29 @@ also passed. Leo's published-graph Windows
 passed both npm 11.15.0 and 12.0.2 jobs at `d202e6a`; all eight downloaded
 receipt inventories passed `sha256sum -c SHA256SUMS`. Its later local Nix-only
 commit `92cf18aa8d461a81ea5ef16e893621f265c03a00` passed an offline
-`nix-build`, typecheck, build and 1,123 tests (one skip), but has no hosted
-exact-commit receipt.
+`nix-build`, typecheck, build and 1,123 tests (one skip). Its first exact-commit
+[CI](https://github.com/arduano/leo-multiplex/actions/runs/35849559861)
+failed one gateway test using Vitest's one-second worker-startup wait; both
+Windows host jobs passed. Follow-up `a8b1a2f5667e4126cf43f46248f4c663a1d6f78f`
+uses the five-second bound already present in that file's other startup tests.
+Its [exact-commit CI](https://github.com/arduano/leo-multiplex/actions/runs/35850282103)
+passed application, Windows installer, and both published-package Windows host
+jobs. All eight downloaded Windows receipt inventories passed
+`sha256sum -c SHA256SUMS`; host receipts identify the exact Leo source,
+framework `.17` source `6bb053cd05be66151114ecf397fd4143a0004512`,
+Windows x64 and zero model calls. The offline Nix build also passed at `a8b1a2f`.
 
 Framework Windows run
 [`35848271811`](https://github.com/arduano/agent-multiplex/actions/runs/35848271811)
-passed native startup, permission and task steps, then failed the real-Iroh
-tree's post-loss reconnect assertion. The test attempted reconnection before
-the remote endpoint had observed the asynchronously closing old handle. A
-local test correction waits for that closure and passed the focused Linux
-real-Iroh suite; Windows has not yet rerun on the corrected source. This is a
-failed diagnostic, not a passing Windows transport receipt.
+failed the real-Iroh tree's post-loss reconnect assertion because the test
+attempted reconnection before the remote endpoint observed the asynchronously
+closing old handle. Corrected source `2dde123508715cd59f8fa4d845030b4a4b9f94c7`
+passed exact-commit [CI](https://github.com/arduano/agent-multiplex/actions/runs/35849558841)
+and [Windows startup, native permission/task, and real-Iroh renewal checks](https://github.com/arduano/agent-multiplex/actions/runs/35849559080).
+All three downloaded Windows receipt inventories passed `sha256sum -c SHA256SUMS`.
 
-The readiness decision remains **no-go for live cutover** until the corrected
-framework Windows run, separately authorized synthetic Windows model UAT,
+The readiness decision remains **no-go for live cutover** until target-host
+Windows qualification, separately authorized synthetic model UAT,
 stopped-state control **and** runtime backup/rollback rehearsal, ticket and
 locator rotation, and the 45-minute three-generation observation pass.
 
@@ -185,10 +194,10 @@ stops until the native state is fresh, trading availability for safe behavior.
 
 The two confirmed lifecycle defects and revision-race mismatch are fixed and
 tested; one complete graph is published and pinned, and the combined rollback
-guide is reconciled. Before scheduling the window, complete corrected framework
-Windows qualification and synthetic model UAT, rehearse stopped-state backups
-and ticket/locator replacement, and qualify the exact installed bytes on the
-target Windows host.
+guide is reconciled. Corrected framework no-model Windows qualification passed.
+Before scheduling the window, complete synthetic model UAT, rehearse
+stopped-state backups and ticket/locator replacement, and qualify the exact
+installed bytes on the target Windows host.
 Observe real authentication generations across at least three expiry periods,
 unchanged logical boots/feeds, contiguous cursors, command receipts and native
 task reads. Any model-driven workload requires separate explicit authorization.

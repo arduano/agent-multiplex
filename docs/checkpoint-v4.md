@@ -50,7 +50,7 @@ URLs and overrides plus the independent core release. The clean URL graph
 passed typecheck, build, 1,123 tests/124 files (one skip), high-severity audit,
 and 17/13/14 no-model browser task/delivery/status checks. Every locked
 framework SHA-512 matched this release manifest. The earlier patch-overlay
-candidate section below remains historical. Windows, stopped-state
+candidate section below remains historical. Installed Windows/model UAT, stopped-state
 backup/rollback and live three-generation receipts remain cutover gates.
 
 Post-release framework CI
@@ -65,15 +65,46 @@ and 12.0.2. Its eight downloaded installer, user-service, local-gateway and
 host receipt inventories passed `sha256sum -c SHA256SUMS`. Leo's later local
 Nix-only commit `92cf18aa8d461a81ea5ef16e893621f265c03a00` passed
 `nix-build nix/build-host.nix --no-out-link`, typecheck, build and 1,123 tests
-(one skip); it has no hosted exact-commit receipt.
+(one skip). Its first exact-commit
+[CI run](https://github.com/arduano/leo-multiplex/actions/runs/35849559861)
+failed one gateway test with a one-second worker-startup wait; the two Windows
+published-package jobs passed, but the overall run remains a failed diagnostic.
+Follow-up `a8b1a2f5667e4126cf43f46248f4c663a1d6f78f` uses the five-second
+bound already used by that file's other worker-startup tests. The focused and
+full local suites passed, as did its [exact-commit CI](https://github.com/arduano/leo-multiplex/actions/runs/35850282103):
+application, Windows installer, and both published-package Windows host jobs.
+The eight downloaded Windows receipt inventories passed
+`sha256sum -c SHA256SUMS`. Both host receipts report `win32`/`x64`, zero model
+calls, exact Leo source `a8b1a2f`, and framework `.17` source
+`6bb053cd05be66151114ecf397fd4143a0004512`. The offline Nix build passed
+again at `a8b1a2f`.
+
+| Leo Windows receipt | npm 11.15.0 `SHA256SUMS` SHA-256 | npm 12.0.2 `SHA256SUMS` SHA-256 |
+| --- | --- | --- |
+| Installer | `6eafaabcd85d5b914c5be32c78a3b04931f3c5a2edb9690d3a229a2437bc10ef` | `2ed4ad95278c9551aa36900e1403e2b7d16abd70e83f481396f2d39bf45b87fb` |
+| Host | `356498af2e5432eeaf1d28425073c8d9af507b95bc8a8ad18e8811bafb21acd8` | `356498af2e5432eeaf1d28425073c8d9af507b95bc8a8ad18e8811bafb21acd8` |
+| Local gateway | `2a34b5f80de7a4c0ec76856abe75f4f84546ac5c1c26883e7344b973ee0bd2fb` | `0a986848a6638358ba53670cdb3d5c147ceb56c90d5be0771cdd55dbb2b7efca` |
+| User service | `c9030b7981ffa6cb46e1a4a3d77cfe9ac7973664b15bcae524a866c5e2cf3cf8` | `c9030b7981ffa6cb46e1a4a3d77cfe9ac7973664b15bcae524a866c5e2cf3cf8` |
 
 Framework Windows run
 [`35848271811`](https://github.com/arduano/agent-multiplex/actions/runs/35848271811)
 passed native startup, permission and task steps but failed the real-Iroh
 post-loss reconnect assertion. The corrected local test waits for the old
 outbound handle to retire before reconnecting; one focused Linux real-Iroh
-rerun passed. The failed workflow is diagnostic evidence, not Windows
-qualification for the corrected test or a native-model receipt.
+rerun passed. The failed workflow remains diagnostic evidence. Corrected
+framework source `2dde123508715cd59f8fa4d845030b4a4b9f94c7` passed
+[exact-commit CI](https://github.com/arduano/agent-multiplex/actions/runs/35849558841)
+and [no-model Windows startup, native permission/task, and real-Iroh renewal](https://github.com/arduano/agent-multiplex/actions/runs/35849559080).
+Its three downloaded receipt inventories passed `sha256sum -c SHA256SUMS`:
+
+| Windows artifact | `SHA256SUMS` SHA-256 |
+| --- | --- |
+| Copilot startup | `4cf2b65199b5fc310ce61496988142dd10d46a8725c68728dda031398aee6c88` |
+| Native permissions | `ec467fa594d3f9f3db2c7d53d621cc86b874fd68fbd2cba1462187d6579618f4` |
+| Native tasks | `47ba9b722fd9e3fd32ca2273770e9d4d464c10551d4494c9612d9c7dcea58553` |
+
+These are no-model Windows receipts, not native-model or installed-host
+qualification.
 
 ## Unpublished protocol-v6 Copilot lifecycle and consumer candidate — 2026-09-23
 
