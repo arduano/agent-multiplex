@@ -202,5 +202,13 @@ readable codex-lb config/key file, `bash packages/adapter-copilot/test/run-luna-
 uses a private glibc container, a read-only key mount, and a trusted CA bundle
 to send exactly one synthetic `gpt-6-luna` prompt. It checks the exact reply,
 whole-session idle, native-history retention, and intentionally partial
-child/interaction hydration on same-home resume. This is an adapter/SDK check,
-not a full control/gateway test or production-host deployment.
+child/interaction hydration on same-home resume. The related
+`native-exit-plan-smoke.mjs` exercises the real CLI's Plan tool with a
+synthetic decline and **zero** provider requests; in a no-network glibc
+container it must emit `exit_plan_mode.requested`, an adapter `exitPlan`
+interaction, then `exit_plan_mode.completed`. With the same private BYOK/CA
+mounts, `bash packages/adapter-copilot/test/run-luna-exit-plan-smoke.sh`
+sends **one** bounded `gpt-6-luna` prompt in Plan mode and checks the native
+request, exact adapter decision and whole-session idle. One prompt can involve
+several provider turns. These are adapter/SDK checks, not full control/gateway
+tests or production-host deployments.
