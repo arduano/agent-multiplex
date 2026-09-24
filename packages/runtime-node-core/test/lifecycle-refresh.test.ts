@@ -199,6 +199,81 @@ describe("server-owned Copilot lifecycle refresh", () => {
     });
   });
 
+  it.each([
+    { label: "send", command: { type: "send", prompt: "blocked send", mode: "enqueue" } },
+    { label: "steer", command: { type: "steer", prompt: "blocked steer", mode: "immediate" } },
+    { label: "settings", command: { type: "setMode", mode: "interactive" } },
+  ] as const)("rejects direct $label while interaction hydration is partial", async ({ label, command }) => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
+      ? { ...tasksResult, payload: { tasks: [] } }
+      : { ...queueResult, payload: { items: [], steeringMessages: [], inFlightSteeringCount: 0 } });
+    const execute = vi.spyOn(f.session, "execute");
+    const result = await f.service.execute({
+      commandId: newCommandId(),
+      payloadHash: `partial-hydration-${label}`,
+      sessionId: f.launch.sessionId,
+      runtimeNodeId: f.launch.runtimeNodeId,
+      bindingRevision: 1,
+      request: { harness: "copilot", command },
+    });
+    expect(result).toMatchObject({ state: "failed", error: { code: "UNAVAILABLE", certainty: "definiteFailure" } });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "send", command: { type: "send", prompt: "blocked send", mode: "enqueue" } },
+    { label: "steer", command: { type: "steer", prompt: "blocked steer", mode: "immediate" } },
+    { label: "settings", command: { type: "setMode", mode: "interactive" } },
+  ] as const)("rejects direct $label while a root callback is waiting", async ({ label, command }) => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
+      ? { ...tasksResult, payload: { tasks: [] } }
+      : { ...queueResult, payload: { items: [], steeringMessages: [], inFlightSteeringCount: 0 } });
+    f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    f.session.emit({ kind: "lifecycle", fact: { type: "rootStarted", cycleId: "waiting-cycle" } });
+    f.session.emit({ kind: "interaction", nativeRequestId: "waiting-input", lifecycleOwner: "root",
+      requestType: "userInput", payload: { question: "answer me" }, ephemeral: false, resolve: async () => undefined });
+    await vi.waitFor(async () => expect((await f.service.readLifecycle(f.launch.sessionId)).view.actions.send)
+      .toEqual({ available: false, reason: "waitingForInput" }));
+    const execute = vi.spyOn(f.session, "execute");
+    const result = await f.service.execute({
+      commandId: newCommandId(),
+      payloadHash: `waiting-callback-${label}`,
+      sessionId: f.launch.sessionId,
+      runtimeNodeId: f.launch.runtimeNodeId,
+      bindingRevision: 1,
+      request: { harness: "copilot", command },
+    });
+    expect(result).toMatchObject({ state: "failed", error: { code: "UNAVAILABLE" } });
+    expect(execute).not.toHaveBeenCalled();
+    const pending = f.service.listInteractions(f.launch.sessionId)[0]!;
+    await expect(f.service.resolveInteraction({ interactionId: pending.interactionId,
+      sessionId: f.launch.sessionId, harness: "copilot", response: { answer: "recovery remains available" } }))
+      .resolves.toMatchObject({ state: "resolved" });
+  });
+
+  it.each([
+    { label: "send", command: { type: "send", prompt: "blocked send", mode: "enqueue" } },
+    { label: "steer", command: { type: "steer", prompt: "blocked steer", mode: "immediate" } },
+    { label: "settings", command: { type: "setMode", mode: "interactive" } },
+  ] as const)("rejects direct $label after an event gap while preserving stop", async ({ label, command }) => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
+      ? { ...tasksResult, payload: { tasks: [] } }
+      : { ...queueResult, payload: { items: [], steeringMessages: [], inFlightSteeringCount: 0 } });
+    f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    f.session.emit({ kind: "lifecycle", fact: { type: "gap" } });
+    await vi.waitFor(async () => expect((await f.service.readLifecycle(f.launch.sessionId)).view.actions.send)
+      .toEqual({ available: false, reason: "interactionStateUnknown" }));
+    const execute = vi.spyOn(f.session, "execute");
+    const result = await f.service.execute({ commandId: newCommandId(), payloadHash: `event-gap-${label}`,
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "copilot", command } });
+    expect(result).toMatchObject({ state: "failed", error: { code: "UNAVAILABLE" } });
+    expect(execute).not.toHaveBeenCalled();
+    await expect(f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: `stop-after-gap-${label}`,
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1 }))
+      .resolves.toMatchObject({ state: "succeeded" });
+  });
+
   it("retries failed observations with bounded backoff until success without another invalidation", async () => {
     let taskReads = 0;
     const f = await fixture(async (_session, request) => {
@@ -437,6 +512,7 @@ describe("server-owned Copilot lifecycle refresh", () => {
       return request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult;
     });
     await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+    f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
     blocked = deferred<AdapterNativeStateResult>();
     f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
     await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("pending"));
@@ -527,6 +603,7 @@ describe("server-owned Copilot lifecycle refresh", () => {
         expect(state.tasks.observation.state).toBe("observed");
         expect(state.queue.observation.state).toBe("observed");
       });
+      f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
       blocked = deferred<AdapterNativeStateResult>();
       f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
       await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.revision).toBe(1));

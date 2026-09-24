@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  lifecycleActionAvailability,
   lifecycleProjection,
   lifecycleNativeObservationDegraded,
   lifecycleFactSchema,
@@ -40,6 +41,7 @@ import {
   type ArchiveRequest,
   type Harness,
   type HarnessCatalogEntry,
+  type HarnessCommand,
   type HarnessSessionSettings,
   type HarnessResumeOptions,
   type HarnessSpawnOptions,
@@ -939,8 +941,8 @@ export class RuntimeNodeService {
         if (!active) {
           throw new RuntimeNodeProtocolError("NOT_FOUND", "session is resumable but not active");
         }
-        this.#assertLifecycleMutationAvailable(active);
         harnessCommandSchema.parse(input.request);
+        this.#assertLifecycleCommandAvailable(active, input.request);
         this.#launchRegistry.backendForSession(record).adapter.imageCodec?.validateCommand?.(input.request);
         const reconstructed = await this.#reconstructImages(input, record);
         const request = await this.#nativePathPolicy.command(reconstructed);
@@ -2447,6 +2449,27 @@ export class RuntimeNodeService {
       throw new RuntimeNodeProtocolError(
         "UNAVAILABLE",
         "Copilot native observation is stalled; stop or recover this runtime before dispatching another mutation",
+      );
+    }
+  }
+
+  #assertLifecycleCommandAvailable(binding: ActiveBinding, request: HarnessCommand): void {
+    if (request.harness !== "copilot") return;
+    const action = request.command.type === "send" ? "send"
+      : request.command.type === "steer" ? "steer"
+        : request.command.type === "setModel" || request.command.type === "setMode" || request.command.type === "setPermissionMode"
+          ? "changeSettings" : undefined;
+    if (action === undefined) {
+      this.#assertLifecycleMutationAvailable(binding);
+      return;
+    }
+    const fence = this.#lifecycleFence(binding.sessionId, binding);
+    if (!fence) return;
+    const availability = lifecycleActionAvailability(this.#lifecycle.read(fence), action);
+    if (!availability.available) {
+      throw new RuntimeNodeProtocolError(
+        "UNAVAILABLE",
+        `Copilot ${action} is unavailable while lifecycle action policy reports ${availability.reason}`,
       );
     }
   }

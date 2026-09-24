@@ -257,6 +257,18 @@ describe("runtime-owned lifecycle dimensions", () => {
     s = step(s, { type: "interactionOpened", interaction: { id: "child-request", owner: "agent:child", kind: "permission" } });
     expect(projectLifecycle(s)).toBe("Unknown");
   });
+  it("fails send, steer, and settings closed when interaction absence is unknown", () => {
+    let s = ready();
+    s = step(s, { type: "interactionsHydrated", items: [], complete: false });
+    expect(lifecycleProjection(s).view.actions).toMatchObject({
+      send: { available: false, reason: "interactionStateUnknown" },
+      steer: { available: false, reason: "interactionStateUnknown" },
+      changeSettings: { available: false, reason: "interactionStateUnknown" },
+      stop: { available: true, reason: "available" },
+    });
+    s = step(s, { type: "gap" });
+    expect(lifecycleProjection(s).view.actions.send).toEqual({ available: false, reason: "interactionStateUnknown" });
+  });
   it("keeps an unattributed recovered permission positive without inventing root ownership or readiness", () => {
     let s = ready();
     s = step(s, { type: "interactionOpened", interaction: { id: "recovered-permission", owner: "unattributed", kind: "permission" } });

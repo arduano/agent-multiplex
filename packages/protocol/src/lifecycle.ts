@@ -329,7 +329,7 @@ export const lifecycleHealthSchema = z.object({
 export type LifecycleHealth = z.infer<typeof lifecycleHealthSchema>;
 
 export const lifecycleActionReasonSchema = z.enum([
-  "available", "hostOffline", "nativeObservationDegraded", "waitingForInput", "notWorking", "noPendingInteraction",
+  "available", "hostOffline", "nativeObservationDegraded", "interactionStateUnknown", "waitingForInput", "notWorking", "noPendingInteraction",
 ]);
 export const lifecycleActionAvailabilitySchema = z.object({
   available: z.boolean(),
@@ -364,6 +364,7 @@ export const runtimeLifecycleProjectionSchema = z.object({
   view: sessionLifecycleViewSchema,
 }).strict();
 export type RuntimeLifecycleProjection = z.infer<typeof runtimeLifecycleProjectionSchema>;
+export type LifecycleAction = keyof SessionLifecycleView["actions"];
 
 const observationNamespace = "bfb0cd00-6374-4c04-b7bf-f62f8fcedf79";
 
@@ -371,6 +372,41 @@ const observationNamespace = "bfb0cd00-6374-4c04-b7bf-f62f8fcedf79";
 export function lifecycleNativeObservationDegraded(state: LifecycleState): boolean {
   return state.nativeAdmission.state === "degraded" ||
     state.tasks.observation.stalled || state.queue.observation.stalled;
+}
+
+/** One pure policy owns both the published controls and runtime admission. */
+export function lifecycleActionAvailability(
+  state: LifecycleState,
+  action: LifecycleAction,
+): LifecycleActionAvailability {
+  const unavailable = (reason: Exclude<z.infer<typeof lifecycleActionReasonSchema>, "available">): LifecycleActionAvailability => ({ available: false, reason });
+  if (lifecycleNativeObservationDegraded(state)) return action === "stop"
+    ? { available: true, reason: "available" }
+    : unavailable("nativeObservationDegraded");
+  const rootWaiting = state.interactions.items.some((item) => item.owner === "root");
+  const interactionStateUnknown = state.continuity === "gap" ||
+    state.interactions.completeness === "partial" ||
+    state.interactions.items.some((item) => item.owner === "unattributed");
+  switch (action) {
+    case "send":
+    case "changeSettings":
+      return rootWaiting ? unavailable("waitingForInput")
+        : interactionStateUnknown ? unavailable("interactionStateUnknown")
+          : { available: true, reason: "available" };
+    case "steer":
+      return rootWaiting ? unavailable("waitingForInput")
+        : interactionStateUnknown ? unavailable("interactionStateUnknown")
+          : state.root.phase === "working" ? { available: true, reason: "available" }
+            : unavailable("notWorking");
+    case "interrupt":
+      return state.root.phase === "working" ? { available: true, reason: "available" }
+        : unavailable("notWorking");
+    case "resolveInteraction":
+      return rootWaiting ? { available: true, reason: "available" }
+        : unavailable("noPendingInteraction");
+    case "stop":
+      return { available: true, reason: "available" };
+  }
 }
 
 export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProjection {
@@ -395,10 +431,6 @@ export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProj
     state: stalled ? "degraded" : issues.length > 0 ? "recovering" : "healthy",
     issues,
   };
-  const rootWaiting = state.interactions.items.some((item) => item.owner === "root");
-  const available = (): LifecycleActionAvailability => ({ available: true, reason: "available" });
-  const unavailable = (reason: Exclude<z.infer<typeof lifecycleActionReasonSchema>, "available">): LifecycleActionAvailability => ({ available: false, reason });
-  const mutable = stalled ? unavailable("nativeObservationDegraded") : rootWaiting ? unavailable("waitingForInput") : available();
   const view: SessionLifecycleView = {
     version: LIFECYCLE_VERSION,
     observationId: uuidv5(`${state.fence.sessionId}:${state.fence.runtimeNodeId}:${state.fence.runtimeNodeBootId}:${state.fence.bindingRevision}:${state.fence.runtimeEpoch}:${state.nextSequence}`, observationNamespace),
@@ -411,16 +443,12 @@ export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProj
                 : label === "Working" || label === "Queued" ? "working" : "unknown",
     health,
     actions: {
-      send: mutable,
-      steer: stalled ? unavailable("nativeObservationDegraded")
-        : rootWaiting ? unavailable("waitingForInput")
-          : state.root.phase === "working" ? available() : unavailable("notWorking"),
-      interrupt: stalled ? unavailable("nativeObservationDegraded")
-        : state.root.phase === "working" ? available() : unavailable("notWorking"),
-      changeSettings: mutable,
-      resolveInteraction: stalled ? unavailable("nativeObservationDegraded")
-        : rootWaiting ? available() : unavailable("noPendingInteraction"),
-      stop: available(),
+      send: lifecycleActionAvailability(state, "send"),
+      steer: lifecycleActionAvailability(state, "steer"),
+      interrupt: lifecycleActionAvailability(state, "interrupt"),
+      changeSettings: lifecycleActionAvailability(state, "changeSettings"),
+      resolveInteraction: lifecycleActionAvailability(state, "resolveInteraction"),
+      stop: lifecycleActionAvailability(state, "stop"),
     },
   };
   return { version: LIFECYCLE_VERSION, fence: state.fence, nextSequence: state.nextSequence, view };

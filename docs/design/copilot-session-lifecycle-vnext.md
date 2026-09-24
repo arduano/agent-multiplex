@@ -233,6 +233,14 @@ while the independent action projection may still permit `send`, settings change
 and stop. Web controls consume those action flags directly rather than deriving
 admission from the status label.
 
+The runtime uses the same pure action policy for command admission that it
+publishes to clients. `send`, `steer`, and settings changes fail closed while a
+root callback is waiting, interaction hydration is partial, an interaction has
+unattributed ownership, or lifecycle continuity has a gap. This prevents a
+direct API caller from bypassing disabled web controls. Exact interaction
+resolution and Stop remain available recovery paths when their own action flags
+permit them.
+
 ### Command admission and delivery
 
 | Fact | Transition |
