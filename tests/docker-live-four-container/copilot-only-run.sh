@@ -443,7 +443,8 @@ done
 for hidden in "$CONTROL_CONTAINER" "$RUNTIME_CONTAINER"; do [[ -z $(docker port "$hidden" 2>/dev/null) ]] || fail "$hidden publishes a host port"; done
 
 note "dispatching the one authorized gpt-6-luna synthetic prompt"
-AGENT_MULTIPLEX_COPILOT_ONLY_BEARER_TOKEN_FILE="$RUNTIME_DIR/access-token" \
+env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
+  NODE_USE_ENV_PROXY=0 AGENT_MULTIPLEX_COPILOT_ONLY_BEARER_TOKEN_FILE="$RUNTIME_DIR/access-token" \
   timeout "$((TIMEOUT_MS * 3 / 1000 + 120))s" node "$SCRIPT_DIR/copilot-only-driver.mjs" \
   "$TRPC_URL" "$RECEIPT_DIR" "$RUN_ID" "$RUNTIME_NAME" "$TIMEOUT_MS" \
   >"$RECEIPT_DIR/logs/driver.log" 2>&1 || { tail -n 100 "$RECEIPT_DIR/logs/driver.log" >&2; fail "driver failed"; }
