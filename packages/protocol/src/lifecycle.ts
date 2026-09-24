@@ -301,12 +301,13 @@ export function projectLifecycle(s: LifecycleState, online = true): LifecycleLab
   if (s.root.phase === "working") return "Working";
   // A root failure/interruption does not settle independent background work.
   // Keep positively observed tasks and children visible until their own evidence clears.
-  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running" || t.status === "idle") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
+  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
   if (s.queue.observation.state === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
   if (s.aggregateActivity === "active") return "Unknown";
-  // A disconnected client task has not reported a terminal outcome. Unlike a
-  // running/idle task it cannot be claimed as positively active either.
-  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "orphaned")) return "Unknown";
+  // Idle tasks await input rather than execute, and an orphaned client has an
+  // unknown executor outcome. Neither proves current background work or a
+  // terminal root; avoid an animated Working or a false Ready/Finished claim.
+  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "idle" || t.status === "orphaned")) return "Unknown";
   if (s.root.outcome === "failed") return "Failed";
   if (s.root.outcome === "interrupted") return "Interrupted";
   if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.interactions.items.some((i) => i.owner === "unattributed") || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";

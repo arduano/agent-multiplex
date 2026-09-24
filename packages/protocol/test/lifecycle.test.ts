@@ -100,9 +100,9 @@ describe("runtime-owned lifecycle dimensions", () => {
       for (const kind of ["agent", "shell", "client"] as const) {
         const idle = step(base, { type: "tasksObserved", revision: 0,
           items: [{ id: `idle-${kind}`, kind, status: "idle" }] });
-        expect(projectLifecycle(idle)).toBe("Waiting for child/task");
+        expect(projectLifecycle(idle)).toBe("Unknown");
         expect(lifecycleProjection(idle).view).toMatchObject({
-          status: "waitingForBackground",
+          status: "unknown",
           actions: { stop: { available: true, reason: "available" } },
         });
       }
