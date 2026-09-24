@@ -110,13 +110,12 @@ try {
     {
       cwd: "/workspace/project",
       model,
-      reasoningEffort: "medium",
       mode: "plan",
       native: {
         enableConfigDiscovery: false,
         tools: [],
-        availableTools: [],
-        excludedTools: ["builtin:*", "mcp:*", "custom:*"],
+        availableTools: ["exit_plan_mode"],
+        excludedTools: ["mcp:*", "custom:*"],
         toolSearch: { enabled: false },
         requestCanvasRenderer: false,
         requestExtensions: false,
@@ -208,9 +207,15 @@ try {
     const requested = await waitFor("matching native exit_plan_mode.requested", timeoutMs, async () =>
       nativeEvents.find((event) =>
         event.sessionId === sessionId && event.nativeType === "exit_plan_mode.requested" &&
-        event.payload?.data?.requestId === interaction.nativeRequestId
+        typeof event.payload?.json?.data?.requestId === "string" &&
+        event.payload?.json?.data?.planContent?.includes(marker)
       )
     );
+    // The SDK callback intentionally omits requestId. Correlate one bounded
+    // pending approval by session and unique plan marker, then fence native
+    // completion with the requestId from the exact native requested event.
+    assert(!interaction.nativeRequestId || interaction.nativeRequestId === requested.payload.json.data.requestId,
+      "gateway interaction disagrees with the native plan request identity");
     const resolved = await handle.client.interactions.resolve.mutate({
       interactionId: interaction.interactionId,
       sessionId: interaction.sessionId,
@@ -227,9 +232,9 @@ try {
     const completed = await waitFor("matching native exit_plan_mode.completed", timeoutMs, async () =>
       nativeEvents.find((event) =>
         event.sessionId === sessionId && event.nativeType === "exit_plan_mode.completed" &&
-        event.payload?.data?.requestId === interaction.nativeRequestId &&
-        event.payload?.data?.approved === true &&
-        event.payload?.data?.selectedAction === "exit_only"
+        event.payload?.json?.data?.requestId === requested.payload.json.data.requestId &&
+        event.payload?.json?.data?.approved === true &&
+        event.payload?.json?.data?.selectedAction === "exit_only"
       )
     );
     streamed = await waitFor("exact native reply followed by root idle", timeoutMs, async () =>
@@ -239,7 +244,7 @@ try {
       observed: true,
       listedPendingBeforeResolution: true,
       interactionId: interaction.interactionId,
-      nativeRequestId: interaction.nativeRequestId,
+      nativeRequestId: requested.payload.json.data.requestId,
       nativeRequestedSequence: requested.sequence,
       resolvedExactly: true,
       nativeCompletedSequence: completed.sequence,
@@ -349,7 +354,7 @@ try {
 function exactReplyAndIdle(events, expectedSessionId, expectedContent) {
   const reply = events.find((event) =>
     event.sessionId === expectedSessionId && event.nativeType === "assistant.message" &&
-    event.payload?.data?.content === expectedContent
+    event.payload?.json?.data?.content === expectedContent
   );
   if (!reply) return undefined;
   const idle = events.find((event) =>

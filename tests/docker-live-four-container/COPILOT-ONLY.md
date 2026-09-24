@@ -79,7 +79,9 @@ without the callback, the pending receipt is an empty list and `result.json`
 records `exitPlan.observed:false` without weakening the create/send/reply,
 security, or cleanup checks.
 
-This remains model-directed because the pinned Copilot SDK has no supported
-zero-model API for creating a genuine pending `exitPlan` request. The harness
-never fabricates an adapter event merely to make the gateway test pass.
-Stop/resume still requires no additional model request.
+This remains model-directed through the public gateway: Multiplex does not
+expose arbitrary native tool execution to a fleet client. The separate
+`native-exit-plan-smoke.mjs` exercises the real SDK's local tool API with zero
+model requests, but cannot by itself prove control/gateway interaction
+admission. This harness never fabricates an adapter event merely to make that
+admission pass. Stop/resume requires no additional model request.
