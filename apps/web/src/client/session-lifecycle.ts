@@ -31,7 +31,7 @@ export function sessionLifecycleLabel(session: SessionRecord, online = true): Se
     if (!online || session.availability !== "active") return "Offline";
     if (!session.lifecycle) return "Unknown";
     if (session.lifecycle.status === "unknown" && session.lifecycle.health.state === "recovering" &&
-        session.lifecycle.health.issues.some((issue) => issue.code === "incompleteNativeState" || issue.code === "observationPending" || issue.code === "observationRetrying")) {
+        session.lifecycle.health.issues.some((issue) => issue.code === "incompleteNativeState")) {
       return "Recovery unverified";
     }
     return labels[session.lifecycle.status];

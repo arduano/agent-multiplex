@@ -30,7 +30,7 @@ function copilot(
 describe("Copilot lifecycle labels", () => {
   it("distinguishes online recovery without complete native evidence from Ready", () => {
     expect(sessionLifecycleLabel(copilot("unknown", ["incompleteNativeState"]), true)).toBe("Recovery unverified");
-    expect(sessionLifecycleLabel(copilot("unknown", ["observationPending"]), true)).toBe("Recovery unverified");
+    expect(sessionLifecycleLabel(copilot("unknown", ["observationPending"]), true)).toBe("Unknown");
     expect(sessionLifecycleLabel(copilot("ready"), true)).toBe("Ready");
   });
 

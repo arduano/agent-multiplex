@@ -78,6 +78,18 @@ describe("runtime-owned lifecycle dimensions", () => {
     s = step(s, { type: "queueObserved", revision: 0, items: [{ id: "q", kind: "queued" }], unidentifiedSteering: 0, inFlightSteering: 0 });
     expect(projectLifecycle(s)).toBe("Queued");
   });
+  it("keeps observed background work visible after root failure or interruption", () => {
+    for (const terminal of ["failed", "interrupted"] as const) {
+      let s = ready();
+      s = step(s, { type: "rootStarted", cycleId: `root-${terminal}` });
+      s = step(s, { type: "tasksObserved", revision: 0, items: [{ id: "live-shell", kind: "shell", status: "running" }] });
+      if (terminal === "failed") s = step(s, { type: "rootFailed" });
+      s = step(s, { type: "rootIdle", aborted: terminal === "interrupted" });
+      expect(projectLifecycle(s)).toBe("Waiting for child/task");
+      s = step(s, { type: "tasksObserved", revision: 0, items: [] });
+      expect(projectLifecycle(s)).toBe(terminal === "failed" ? "Failed" : "Interrupted");
+    }
+  });
   it("rejects stale empty snapshots after invalidation and does not invent completion on errors", () => {
     let s = ready();
     s = step(s, { type: "rootStarted", cycleId: "start" });
