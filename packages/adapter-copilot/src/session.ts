@@ -73,6 +73,7 @@ export interface CopilotSessionRpc {
   };
   permissions?: {
     getMode(): Promise<unknown>;
+    pendingRequests?(): Promise<unknown>;
     setMode(input: { mode: "manual" | "allow-all" }): Promise<unknown>;
     handlePendingPermissionRequest(input: { requestId: string; result: Exclude<PermissionRequestResult, { kind: "no-result" }> }): Promise<unknown>;
   };
@@ -259,6 +260,28 @@ export class CopilotSessionBridge {
     this.#permissionsChanged?.();
   }
 
+  /** Import only the permission kind that the pinned native RPC can enumerate.
+   * Other callback kinds remain deliberately unverified after resume. */
+  public hydratePendingPermissions(value: unknown): void {
+    if (!isObject(value) || !Array.isArray(value.items) || value.items.length > 256 ||
+        jsonWireByteUpperBound(value) + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
+      throw new TypeError("Unrecognized Copilot pending-permission snapshot");
+    }
+    const items = value.items.map((item) => {
+      if (!isObject(item) || typeof item.requestId !== "string" || item.requestId.length === 0 || item.requestId.length > 4_096 || !isObject(item.request)) {
+        throw new TypeError("Unrecognized Copilot pending-permission snapshot");
+      }
+      copilotJson(item.request);
+      return { requestId: item.requestId, request: item.request };
+    });
+    for (const item of items) {
+      // The session-scoped RPC does not expose child ownership. Preserve that
+      // uncertainty instead of fabricating root ownership. Concurrent
+      // completion or callback replay wins through the exact-ID guards.
+      this.registerPermission(item.requestId, item.request, false, undefined, true);
+    }
+  }
+
   public setStatus(status: SessionRuntimeStatus): void {
     if (this.#closed) return;
     this.#activityRevision += 1;
@@ -349,12 +372,16 @@ export class CopilotSessionBridge {
     const { requestId, permissionRequest, resolvedByHook } = event.data;
     if (resolvedByHook || typeof requestId !== "string" || !requestId || !permissionRequest || typeof permissionRequest !== "object") return;
     const owner = eventOwner(event);
+    this.registerPermission(requestId, permissionRequest, owner !== undefined, owner);
+  }
+  private registerPermission(requestId: string, permissionRequest: object, child: boolean, owner?: string, unattributed = false): void {
     const nativeRequestId = permissionIdentity(requestId, owner);
     if (this.#permissions.has(nativeRequestId) || this.#completedPermissions.has(nativeRequestId)) return;
-    const pending: PendingPermission = { requestId, nativeRequestId, child: owner !== undefined, resolving: false, completed: false };
+    const pending: PendingPermission = { requestId, nativeRequestId, child, resolving: false, completed: false };
     this.#permissions.set(nativeRequestId, pending);
     if (!pending.child) this.setStatus("waitingForInput");
     this.emit({ kind: "interaction", requestType: "permission", nativeRequestId, ephemeral: false,
+      ...(unattributed ? { lifecycleOwner: "unattributed" as const } : {}),
       payload: copilotJson({ permissionRequest, requestId, ...(owner === undefined ? {} : { agentId: owner }) }),
       resolve: async (response) => {
         if (this.#closed || pending.completed || this.#permissions.get(nativeRequestId) !== pending) throw new Error("Copilot permission request is no longer pending");
@@ -532,6 +559,20 @@ export class CopilotAdapterSession implements AdapterSession {
       this.#bridge.observePermissions(result, generation);
     } catch (error) {
       if (!(error instanceof CopilotReadBusyError)) this.#bridge.observePermissions(undefined, generation);
+    }
+  }
+
+  /** Resume-only reconciliation for the one ephemeral interaction kind the
+   * pinned CLI can enumerate. Failure leaves interaction hydration partial. */
+  public async readPendingPermissions(): Promise<void> {
+    const read = this.#native.rpc.permissions?.pendingRequests;
+    if (typeof read !== "function") return;
+    try {
+      const result = await this.read("pendingPermissions", "", () => read.call(this.#native.rpc.permissions));
+      this.#bridge.hydratePendingPermissions(result);
+    } catch {
+      // An absent, failed, stale or malformed snapshot cannot prove emptiness.
+      // The resume baseline remains partial and live positive callbacks still win.
     }
   }
 

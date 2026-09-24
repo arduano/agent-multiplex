@@ -11,7 +11,7 @@ describe("web lifecycle projection", () => {
     expect(sessionLifecycleLabel(session({}))).toBe("Unknown");
     expect(sessionLifecycleLabel(session({ lifecycle: { status: "waitingForBackground" } as SessionRecord["lifecycle"] }))).toBe("Waiting for child/task");
     expect(sessionLifecycleLabel(session({ lifecycle: { status: "offline" } as SessionRecord["lifecycle"] }))).toBe("Offline");
-    expect(sessionLifecycleLabel(session({ availability: "resumable" }))).toBe("Unknown");
+    expect(sessionLifecycleLabel(session({ availability: "resumable" }))).toBe("Offline");
   });
 
   it("keeps non-Copilot sessions usable and ranks actionable lifecycle states first", () => {

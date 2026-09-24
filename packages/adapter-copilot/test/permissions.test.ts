@@ -25,6 +25,7 @@ async function fixture(options: { beforeAttach?: (rpc: CopilotSessionRpc, emit: 
   let state = { mode: "manual" as "manual" | "allow-all" | "assisted" };
   const permissions = {
     getMode: vi.fn(async (): Promise<unknown> => ({ ...state })),
+    pendingRequests: vi.fn(async (): Promise<unknown> => ({ items: [] })),
     setMode: vi.fn(async ({ mode }: { mode: "manual" | "allow-all" }): Promise<unknown> => {
       state = { mode }; return { success: true, ...state };
     }),
@@ -75,6 +76,47 @@ describe("Copilot native allow-all permissions", () => {
     expect(resumed.settings?.()?.copilotPermissions).toEqual({ mode: "allow-all" });
     expect(f.permissions.getMode).toHaveBeenCalledTimes(2);
     expect(f.permissions.setMode).not.toHaveBeenCalled();
+  });
+
+  it("hydrates exact pending permissions on resume without claiming all-kind completeness", async () => {
+    const f = await fixture();
+    f.permissions.pendingRequests.mockResolvedValueOnce({
+      items: [{ requestId: "recovered-permission", request: readRequest }],
+    });
+    const resumed = await f.adapter.resume({ harness: "copilot", vendorSessionId: f.session.vendorSessionId, cwd: "/repo", continuePendingWork: false });
+    const events: AdapterEvent[] = [];
+    resumed.subscribe(item => events.push(item));
+    expect(events).toContainEqual({
+      kind: "lifecycle",
+      fact: { type: "interactionsHydrated", items: [], complete: false },
+    });
+    const recovered = events.find(item => item.kind === "interaction" && item.nativeRequestId === "recovered-permission");
+    expect(recovered).toMatchObject({ kind: "interaction", requestType: "permission", lifecycleOwner: "unattributed" });
+    if (!recovered || recovered.kind !== "interaction") throw new Error("Expected recovered permission");
+    await recovered.resolve({ kind: "approve-once" });
+    expect(f.permissions.handlePendingPermissionRequest).toHaveBeenCalledWith({
+      requestId: "recovered-permission",
+      result: { kind: "approve-once" },
+    });
+  });
+
+  it("lets an exact completion beat a racing resume snapshot and keeps malformed snapshots unverified", async () => {
+    const f = await fixture();
+    f.permissions.pendingRequests.mockImplementationOnce(async () => {
+      f.emit("permission.completed", { requestId: "already-complete", result: { kind: "approved" } });
+      return { items: [{ requestId: "already-complete", request: readRequest }] };
+    });
+    const resumed = await f.adapter.resume({ harness: "copilot", vendorSessionId: f.session.vendorSessionId, cwd: "/repo", continuePendingWork: false });
+    const raced: AdapterEvent[] = [];
+    resumed.subscribe(item => raced.push(item));
+    expect(raced.some(item => item.kind === "interaction" && item.nativeRequestId === "already-complete")).toBe(false);
+
+    f.permissions.pendingRequests.mockResolvedValueOnce({ items: "not-a-complete-list" });
+    const malformed = await f.adapter.resume({ harness: "copilot", vendorSessionId: f.session.vendorSessionId, cwd: "/repo", continuePendingWork: false });
+    const events: AdapterEvent[] = [];
+    malformed.subscribe(item => events.push(item));
+    expect(events).toContainEqual({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: false } });
+    expect(events.some(item => item.kind === "interaction")).toBe(false);
   });
 
   it("acknowledges on/off without changing interactive/plan/autopilot mode", async () => {

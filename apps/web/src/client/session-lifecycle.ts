@@ -4,6 +4,7 @@ export type LifecycleTone = "good" | "warn" | "bad" | "neutral";
 export type SessionLifecycleLabel =
   | "Offline"
   | "Unknown"
+  | "Recovery unverified"
   | "Waiting for input"
   | "Failed"
   | "Interrupted"
@@ -27,7 +28,13 @@ const labels = {
 /** Use the runtime-owned Copilot projection and fail closed if it is absent. */
 export function sessionLifecycleLabel(session: SessionRecord, online = true): SessionLifecycleLabel {
   if (session.harness === "copilot") {
-    return session.lifecycle ? labels[session.lifecycle.status] : "Unknown";
+    if (!online || session.availability !== "active") return "Offline";
+    if (!session.lifecycle) return "Unknown";
+    if (session.lifecycle.status === "unknown" && session.lifecycle.health.state === "recovering" &&
+        session.lifecycle.health.issues.some((issue) => issue.code === "incompleteNativeState" || issue.code === "observationPending" || issue.code === "observationRetrying")) {
+      return "Recovery unverified";
+    }
+    return labels[session.lifecycle.status];
   }
   if (!online || session.availability !== "active") return "Offline";
   switch (session.runtimeStatus) {
@@ -60,7 +67,7 @@ export function lifecycleTone(label: SessionLifecycleLabel): LifecycleTone {
 export function lifecycleRank(label: SessionLifecycleLabel): number {
   if (label === "Waiting for input") return 0;
   if (label === "Working" || label === "Waiting for child/task") return 1;
-  if (label === "Failed" || label === "Interrupted" || label === "Unknown") return 3;
+  if (label === "Failed" || label === "Interrupted" || label === "Unknown" || label === "Recovery unverified") return 3;
   if (label === "Ready" || label === "Finished") return 4;
   return 5;
 }

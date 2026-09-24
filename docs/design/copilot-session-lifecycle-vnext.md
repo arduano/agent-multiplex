@@ -216,6 +216,15 @@ its beginning; later positive callback facts extend that set. Resume emits a
 partial baseline because the SDK cannot enumerate ephemeral requests that may
 already have been pruned. A reconnect snapshot may claim `complete` only when a
 native source enumerates every pending kind and owner for this exact binding.
+The pinned CLI exposes `session.permissions.pendingRequests`, so resume imports
+those permission prompts by exact request ID and fences them against live
+completion/callback events. The RPC omits root/child ownership, so imported
+items remain explicitly unattributed and cannot establish Ready. It also does
+not expose one authoritative snapshot for pending user-input, elicitation,
+exit-plan, and child callbacks. Consequently a successful empty permission read
+remains partial; a vendor API enumerating all pending kinds with exact owner and
+request identity is required before resumed interaction hydration may become
+complete.
 
 ### Command admission and delivery
 

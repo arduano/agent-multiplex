@@ -55,6 +55,8 @@ export interface AdapterNativeEvent {
 export interface AdapterInteractionEvent {
   kind: "interaction";
   nativeRequestId?: string;
+  /** Used only when a native recovery snapshot omits root/child ownership. */
+  lifecycleOwner?: "unattributed";
   requestType:
     | "approval"
     | "permission"

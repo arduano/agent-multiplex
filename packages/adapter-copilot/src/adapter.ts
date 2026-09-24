@@ -370,7 +370,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await Promise.all([session.readPermissions(), session.readModel(), session.readMode(), session.readActivity()]);
+    await Promise.all([
+      session.readPermissions(),
+      session.readPendingPermissions(),
+      session.readModel(),
+      session.readMode(),
+      session.readActivity(),
+    ]);
     if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the resumed session could be returned");
     return session;
   }

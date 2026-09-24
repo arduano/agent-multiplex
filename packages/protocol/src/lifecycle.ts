@@ -28,6 +28,7 @@ const childIdentitySchema = z.string().min(6).max(4_096).regex(/^(agent|tool):.+
 const childSchema = z.object({ id: childIdentitySchema, state: z.enum(["running", "settled", "completed", "failed", "unknown"]) }).strict();
 const lifecycleOwnerSchema = z.union([
   z.literal("root"),
+  z.literal("unattributed"),
   z.string().min(6).max(4_096).regex(/^(agent|tool):.+$/, "child owner must carry its identity namespace"),
 ]);
 const interactionSchema = z.object({ id: opaqueId, owner: lifecycleOwnerSchema, kind: z.enum(["permission", "userInput", "elicitation", "exitPlan", "other"]) }).strict();
@@ -295,7 +296,7 @@ export function projectLifecycle(s: LifecycleState, online = true): LifecycleLab
   if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
   if (s.queue.observation.state === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
   if (s.aggregateActivity === "active") return "Unknown";
-  if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
+  if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.interactions.items.some((i) => i.owner === "unattributed") || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
   return s.root.outcome === "finished" ? "Finished" : "Ready";
 }
 export function projectDelivery(command: LifecycleCommand, state: LifecycleState): "Prepared" | "Dispatched" | "Accepted" | "Queued" | "Displayed" | "Consumed" | "Settled" | "Failed" | "Unknown" {

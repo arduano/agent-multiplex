@@ -56,9 +56,11 @@ Key behavior:
   events using existing active handles, without resuming sessions.
   Failed activity reads mark unchanged running/idle observations unknown while
   retaining newer native events, errors and actionable pending input.
-- permission requests use native request/completion events and the SDK's pending
-  permission RPC, preserving their exact request identities. Questions,
-  elicitation and exit-plan callbacks remain separate pending interactions.
+- permission requests use native request/completion events and, on resume, the
+  guarded SDK pending-permission RPC, preserving exact request identities and
+  giving live completion/callback events precedence over a racing snapshot.
+  Questions, elicitation, exit-plan and child callbacks have no all-kind native
+  snapshot and therefore keep resumed interaction hydration partial.
 - full history is read through `CopilotSession.getEvents()`; the opt-in primary
   view uses native `eventLog.read`. The adapter never reads Copilot files.
   The full-history opaque pagination cursor has the form

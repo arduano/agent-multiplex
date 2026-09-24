@@ -173,6 +173,32 @@ const queueResult = {
 };
 
 describe("server-owned Copilot lifecycle refresh", () => {
+  it("does not turn root idle into Ready while a fresh task snapshot is running", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
+    await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+    f.session.emit({ kind: "lifecycle", fact: { type: "rootIdle", aborted: false } });
+    await vi.waitFor(async () => expect((await f.service.readLifecycle(f.launch.sessionId)).view.status).toBe("waitingForBackground"));
+  });
+
+  it("keeps a recovered unattributed permission online but unverified", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
+      ? { ...tasksResult, payload: { tasks: [] } }
+      : { ...queueResult, payload: { items: [], steeringMessages: [], inFlightSteeringCount: 0 } });
+    await vi.waitFor(async () => {
+      const state = await lifecycleState(f);
+      expect(state.tasks.observation.state).toBe("observed");
+      expect(state.queue.observation.state).toBe("observed");
+    });
+    f.session.emit({ kind: "lifecycle", fact: { type: "rootIdle", aborted: false } });
+    f.session.emit({ kind: "interaction", nativeRequestId: "recovered-permission", lifecycleOwner: "unattributed",
+      requestType: "permission", payload: { kind: "read" }, ephemeral: false, resolve: async () => undefined });
+    await vi.waitFor(async () => {
+      const state = await lifecycleState(f);
+      expect(state.interactions.items).toEqual([expect.objectContaining({ owner: "unattributed", kind: "permission" })]);
+      expect((await f.service.readLifecycle(f.launch.sessionId)).view.status).toBe("unknown");
+    });
+  });
+
   it("retries failed observations with bounded backoff until success without another invalidation", async () => {
     let taskReads = 0;
     const f = await fixture(async (_session, request) => {

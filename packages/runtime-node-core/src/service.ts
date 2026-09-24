@@ -3158,7 +3158,7 @@ export class RuntimeNodeService {
     const childOwner = typeof interactionPayload.agentId === "string" && interactionPayload.agentId.length > 0 ? `agent:${interactionPayload.agentId}`
       : typeof interactionPayload.parentToolCallId === "string" && interactionPayload.parentToolCallId.length > 0 ? `tool:${interactionPayload.parentToolCallId}` : undefined;
     this.#appendLifecycle(sessionId, binding, { type: "interactionOpened", interaction: {
-      id: interactionId, owner: childOwner ?? "root",
+      id: interactionId, owner: event.lifecycleOwner ?? childOwner ?? "root",
       kind: event.requestType === "approval" ? "permission" : event.requestType,
     } });
     this.#pendingInteractions.set(interactionId, {

@@ -226,6 +226,16 @@ describe("runtime-owned lifecycle dimensions", () => {
     s = step(s, { type: "interactionOpened", interaction: { id: "child-request", owner: "agent:child", kind: "permission" } });
     expect(projectLifecycle(s)).toBe("Unknown");
   });
+  it("keeps an unattributed recovered permission positive without inventing root ownership or readiness", () => {
+    let s = ready();
+    s = step(s, { type: "interactionOpened", interaction: { id: "recovered-permission", owner: "unattributed", kind: "permission" } });
+    expect(projectLifecycle(s)).toBe("Unknown");
+    expect(lifecycleProjection(s).view.status).toBe("unknown");
+    s = step(s, { type: "rootIdle", aborted: false });
+    expect(projectLifecycle(s)).toBe("Unknown");
+    s = step(s, { type: "interactionClosed", id: "recovered-permission" });
+    expect(projectLifecycle(s)).toBe("Ready");
+  });
   it("keeps task-only aggregate activity separate from a finished root cycle", () => {
     let s = ready();
     s = step(s, { type: "rootStarted", cycleId: "cycle-one" });
