@@ -226,6 +226,13 @@ remains partial; a vendor API enumerating all pending kinds with exact owner and
 request identity is required before resumed interaction hydration may become
 complete.
 
+A freshly created zero-message session is a separate boundary: complete empty
+task, queue, interaction and child observations do not prove that its never-started
+root has completed a cycle. Its lifecycle remains `unknown` with healthy evidence,
+while the independent action projection may still permit `send`, settings changes
+and stop. Web controls consume those action flags directly rather than deriving
+admission from the status label.
+
 ### Command admission and delivery
 
 | Fact | Transition |

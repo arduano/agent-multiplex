@@ -144,6 +144,25 @@ describe("runtime-owned lifecycle dimensions", () => {
     expect(s.tasks).toEqual(observed.tasks);
     expect(lifecycleProjection(s).view.health.state).toBe("healthy");
   });
+  it("keeps a fresh zero-message root unknown while exposing safe idle actions", () => {
+    let s = initialLifecycle(fence());
+    s = step(s, { type: "tasksObserved", revision: 0, items: [] });
+    s = step(s, { type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 0, inFlightSteering: 0 });
+    s = step(s, { type: "childrenHydrated", items: [], complete: true });
+    s = step(s, { type: "interactionsHydrated", items: [], complete: true });
+    expect(s.root.phase).toBe("unknown");
+    expect(projectLifecycle(s)).toBe("Unknown");
+    expect(lifecycleProjection(s).view).toMatchObject({
+      status: "unknown",
+      health: { state: "healthy", issues: [] },
+      actions: {
+        send: { available: true, reason: "available" },
+        steer: { available: false, reason: "notWorking" },
+        interrupt: { available: false, reason: "notWorking" },
+        changeSettings: { available: true, reason: "available" },
+      },
+    });
+  });
   it("publishes an opaque compact view and applies host reachability centrally", () => {
     const state = ready();
     const projection = lifecycleProjection(state);

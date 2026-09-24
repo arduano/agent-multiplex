@@ -1,8 +1,14 @@
 import type { SessionRecord } from "@arduano/agent-multiplex-protocol";
 import { describe, expect, it } from "vitest";
-import { sessionLifecycleLabel } from "../apps/web/src/client/session-lifecycle.js";
+import { lifecycleActionAvailable, sessionLifecycleLabel } from "../apps/web/src/client/session-lifecycle.js";
 
-function copilot(status: "ready" | "unknown", issues: Array<"incompleteNativeState" | "observationPending"> = []): SessionRecord {
+const actionNames = ["send", "steer", "interrupt", "changeSettings", "resolveInteraction", "stop"] as const;
+
+function copilot(
+  status: "ready" | "unknown",
+  issues: Array<"incompleteNativeState" | "observationPending"> = [],
+  available: readonly (typeof actionNames)[number][] = [],
+): SessionRecord {
   return {
     harness: "copilot",
     availability: "active",
@@ -14,8 +20,9 @@ function copilot(status: "ready" | "unknown", issues: Array<"incompleteNativeSta
         state: issues.length > 0 ? "recovering" : "healthy",
         issues: issues.map(code => ({ scope: code === "observationPending" ? "tasks" : "lifecycle", code })),
       },
-      actions: Object.fromEntries(["send", "steer", "interrupt", "changeSettings", "resolveInteraction", "stop"]
-        .map(action => [action, { available: false, reason: "notWorking" }])) as unknown as NonNullable<SessionRecord["lifecycle"]>["actions"],
+      actions: Object.fromEntries(actionNames.map(action => [action, available.includes(action)
+        ? { available: true, reason: "available" }
+        : { available: false, reason: "notWorking" }])) as unknown as NonNullable<SessionRecord["lifecycle"]>["actions"],
     },
   } as unknown as SessionRecord;
 }
@@ -25,6 +32,15 @@ describe("Copilot lifecycle labels", () => {
     expect(sessionLifecycleLabel(copilot("unknown", ["incompleteNativeState"]), true)).toBe("Recovery unverified");
     expect(sessionLifecycleLabel(copilot("unknown", ["observationPending"]), true)).toBe("Recovery unverified");
     expect(sessionLifecycleLabel(copilot("ready"), true)).toBe("Ready");
+  });
+
+  it("lets a fresh zero-message session expose authoritative actions without inventing Ready", () => {
+    const fresh = copilot("unknown", [], ["send", "changeSettings", "stop"]);
+    expect(sessionLifecycleLabel(fresh, true)).toBe("Unknown");
+    expect(lifecycleActionAvailable(fresh, "send")).toBe(true);
+    expect(lifecycleActionAvailable(fresh, "changeSettings")).toBe(true);
+    expect(lifecycleActionAvailable(fresh, "steer")).toBe(false);
+    expect(lifecycleActionAvailable(fresh, "interrupt")).toBe(false);
   });
 
   it("lets current host reachability override a stale online projection", () => {

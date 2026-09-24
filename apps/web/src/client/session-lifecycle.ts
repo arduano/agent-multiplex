@@ -47,6 +47,8 @@ export function sessionLifecycleLabel(session: SessionRecord, online = true): Se
   }
 }
 
+/** Gate controls from the authoritative action projection, not the status label.
+ * A fresh zero-message Copilot root is intentionally Unknown but may send or change settings. */
 export function lifecycleActionAvailable(
   session: SessionRecord,
   action: keyof SessionLifecycleView["actions"],
