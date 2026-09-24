@@ -234,12 +234,13 @@ and stop. Web controls consume those action flags directly rather than deriving
 admission from the status label.
 
 The runtime uses the same pure action policy for command admission that it
-publishes to clients. `send`, `steer`, and settings changes fail closed while a
-root callback is waiting, interaction hydration is partial, an interaction has
-unattributed ownership, or lifecycle continuity has a gap. This prevents a
-direct API caller from bypassing disabled web controls. Exact interaction
-resolution and Stop remain available recovery paths when their own action flags
-permit them.
+publishes to clients. `send` and native compaction use send admission;
+`steer` and queued-message steering use steer admission; settings changes use
+settings admission. They fail closed while a root callback is waiting,
+interaction hydration is partial, an interaction has unattributed ownership,
+or lifecycle continuity has a gap. This prevents a direct API caller from
+bypassing disabled web controls. Exact task controls, interaction resolution
+and Stop remain available recovery paths when their own admission permits them.
 
 ### Command admission and delivery
 

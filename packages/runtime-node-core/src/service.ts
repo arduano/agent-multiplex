@@ -2455,8 +2455,8 @@ export class RuntimeNodeService {
 
   #assertLifecycleCommandAvailable(binding: ActiveBinding, request: HarnessCommand): void {
     if (request.harness !== "copilot") return;
-    const action = request.command.type === "send" ? "send"
-      : request.command.type === "steer" ? "steer"
+    const action = request.command.type === "send" || request.command.type === "compact" ? "send"
+      : request.command.type === "steer" || request.command.type === "steerQueuedMessage" ? "steer"
         : request.command.type === "setModel" || request.command.type === "setMode" || request.command.type === "setPermissionMode"
           ? "changeSettings" : undefined;
     if (action === undefined) {

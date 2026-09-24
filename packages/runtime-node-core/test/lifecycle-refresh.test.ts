@@ -201,7 +201,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
 
   it.each([
     { label: "send", command: { type: "send", prompt: "blocked send", mode: "enqueue" } },
+    { label: "compact", command: { type: "compact" } },
     { label: "steer", command: { type: "steer", prompt: "blocked steer", mode: "immediate" } },
+    { label: "queued steer", command: { type: "steerQueuedMessage", id: "blocked-queued-steer" } },
     { label: "settings", command: { type: "setMode", mode: "interactive" } },
   ] as const)("rejects direct $label while interaction hydration is partial", async ({ label, command }) => {
     const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
@@ -222,7 +224,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
 
   it.each([
     { label: "send", command: { type: "send", prompt: "blocked send", mode: "enqueue" } },
+    { label: "compact", command: { type: "compact" } },
     { label: "steer", command: { type: "steer", prompt: "blocked steer", mode: "immediate" } },
+    { label: "queued steer", command: { type: "steerQueuedMessage", id: "blocked-queued-steer" } },
     { label: "settings", command: { type: "setMode", mode: "interactive" } },
   ] as const)("rejects direct $label while a root callback is waiting", async ({ label, command }) => {
     const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
@@ -249,6 +253,26 @@ describe("server-owned Copilot lifecycle refresh", () => {
     await expect(f.service.resolveInteraction({ interactionId: pending.interactionId,
       sessionId: f.launch.sessionId, harness: "copilot", response: { answer: "recovery remains available" } }))
       .resolves.toMatchObject({ state: "resolved" });
+  });
+
+  it("preserves exact task-control and stop escapes while interaction hydration is partial", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks"
+      ? { ...tasksResult, payload: { tasks: [] } }
+      : { ...queueResult, payload: { items: [], steeringMessages: [], inFlightSteeringCount: 0 } });
+    const execute = vi.spyOn(f.session, "execute");
+    for (const [label, command] of [
+      ["cancel", { type: "cancelTask", id: "exact-task" }],
+      ["promote", { type: "promoteTaskToBackground", id: "exact-task" }],
+    ] as const) {
+      await expect(f.service.execute({ commandId: newCommandId(), payloadHash: `partial-task-${label}`,
+        sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1,
+        request: { harness: "copilot", command } }))
+        .resolves.toMatchObject({ state: "succeeded" });
+    }
+    expect(execute).toHaveBeenCalledTimes(2);
+    await expect(f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "stop-partial-task-escape",
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1 }))
+      .resolves.toMatchObject({ state: "succeeded" });
   });
 
   it.each([
