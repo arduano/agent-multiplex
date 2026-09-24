@@ -14,7 +14,10 @@ export function copilotLifecycleFacts(nativeType: string, payload: unknown): Lif
   if (nativeType === "subagent.started" || nativeType === "subagent.completed" || nativeType === "subagent.failed") {
     if (!nonempty(data.toolCallId)) return [];
     return [{ type: "child", id: `tool:${data.toolCallId}`, state: nativeType === "subagent.started" ? "running"
-      : nativeType === "subagent.failed" ? "failed" : "completed" }];
+      : nativeType === "subagent.failed" ? "failed"
+        // The SDK emits cancelled subagents as completed, but explicitly says
+        // cancellation is teardown rather than successful completion.
+        : data.cancelled === true ? "settled" : "completed" }];
   }
   if (agentOwner !== undefined || toolOwner !== undefined) {
     // No alias is guessed between an agent instance and a task/tool-call ID.

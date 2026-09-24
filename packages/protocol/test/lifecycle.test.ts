@@ -90,6 +90,45 @@ describe("runtime-owned lifecycle dimensions", () => {
       expect(projectLifecycle(s)).toBe(terminal === "failed" ? "Failed" : "Interrupted");
     }
   });
+  it("keeps waiting tasks nonterminal and orphaned client execution unknown", () => {
+    for (const outcome of ["ready", "finished"] as const) {
+      let base = ready();
+      if (outcome === "finished") {
+        base = step(base, { type: "rootStarted", cycleId: "finished-cycle" });
+        base = step(base, { type: "rootIdle", aborted: false });
+      }
+      for (const kind of ["agent", "shell", "client"] as const) {
+        const idle = step(base, { type: "tasksObserved", revision: 0,
+          items: [{ id: `idle-${kind}`, kind, status: "idle" }] });
+        expect(projectLifecycle(idle)).toBe("Waiting for child/task");
+        expect(lifecycleProjection(idle).view).toMatchObject({
+          status: "waitingForBackground",
+          actions: { stop: { available: true, reason: "available" } },
+        });
+      }
+      const orphaned = step(base, { type: "tasksObserved", revision: 0,
+        items: [{ id: "lost-client-owner", kind: "client", status: "orphaned" }] });
+      expect(projectLifecycle(orphaned)).toBe("Unknown");
+      expect(lifecycleProjection(orphaned).view).toMatchObject({
+        status: "unknown",
+        actions: { stop: { available: true, reason: "available" } },
+      });
+    }
+  });
+  it("keeps exact child failure terminal across native replay ordering", () => {
+    for (const order of [
+      ["failed", "completed"],
+      ["completed", "failed"],
+      ["failed", "settled"],
+      ["settled", "failed"],
+    ] as const) {
+      let s = ready();
+      for (const state of order) s = step(s, { type: "child", id: "tool:ordered-child", state });
+      expect(s.children.items).toEqual([{ id: "tool:ordered-child", state: "failed" }]);
+      s = step(s, { type: "child", id: "tool:ordered-child", state: "running" });
+      expect(s.children.items).toEqual([{ id: "tool:ordered-child", state: "failed" }]);
+    }
+  });
   it("rejects stale empty snapshots after invalidation and does not invent completion on errors", () => {
     let s = ready();
     s = step(s, { type: "rootStarted", cycleId: "start" });

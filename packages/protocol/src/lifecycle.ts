@@ -73,7 +73,7 @@ export const lifecycleFactSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("sessionActivityObserved"), active: z.boolean() }).strict(),
   z.object({ type: z.literal("nativeObservationDegraded"), diagnosticId }).strict(),
   z.object({ type: z.literal("nativeObservationRecovered") }).strict(),
-  z.object({ type: z.literal("child"), id: childIdentitySchema, state: z.enum(["running", "completed", "failed"]) }).strict(),
+  z.object({ type: z.literal("child"), id: childIdentitySchema, state: z.enum(["running", "settled", "completed", "failed"]) }).strict(),
   z.object({ type: z.literal("childrenHydrated"), items: z.array(childSchema).max(256), complete: z.boolean() }).strict(),
   z.object({ type: z.literal("tasksInvalidated") }).strict(),
   z.object({ type: z.literal("tasksObserved"), revision: counter, items: z.array(taskSchema).max(1_000) }).strict(),
@@ -171,9 +171,17 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
       // child's success outcome.
       children: { completeness: "complete", items: s.children.items.map((c) => c.state === "running" || c.state === "unknown" ? { ...c, state: "settled" } : c) } };
     case "child": {
+      const existing = s.children.items.find((c) => c.id === f.id);
       const children = s.children.items.filter((c) => c.id !== f.id);
       if (children.length >= 256) return invalidate(s);
-      return { ...s, children: { ...s.children, items: [...children, { id: f.id, state: f.state }] } };
+      // Native delivery/replay order cannot downgrade exact terminal evidence.
+      // A later failure is stronger than completion; exact completion is
+      // stronger than cancellation/quiescence-only settlement. No terminal
+      // child can be revived by a delayed start for the same native identity.
+      const precedence = { unknown: 0, running: 1, settled: 2, completed: 3, failed: 4 } as const;
+      const childState = existing !== undefined && precedence[existing.state] > precedence[f.state]
+        ? existing.state : f.state;
+      return { ...s, children: { ...s.children, items: [...children, { id: f.id, state: childState }] } };
     }
     case "childrenHydrated": {
       if (f.complete) return { ...s, children: { completeness: "complete", items: f.items } };
@@ -293,9 +301,12 @@ export function projectLifecycle(s: LifecycleState, online = true): LifecycleLab
   if (s.root.phase === "working") return "Working";
   // A root failure/interruption does not settle independent background work.
   // Keep positively observed tasks and children visible until their own evidence clears.
-  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
+  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "running" || t.status === "idle") || s.children.items.some((c) => c.state === "running")) return "Waiting for child/task";
   if (s.queue.observation.state === "observed" && (s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0)) return "Queued";
   if (s.aggregateActivity === "active") return "Unknown";
+  // A disconnected client task has not reported a terminal outcome. Unlike a
+  // running/idle task it cannot be claimed as positively active either.
+  if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "orphaned")) return "Unknown";
   if (s.root.outcome === "failed") return "Failed";
   if (s.root.outcome === "interrupted") return "Interrupted";
   if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.interactions.items.some((i) => i.owner === "unattributed") || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";

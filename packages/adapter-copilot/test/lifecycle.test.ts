@@ -34,6 +34,8 @@ describe("Copilot lifecycle evidence normalization", () => {
   it("keeps native task/tool and agent identities separate and refuses nameless children", () => {
     expect(copilotLifecycleFacts("subagent.started", event({ agentName: "same", toolCallId: "exact" }))).toEqual([{ type: "child", id: "tool:exact", state: "running" }]);
     expect(copilotLifecycleFacts("subagent.completed", event({ toolCallId: "exact" }))).toEqual([{ type: "child", id: "tool:exact", state: "completed" }]);
+    expect(copilotLifecycleFacts("subagent.completed", event({ toolCallId: "exact", cancelled: true }))).toEqual([{ type: "child", id: "tool:exact", state: "settled" }]);
+    expect(copilotLifecycleFacts("subagent.completed", event({ toolCallId: "exact", cancelled: false }))).toEqual([{ type: "child", id: "tool:exact", state: "completed" }]);
     expect(copilotLifecycleFacts("subagent.failed", event({ toolCallId: "exact" }))).toEqual([{ type: "child", id: "tool:exact", state: "failed" }]);
     expect(copilotLifecycleFacts("subagent.started", event({ agentName: "same" }))).toEqual([]);
   });
