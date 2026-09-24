@@ -62,6 +62,10 @@ Optional non-secret settings:
 
 - `AGENT_MULTIPLEX_COPILOT_ONLY_TIMEOUT_MS` (default `600000`)
 - `AGENT_MULTIPLEX_COPILOT_ONLY_RUN_ID`
+- `AGENT_MULTIPLEX_COPILOT_ONLY_SUBNET` (default `10.250.254.0/28`): a
+  temporary private /28 for the three application containers. The runner
+  rejects overlap with existing Docker IPAM allocations or active host routes;
+  it never removes another network to free Docker's exhausted automatic pool.
 - `AGENT_MULTIPLEX_COPILOT_ONLY_RECEIPT_ROOT`
 - `AGENT_MULTIPLEX_DOCKER_NPMRC`
 - `AGENT_MULTIPLEX_COPILOT_ONLY_LOCAL_BIND=1` uses the already-built source

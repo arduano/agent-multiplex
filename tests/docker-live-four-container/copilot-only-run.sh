@@ -11,6 +11,7 @@ RECEIPT_ROOT=${AGENT_MULTIPLEX_COPILOT_ONLY_RECEIPT_ROOT:-"$REPO_ROOT/receipts/p
 TIMEOUT_MS=${AGENT_MULTIPLEX_COPILOT_ONLY_TIMEOUT_MS:-600000}
 LIVE_OPT_IN=${AGENT_MULTIPLEX_COPILOT_ONLY_RUN:-}
 LOCAL_BIND=${AGENT_MULTIPLEX_COPILOT_ONLY_LOCAL_BIND:-0}
+ISOLATED_SUBNET=${AGENT_MULTIPLEX_COPILOT_ONLY_SUBNET:-10.250.254.0/28}
 BUILD_MODE=container-build
 MODEL=gpt-6-luna
 
@@ -47,7 +48,7 @@ if [[ ! "$TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 [[ "$LOCAL_BIND" == 0 || "$LOCAL_BIND" == 1 ]] || { echo "copilot-only-v6: LOCAL_BIND must be 0 or 1" >&2; exit 2; }
-for tool in docker git jq node npm curl sha256sum awk perl rg timeout find systemctl systemd-run; do
+for tool in docker git jq node npm curl sha256sum awk perl rg timeout find ip systemctl systemd-run; do
   command -v "$tool" >/dev/null 2>&1 || { echo "copilot-only-v6: required tool '$tool' is unavailable" >&2; exit 1; }
 done
 static_validation >/dev/null
@@ -126,7 +127,8 @@ secret_values_present_in_receipt() {
   rg --text --quiet 'p2prpc3\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{80,}' "$RECEIPT_DIR"
 }
 capture_log() {
-  local name=$1 label=$2 raw="$RUNTIME_DIR/$label.raw.log"
+  local name=$1 label=$2 raw
+  raw="$RUNTIME_DIR/$label.raw.log"
   docker container inspect "$name" >/dev/null 2>&1 || return 0
   docker logs "$name" >"$raw" 2>&1 || true
   awk 'redact {print "<redacted-p2p-ticket>"; redact=0; next} /^P2P ticket \(/ {print; redact=1; next} {print}' "$raw" \
@@ -270,7 +272,28 @@ else
     >"$RECEIPT_DIR/logs/docker-build.log" 2>&1 || { tail -n 80 "$RECEIPT_DIR/logs/docker-build.log" >&2; fail "image build failed"; }
   IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")
 fi
-docker network create --driver bridge "$NETWORK_NAME" >/dev/null
+# Docker's automatic pools can be exhausted on a busy NAS. Validate the
+# explicitly bounded private /28 against both Docker IPAM and active host
+# routes; never prune an existing network to make room for this test.
+ISOLATED_SUBNET="$ISOLATED_SUBNET" node <<'NODE'
+const {execFileSync}=require('node:child_process');
+const cidr=process.env.ISOLATED_SUBNET;
+const asRange=value=>{
+  const [address,bits]=value.split('/'),parts=address.split('.').map(Number),prefix=bits===undefined?32:Number(bits);
+  if(parts.length!==4||parts.some(part=>!Number.isInteger(part)||part<0||part>255)||!Number.isInteger(prefix)||prefix<0||prefix>32)throw Error('Invalid IPv4 route');
+  const ip=parts.reduce((n,part)=>((n<<8)>>>0)+part,0)>>>0;
+  const mask=prefix===0?0:(0xffffffff<<(32-prefix))>>>0;
+  return {start:(ip&mask)>>>0,end:((ip&mask)|(~mask>>>0))>>>0,prefix};
+};
+const candidate=asRange(cidr);
+if(candidate.prefix!==28||candidate.start!==asRange('10.250.254.0/28').start&&!(candidate.start>=asRange('10.250.0.0/16').start&&candidate.end<=asRange('10.250.0.0/16').end))throw Error('Test subnet must be a private 10.250.0.0/16 /28');
+const ids=execFileSync('docker',['network','ls','-q'],{encoding:'utf8'}).trim().split(/\s+/).filter(Boolean);
+const networks=ids.length?JSON.parse(execFileSync('docker',['network','inspect',...ids],{encoding:'utf8'})):[];
+const routes=JSON.parse(execFileSync('ip',['-j','-4','route','show','table','all'],{encoding:'utf8'}));
+const existing=[...networks.flatMap(net=>(net.IPAM?.Config??[]).map(row=>row.Subnet).filter(Boolean)),...routes.map(route=>route.dst).filter(dst=>dst&&dst!=='default')];
+for(const raw of existing){let range;try{range=asRange(raw)}catch{continue}if(candidate.start<=range.end&&range.start<=candidate.end)throw Error('Test subnet overlaps an existing Docker network or host route')}
+NODE
+docker network create --driver bridge --subnet "$ISOLATED_SUBNET" "$NETWORK_NAME" >/dev/null
 NETWORK_ID=$(docker network inspect --format '{{.Id}}' "$NETWORK_NAME")
 BRIDGE_HOST=$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' "$NETWORK_NAME")
 [[ -n "$BRIDGE_HOST" ]] || fail "isolated bridge has no gateway"
