@@ -10,6 +10,8 @@ SOURCE_KEY=${AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY:-"${HOME}/.codex/codex-lb-a
 RECEIPT_ROOT=${AGENT_MULTIPLEX_COPILOT_ONLY_RECEIPT_ROOT:-"$REPO_ROOT/receipts/protocol-v6-copilot-only"}
 TIMEOUT_MS=${AGENT_MULTIPLEX_COPILOT_ONLY_TIMEOUT_MS:-600000}
 LIVE_OPT_IN=${AGENT_MULTIPLEX_COPILOT_ONLY_RUN:-}
+LOCAL_BIND=${AGENT_MULTIPLEX_COPILOT_ONLY_LOCAL_BIND:-0}
+BUILD_MODE=container-build
 MODEL=gpt-6-luna
 
 note() { printf '[copilot-only-v6] %s\n' "$*" >&2; }
@@ -44,6 +46,7 @@ if [[ ! "$TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
   echo "copilot-only-v6: timeout must be a positive integer" >&2
   exit 2
 fi
+[[ "$LOCAL_BIND" == 0 || "$LOCAL_BIND" == 1 ]] || { echo "copilot-only-v6: LOCAL_BIND must be 0 or 1" >&2; exit 2; }
 for tool in docker git jq node npm curl sha256sum awk perl rg timeout find systemctl systemd-run; do
   command -v "$tool" >/dev/null 2>&1 || { echo "copilot-only-v6: required tool '$tool' is unavailable" >&2; exit 1; }
 done
@@ -60,7 +63,9 @@ if git -C "$REPO_ROOT" status --porcelain=v1 --untracked-files=all -- . ':(exclu
   exit 1
 fi
 if [[ -z "$DOCKER_NPMRC" ]]; then DOCKER_NPMRC=$(npm config get userconfig); fi
-[[ -r "$DOCKER_NPMRC" ]] || { echo "copilot-only-v6: readable npm user config required" >&2; exit 1; }
+if [[ "$LOCAL_BIND" == 0 ]]; then
+  [[ -r "$DOCKER_NPMRC" ]] || { echo "copilot-only-v6: readable npm user config required" >&2; exit 1; }
+fi
 [[ -r "$SOURCE_CONFIG" ]] || { echo "copilot-only-v6: provider config unreadable" >&2; exit 1; }
 [[ -r "$SOURCE_KEY" ]] || { echo "copilot-only-v6: provider key unreadable" >&2; exit 1; }
 
@@ -87,6 +92,8 @@ printf '%s\n' "$ACCESS_TOKEN" >"$RUNTIME_DIR/access-token"
 chmod 600 "$RUNTIME_DIR/access-token"
 
 CONTROL_ID= RUNTIME_ID= GATEWAY_ID= NETWORK_ID= IMAGE_ID=
+IMAGE_OWNED=1
+LOCAL_RUN_ARGS=()
 CONTROL_TICKET= PROVIDER_URL= PROVIDER_ORIGIN= PROXIED_PROVIDER_URL= API_KEY_LITERAL=
 PROXY_READY="$RUNTIME_DIR/provider-proxy-ready.json"
 PROXY_STARTED=0
@@ -185,7 +192,7 @@ cleanup() {
     elif [[ "$OBSERVED_ID" == "$NETWORK_ID" ]]; then docker network rm -- "$NETWORK_NAME" >/dev/null || CLEANUP_SAFE=0
     else note "cleanup identity mismatch for network $NETWORK_NAME"; CLEANUP_SAFE=0; fi
   fi
-  if [[ -n "$IMAGE_ID" ]]; then
+  if (( IMAGE_OWNED == 1 )) && [[ -n "$IMAGE_ID" ]]; then
     observe_docker_resource image "$IMAGE_TAG"
     if [[ "$OBSERVATION" == absent ]]; then :
     elif [[ "$OBSERVATION" != present ]]; then note "cleanup could not inspect image $IMAGE_TAG"; CLEANUP_SAFE=0
@@ -239,11 +246,30 @@ node -e 'const u=new URL(process.argv[1]); if(!/^https?:$/.test(u.protocol)||u.u
   || fail "provider base URL must be credential-free HTTP(S) without query or fragment"
 PROVIDER_ORIGIN=$(node -e 'process.stdout.write(new URL(process.argv[1]).origin)' "$PROVIDER_URL")
 
-note "building fenced protocol-v6 Copilot-only image at $SOURCE_COMMIT"
-docker build --progress=plain --secret "id=npmrc,src=$DOCKER_NPMRC" \
-  --file "$SCRIPT_DIR/copilot-only-Dockerfile" --tag "$IMAGE_TAG" "$REPO_ROOT" \
-  >"$RECEIPT_DIR/logs/docker-build.log" 2>&1 || { tail -n 80 "$RECEIPT_DIR/logs/docker-build.log" >&2; fail "image build failed"; }
-IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")
+if [[ "$LOCAL_BIND" == 1 ]]; then
+  # Reuse the exact already-built checkout and installed dependencies without
+  # acquiring a GitHub Packages credential. This shared base image is never
+  # removed by cleanup; only our three uniquely named containers are owned.
+  IMAGE_TAG='node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df'
+  IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG") || fail "pinned Node base image is unavailable"
+  IMAGE_OWNED=0
+  BUILD_MODE=read-only-local-bind
+  CA_FILE=$(readlink -f /etc/ssl/certs/ca-certificates.crt)
+  [[ -s "$CA_FILE" ]] || fail "host CA bundle unavailable for native Copilot TLS initialization"
+  for entry in apps/control-node/dist/main.js apps/runtime-node/dist/main.js apps/gateway/dist/main.js; do
+    [[ -s "$REPO_ROOT/$entry" ]] || fail "build local source before LOCAL_BIND: $entry"
+  done
+  LOCAL_RUN_ARGS=(--mount "type=bind,src=$REPO_ROOT,dst=/opt/src/agent-multiplex,readonly"
+    --mount "type=bind,src=$CA_FILE,dst=/run/ca-bundle.pem,readonly"
+    --workdir /opt/src/agent-multiplex --env SSL_CERT_FILE=/run/ca-bundle.pem)
+  note "using read-only prebuilt checkout $SOURCE_COMMIT and shared pinned Node base image"
+else
+  note "building fenced protocol-v6 Copilot-only image at $SOURCE_COMMIT"
+  docker build --progress=plain --secret "id=npmrc,src=$DOCKER_NPMRC" \
+    --file "$SCRIPT_DIR/copilot-only-Dockerfile" --tag "$IMAGE_TAG" "$REPO_ROOT" \
+    >"$RECEIPT_DIR/logs/docker-build.log" 2>&1 || { tail -n 80 "$RECEIPT_DIR/logs/docker-build.log" >&2; fail "image build failed"; }
+  IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")
+fi
 docker network create --driver bridge "$NETWORK_NAME" >/dev/null
 NETWORK_ID=$(docker network inspect --format '{{.Id}}' "$NETWORK_NAME")
 BRIDGE_HOST=$(docker network inspect --format '{{(index .IPAM.Config 0).Gateway}}' "$NETWORK_NAME")
@@ -269,6 +295,7 @@ PROXIED_PROVIDER_URL="http://$BRIDGE_HOST:$PROXY_PORT$PROVIDER_PATH"
 note "starting isolated authority"
 docker run --detach --name "$CONTROL_CONTAINER" --hostname copilot-only-control --network "$NETWORK_NAME" \
   --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
+  "${LOCAL_RUN_ARGS[@]}" \
   --mount type=bind,src="$RUNTIME_DIR/control-state",dst=/state --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_NAME=copilot-only-authority \
@@ -292,7 +319,8 @@ CONTROL_TICKET=$(awk '/^P2P ticket \(/ {getline; print; exit}' <<<"$CONTROL_LOG"
 note "starting one real Copilot SDK runtime; no Codex runtime is created"
 COPILOT_MODELS=$(jq -cn --arg model "$MODEL" '[$model]')
 docker run --detach --name "$RUNTIME_CONTAINER" --hostname copilot-only-runtime --network "$NETWORK_NAME" \
-  --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges --security-opt seccomp=unconfined \
+  --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
+  "${LOCAL_RUN_ARGS[@]}" \
   --mount type=bind,src="$RUNTIME_DIR/runtime-state",dst=/state \
   --mount type=bind,src="$RUNTIME_DIR/copilot-home",dst=/home/arduano/.copilot \
   --mount type=bind,src="$RUNTIME_DIR/workspace",dst=/workspace/project \
@@ -339,6 +367,7 @@ GATEWAY_SOURCES=$(jq -cn --arg endpoint "$CONTROL_ENDPOINT_ID" --arg ticket "$CO
 note "starting zero-authority bearer gateway as the only published application port"
 docker run --detach --name "$GATEWAY_CONTAINER" --hostname copilot-only-gateway --network "$NETWORK_NAME" \
   --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
+  "${LOCAL_RUN_ARGS[@]}" \
   --mount type=bind,src="$RUNTIME_DIR/gateway-state",dst=/state \
   --mount type=bind,src="$RUNTIME_DIR/access-token",dst=/run/access-token,readonly \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 --publish 127.0.0.1::4318 \
@@ -380,8 +409,8 @@ if rg --text --ignore-case 'harness["=: ]+codex|AGENT_MULTIPLEX_RUNTIME_NODE_HAR
   fail "receipt unexpectedly contains a Codex harness/model path"
 fi
 jq -n --arg runId "$RUN_ID" --arg sourceCommit "$SOURCE_COMMIT" --arg model "$MODEL" \
-  --arg imageId "$IMAGE_ID" --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
-  {schema:"protocol-v6-copilot-only-v1",runId:$runId,sourceCommit:$sourceCommit,protocolVersion:6,
+  --arg imageId "$IMAGE_ID" --arg buildMode "$BUILD_MODE" --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+  {schema:"protocol-v6-copilot-only-v1",runId:$runId,sourceCommit:$sourceCommit,buildMode:$buildMode,protocolVersion:6,
    topology:{applicationContainers:3,authority:1,gateway:1,copilotRuntimes:1,codexRuntimes:0},
    model:$model,maximumSyntheticPrompts:1,imageId:$imageId,credentialsRecorded:false,providerEndpointRecorded:false,
    completedAt:$completedAt}

@@ -64,6 +64,13 @@ Optional non-secret settings:
 - `AGENT_MULTIPLEX_COPILOT_ONLY_RUN_ID`
 - `AGENT_MULTIPLEX_COPILOT_ONLY_RECEIPT_ROOT`
 - `AGENT_MULTIPLEX_DOCKER_NPMRC`
+- `AGENT_MULTIPLEX_COPILOT_ONLY_LOCAL_BIND=1` uses the already-built source
+  checkout and installed `node_modules` as a read-only bind mount in all three
+  containers, with a read-only system CA bundle. It avoids fetching the private
+  p2prpc package or obtaining an npm credential. Build the checkout first with
+  `npm run build`. This proves the exact current source graph but is **not** a
+  claim that the Dockerfile's independent `npm ci` packaging path passed. The
+  shared pinned Node base image is never deleted by test cleanup.
 - `AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_CONFIG`
 - `AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY`
 
