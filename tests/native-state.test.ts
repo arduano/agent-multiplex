@@ -7,7 +7,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 import {
   AdapterOutcomeUnknownError, RuntimeLifecycleJournal, RuntimeNodeService, RuntimeNodeStore, createRuntimeNodeRouter,
-  type AdapterSession, type AgentAdapter,
+  type AdapterEvent, type AdapterSession, type AgentAdapter,
 } from "@arduano/agent-multiplex-runtime-node-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -23,9 +23,11 @@ async function fixture() {
   const readNativeState = vi.fn(async (input: NativeStateRequest) => ({ harness: "copilot" as const, vendorSessionId: "native-state",
     payload: input.harness === "copilot" && input.view === "tasks" ? { tasks: [] } : payload }));
   const readNativeHistory = vi.fn(async () => { throw new Error("history must not run"); });
+  const listeners = new Set<(event: AdapterEvent) => void>();
   const session: AdapterSession = {
     harness: "copilot", adapterScopeId: "native-state-test", vendorSessionId: "native-state", cwd, runtimeEpoch: newRuntimeEpoch(),
-    status: () => "idle", subscribe: () => () => {}, execute: vi.fn(async () => ({ steered: true })), readNativeState, readNativeHistory, stop: vi.fn(async () => {}),
+    status: () => "idle", subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+    execute: vi.fn(async () => ({ steered: true })), readNativeState, readNativeHistory, stop: vi.fn(async () => {}),
   };
   const resume = vi.fn(async () => session);
   const adapter: AgentAdapter = {
@@ -41,11 +43,16 @@ async function fixture() {
     harness: "copilot", input: { cwd } };
   service.createLaunch(launch);
   await vi.waitFor(() => expect(service.getLaunch(launch.launchId)?.state).toBe("succeeded"));
+  for (const listener of listeners) {
+    listener({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    listener({ kind: "lifecycle", fact: { type: "rootStarted", cycleId: "queue-steering-cycle" } });
+  }
   await vi.waitFor(async () => {
     const projection = await service.readLifecycle(launch.sessionId);
     expect(new RuntimeLifecycleJournal(store).read(projection.fence)).toMatchObject({
       tasks: { observation: { state: "observed" } }, queue: { observation: { state: "observed" } },
     });
+    expect(projection.view.actions.steer).toEqual({ available: true, reason: "available" });
   });
   readNativeState.mockClear();
   const caller = createRuntimeNodeRouter(service).createCaller({});
@@ -109,6 +116,11 @@ describe("active-only native session observations", () => {
     const first = await f.service.execute(command);
     expect(first.state).toBe(uncertain ? "outcomeUnknown" : "succeeded");
     if (!uncertain) expect(first.result).toEqual(packNativePayload({ steered: false }));
+    expect(f.service.observeCommand(command.commandId)).toMatchObject({
+      receipt: first,
+      delivery: uncertain ? "unknown" : "accepted",
+      continuation: uncertain ? "reviewRequired" : "complete",
+    });
     expect(await f.service.execute(command)).toEqual(first);
     expect(execute).toHaveBeenCalledExactlyOnceWith(command.request);
     expect(f.readNativeHistory).not.toHaveBeenCalled();
