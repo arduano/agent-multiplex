@@ -1,5 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -41,6 +41,35 @@ import { describe, expect, it } from "vitest";
 const t = initTRPC.context<PeerContext>().create();
 
 const adapterScopeId = adapterScopeIdSchema.parse("archive-transport-test");
+
+function fixtureAddress(): string {
+  const address = Object.entries(networkInterfaces())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .flatMap(([, entries]) => entries ?? [])
+    .filter((entry) => entry.family === "IPv4" && !entry.internal)
+    .map((entry) => entry.address)
+    .sort()[0];
+  if (!address) {
+    throw new Error("real-Iroh archive fixture requires a non-loopback IPv4 interface");
+  }
+  return address;
+}
+
+function directAddressHost(address: string): string {
+  return address.slice(0, address.lastIndexOf(":"));
+}
+
+function ticketPayload(ticket: string): {
+  directAddresses: string[];
+  relayUrl: string | null;
+} {
+  const encodedPayload = ticket.split(".")[1];
+  if (!encodedPayload) throw new Error("p2prpc ticket is missing its signed payload");
+  return JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as {
+    directAddresses: string[];
+    relayUrl: string | null;
+  };
+}
 const adapter: AgentAdapter = {
   harness: "codex",
   adapterScopeId,
@@ -167,11 +196,18 @@ describe("archive projection over real p2prpc transport", () => {
       });
 
       const sharedSecret = "archive-event-transport-regression".padEnd(64, "x");
+      // Iroh deliberately does not publish loopback-only listeners as direct
+      // routes. Pin one real local interface and permit only that exact host so
+      // the relayless fixture is dialable without broadening transport egress.
+      const fixtureHost = fixtureAddress();
+      const permitsFixtureHost = (address: string): boolean =>
+        directAddressHost(address) === fixtureHost;
       const iroh = {
-        bindAddress: "127.0.0.1:0",
+        bindAddress: `${fixtureHost}:0`,
         relay: { mode: "disabled" as const },
-        allowAdvertisedAddress: () => true,
-        allowDirectAddress: () => true,
+        discovery: { dns: false, mdns: false },
+        allowAdvertisedAddress: permitsFixtureHost,
+        allowDirectAddress: permitsFixtureHost,
       };
       runtimeNode = await createMultiplexP2PNode({
         router: runtimeRouter,
@@ -185,9 +221,14 @@ describe("archive projection over real p2prpc transport", () => {
         createContext: (context) => context,
         iroh,
       });
+      const ticket = await runtimeNode.createTicket();
+      const payload = ticketPayload(ticket);
+      expect(payload.relayUrl).toBeNull();
+      expect(payload.directAddresses.length).toBeGreaterThan(0);
+      expect(payload.directAddresses.every(permitsFixtureHost)).toBe(true);
       const peer = await controlNode.connect({
         endpointId: runtimeNode.id,
-        locator: { kind: "ticket", ticket: runtimeNode.ticket() },
+        locator: { kind: "ticket", ticket },
       });
       const connection = new P2PRuntimeNodeConnection(
         runtimeNodeId,
