@@ -835,6 +835,36 @@ describe("AccessGatewayProjection routing and feed", () => {
     await staleBindingRejected;
   });
 
+  it("projects a delayed lifecycle snapshot offline when its runtime becomes unreachable", async () => {
+    const root = newControlNodeId();
+    const view = snapshot(authority(root), [root], { withSession: true });
+    const session = view.sessions[0]!;
+    const runtime = view.runtimeNodes[0]!;
+    session.harness = "copilot";
+    session.runtimeEpoch = newRuntimeEpoch();
+    const initial = lifecycleProjection(initialLifecycle({
+      sessionId: session.sessionId,
+      runtimeNodeId: runtime.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId,
+      bindingRevision: session.bindingRevision,
+      runtimeEpoch: session.runtimeEpoch,
+    })).view;
+    session.lifecycle = initial;
+    const selected = source("selected", view);
+    const gateway = new AccessGatewayProjection([selected]);
+    await gateway.refreshAll();
+    const delayedFinished = { ...initial, status: "finished" as const };
+    let release!: (value: typeof delayedFinished) => void;
+    vi.spyOn(selected.client, "readLifecycle").mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const pending = gateway.readLifecycle(session.sessionId);
+    runtime.reachability = "unreachable";
+    release(delayedFinished);
+    await expect(pending).resolves.toMatchObject({
+      version: 2, status: "offline", health: { state: "offline" },
+      actions: { send: { available: false, reason: "hostOffline" } },
+    });
+  });
+
   it("observes native state only through the selected source without durable dispatch", async () => {
     const root = newControlNodeId(); const child = newControlNodeId();
     const views = overlappingSnapshots(authority(root), root, child, { withSession: true });

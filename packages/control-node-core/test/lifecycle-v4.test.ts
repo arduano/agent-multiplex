@@ -382,6 +382,33 @@ describe("protocol-v4 launch binding durability", () => {
     } finally { service.close(); child.close(); catalog.close(); childCatalog.close(); }
   });
 
+  it("projects a delayed lifecycle snapshot offline when its runtime disconnects during observation", async () => {
+    const catalog = new ControlNodeCatalog({ filename: stateFile("lifecycle-offline-race"), now: clock });
+    const service = new ControlNodeService({ catalog, now: clock });
+    const runtime = registration(); const input = launch(runtime, "lifecycle-offline-race");
+    runtime.harnesses = runtime.harnesses.map((entry) => ({ ...entry, harness: "copilot" }));
+    input.harness = "copilot";
+    const bound = boundSession(input, "lifecycle-offline-race");
+    const initial = lifecycleProjection(initialLifecycle({ sessionId: input.sessionId, runtimeNodeId: runtime.runtimeNodeId,
+      runtimeNodeBootId: runtime.runtimeNodeBootId, bindingRevision: bound.bindingRevision, runtimeEpoch: bound.runtimeEpoch! }));
+    const delayedFinished = { ...initial, view: { ...initial.view, status: "finished" as const } };
+    let release!: (value: typeof delayedFinished) => void;
+    const connectionInfo = connection(runtime, async () => accepted(input));
+    connectionInfo.readLifecycle = () => new Promise(resolve => { release = resolve; });
+    try {
+      register(service, runtime, connectionInfo);
+      catalog.recordLaunch(succeeded(input, "lifecycle-offline-race"));
+      catalog.mergeRuntimeSession({ ...bound, lifecycle: initial });
+      const pending = service.readLifecycle(input.sessionId);
+      service.detachRuntimeNodeConnection(runtime.runtimeNodeId, runtime.runtimeNodeBootId);
+      release(delayedFinished);
+      await expect(pending).resolves.toMatchObject({
+        version: 2, status: "offline", health: { state: "offline" },
+        actions: { send: { available: false, reason: "hostOffline" } },
+      });
+    } finally { service.close(); catalog.close(); }
+  });
+
   it.each(["direct", "child"] as const)("routes native state through the %s owner under read scope without catalog writes", async route => {
     const catalog = new ControlNodeCatalog({ filename: stateFile(`native-state-root-${route}`), now: clock });
     const childCatalog = new ControlNodeCatalog({ filename: stateFile(`native-state-child-${route}`), now: clock });

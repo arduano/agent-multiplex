@@ -998,6 +998,11 @@ export class AccessGatewayProjection {
       before.bindingRevision !== current.bindingRevision || before.runtimeEpoch !== current.runtimeEpoch) {
       throw new GatewayRoutingError("CONFLICT", "lifecycle snapshot does not match the selected runtime binding");
     }
+    const currentRuntime = source.snapshot?.runtimeNodes.find(item => item.runtimeNodeId === current.runtimeNodeId);
+    if (!currentRuntime || currentRuntime.presence !== "online" || currentRuntime.reachability !== "reachable") {
+      const cached = current.lifecycle;
+      return cached?.status === "offline" ? cached : offlineLifecycleView(cached ?? view);
+    }
     return view;
   }
 

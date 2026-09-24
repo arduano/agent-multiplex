@@ -1202,15 +1202,23 @@ export class ControlNodeService {
       current.bindingRevision !== session.bindingRevision || current.runtimeEpoch !== session.runtimeEpoch) {
       throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
     }
-    if (route.immediateChildControlNodeId) return sessionLifecycleViewSchema.parse(observed);
-    const projection = runtimeLifecycleProjectionSchema.parse(observed);
-    const fence = projection.fence;
-    if (fence.sessionId !== sessionId || fence.runtimeNodeId !== session.runtimeNodeId ||
-      fence.bindingRevision !== session.bindingRevision || fence.runtimeEpoch !== session.runtimeEpoch ||
-      fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
-      throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
+    const projection = route.immediateChildControlNodeId
+      ? undefined
+      : runtimeLifecycleProjectionSchema.parse(observed);
+    const view = projection?.view ?? sessionLifecycleViewSchema.parse(observed);
+    if (projection) {
+      const fence = projection.fence;
+      if (fence.sessionId !== sessionId || fence.runtimeNodeId !== session.runtimeNodeId ||
+        fence.bindingRevision !== session.bindingRevision || fence.runtimeEpoch !== session.runtimeEpoch ||
+        fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
+        throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
+      }
     }
-    return projection.view;
+    if (!runtime || runtime.presence !== "online" || runtime.reachability !== "reachable") {
+      const cached = current.lifecycle;
+      return cached?.status === "offline" ? cached : offlineLifecycleView(cached ?? view);
+    }
+    return view;
   }
 
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
