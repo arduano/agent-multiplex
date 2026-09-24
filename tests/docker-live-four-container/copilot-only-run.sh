@@ -76,6 +76,7 @@ SUFFIX=$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9' | 
 CONTROL_CONTAINER="multiplex-copilot-only-control-$SUFFIX"
 RUNTIME_CONTAINER="multiplex-copilot-only-runtime-$SUFFIX"
 GATEWAY_CONTAINER="multiplex-copilot-only-gateway-$SUFFIX"
+NATIVE_BUILD_CONTAINER="multiplex-copilot-only-native-build-$SUFFIX"
 NETWORK_NAME="multiplex-copilot-only-net-$SUFFIX"
 IMAGE_TAG="agent-multiplex-copilot-only:$SUFFIX"
 RUNTIME_NAME="copilot-only-$SUFFIX"
@@ -92,7 +93,7 @@ ACCESS_TOKEN=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(
 printf '%s\n' "$ACCESS_TOKEN" >"$RUNTIME_DIR/access-token"
 chmod 600 "$RUNTIME_DIR/access-token"
 
-CONTROL_ID= RUNTIME_ID= GATEWAY_ID= NETWORK_ID= IMAGE_ID=
+CONTROL_ID= RUNTIME_ID= GATEWAY_ID= NATIVE_BUILD_ID= NETWORK_ID= IMAGE_ID=
 IMAGE_OWNED=1
 LOCAL_RUN_ARGS=()
 CONTROL_TICKET= PROVIDER_URL= PROVIDER_ORIGIN= PROXIED_PROVIDER_URL= API_KEY_LITERAL=
@@ -172,6 +173,8 @@ cleanup() {
   capture_log "$CONTROL_CONTAINER" control-node
   capture_log "$RUNTIME_CONTAINER" copilot-runtime
   capture_log "$GATEWAY_CONTAINER" gateway
+  capture_log "$NATIVE_BUILD_CONTAINER" native-build
+  remove_container_fenced "$NATIVE_BUILD_CONTAINER" "$NATIVE_BUILD_ID"
   remove_container_fenced "$GATEWAY_CONTAINER" "$GATEWAY_ID"
   remove_container_fenced "$RUNTIME_CONTAINER" "$RUNTIME_ID"
   remove_container_fenced "$CONTROL_CONTAINER" "$CONTROL_ID"
@@ -249,22 +252,44 @@ node -e 'const u=new URL(process.argv[1]); if(!/^https?:$/.test(u.protocol)||u.u
 PROVIDER_ORIGIN=$(node -e 'process.stdout.write(new URL(process.argv[1]).origin)' "$PROVIDER_URL")
 
 if [[ "$LOCAL_BIND" == 1 ]]; then
-  # Reuse the exact already-built checkout and installed dependencies without
-  # acquiring a GitHub Packages credential. This shared base image is never
-  # removed by cleanup; only our three uniquely named containers are owned.
-  IMAGE_TAG='node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df'
-  IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG") || fail "pinned Node base image is unavailable"
-  IMAGE_OWNED=0
-  BUILD_MODE=read-only-local-bind
+  # The host's node-pty binary targets Nix glibc 2.42, not Debian glibc 2.36.
+  # Compile only that addon against the pinned container's Node headers in an
+  # owned overlay. Source and all remaining dependencies stay read-only; no
+  # GitHub Packages credential or copy of the production Copilot home is used.
+  note "building credential-free native toolchain image for read-only checkout $SOURCE_COMMIT"
+  docker build --progress=plain --file "$SCRIPT_DIR/copilot-only-local-Dockerfile" \
+    --tag "$IMAGE_TAG" "$REPO_ROOT" >"$RECEIPT_DIR/logs/docker-build.log" 2>&1 \
+    || { tail -n 60 "$RECEIPT_DIR/logs/docker-build.log" >&2; fail "local toolchain build failed"; }
+  IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")
+  BUILD_MODE=read-only-local-bind-debian-pty
   CA_FILE=$(readlink -f /etc/ssl/certs/ca-certificates.crt)
   [[ -s "$CA_FILE" ]] || fail "host CA bundle unavailable for native Copilot TLS initialization"
   for entry in apps/control-node/dist/main.js apps/runtime-node/dist/main.js apps/gateway/dist/main.js; do
     [[ -s "$REPO_ROOT/$entry" ]] || fail "build local source before LOCAL_BIND: $entry"
   done
+  NODE_PTY_DIR="$RUNTIME_DIR/node-pty"
+  mkdir -m 700 "$NODE_PTY_DIR"
+  cp -a "$REPO_ROOT/node_modules/node-pty/." "$NODE_PTY_DIR/"
   LOCAL_RUN_ARGS=(--mount "type=bind,src=$REPO_ROOT,dst=/opt/src/agent-multiplex,readonly"
     --mount "type=bind,src=$CA_FILE,dst=/run/ca-bundle.pem,readonly"
     --workdir /opt/src/agent-multiplex --env SSL_CERT_FILE=/run/ca-bundle.pem)
-  note "using read-only prebuilt checkout $SOURCE_COMMIT and shared pinned Node base image"
+  note "rebuilding only node-pty under the disposable Debian runtime"
+  docker run --detach --name "$NATIVE_BUILD_CONTAINER" --network none --init --user 1000:100 \
+    --read-only --cap-drop ALL --security-opt no-new-privileges \
+    "${LOCAL_RUN_ARGS[@]}" \
+    --mount "type=bind,src=$NODE_PTY_DIR,dst=/opt/src/agent-multiplex/node_modules/node-pty" \
+    --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 --env HOME=/tmp \
+    "$IMAGE_TAG" sh -c 'cd node_modules/node-pty && node ../node-gyp/bin/node-gyp.js rebuild --nodedir=/usr/local && cd ../.. && node -e "require(\"node-pty\")"' >/dev/null
+  NATIVE_BUILD_ID=$(docker container inspect --format '{{.Id}}' "$NATIVE_BUILD_CONTAINER")
+  BUILD_EXIT=$(docker wait "$NATIVE_BUILD_CONTAINER")
+  if [[ "$BUILD_EXIT" != 0 ]]; then
+    docker logs "$NATIVE_BUILD_CONTAINER" 2>&1 | tail -n 60 >&2
+    fail "disposable node-pty rebuild failed"
+  fi
+  remove_container_fenced "$NATIVE_BUILD_CONTAINER" "$NATIVE_BUILD_ID"
+  [[ "$CLEANUP_SAFE" == 1 ]] || fail "native build container cleanup identity failed"
+  NATIVE_BUILD_ID=
+  LOCAL_RUN_ARGS+=(--mount "type=bind,src=$NODE_PTY_DIR,dst=/opt/src/agent-multiplex/node_modules/node-pty,readonly")
 else
   note "building fenced protocol-v6 Copilot-only image at $SOURCE_COMMIT"
   docker build --progress=plain --secret "id=npmrc,src=$DOCKER_NPMRC" \

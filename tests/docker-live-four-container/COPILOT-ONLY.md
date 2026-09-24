@@ -69,12 +69,15 @@ Optional non-secret settings:
 - `AGENT_MULTIPLEX_COPILOT_ONLY_RECEIPT_ROOT`
 - `AGENT_MULTIPLEX_DOCKER_NPMRC`
 - `AGENT_MULTIPLEX_COPILOT_ONLY_LOCAL_BIND=1` uses the already-built source
-  checkout and installed `node_modules` as a read-only bind mount in all three
-  containers, with a read-only system CA bundle. It avoids fetching the private
-  p2prpc package or obtaining an npm credential. Build the checkout first with
-  `npm run build`. This proves the exact current source graph but is **not** a
-  claim that the Dockerfile's independent `npm ci` packaging path passed. The
-  shared pinned Node base image is never deleted by test cleanup.
+  checkout and installed `node_modules` as read-only mounts in all three
+  containers, with a read-only system CA bundle. The Nix-built `node-pty`
+  addon requires newer glibc than Debian; this mode builds an owned,
+  credential-free Debian toolchain image and recompiles **only** that addon in
+  the disposable runtime directory. Build source first with `npm run build`.
+  This avoids fetching the private p2prpc package or obtaining an npm
+  credential. It tests the exact local source graph but does **not** claim
+  the independent Dockerfile `npm ci` packaging path passed. Owned image,
+  addon overlay, containers, network and relay are identity-fenced on cleanup.
 - `AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_CONFIG`
 - `AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY`
 

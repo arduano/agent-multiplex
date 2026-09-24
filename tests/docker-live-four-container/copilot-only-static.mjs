@@ -11,6 +11,7 @@ const files = {
   driver: join(directory, "copilot-only-driver.mjs"),
   proxy: join(directory, "copilot-only-provider-proxy.mjs"),
   dockerfile: join(directory, "copilot-only-Dockerfile"),
+  localDockerfile: join(directory, "copilot-only-local-Dockerfile"),
   docs: join(directory, "COPILOT-ONLY.md"),
 };
 const source = Object.fromEntries(
@@ -45,11 +46,16 @@ assert.match(source.run, /identity mismatch/);
 assert.match(source.run, /copilot-only-provider-proxy\.mjs/);
 assert.match(source.run, /git -C "\$REPO_ROOT" diff --quiet --exit-code HEAD --/);
 assert.match(source.run, /--static/);
+assert.match(source.run, /AGENT_MULTIPLEX_COPILOT_ONLY_LOCAL_BIND/);
+assert.match(source.run, /node-gyp\/bin\/node-gyp\.js rebuild/);
+assert.doesNotMatch(source.run, /seccomp=unconfined|--privileged|NODE_TLS_REJECT_UNAUTHORIZED=0/);
 
 assert.match(source.proxy, /credential-free HTTP\(S\) URL/);
 assert.doesNotMatch(source.proxy, /console\.(?:log|error)/);
 assert.match(source.dockerfile, /FROM node:24\.19\.0-bookworm-slim@sha256:/);
 assert.match(source.dockerfile, /@github\/copilot-sdk/);
+assert.match(source.localDockerfile, /g\+\+ make python3/);
+assert.doesNotMatch(source.localDockerfile, /npm ci|npmrc/);
 assert.match(source.docs, /exactly one synthetic `gpt-6-luna` prompt/);
 assert.match(source.docs, /pending `exitPlan`/);
 
