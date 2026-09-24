@@ -670,6 +670,44 @@ describe("server-owned Copilot lifecycle refresh", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("keeps the no-success deadline across timed-out native-lane retries and periodic refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      let taskReads = 0;
+      let firstTaskReadAt: number | undefined;
+      const recovery = vi.fn();
+      const f = await fixture(async (_session, request) => {
+        if (request.harness !== "copilot" || request.view !== "tasks") return queueResult;
+        taskReads += 1;
+        if (taskReads === 1) {
+          firstTaskReadAt = Date.now();
+          return new Promise<AdapterNativeStateResult>((_resolve, reject) => {
+            setTimeout(() => reject(new Error("native read timed out; lane remains occupied")), 15_000);
+          });
+        }
+        throw new Error("native read lane is still occupied");
+      }, recovery);
+
+      expect(firstTaskReadAt).toBeDefined();
+      await vi.advanceTimersByTimeAsync(firstTaskReadAt! + 44_999 - Date.now());
+      expect(taskReads).toBeGreaterThan(1);
+      expect((await lifecycleState(f)).nativeAdmission.state).toBe("open");
+      await vi.advanceTimersByTimeAsync(1);
+      expect((await lifecycleState(f)).nativeAdmission.state).toBe("degraded");
+
+      // The minute refresh must not restart either the 45-second observation
+      // deadline or the 120-second supervisor deadline.
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(recovery).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(recovery).toHaveBeenCalledExactlyOnceWith(f.launch.sessionId);
+
+      await expect(f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "stop-occupied-read-lane",
+        sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1 }))
+        .resolves.toMatchObject({ state: "succeeded" });
+    } finally { vi.useRealTimers(); }
+  });
+
   it("cancels the recovery deadline when fresh observations heal or the binding stops", async () => {
     vi.useFakeTimers();
     try {

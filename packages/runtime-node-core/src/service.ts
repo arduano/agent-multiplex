@@ -203,15 +203,15 @@ interface LifecycleRefreshLane {
   failures: number;
   requestedAt: number;
   dueAt: number;
+  deadlineRevision: number | undefined;
+  deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
 interface LifecycleObservationCoordinator {
   retired: boolean;
   running: boolean;
-  startedAt: number;
   generation: number;
   timer: ReturnType<typeof setTimeout> | undefined;
-  stallTimer: ReturnType<typeof setTimeout> | undefined;
   refreshTimer: ReturnType<typeof setInterval> | undefined;
   recoveryTimer: ReturnType<typeof setTimeout> | undefined;
   recoveryRequested: boolean;
@@ -2534,9 +2534,34 @@ export class RuntimeNodeService {
     const lane = coordinator.lanes[view];
     const timestamp = Date.now();
     lane.pending = true;
-    lane.failures = 0;
-    lane.requestedAt = timestamp;
-    lane.dueAt = timestamp;
+    // This is a no-success deadline, not a per-attempt timeout. Native read
+    // adapters may release the caller while retaining an occupied SDK lane, so
+    // retries and the periodic refresh must not move the watchdog forward.
+    if (lane.requestedAt === 0) {
+      lane.failures = 0;
+      lane.requestedAt = timestamp;
+      lane.dueAt = timestamp;
+      lane.deadlineTimer = setTimeout(() => {
+        lane.deadlineTimer = undefined;
+        if (coordinator.retired || lane.requestedAt !== timestamp || this.#active.get(sessionId) !== binding) return;
+        const fence = this.#lifecycleFence(sessionId, binding);
+        if (!fence) return;
+        const state = this.#lifecycle.read(fence);
+        const revision = lane.deadlineRevision ??
+          (view === "tasks" ? state.tasks.revision : state.queue.revision);
+        const diagnosticId = newOperationId();
+        this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
+        this.#appendLifecycle(sessionId, binding, {
+          type: "observationFailed",
+          view: view === "tasks" ? "tasks" : "queue",
+          revision,
+          failures: Math.max(1, lane.failures + 1),
+          diagnosticId,
+          stalled: true,
+        });
+      }, LIFECYCLE_OBSERVATION_STALLED_MS);
+      lane.deadlineTimer.unref?.();
+    }
     this.#pumpLifecycleObservations(sessionId, binding);
   }
 
@@ -2565,7 +2590,6 @@ export class RuntimeNodeService {
     lane.pending = false;
     coordinator.running = true;
     const generation = ++coordinator.generation;
-    coordinator.startedAt = Date.now();
     const fence = this.#lifecycleFence(sessionId, binding);
     const revision = fence === undefined ? undefined
       : view === "tasks" ? this.#lifecycle.read(fence).tasks.revision : this.#lifecycle.read(fence).queue.revision;
@@ -2573,21 +2597,7 @@ export class RuntimeNodeService {
       coordinator.running = false;
       return;
     }
-    coordinator.stallTimer = setTimeout(() => {
-      if (coordinator.retired || !coordinator.running || coordinator.generation !== generation || this.#active.get(sessionId) !== binding) return;
-      const failures = Math.max(1, lane.failures + 1);
-      const diagnosticId = newOperationId();
-      this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
-      this.#appendLifecycle(sessionId, binding, {
-        type: "observationFailed",
-        view: view === "tasks" ? "tasks" : "queue",
-        revision,
-        failures,
-        diagnosticId,
-        stalled: true,
-      });
-    }, LIFECYCLE_OBSERVATION_STALLED_MS);
-    coordinator.stallTimer.unref?.();
+    lane.deadlineRevision = revision;
 
     // This read deliberately runs outside the per-session mutation lock and is
     // not admitted shutdown work. The SDK has no cancellation signal; fencing
@@ -2608,10 +2618,6 @@ export class RuntimeNodeService {
     failed = false,
   ): void {
     const coordinator = binding.lifecycleObservations;
-    if (coordinator.stallTimer) {
-      clearTimeout(coordinator.stallTimer);
-      coordinator.stallTimer = undefined;
-    }
     if (coordinator.retired || coordinator.generation !== generation || this.#active.get(sessionId) !== binding) return;
     coordinator.running = false;
     const fence = this.#lifecycleFence(sessionId, binding);
@@ -2623,13 +2629,12 @@ export class RuntimeNodeService {
       // The invalidation callback already requested the newer revision. Ensure
       // it cannot be lost even when a malformed adapter omitted that callback.
       lane.pending = true;
-      lane.failures = 0;
-      lane.requestedAt = Date.now();
-      lane.dueAt = lane.requestedAt;
+      lane.deadlineRevision = undefined;
+      lane.dueAt = Date.now();
     } else if (failed) {
       lane.failures += 1;
       const stalled = state.nativeAdmission.state === "degraded" ||
-        Date.now() - coordinator.startedAt >= LIFECYCLE_OBSERVATION_STALLED_MS;
+        Date.now() - lane.requestedAt >= LIFECYCLE_OBSERVATION_STALLED_MS;
       const diagnosticId = newOperationId();
       if (stalled) this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
       this.#appendLifecycle(sessionId, binding, {
@@ -2646,6 +2651,9 @@ export class RuntimeNodeService {
         LIFECYCLE_OBSERVATION_RETRY_BASE_MS * 2 ** Math.min(30, lane.failures - 1),
       );
     } else {
+      if (lane.deadlineTimer) clearTimeout(lane.deadlineTimer);
+      lane.deadlineTimer = undefined;
+      lane.deadlineRevision = undefined;
       lane.failures = 0;
       lane.requestedAt = 0;
       lane.dueAt = 0;
@@ -2668,14 +2676,16 @@ export class RuntimeNodeService {
     coordinator.retired = true;
     coordinator.generation += 1;
     if (coordinator.timer) clearTimeout(coordinator.timer);
-    if (coordinator.stallTimer) clearTimeout(coordinator.stallTimer);
     if (coordinator.refreshTimer) clearInterval(coordinator.refreshTimer);
     if (coordinator.recoveryTimer) clearTimeout(coordinator.recoveryTimer);
     coordinator.timer = undefined;
-    coordinator.stallTimer = undefined;
     coordinator.refreshTimer = undefined;
     coordinator.recoveryTimer = undefined;
-    for (const lane of Object.values(coordinator.lanes)) lane.pending = false;
+    for (const lane of Object.values(coordinator.lanes)) {
+      lane.pending = false;
+      if (lane.deadlineTimer) clearTimeout(lane.deadlineTimer);
+      lane.deadlineTimer = undefined;
+    }
   }
 
   #publishLaunch(launch: LaunchRecord): void {
@@ -2940,16 +2950,14 @@ export class RuntimeNodeService {
       lifecycleObservations: {
         retired: false,
         running: false,
-        startedAt: 0,
         generation: 0,
         timer: undefined,
-        stallTimer: undefined,
         refreshTimer: undefined,
         recoveryTimer: undefined,
         recoveryRequested: false,
         lanes: {
-          tasks: { pending: false, failures: 0, requestedAt: 0, dueAt: 0 },
-          pendingMessages: { pending: false, failures: 0, requestedAt: 0, dueAt: 0 },
+          tasks: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined },
+          pendingMessages: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined },
         },
       },
       unsubscribe: () => undefined,
