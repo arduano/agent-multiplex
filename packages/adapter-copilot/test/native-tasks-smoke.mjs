@@ -104,7 +104,9 @@ try {
   await session?.stop().catch(() => undefined); await adapter?.close().catch(() => undefined);
   await new Promise(resolve => provider.close(resolve)); await rm(scratch, { recursive: true, force: true });
 }
-const receipt = { result: "passed", source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
+const sourceCommit = process.env.AGENT_MULTIPLEX_TEST_SOURCE_COMMIT ?? execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+assert.match(sourceCommit, /^[a-f0-9]{40}$/, "Source commit must be an exact Git SHA");
+const receipt = { result: "passed", source: sourceCommit,
   sourceHashes: before, node: process.version, platform: process.platform, arch: process.arch, native: { sdk: "1.0.14", cli: "1.0.88" },
   modelCalls: 0, providerRequests, checks, retainedAuthHomes: false, retainedNativePayloads: false,
   scope: `Disposable ${process.platform} sync shell task API verification. Native model-driven agent/client tasks and corporate authentication/network policy remain separate UAT.` };

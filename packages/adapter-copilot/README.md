@@ -197,5 +197,10 @@ the existing durable command identity without retry or shell fallbacks.
 See [task operation guidance](../../docs/wiki/Adapters-and-Terminals.md#copilot-tracked-tasks)
 for view/command names, read limits, native caveats and client behavior. The
 [disposable native smoke](test/native-tasks-smoke.mjs) proves sync-shell
-promotion/cancellation without model requests; Windows and model-driven
-agent/client behavior remain separate UAT.
+promotion/cancellation without model requests. With a built checkout and a
+readable codex-lb config/key file, `bash packages/adapter-copilot/test/run-luna-resume-smoke.sh`
+uses a private glibc container, a read-only key mount, and a trusted CA bundle
+to send exactly one synthetic `gpt-6-luna` prompt. It checks the exact reply,
+whole-session idle, native-history retention, and intentionally partial
+child/interaction hydration on same-home resume. This is an adapter/SDK check,
+not a full control/gateway test or production-host deployment.
