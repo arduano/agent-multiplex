@@ -199,21 +199,23 @@ try {
       Array.isArray(request?.actions) && request.actions.includes("exit_only"),
       "gateway exitPlan record omitted exit_only",
     );
-    assert(
-      typeof request?.planContent === "string" && request.planContent.includes(marker),
-      "gateway exitPlan record omitted the requested plan marker",
-    );
+    assert(typeof request?.summary === "string" && request.summary.trim(),
+      "gateway exitPlan record omitted its native summary");
+    assert(typeof request?.planContent === "string",
+      "gateway exitPlan record omitted its native plan-content field");
     await writeJson(paths.exitPlanPending, turnCheckpoint.pending);
     const requested = await waitFor("matching native exit_plan_mode.requested", timeoutMs, async () =>
       nativeEvents.find((event) =>
         event.sessionId === sessionId && event.nativeType === "exit_plan_mode.requested" &&
         typeof event.payload?.json?.data?.requestId === "string" &&
-        event.payload?.json?.data?.planContent?.includes(marker)
+        event.payload?.json?.data?.summary === request.summary &&
+        event.payload?.json?.data?.planContent === request.planContent
       )
     );
     // The SDK callback intentionally omits requestId. Correlate one bounded
-    // pending approval by session and unique plan marker, then fence native
-    // completion with the requestId from the exact native requested event.
+    // pending approval by session and identical native summary/content (the
+    // CLI may emit an empty planContent), then fence completion with the exact
+    // requestId from the native requested event.
     assert(!interaction.nativeRequestId || interaction.nativeRequestId === requested.payload.json.data.requestId,
       "gateway interaction disagrees with the native plan request identity");
     const resolved = await handle.client.interactions.resolve.mutate({
@@ -248,6 +250,7 @@ try {
       nativeRequestedSequence: requested.sequence,
       resolvedExactly: true,
       nativeCompletedSequence: completed.sequence,
+      planContentBytes: Buffer.byteLength(request.planContent),
     };
   } else {
     streamed = turnCheckpoint.streamed;

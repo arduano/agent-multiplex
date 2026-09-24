@@ -43,8 +43,11 @@ model override and no second send. It verifies:
 - an opportunistic same-turn Plan probe: if the real SDK emits
   `exit_plan_mode.requested`, the gateway must expose a pending `exitPlan` record
   through `interactions.list({sessionId,pendingOnly:true})` before the driver
-  resolves it with exactly `{approved:true,selectedAction:"exit_only"}` and
-  observes the matching native completion;
+  correlates the native request by exact session/summary/content and resolves
+  it with `{approved:true,selectedAction:"exit_only"}`. The CLI can leave
+  `planContent` empty when native tools are restricted; the receipt records its
+  byte length and does not claim review of a substantive plan. The matching
+  native completion is required;
 - native history containing that turn;
 - stop to `resumable/stopped`, native resume with a new runtime epoch, retained
   native history, and a final stop;
