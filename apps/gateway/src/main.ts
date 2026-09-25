@@ -31,7 +31,7 @@ import {
   type SourceId,
   type StreamCursor,
 } from "@arduano/agent-multiplex-protocol";
-import type { PinnedPeerTarget } from "@arduano/agent-multiplex-transport-p2prpc";
+import type { MultiplexRelayPolicy, PinnedPeerTarget } from "@arduano/agent-multiplex-transport-p2prpc";
 
 import {
   createGatewayHttpSurface,
@@ -80,6 +80,7 @@ export interface GatewayAppConfig {
   readonly bindAddress: string;
   readonly port: number;
   readonly reconnectMaxMs: number;
+  readonly irohRelay?: MultiplexRelayPolicy;
   readonly auth?: GatewayBearerAuthConfig;
 }
 
@@ -178,7 +179,8 @@ export async function runGateway(
       },
       iroh: {
         secretKey,
-        relay: { mode: "default" },
+        relay: config.irohRelay ?? { mode: "default" },
+        ...(config.irohRelay?.mode === "custom" ? { discovery: { dns: false, mdns: false } } : {}),
         allowDirectAddress: () => true,
         allowRelayUrl: () => true,
       },

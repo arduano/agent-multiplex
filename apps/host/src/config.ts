@@ -1,7 +1,7 @@
 import { hostname } from "node:os";
 import { resolve } from "node:path";
 
-import type { PinnedPeerTarget } from "@agent-multiplex/transport-p2prpc";
+import type { MultiplexRelayPolicy, PinnedPeerTarget } from "@agent-multiplex/transport-p2prpc";
 
 const DEFAULT_PARENT_HEARTBEAT_MS = 10_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
@@ -28,6 +28,7 @@ export interface HostAppConfig {
   readonly parent?: PinnedPeerTarget;
   readonly parentHeartbeatMs: number;
   readonly reconnectMaxMs: number;
+  readonly irohRelay?: MultiplexRelayPolicy;
 }
 
 /** Parse root and subordinate host configuration without performing I/O. */

@@ -38,6 +38,7 @@ import {
   createMultiplexP2PNode,
   createRuntimeNodeRouterContext,
   type MultiplexP2PNode,
+  type MultiplexRelayPolicy,
   type PinnedPeerTarget,
 } from "@arduano/agent-multiplex-transport-p2prpc";
 import {
@@ -86,6 +87,7 @@ export interface RuntimeNodeAppConfig {
   readonly controlNode: PinnedPeerTarget;
   /** Narrow native discovery on machines with many virtual network interfaces. */
   readonly p2pBindAddress?: string;
+  readonly irohRelay?: MultiplexRelayPolicy;
   readonly heartbeatMs: number;
   readonly inventoryRefreshMs: number;
   readonly metadataFlushMs: number;
@@ -224,7 +226,8 @@ export async function runRuntimeNode(
       iroh: {
         secretKey: identity.irohSecretKey,
         ...(config.p2pBindAddress === undefined ? {} : { bindAddress: config.p2pBindAddress }),
-        relay: { mode: "default" },
+        relay: config.irohRelay ?? { mode: "default" },
+        ...(config.irohRelay?.mode === "custom" ? { discovery: { dns: false, mdns: false } } : {}),
         // The locator is explicitly provisioned configuration and the remote
         // endpoint key is pinned independently. Deployments with stricter
         // egress requirements should narrow these two policies.

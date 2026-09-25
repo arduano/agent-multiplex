@@ -1,4 +1,5 @@
 export * from "./bindings.js";
+export type { MultiplexRelayPolicy } from "./relay-policy.js";
 export * from "./constants.js";
 export * from "./runtime-node-bridge.js";
 export * from "./node.js";

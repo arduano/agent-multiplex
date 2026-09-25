@@ -8,7 +8,7 @@ import {
   type ActionScope,
   type ControlNodeId,
 } from "@arduano/agent-multiplex-protocol";
-import type { PinnedPeerTarget } from "@arduano/agent-multiplex-transport-p2prpc";
+import type { MultiplexRelayPolicy, PinnedPeerTarget } from "@arduano/agent-multiplex-transport-p2prpc";
 
 const DEFAULT_HEARTBEAT_MS = 10_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
@@ -74,6 +74,7 @@ export interface ControlNodeAppConfig {
   readonly bootstrapUpstream?: DesiredControlNodeUpstream;
   readonly upstreamHeartbeatMs: number;
   readonly reconnectMaxMs: number;
+  readonly irohRelay?: MultiplexRelayPolicy;
 }
 
 /** Parse protocol-v4 control-node configuration without performing I/O. */

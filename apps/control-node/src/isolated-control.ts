@@ -140,7 +140,9 @@ export async function runIsolatedAuthorityControlNode(config: ControlNodeAppConf
       authorizePeerEndpoint: async endpoint => !!(await enrollment(endpoint)) || config.enrollment.childControlNodes || config.enrollment.accessGateways,
       createContext: (context): ControlNodeRouterContext => ({ authenticatedActorId: context.p2p.peer.id, endpointId: context.p2p.peer.id }),
       iroh: { secretKey, ...(config.p2pBindAddress ? { bindAddress: config.p2pBindAddress } : {}), ticketTtlMs: 30 * 24 * 60 * 60_000,
-        relay: { mode: "default" }, allowAdvertisedAddress: () => true, allowDirectAddress: () => true, allowRelayUrl: () => true },
+        relay: config.irohRelay ?? { mode: "default" },
+        ...(config.irohRelay?.mode === "custom" ? { discovery: { dns: false, mdns: false } } : {}),
+        allowAdvertisedAddress: () => true, allowDirectAddress: () => true, allowRelayUrl: () => true },
       onError: diagnostic,
     });
     const createTicket = async () => {
