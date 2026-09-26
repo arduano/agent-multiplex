@@ -34,7 +34,7 @@ describe("bounded isolated control operations", () => {
       Atomics.store(new Int32Array(latch), 0, 1); Atomics.notify(new Int32Array(latch), 0);
       await expect.poll(() => rpc.diagnostics().pending).toBe(0);
       expect(await rpc.call("read", [], { timeoutMs: 2_000 })).toEqual([{ id: "stable-command", result: "committed" }]);
-      await rpc.call("close");
+      await rpc.call("close", [], { timeoutMs: 2_000 });
     } finally { Atomics.store(new Int32Array(latch), 0, 1); Atomics.notify(new Int32Array(latch), 0); rpc.close(); await worker.terminate(); await rm(directory, { recursive: true, force: true }); }
   });
   it("bounds queued bytes independently of request count", async () => {
