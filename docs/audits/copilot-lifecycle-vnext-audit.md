@@ -179,16 +179,20 @@ invariant sources are in `packages/protocol/test/lifecycle.test.ts`.
 | Atomic lifecycle/native cursor handoff | **Conditional, private runtime boundary only.** `RuntimeNodeService.readLifecycle` drains admitted event work and returns a fenced projection with private reducer sequence. Control validates and strips those fields. Public `readLifecycle` has no native cursor; access-feed recovery uses its own committed cursor and native epoch. This is not a vendor task/event-log transaction. |
 | Crash repair without redispatch | **Confirmed for a command already represented in the bounded lifecycle state under the same fence.** It reads terminal durable command receipts by exact identity. Runtime-store startup separately converts `received`/`started` commands to outcome unknown. |
 | Task/queue sequenced delta stream | **Disproved as implemented and unsupported by the pin.** vNext uses revision-fenced complete observations after native invalidation. This is safe but does not meet the aspirational native-delta recommendation. |
-| Exact child and interaction hydration | **Conditional.** Fresh creation emits complete empty child and interaction baselines before buffered callbacks because the adapter observes the binding from its beginning. Resume emits partial baselines; root whole-session idle can later prove child quiescence, but the Copilot pin has no complete reconnect pending-interaction snapshot (`packages/adapter-copilot/src/adapter.ts`, `session.ts`, `test/lifecycle-races.test.ts`). |
+| Exact child and interaction hydration | **Conditional.** Fresh creation emits complete empty child and interaction baselines before buffered callbacks because the adapter observes the binding from its beginning. Resume starts partial. SDK 1.0.14's generated `session.resume` contract additionally certifies one narrow cold boundary when `continuePendingWork` and `sessionWasActive` are both explicitly false: old pending work was interrupted and no live work was joined. The adapter consumes only the first session-scoped event for a fresh bridge and promotes only if no child/interaction callback raced ahead; true, missing, duplicate, child-owned, retired and replacement-epoch events fail closed. Root whole-session idle can separately prove child quiescence, while the pin still has no general complete reconnect pending-interaction snapshot (`packages/adapter-copilot/src/adapter.ts`, `session.ts`, `test/lifecycle-races.test.ts`; installed pin declarations `dist/generated/session-events.d.ts:1235-1270`). |
 | Shared projection reducer | **Confirmed.** Protocol exports the private pure reducer and compact public session/command projections. The runtime computes action availability and health; controls and gateway route/fence that view. Browser reducers for task/queue/transcript lifecycle status are superseded. |
 | Typed sanitized generic command errors | **Confirmed in scope.** Object-only fixed messages and deterministic migration; native-read/launch/archive error surfaces are not claimed migrated. |
 
 ## Deliberate partial boundaries and remaining inconsistencies
 
 1. Fresh creation produces complete child and interaction hydration before
-   buffered callbacks, so it can prove both initial sets. Resume produces partial
-   baselines. Root whole-session idle can prove child quiescence, while reconnect
-   and post-gap recovery still have no complete pending-interaction snapshot.
+   buffered callbacks, so it can prove both initial sets. Resume starts with
+   partial baselines. An exact first `session.resume` event with explicit
+   `continuePendingWork:false`, `sessionWasActive:false`, and no callback that
+   raced ahead can certify the empty cold-resume boundary for that bridge only.
+   Every ambiguous, live, continuing, stale or raced boundary remains partial.
+   Root whole-session idle can separately prove child quiescence; reconnect and
+   post-gap recovery still have no general complete pending-interaction snapshot.
    Those paths remain Unknown once no stronger positive state applies.
 2. `commandSettled` has no production Copilot producer. Root idle, compaction
    complete and command success cannot fill it. Consumption is produced only
@@ -230,8 +234,8 @@ reattachment; and a version-2 `commands.observe` view that does not keep waiting
 when the SDK gave no exact native message ID.
 
 External-only or still blocked: Leo IndexedDB/Web Locks cross-tab migration;
-complete Copilot interaction
-hydration after resume/reconnect or a gap; universal native causal IDs;
+general Copilot interaction hydration after a live/ambiguous resume, reconnect,
+or a gap; universal native causal IDs;
 guaranteed logical IDs; native task/queue snapshot cursors or deltas;
 per-command settlement; and typed arbitrary native-read errors. The reviewed
 p2prpc renewal candidate is staged locally, while public graph publication and

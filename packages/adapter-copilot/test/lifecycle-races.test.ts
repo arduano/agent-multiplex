@@ -40,6 +40,136 @@ describe("Copilot command and event ordering", () => {
     bridge.close();
   });
 
+  it.each([
+    [{ continuePendingWork: false, sessionWasActive: false }, true],
+    [{ continuePendingWork: true, sessionWasActive: false }, false],
+    [{ continuePendingWork: false, sessionWasActive: true }, false],
+    [{ sessionWasActive: false }, false],
+    [{ continuePendingWork: false }, false],
+    [{}, false],
+  ] as const)("certifies only an explicit cold non-continuing resume: %j", (data, certified) => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    bridge.nativeEvent({ id: "resume", type: "session.resume", data,
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    expect(events.filter((event): event is Extract<AdapterEvent, { kind: "lifecycle" }> =>
+      event.kind === "lifecycle" && (event.fact.type === "childrenHydrated" || event.fact.type === "interactionsHydrated"))
+      .map(event => event.fact)).toEqual(certified ? [
+        { type: "childrenHydrated", items: [], complete: false },
+        { type: "interactionsHydrated", items: [], complete: false },
+        { type: "childrenHydrated", items: [], complete: true },
+        { type: "interactionsHydrated", items: [], complete: true },
+      ] : [
+        { type: "childrenHydrated", items: [], complete: false },
+        { type: "interactionsHydrated", items: [], complete: false },
+      ]);
+    bridge.close();
+  });
+
+  it("keeps hydration partial when a pending callback races before the resume boundary", () => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const pending = bridge.interaction("userInput", { question: "still pending" }, {
+      ephemeral: true, cancelValue: { answer: "cancelled" }, parseResponse: value => value,
+    });
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    bridge.nativeEvent({ id: "resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    expect(events.some(event => event.kind === "lifecycle" &&
+      (event.fact.type === "childrenHydrated" || event.fact.type === "interactionsHydrated") && event.fact.complete)).toBe(false);
+    bridge.close();
+    return expect(pending).resolves.toEqual({ answer: "cancelled" });
+  });
+
+  it("keeps hydration partial when a child callback races before the resume boundary", () => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    bridge.nativeEvent({ id: "child", type: "subagent.started", data: { toolCallId: "child-tool" },
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    bridge.nativeEvent({ id: "resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:01.000Z", parentId: "child" } as SessionEvent);
+    expect(events.some(event => event.kind === "lifecycle" &&
+      (event.fact.type === "childrenHydrated" || event.fact.type === "interactionsHydrated") && event.fact.complete)).toBe(false);
+    bridge.close();
+  });
+
+  it("keeps hydration partial when a native interaction request races ahead of its callback", () => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    bridge.nativeEvent({ id: "request", type: "user_input.requested",
+      data: { requestId: "pending", question: "still pending" }, ephemeral: true,
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    bridge.nativeEvent({ id: "resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:01.000Z", parentId: "request" } as SessionEvent);
+    expect(events.some(event => event.kind === "lifecycle" &&
+      (event.fact.type === "childrenHydrated" || event.fact.type === "interactionsHydrated") && event.fact.complete)).toBe(false);
+    bridge.close();
+  });
+
+  it("orders a certified boundary before a later callback", async () => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    bridge.nativeEvent({ id: "resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    const pending = bridge.interaction("elicitation", { message: "new work" }, {
+      ephemeral: true, cancelValue: { action: "cancel" }, parseResponse: value => value,
+    });
+    expect(events.map(event => event.kind === "lifecycle" ? `${event.fact.type}:${"complete" in event.fact ? event.fact.complete : ""}` : event.kind)).toEqual([
+      "childrenHydrated:false", "interactionsHydrated:false", "native",
+      "childrenHydrated:true", "interactionsHydrated:true", "status", "interaction",
+    ]);
+    bridge.close();
+    await expect(pending).resolves.toEqual({ action: "cancel" });
+  });
+
+  it("fences duplicate, child-owned, retired, and replacement resume boundaries", () => {
+    const lifecycle = (bridge: CopilotSessionBridge): AdapterEvent[] => {
+      const events: AdapterEvent[] = [];
+      bridge.subscribe(event => events.push(event));
+      return events;
+    };
+    const stale = new CopilotSessionBridge(); stale.interactionHydration(false); const staleEvents = lifecycle(stale);
+    stale.nativeEvent({ id: "ambiguous", type: "session.resume", data: {},
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    stale.nativeEvent({ id: "duplicate", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:01.000Z", parentId: "ambiguous" } as SessionEvent);
+    expect(staleEvents.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    stale.close();
+    stale.nativeEvent({ id: "late", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:02.000Z", parentId: "duplicate" } as SessionEvent);
+
+    const childOwned = new CopilotSessionBridge(); childOwned.interactionHydration(false); const childEvents = lifecycle(childOwned);
+    childOwned.nativeEvent({ id: "child-resume", type: "session.resume", agentId: "other-session-owner",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    expect(childEvents.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    childOwned.close();
+
+    // A runtime restart creates a fresh bridge/epoch. Only its own first exact
+    // boundary may certify that replacement attachment.
+    const replacement = new CopilotSessionBridge(); replacement.interactionHydration(false); const replacementEvents = lifecycle(replacement);
+    replacement.nativeEvent({ id: "replacement", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
+    expect(replacementEvents.filter(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toHaveLength(2);
+    replacement.close();
+  });
+
   it.each(["agentId", "parentToolCallId"])("fences legacy %s child lifecycle and settings", key => {
     const f = fixture();
     f.emit("assistant.turn_start", { turnId: "0" });

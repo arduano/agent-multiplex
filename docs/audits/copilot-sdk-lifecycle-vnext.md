@@ -40,6 +40,7 @@ absence of undocumented native behavior.
 | UI callbacks provide exact identity and a durable acknowledgement | Disproved | `SDK:client.js:2335-2357` strips user-input/plan request ID; `SDK:session.js:1272-1282` strips elicitation ID before calling the handler, then separately submits the native response. Callback resolution precedes any success/refusal/loss visible to the callback. The executable SDK test confirms elicitation behavior. |
 | Exact UI response APIs are unavailable | Disproved | `SDK:generated/rpc.d.ts:25670-25710` exposes `handlePendingElicitation`, `handlePendingUserInput`, and `handlePendingExitPlanMode`, all keyed by native `requestId`; native false means no pending request was resolved. |
 | Those APIs alone enable complete reconnect hydration | Disproved | User-input, elicitation, and exit-plan request/completion events are ephemeral. `eventLog.read` explicitly warns that ephemeral events are not replayable once pruned. `rpc.ui` has no pending-list/snapshot method. `permissions.pendingRequests()` is permission-only and its return omits agent ownership. Retaining callback mode is a declared staged limitation, not a complete reconnect solution. |
+| A cold non-continuing resume can certify empty child/interaction hydration | Confirmed at one exact event boundary | SDK 1.0.14's generated `ResumeData` says `continuePendingWork:false` interrupts old pending work unless the resume passively joined live work, and `sessionWasActive:false` means the resume had no live work or explicitly abandoned it (`SDK:generated/session-events.d.ts:1235-1270`). The adapter requires both fields explicitly false on the first root/session-scoped resume event for a fresh bridge and refuses promotion if any child or interaction callback raced ahead. Missing, true, duplicate, child-owned, retired and prior-epoch events remain partial. This is not a general pending-interaction snapshot. |
 | Compaction native event IDs correlate a Multiplex compact command | Disproved | `CompactionCompleteData` exposes optional provider tracing IDs, no originating Multiplex command ID. A complete event may report failed native compaction. The normalizer emits only an uncorrelated observation that compaction ended, never a command receipt or settlement. |
 | Task false cancel/promote result is a refusal/no-op | Confirmed | Existing task command tests and the supported boolean replies distinguish native false from malformed/lost acknowledgement; the latter remains `outcomeUnknown`, never retry. No native smoke was run by this audit. |
 | The stability report establishes repeated WSL crashes or the SDK cause of Windows failures | Not established | The supplied report explicitly limits its evidence to one observed retirement cycle and session-specific Windows native-read failures. This audit uses no live probes and makes no attribution beyond those stated limits. |
@@ -74,8 +75,11 @@ plan requests after their ephemeral request event disappears. Switching to
 events alone would lose requests after attachment/reconnect; running both paths
 would create competing responders without callback-to-event identity. No text
 matching is acceptable. This stage therefore preserves callback handlers and
-marks interaction completeness partial. It does not claim callback completion
-is an acknowledged native answer.
+normally marks interaction completeness partial. The sole exception is the
+exact cold non-continuing `session.resume` certificate above, before which no
+positive callback may have raced. It does not claim callback completion is an
+acknowledged native answer and does not complete live, ambiguous, reconnect, or
+post-gap hydration.
 
 Required SDK/CLI contract: a bounded pending-interaction snapshot that includes
 request kind, exact ID, owner, native binding generation and an event cursor;
@@ -117,6 +121,7 @@ custom-provider-only fallback table.
 
 - [`sdk-lifecycle-contract.test.ts`](../../packages/adapter-copilot/test/sdk-lifecycle-contract.test.ts): actual installed SDK packet serialization, `source` forwarding, optional assistant origin correlation, supported RPC method surface, and elicitation callback identity/acknowledgement boundary; inert connection only.
 - [`lifecycle.test.ts`](../../packages/adapter-copilot/test/lifecycle.test.ts): root/child ownership, repeated turn counters, missing IDs, uncorrelated compaction, invalidation and malformed envelopes.
+- [`lifecycle-races.test.ts`](../../packages/adapter-copilot/test/lifecycle-races.test.ts): explicit false/true/missing resume flags, callback-before/boundary-before ordering, duplicate and owner fences, and fresh-bridge restart isolation.
 - [`tasks.test.ts`](../../packages/adapter-copilot/test/tasks.test.ts) and [`session-state.test.ts`](../../packages/adapter-copilot/test/session-state.test.ts): delayed stale-empty snapshots, generation-safe coalescing and refresh-before-list behavior.
 
 Dependency content hashes read in this worktree:

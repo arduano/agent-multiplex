@@ -28,6 +28,11 @@ native hydration remain Unknown; catalog idle, elapsed time, text equality,
 queue disappearance, or a successful generic command receipt cannot
 manufacture completion. Runtime startup reattaches persisted active Copilot
 bindings before control registration, with native pending work disabled.
+That cold reattach may complete empty child/interaction hydration only from the
+first session-scoped native resume boundary carrying explicit
+`continuePendingWork:false` and `sessionWasActive:false`, provided no positive
+callback raced ahead; missing, true, duplicate, stale and replacement-epoch
+evidence remains fail-closed.
 The runtime now refreshes task and queue observations every minute, blocks
 mutations after a 45-second stalled observation, and requests a runtime-only
 supervisor retry after 120 more seconds of degradation. Automatic retry requires

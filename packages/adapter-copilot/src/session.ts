@@ -136,6 +136,8 @@ export class CopilotSessionBridge {
   #activityRevision = 0;
   #taskRevision = 0;
   #queueRevision = 0;
+  #awaitingResumeBoundary = false;
+  #resumeCallbackObserved = false;
 
   /** Adapter observation fences; native snapshots do not carry a log cursor. */
   public nativeStateRevision(view: NativeStateRequest["view"]): number {
@@ -151,6 +153,8 @@ export class CopilotSessionBridge {
     // callbacks by the adapter.
     this.emit({ kind: "lifecycle", fact: { type: "childrenHydrated", items: [], complete } });
     this.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete } });
+    this.#awaitingResumeBoundary = !complete;
+    this.#resumeCallbackObserved = false;
   }
 
   public status(): SessionRuntimeStatus {
@@ -171,13 +175,22 @@ export class CopilotSessionBridge {
     if (this.#closed) return;
     if (event.type === "session.background_tasks_changed") this.#taskRevision += 1;
     if (event.type === "pending_messages.modified") this.#queueRevision += 1;
+    if (this.#awaitingResumeBoundary && (
+      event.type === "permission.requested" || event.type === "user_input.requested" ||
+      event.type === "elicitation.requested" || event.type === "exit_plan_mode.requested"
+    )) this.#resumeCallbackObserved = true;
     this.emit({
       kind: "native",
       nativeType: event.type,
       payload: copilotJson(event),
       ephemeral: event.ephemeral === true,
     });
-    for (const fact of copilotLifecycleFacts(event.type, event)) this.emit({ kind: "lifecycle", fact });
+    const lifecycleFacts = copilotLifecycleFacts(event.type, event);
+    if (this.#awaitingResumeBoundary && lifecycleFacts.some((fact) => fact.type === "child")) {
+      this.#resumeCallbackObserved = true;
+    }
+    for (const fact of lifecycleFacts) this.emit({ kind: "lifecycle", fact });
+    this.certifyColdResume(event);
     const child = eventOwner(event) !== undefined;
     if (event.type === "permission.requested") { this.permissionRequested(event); return; }
     if (event.type === "permission.completed" && !this.permissionCompleted(event)) return;
@@ -324,6 +337,7 @@ export class CopilotSessionBridge {
     },
   ): Promise<JsonValue> {
     if (this.#closed) return Promise.resolve(options.cancelValue);
+    if (this.#awaitingResumeBoundary) this.#resumeCallbackObserved = true;
     this.setStatus("waitingForInput");
     return new Promise<JsonValue>((settle) => {
       const pending: PendingBridgeInteraction = {
@@ -368,9 +382,27 @@ export class CopilotSessionBridge {
     this.#buffer.splice(0);
   }
 
+  private certifyColdResume(event: SessionEvent): void {
+    if (!this.#awaitingResumeBoundary || event.type !== "session.resume" || eventOwner(event) !== undefined) return;
+    // Consume exactly the first resume boundary for this bridge. A replayed or
+    // duplicated event must never upgrade an earlier ambiguous boundary.
+    this.#awaitingResumeBoundary = false;
+    // The pinned native contract certifies a cold, non-continuing resume only
+    // when both booleans are explicitly false. Omission is deliberately not
+    // treated as a default: older/ambiguous producers remain fail-closed.
+    if (event.data.continuePendingWork !== false || event.data.sessionWasActive !== false) return;
+    // The session-scoped bridge and runtime epoch fence this certificate to the
+    // exact attachment. If a callback or child fact raced ahead of the native
+    // boundary, retain partial hydration rather than erasing positive evidence.
+    if (this.#resumeCallbackObserved || this.#pending.size > 0 || this.#permissions.size > 0) return;
+    this.emit({ kind: "lifecycle", fact: { type: "childrenHydrated", items: [], complete: true } });
+    this.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+  }
+
   private permissionRequested(event: Extract<SessionEvent, { type: "permission.requested" }>): void {
     const { requestId, permissionRequest, resolvedByHook } = event.data;
     if (resolvedByHook || typeof requestId !== "string" || !requestId || !permissionRequest || typeof permissionRequest !== "object") return;
+    if (this.#awaitingResumeBoundary) this.#resumeCallbackObserved = true;
     const owner = eventOwner(event);
     this.registerPermission(requestId, permissionRequest, owner !== undefined, owner);
   }

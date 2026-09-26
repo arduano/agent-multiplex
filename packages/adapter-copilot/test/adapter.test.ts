@@ -352,6 +352,34 @@ describe("CopilotAgentAdapter", () => {
     await adapter.close();
   });
 
+  it("buffers the certified cold-resume boundary until the replacement handle is attached", async () => {
+    const client = new Client();
+    const resume = client.resumeSession.bind(client);
+    client.resumeSession = async (sessionId, config) => {
+      const native = await resume(sessionId, config);
+      config.onEvent?.({
+        id: "cold-resume-boundary", type: "session.resume", parentId: null,
+        timestamp: "2026-09-26T00:00:00.000Z",
+        data: { eventCount: 7, resumeTime: "2026-09-26T00:00:00.000Z",
+          continuePendingWork: false, sessionWasActive: false },
+      });
+      return native;
+    };
+    const adapter = adapterFor(client);
+    const session = await adapter.resume({ harness: "copilot", vendorSessionId: "cold-resume", cwd: "/repo", continuePendingWork: false });
+    const received: AdapterEvent[] = [];
+    session.subscribe(event => received.push(event));
+    expect(received.filter((event): event is Extract<AdapterEvent, { kind: "lifecycle" }> => event.kind === "lifecycle")
+      .map(event => event.fact)).toEqual([
+        { type: "childrenHydrated", items: [], complete: false },
+        { type: "interactionsHydrated", items: [], complete: false },
+        { type: "childrenHydrated", items: [], complete: true },
+        { type: "interactionsHydrated", items: [], complete: true },
+      ]);
+    expect(client.resumed[0]?.config.continuePendingWork).toBe(false);
+    await adapter.close();
+  });
+
   it("injects runtime-node-local BYOK configuration and lists only configured models", async () => {
     const client = new Client();
     const adapter = new CopilotAgentAdapter({

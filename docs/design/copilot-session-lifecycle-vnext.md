@@ -214,8 +214,19 @@ Waiting for input. Fresh creation emits a complete empty baseline before any
 synchronously buffered callback, because the adapter observes the binding from
 its beginning; later positive callback facts extend that set. Resume emits a
 partial baseline because the SDK cannot enumerate ephemeral requests that may
-already have been pruned. A reconnect snapshot may claim `complete` only when a
-native source enumerates every pending kind and owner for this exact binding.
+already have been pruned. One narrower cold-resume boundary is authoritative:
+the pinned SDK's session-scoped `session.resume` event jointly reports
+`continuePendingWork:false` and `sessionWasActive:false`. The former says old
+pending work was interrupted and the latter says this resume did not join live
+work. Only when both fields are explicitly false, the event is the first resume
+boundary for this fresh bridge, and no child or interaction callback raced
+ahead of it may the adapter promote both empty child and interaction baselines
+to complete. Missing or true flags remain partial. A callback after that ordered
+boundary is positive new evidence and extends the complete baseline. Each
+bridge is scoped to one native handle/runtime epoch; replacement and retired
+bridges cannot contribute the certificate. A reconnect snapshot may otherwise
+claim `complete` only when a native source enumerates every pending kind and
+owner for this exact binding.
 The pinned CLI exposes `session.permissions.pendingRequests`, so resume imports
 those permission prompts by exact request ID and fences them against live
 completion/callback events. The RPC omits root/child ownership, so imported
