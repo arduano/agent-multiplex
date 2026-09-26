@@ -310,7 +310,7 @@ export function projectLifecycle(s: LifecycleState, online = true): LifecycleLab
   if (s.tasks.observation.state === "observed" && s.tasks.items.some((t) => t.status === "idle" || t.status === "orphaned")) return "Unknown";
   if (s.root.outcome === "failed") return "Failed";
   if (s.root.outcome === "interrupted") return "Interrupted";
-  if (s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.interactions.items.some((i) => i.owner === "unattributed") || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
+  if (s.aggregateActivity === "unknown" || s.root.phase === "unknown" || s.root.phase === "paused" || s.tasks.observation.state !== "observed" || s.queue.observation.state !== "observed" || s.queue.inFlightSteering === null || s.interactions.completeness === "partial" || s.interactions.items.some((i) => i.owner === "unattributed") || s.children.completeness === "partial" || s.children.items.some((c) => c.state === "unknown")) return "Unknown";
   return s.root.outcome === "finished" ? "Finished" : "Ready";
 }
 export function projectDelivery(command: LifecycleCommand, state: LifecycleState): "Prepared" | "Dispatched" | "Accepted" | "Queued" | "Displayed" | "Consumed" | "Settled" | "Failed" | "Unknown" {

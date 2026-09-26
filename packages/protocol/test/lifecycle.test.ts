@@ -333,6 +333,39 @@ describe("runtime-owned lifecycle dimensions", () => {
     expect(s.root.outcome).toBe("finished");
     expect(projectLifecycle(s)).toBe("Finished");
   });
+  it("does not certify migrated unknown aggregate activity as ready or finished", () => {
+    let migrated = lifecycleStateSchema.parse({ ...ready(), aggregateActivity: "unknown" });
+    expect(migrated).toMatchObject({
+      aggregateActivity: "unknown",
+      root: { phase: "idle", outcome: "none" },
+      tasks: { observation: { state: "observed" } },
+      queue: { observation: { state: "observed" } },
+      children: { completeness: "complete" },
+      interactions: { completeness: "complete" },
+    });
+    expect(projectLifecycle(migrated)).toBe("Unknown");
+    expect(lifecycleProjection(migrated).view).toMatchObject({
+      status: "unknown",
+      health: { state: "healthy", issues: [] },
+    });
+
+    migrated = step(migrated, { type: "rootStarted", cycleId: "migrated-cycle" });
+    migrated = step(migrated, { type: "rootIdle", aborted: false });
+    const migratedFinished = lifecycleStateSchema.parse({ ...migrated, aggregateActivity: "unknown" });
+    expect(migratedFinished.root.outcome).toBe("finished");
+    expect(projectLifecycle(migratedFinished)).toBe("Unknown");
+    expect(lifecycleProjection(migratedFinished).view.status).toBe("unknown");
+
+    for (const outcome of ["failed", "interrupted"] as const) {
+      const terminal = lifecycleStateSchema.parse({
+        ...migratedFinished,
+        aggregateActivity: "unknown",
+        root: { ...migratedFinished.root, outcome },
+      });
+      expect(projectLifecycle(terminal)).toBe(outcome === "failed" ? "Failed" : "Interrupted");
+    }
+    expect(projectLifecycle({ ...migratedFinished, aggregateActivity: "active" })).toBe("Unknown");
+  });
   it("uses one degraded admission state for the public action view", () => {
     let s = ready();
     s = step(s, { type: "tasksInvalidated" });
