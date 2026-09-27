@@ -12,6 +12,7 @@ import { delimiter, resolve } from "node:path";
 import {
   assert,
   assertReviewedIrohLock,
+  assertReviewedKoffiLock,
   releasePackages,
   releaseVersion,
   repositoryRoot,
@@ -51,7 +52,10 @@ function verifyIsolatedConsumer(subject) {
       ...frameworkDependencies,
       ...Object.fromEntries(reviewedIrohClosure.map(({ name, url }) => [name, url])),
     };
-    const overrides = Object.fromEntries(reviewedIrohClosure.map(({ name }) => [name, `$${name}`]));
+    const overrides = {
+      ...Object.fromEntries(reviewedIrohClosure.map(({ name }) => [name, `$${name}`])),
+      koffi: "3.2.1",
+    };
     writeFileSync(
       resolve(directory, "package.json"),
       `${JSON.stringify({
@@ -98,7 +102,9 @@ function verifyIsolatedConsumer(subject) {
       },
       timeout: 300_000,
     });
-    assertReviewedIrohLock(JSON.parse(readFileSync(resolve(directory, "package-lock.json"), "utf8")));
+    const lock = JSON.parse(readFileSync(resolve(directory, "package-lock.json"), "utf8"));
+    assertReviewedIrohLock(lock);
+    assertReviewedKoffiLock(lock);
 
     if (subject.workspace.startsWith("packages/") || subject.workspace === "apps/web") {
       writeFileSync(

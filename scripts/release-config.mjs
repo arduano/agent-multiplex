@@ -54,6 +54,10 @@ export const reviewedIrohClosure = Object.freeze([
     integrity: "sha512-LI6vNhKQQZBJV+pC3w/yNxXQoP+pMpmYVHrOo9Y3IHFbMnvkWhV1qzArOn34lQ8JU/pbEMdHVHgZYwmTFnDIDQ==",
   }),
 ]);
+export const reviewedKoffi = Object.freeze({
+  version: "3.2.1",
+  integrity: "sha512-0qE3lZ8jllRqPN4Ob6Ajl7c2bJSJDhQWuKLGP5hIEpHLllJWv1ydHFMhHmHc5p/W9GticKVDbYzZd7TBoQ4CZg==",
+});
 
 export function assertReviewedIrohManifest(manifest) {
   for (const { name, url } of reviewedIrohClosure) {
@@ -76,6 +80,18 @@ export function assertReviewedIrohLock(lock) {
         assert(nested.version === expected.version && nested.resolved === url && nested.integrity === integrity,
           `nested consumer ${name} differs from reviewed fork`);
       }
+    }
+  }
+}
+
+export function assertReviewedKoffiLock(lock) {
+  const root = readJson("package-lock.json").packages?.["node_modules/koffi"];
+  assert(root?.version === reviewedKoffi.version && root.integrity === reviewedKoffi.integrity,
+    "root koffi differs from reviewed lock");
+  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+    if (path === "node_modules/koffi" || path.endsWith("/node_modules/koffi")) {
+      assert(entry.version === reviewedKoffi.version && entry.integrity === reviewedKoffi.integrity,
+        "isolated consumer koffi differs from reviewed lock");
     }
   }
 }
