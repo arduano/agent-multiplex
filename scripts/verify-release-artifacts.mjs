@@ -11,9 +11,11 @@ import { delimiter, resolve } from "node:path";
 
 import {
   assert,
+  assertReviewedIrohLock,
   releasePackages,
   releaseVersion,
   repositoryRoot,
+  reviewedIrohClosure,
 } from "./release-config.mjs";
 import { validateReleaseArtifactSet } from "./release-artifact-validation.mjs";
 
@@ -37,7 +39,7 @@ console.log(`Verified ${artifacts.length} packed packages in role-isolated consu
 function verifyIsolatedConsumer(subject) {
   const directory = mkdtempSync(resolve(tmpdir(), "agent-multiplex-packed-consumer-"));
   try {
-    const dependencies = verifyRegistry
+    const frameworkDependencies = verifyRegistry
       ? { [subject.name]: subject.version }
       : Object.fromEntries(
         internalDependencyClosure(subject).map((artifact) => [
@@ -45,6 +47,11 @@ function verifyIsolatedConsumer(subject) {
           `file:${artifact.path}`,
         ]),
       );
+    const dependencies = {
+      ...frameworkDependencies,
+      ...Object.fromEntries(reviewedIrohClosure.map(({ name, url }) => [name, url])),
+    };
+    const overrides = Object.fromEntries(reviewedIrohClosure.map(({ name }) => [name, `$${name}`]));
     writeFileSync(
       resolve(directory, "package.json"),
       `${JSON.stringify({
@@ -62,6 +69,7 @@ function verifyIsolatedConsumer(subject) {
           "node-pty@1.1.0": true,
         },
         dependencies,
+        overrides,
       }, null, 2)}\n`,
     );
     const npmrc = [
@@ -90,6 +98,7 @@ function verifyIsolatedConsumer(subject) {
       },
       timeout: 300_000,
     });
+    assertReviewedIrohLock(JSON.parse(readFileSync(resolve(directory, "package-lock.json"), "utf8")));
 
     if (subject.workspace.startsWith("packages/") || subject.workspace === "apps/web") {
       writeFileSync(

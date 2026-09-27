@@ -21,6 +21,14 @@ with `read:packages`. This repository's CI and Dependabot use the
 `PACKAGES_READ_TOKEN` secret because their repository-scoped tokens do not
 implicitly receive access to the independently published p2prpc package.
 
+The `.19` source root pins the reviewed owner-fork Iroh archives as direct
+dependencies and overrides both transitive edges. Each isolated packed
+consumer check must install that same closure and verify its exact lockfile
+URLs and SHA-512 integrities. The p2prpc `.1` manifest keeps numeric Iroh
+dependencies; a bare install is not a supported native graph. The current
+source lock still records `.18`/renewal `.0` and must be regenerated only after
+the fork archives and p2prpc `.1` are published and independently reviewed.
+
 ## Versioning rules
 
 - A wire-incompatible schema, authority rule, operation identity, or stream

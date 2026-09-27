@@ -71,6 +71,8 @@
     "release:publish": "node scripts/publish-release.mjs release-artifacts"
   },
   "dependencies": {
+    "@momics/iroh-http-node": "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-node-0.6.2-fork-linux-win-x64.tgz",
+    "@momics/iroh-http-shared": "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-shared-0.6.2-fork.tgz",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0",
     "superjson": "2.2.2",
@@ -92,6 +94,8 @@
   },
   "overrides": {
     "@github/copilot": "1.0.88",
+    "@momics/iroh-http-node": "$@momics/iroh-http-node",
+    "@momics/iroh-http-shared": "$@momics/iroh-http-shared",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0"
   },

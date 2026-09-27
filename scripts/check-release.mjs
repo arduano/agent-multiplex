@@ -10,6 +10,7 @@ import { extname, relative, resolve } from "node:path";
 
 import {
   assert,
+  assertReviewedIrohManifest,
   bugsUrl,
   githubRegistry,
   homepageUrl,
@@ -47,6 +48,7 @@ assert(rootManifest.version === releaseVersion, "invalid root release version");
 assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(releaseVersion), "root version is not semver");
 assert(/^\d+\.\d+\.\d+$/.test(releaseNodeVersion), ".node-version must be an exact Node version");
 assert(rootManifest.packageManager === `npm@${releaseNpmVersion}`, "packageManager must pin npm exactly");
+assertReviewedIrohManifest(rootManifest);
 assert(
   rootManifest.scripts?.["release:native-status"] ===
     "node scripts/record-native-qualification.mjs",
