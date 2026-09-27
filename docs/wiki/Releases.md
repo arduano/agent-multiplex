@@ -13,8 +13,9 @@ artifact verification. Historical `v0.1.0` evidence is retained separately there
 
 The released protocol-v5 graph contains 16 packages under
 `@arduano/agent-multiplex-*` and pins `@arduano/p2prpc-core@0.2.1` exactly.
-Current protocol-v6 source pins independently published
-`@arduano/p2prpc-core@0.3.0-renewal.0`. GitHub Packages requires
+Current protocol-v6 release-preparation manifests declare
+`@arduano/p2prpc-core@0.3.0-renewal.1`. The lockfile and owner-fork Iroh
+dependency closure remain release blockers. GitHub Packages requires
 authentication even for public installs. Local readers need a classic token
 with `read:packages`. This repository's CI and Dependabot use the
 `PACKAGES_READ_TOKEN` secret because their repository-scoped tokens do not
