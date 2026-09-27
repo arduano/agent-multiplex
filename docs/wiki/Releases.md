@@ -14,8 +14,10 @@ artifact verification. Historical `v0.1.0` evidence is retained separately there
 The released protocol-v5 graph contains 16 packages under
 `@arduano/agent-multiplex-*` and pins `@arduano/p2prpc-core@0.2.1` exactly.
 Current protocol-v6 release-preparation manifests declare
-`@arduano/p2prpc-core@0.3.0-renewal.1`. The lockfile and owner-fork Iroh
-dependency closure remain release blockers. GitHub Packages requires
+`@arduano/p2prpc-core@0.3.0-renewal.1`. The source lock now pins its
+verified published registry bytes and the exact owner-fork Iroh archives;
+final source, native and packed-consumer qualification remain release gates.
+GitHub Packages requires
 authentication even for public installs. Local readers need a classic token
 with `read:packages`. This repository's CI and Dependabot use the
 `PACKAGES_READ_TOKEN` secret because their repository-scoped tokens do not
@@ -25,9 +27,9 @@ The `.19` source root pins the reviewed owner-fork Iroh archives as direct
 dependencies and overrides both transitive edges. Each isolated packed
 consumer check must install that same closure and verify its exact lockfile
 URLs and SHA-512 integrities. The p2prpc `.1` manifest keeps numeric Iroh
-dependencies; a bare install is not a supported native graph. The current
-source lock still records `.18`/renewal `.0` and must be regenerated only after
-the fork archives and p2prpc `.1` are published and independently reviewed.
+dependencies; a bare install is not a supported native graph. The `.19` lock
+was regenerated through this repository's package-read CI credential after the
+fork archives and p2prpc `.1` were published and independently reviewed.
 
 ## Versioning rules
 

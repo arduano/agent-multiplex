@@ -53,8 +53,9 @@ identities remain immutable.
 
 This release-preparation branch declares
 `@arduano/p2prpc-core@0.3.0-renewal.1` in its transport manifest. Its lockfile
-and source-bound Iroh fork closure still need independent verification before
-publication. Ordinary renewal keeps the
+pins the independently verified published p2prpc and Iroh fork bytes; final
+source and packed-consumer qualification still gate framework publication.
+Ordinary renewal keeps the
 same RPC/feed streams while replacing short-lived authentication generations.
 Read the [transport handoff](Transport-Renewal-Handoff.md), the
 [renewal design](../design/p2prpc-renewal-vnext.md), and the
@@ -327,7 +328,7 @@ Suggested first prompt for a new session:
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
 | Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.3` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
-| Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 release-preparation manifest declares `0.3.0-renewal.1`, with lock and closure unqualified |
+| Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 release-preparation lock pins published `0.3.0-renewal.1` and the reviewed Iroh closure, with final framework qualification pending |
 | Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.14` and optional CLI `1.0.88`; GPT-6 Sol availability is publicly documented but not account-qualified here |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
