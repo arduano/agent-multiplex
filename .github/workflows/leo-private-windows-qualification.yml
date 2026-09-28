@@ -201,7 +201,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Disposable TEMP cleanup failed' }
 
   bootstrap:
-    if: false
+    if: true
     runs-on: windows-2025
     timeout-minutes: 180
     steps:
@@ -239,6 +239,7 @@ jobs:
           node scripts/prepare-windows-ci-temp.mjs *> (Join-Path $env:RUNNER_TEMP 'leo-full-temp.log')
           if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP preparation failed' }
       - name: Run ACL and rename fixtures in protected TEMP
+        if: false
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
@@ -345,7 +346,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP cleanup failed' }
 
   helper_pin:
-    if: true
+    if: false
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
