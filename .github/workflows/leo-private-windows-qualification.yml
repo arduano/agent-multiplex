@@ -153,7 +153,7 @@ jobs:
           Invoke-Stage 'stock-node-task' { node tests/windows-fresh-task-smoke.mjs }
           Invoke-Stage 'production-ci' { npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --omit=dev --strict-allow-scripts }
           $release = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'release'
-          Invoke-Stage 'private-release' { node --input-type=module -e "import { privateDirectory } from '@arduano/agent-multiplex-storage-sqlite'; await privateDirectory(process.argv[1])" $release }
+          Invoke-Stage 'private-release' { node --input-type=module -e "import { privateDirectory } from './dist/apps/host/src/private-state.js'; await privateDirectory(process.argv[1])" $release }
           Invoke-Stage 'stage-root' { node scripts/stage-fresh-payload.mjs --payload (Join-Path $release 'payload') }
           $nodeExe = (Get-Command node.exe).Source
           Invoke-Stage 'seal-root' { node scripts/fresh-install.mjs seal --artifact (Join-Path $release 'payload') --revision 3a5ca7d79197a99e433d8e072125593c2fd7dfd8 --roles root --node $nodeExe }
