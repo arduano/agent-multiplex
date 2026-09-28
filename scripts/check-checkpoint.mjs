@@ -144,7 +144,7 @@ for (const dockerfilePath of maintainedDockerBuilds) {
 const transportManifest = readJson("packages/transport-p2prpc/package.json");
 const p2prpcVersion = transportManifest.dependencies?.["@arduano/p2prpc-core"];
 assert(
-  p2prpcVersion === "0.2.1",
+  p2prpcVersion === "0.3.0-renewal.1",
   "@arduano/p2prpc-core must remain pinned to the exact independently released transport version",
 );
 assert(
@@ -161,7 +161,7 @@ assert(
 );
 
 console.log(
-  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v5 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
+  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v6 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
 );
 
 function assertNoOrphanedCompilerOutput(workspacePath) {

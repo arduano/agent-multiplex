@@ -40,7 +40,9 @@ COPY scripts/ ./scripts/
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 
-RUN npm run build -- --force \
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
+    --mount=type=cache,id=agent-multiplex-deterministic-npm,target=/root/.npm,sharing=locked \
+    npm run build -- --force \
     && npm prune --omit=dev \
     && test -f apps/control-node/dist/main.js \
     && test -f apps/runtime-node/dist/main.js \
@@ -72,4 +74,4 @@ COPY --chmod=0755 tests/docker-live-four-container/codex-runtime-entrypoint.sh \
   /usr/local/bin/agent-multiplex-live-codex-runtime
 
 LABEL org.opencontainers.image.title="Agent Multiplex four-container live acceptance"
-LABEL org.opencontainers.image.description="Protocol-v4 authority, gateway UI, Codex runtime, and Copilot BYOK runtime"
+LABEL org.opencontainers.image.description="Protocol-v6 authority, gateway UI, Codex runtime, and Copilot BYOK runtime"

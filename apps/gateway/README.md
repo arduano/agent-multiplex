@@ -6,7 +6,7 @@ sources. It keeps every healthy source synchronized, selects ancestor
 projections over overlapping descendants, and keeps suppressed descendants
 warm for failover. It never accepts another gateway as a source.
 
-The public protocol-v4 `access` surface is available at `/trpc`; the reference
+The public protocol-v6 `access` surface is available at `/trpc`; the reference
 dashboard is served at `/`.
 
 Configuration:

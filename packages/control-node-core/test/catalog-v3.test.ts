@@ -47,7 +47,7 @@ function attach(parent: ControlNodeCatalog, child: ControlNodeCatalog, childEndp
     controlNodeBootId: local.controlNodeBootId,
     feedId: local.feedId,
     name: local.name,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),
@@ -66,7 +66,7 @@ function addSession(catalog: ControlNodeCatalog, vendorSessionId = "native-sessi
     name: "runtime",
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 5,
+    protocolVersion: 6,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -350,7 +350,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       name: "post-restart-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     const runtimeEvent = childCatalog.controlEventsAfter(
       snapshot.source.manifest.controlCursor,
@@ -360,10 +360,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
     );
     expect(runtimeEvent).toBeDefined();
     publishAfterRestart(runtimeEvent!);
-    for (let attempt = 0; attempt < 20 && !parentCatalog.getRuntimeNode(runtimeNodeId); attempt += 1) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
-    expect(parentCatalog.getRuntimeNode(runtimeNodeId)).toMatchObject({
+    await expect.poll(() => parentCatalog.getRuntimeNode(runtimeNodeId)).toMatchObject({
       runtimeNodeId,
       ownerControlNodeId: child.controlNodeId,
       reachability: "reachable",
@@ -391,7 +388,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       lastHeartbeatAt: now,
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5 as const,
+      protocolVersion: 6 as const,
     };
     const makeSession = (vendor: string): SessionRecord => ({
       sessionId: newSessionId(),
@@ -416,13 +413,13 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       source: {
         manifest: {
           componentKind: "control-node",
-          protocolVersion: 5,
+          protocolVersion: 6,
           sourceControlNodeId: child.controlNodeId,
           sourceControlNodeBootId: child.controlNodeBootId,
           authority: parentCatalog.authority(),
           projectionRootControlNodeId: child.controlNodeId,
           coveredControlNodeIds: [child.controlNodeId],
-          feedId: child.feedId,
+          feedId: childCatalog.localControlNode().feedId,
           controlCursor: 7,
           generatedAt: now,
           capabilities: [],
@@ -517,7 +514,7 @@ describe("ControlNodeService snapshot and delivery boundaries", () => {
       name: "healthy-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     const item = await nextHealthy;
     expect(item.value).toMatchObject({ kind: "control" });

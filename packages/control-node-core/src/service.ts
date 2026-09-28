@@ -1,4 +1,6 @@
+import { childImportBatches } from "./child-import-batches.js";
 import {
+  safeCommandError,
   assertImageResponseTarget,
   imageContract,
   type ImageAbortUploadResult,
@@ -34,6 +36,11 @@ import {
   launchListPageSchema,
   launchRecordSchema,
   launchRequestSchema,
+  commandObservationView,
+  commandObservationViewSchema,
+  offlineLifecycleView,
+  runtimeLifecycleProjectionSchema,
+  sessionLifecycleViewSchema,
   metadataOperationRecordSchema,
   metadataPatchSchema,
   runtimeNodeEventItemSchema,
@@ -57,6 +64,7 @@ import {
   type CommandEnvelope,
   type CommandId,
   type CommandRecord,
+  type CommandObservationView,
   type ControlNodeAttachmentRequest,
   type ControlNodeBootId,
   type ControlNodeId,
@@ -79,6 +87,8 @@ import {
   type LineageId,
   type MetadataOperationRecord,
   type MetadataPatch,
+  type NativeStateRequest,
+  type NativeStateResult,
   type NativeHistoryRequest,
   type NativeHistoryResult,
   type NativeModel,
@@ -88,6 +98,7 @@ import {
   type RuntimeNodeFence,
   type RuntimeNodeId,
   type RuntimeNodeRegistration,
+  type SessionLifecycleView,
   type SessionId,
   type SessionRecord,
   type SessionSearchInput,
@@ -308,7 +319,7 @@ export class ControlNodeService {
   public describe() {
     return {
       application: "agent-multiplex" as const,
-      protocolVersion: 5 as const,
+      protocolVersion: 6 as const,
       componentKind: "control-node" as const,
       dataAuthority: "control-node" as const,
       instanceId: this.#instanceId,
@@ -517,6 +528,40 @@ export class ControlNodeService {
   public watchMetadataOperations(cursor: StreamCursor, signal?: AbortSignal) { return this.events.watchMetadataOperations(cursor, signal); }
   public listInteractions(options = {}) { return this.catalog.listInteractions(options); }
   public getCommand(id: CommandId) { return this.catalog.getCommand(id); }
+
+  public async observeCommand(id: CommandId): Promise<CommandObservationView | null> {
+    const receipt = this.catalog.getCommand(id);
+    if (!receipt) return null;
+    if (receipt.sessionId === null) return commandObservationView(receipt);
+    const session = this.catalog.getSession(receipt.sessionId);
+    if (!session || session.runtimeNodeId !== receipt.runtimeNodeId) return commandObservationView(receipt);
+    let observed: CommandObservationView | null = null;
+    try {
+      const route = this.#route(session.runtimeNodeId);
+      const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+      observed = owner.observeCommand ? await owner.observeCommand(id) : null;
+    } catch {
+      // The control journal remains receipt authority while the runtime or
+      // child is offline. A failed read supplies no delivery refinement.
+      return commandObservationView(receipt);
+    }
+    if (!observed) return commandObservationView(receipt);
+    if (observed.receipt.commandId !== receipt.commandId || observed.receipt.payloadHash !== receipt.payloadHash ||
+      observed.receipt.sessionId !== receipt.sessionId || observed.receipt.runtimeNodeId !== receipt.runtimeNodeId ||
+      canonicalJson(observed.receipt.request) !== canonicalJson(receipt.request)) {
+      throw new ControlNodeCoreError("PAYLOAD_MISMATCH", "command observation does not match the durable receipt identity");
+    }
+    // The control journal owns terminal certainty. Runtime delivery can refine
+    // presentation, but can never overwrite an outcomeUnknown review fence.
+    return commandObservationViewSchema.parse({
+      ...observed,
+      receipt,
+      continuation: receipt.state === "outcomeUnknown" ? "reviewRequired"
+        : receipt.state === "failed" ? "complete" : observed.continuation,
+      delivery: receipt.state === "outcomeUnknown" ? "unknown"
+        : receipt.state === "failed" ? "failed" : observed.delivery,
+    });
+  }
 
   public enrollGateway(inputValue: GatewayEnrollment, context: AccessContext = {}) {
     const input = gatewayEnrollmentSchema.parse(inputValue);
@@ -1139,6 +1184,54 @@ export class ControlNodeService {
       : this.#runtime(session.runtimeNodeId).readNativeHistory(sessionId, request);
   }
 
+  public async readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView> {
+    const session = this.catalog.getSession(sessionId);
+    if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
+    if (session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "archived session resources have been released");
+    const cachedRuntime = this.catalog.getRuntimeNode(session.runtimeNodeId);
+    if (session.lifecycle && (!cachedRuntime || cachedRuntime.presence !== "online" ||
+      cachedRuntime.reachability !== "reachable")) {
+      return session.lifecycle.status === "offline" ? session.lifecycle : offlineLifecycleView(session.lifecycle);
+    }
+    const route = this.#route(session.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+    const observed = await owner.readLifecycle(sessionId);
+    const current = this.catalog.getSession(sessionId);
+    const runtime = this.catalog.getRuntimeNode(session.runtimeNodeId);
+    if (!current || current.catalogState === "archived" || current.runtimeNodeId !== session.runtimeNodeId ||
+      current.bindingRevision !== session.bindingRevision || current.runtimeEpoch !== session.runtimeEpoch) {
+      throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
+    }
+    const projection = route.immediateChildControlNodeId
+      ? undefined
+      : runtimeLifecycleProjectionSchema.parse(observed);
+    const view = projection?.view ?? sessionLifecycleViewSchema.parse(observed);
+    if (projection) {
+      const fence = projection.fence;
+      if (fence.sessionId !== sessionId || fence.runtimeNodeId !== session.runtimeNodeId ||
+        fence.bindingRevision !== session.bindingRevision || fence.runtimeEpoch !== session.runtimeEpoch ||
+        fence.runtimeNodeBootId !== runtime?.runtimeNodeBootId) {
+        throw new ControlNodeCoreError("FENCED", "lifecycle snapshot does not match the current runtime binding");
+      }
+    }
+    if (!runtime || runtime.presence !== "online" || runtime.reachability !== "reachable") {
+      const cached = current.lifecycle;
+      return cached?.status === "offline" ? cached : offlineLifecycleView(cached ?? view);
+    }
+    return view;
+  }
+
+  public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    const session = this.catalog.getSession(sessionId);
+    if (!session) throw new ControlNodeCoreError("NOT_FOUND", "session is unknown");
+    if (session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "archived session resources have been released");
+    if (session.harness !== request.harness) throw new ControlNodeCoreError("FENCED", "native state request harness does not match binding");
+    const route = this.#route(session.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+    if (!owner.readNativeState) throw new ControlNodeCoreError("UNSUPPORTED", "native state observation is unavailable");
+    return owner.readNativeState(sessionId, request);
+  }
+
   public beginImageUpload(input: ImageBeginUploadInput): Promise<ImageUploadState> {
     const request = imageContract.beginUpload.input.parse(input);
     return this.#routeImage(request, (owner) => owner.beginImageUpload(request))
@@ -1529,7 +1622,7 @@ export class ControlNodeService {
       const unknown = commandRecordSchema.parse({
         ...current,
         state: "outcomeUnknown",
-        error: "control-node dispatch ownership was lost before a terminal response",
+        error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown" }),
         updatedAt: this.#now().toISOString(),
       });
       return Promise.resolve(this.catalog.updateCommand(unknown));
@@ -1573,7 +1666,7 @@ export class ControlNodeService {
           const unknown = commandRecordSchema.parse({
             ...durable,
             state: "outcomeUnknown",
-            error: cause instanceof Error ? cause.message : String(cause),
+            error: safeCommandError(cause, { stage: "dispatch", certainty: "outcomeUnknown" }),
             updatedAt: this.#now().toISOString(),
           });
           this.catalog.updateCommand(unknown);
@@ -1925,10 +2018,11 @@ export class ControlNodeService {
         if (!attachment) return;
         const checkpoint = this.catalog.childCheckpoint(connection.controlNodeId);
         if (!checkpoint) return;
-        for await (const item of connection.subscribeAggregate({ ...checkpoint, native: {} }, controller.signal)) {
+        for await (const group of childImportBatches(connection.subscribeAggregate({ ...checkpoint, native: {} }, controller.signal), requiresChildResnapshot)) {
+          const item = Array.isArray(group) ? group.at(-1)! : group;
           if (controller.signal.aborted) return;
           if (item.kind === "control") {
-            this.catalog.importChildControl(connection.controlNodeId, attachment.attachmentId, item);
+            this.catalog.importChildControls(connection.controlNodeId, attachment.attachmentId, Array.isArray(group) ? group : [item]);
             if (requiresChildResnapshot(item)) {
               if (
                 this.#childPumps.get(connection.controlNodeId) !== pump ||

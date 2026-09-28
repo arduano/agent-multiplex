@@ -121,11 +121,36 @@ export const nativeHistoryRequestSchema = z.discriminatedUnion("harness", [
 ]);
 export type NativeHistoryRequest = z.infer<typeof nativeHistoryRequestSchema>;
 
+/** A live harness-owned observation. Never attaches or resumes an inactive binding. */
+export const nativeStateRequestSchema = z.discriminatedUnion("harness", [
+  z.discriminatedUnion("view", [
+    z.object({ harness: z.literal("copilot"), view: z.literal("pendingMessages") }).strict(),
+    z.object({ harness: z.literal("copilot"), view: z.literal("tasks") }).strict(),
+    z.object({ harness: z.literal("copilot"), view: z.literal("taskProgress"), id: z.string().min(1).max(4_096) }).strict(),
+    z.object({ harness: z.literal("copilot"), view: z.literal("currentPromotableTask") }).strict(),
+  ]),
+  z.object({ harness: z.literal("codex"), view: z.literal("goal") }).strict(),
+]);
+export type NativeStateRequest = z.infer<typeof nativeStateRequestSchema>;
+
+export const nativeStateResultSchema = z.object({
+  harness: harnessSchema,
+  vendorSessionId: z.string().min(1),
+  payload: nativePayloadSchema,
+});
+export type NativeStateResult = z.infer<typeof nativeStateResultSchema>;
+
 export const nativeHistoryResultSchema = z.object({
   harness: harnessSchema,
   vendorSessionId: z.string().min(1),
   payload: nativePayloadSchema,
   nextCursor: z.string().optional(),
   complete: z.boolean().optional(),
+  sortDirection: z.enum(["asc", "desc"]).optional(),
+  unavailableItem: z.object({
+    reason: z.literal("exceedsWireLimit"),
+    nativeItemId: z.string().max(1_024).optional(),
+    nativeType: z.string().max(256).optional(),
+  }).optional(),
 });
 export type NativeHistoryResult = z.infer<typeof nativeHistoryResultSchema>;

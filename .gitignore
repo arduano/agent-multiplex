@@ -13,3 +13,4 @@ coverage/
 receipts/
 release-artifacts/
 *.tgz
+transport-candidate/artifact.json

@@ -9,7 +9,9 @@ import type {
   HarnessSpawnOptions,
   JsonValue,
   LaunchBackendId,
+  LifecycleFact,
   NativeHistoryRequest,
+  NativeStateRequest,
   NativePayload,
   NativeImageSlot,
   NativeInventoryItem,
@@ -26,7 +28,11 @@ export interface AdapterNativeHistoryResult {
   payload: JsonValue;
   complete?: boolean;
   nextCursor?: string;
+  sortDirection?: "asc" | "desc";
+  unavailableItem?: { reason: "exceedsWireLimit"; nativeItemId?: string; nativeType?: string };
 }
+
+export type AdapterNativeStateResult = Pick<AdapterNativeHistoryResult, "harness" | "vendorSessionId" | "payload">;
 
 export interface NativeImageSink {
   storeBase64(input: { dataBase64: string; mediaType: string }): Promise<NativeImageSlot["image"]>;
@@ -49,6 +55,8 @@ export interface AdapterNativeEvent {
 export interface AdapterInteractionEvent {
   kind: "interaction";
   nativeRequestId?: string;
+  /** Used only when a native recovery snapshot omits root/child ownership. */
+  lifecycleOwner?: "unattributed";
   requestType:
     | "approval"
     | "permission"
@@ -84,6 +92,7 @@ export interface AdapterSettingsEvent {
 }
 
 export type AdapterEvent =
+  | { kind: "lifecycle"; fact: LifecycleFact }
   | AdapterNativeEvent
   | AdapterInteractionEvent
   | AdapterInteractionSettledEvent
@@ -102,6 +111,8 @@ export interface AdapterSession {
   subscribe(listener: (event: AdapterEvent) => void): () => void;
   execute(command: HarnessCommand): Promise<JsonValue | undefined>;
   readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult>;
+  /** Optional active-session observation; does not mutate the native session. */
+  readNativeState?(request: NativeStateRequest): Promise<AdapterNativeStateResult>;
   stop(): Promise<void>;
 }
 

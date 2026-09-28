@@ -3,6 +3,7 @@ import {
   type SessionId,
   type StreamCursor,
 } from "@arduano/agent-multiplex-protocol";
+import { advanceAccessCursor } from "./access-watch.js";
 
 /** Mutable reconnect cursor. Native cursors remain epoch-scoped and never imply history. */
 export class AccessCursor {
@@ -16,23 +17,23 @@ export class AccessCursor {
   }
 
   public observe(item: AccessStreamItem): void {
-    if (item.kind === "control") {
-      this.#observeFeed(item.feedId, item.cursor);
-    } else if (item.kind === "heartbeat") {
-      this.#observeFeed(item.feedId, item.controlCursor);
-    } else if (item.kind === "native") {
-      const native = this.#cursor?.native ?? this.#pendingNative;
-      native[item.sessionId] = {
-        runtimeEpoch: item.runtimeEpoch,
-        sequence: item.sequence,
-      };
-    } else if (item.kind === "streamReset") {
+    if (item.kind === "native" && !this.#cursor) {
+      const previous = this.#pendingNative[item.sessionId];
+      if (previous?.runtimeEpoch !== item.runtimeEpoch || previous.sequence < item.sequence) {
+        this.#pendingNative[item.sessionId] = {
+          runtimeEpoch: item.runtimeEpoch,
+          sequence: item.sequence,
+        };
+      }
+      return;
+    }
+    const previous = this.#cursor;
+    this.#cursor = advanceAccessCursor(previous, item);
+    if (item.kind === "streamReset" || (previous && previous.feedId !== this.#cursor?.feedId)) {
       this.#pendingNative = {};
-      this.#cursor = {
-        feedId: item.feedId,
-        controlCursor: item.controlCursor,
-        native: {},
-      };
+    } else if (!previous && this.#cursor) {
+      this.#cursor.native = { ...this.#pendingNative, ...this.#cursor.native };
+      this.#pendingNative = {};
     }
   }
 
@@ -44,22 +45,6 @@ export class AccessCursor {
   /** Undefined until the remote feed has identified itself. */
   public snapshot(): StreamCursor | undefined {
     return this.#cursor ? clone(this.#cursor) : undefined;
-  }
-
-  #observeFeed(feedId: StreamCursor["feedId"], controlCursor: number): void {
-    if (!this.#cursor || this.#cursor.feedId !== feedId) {
-      this.#cursor = {
-        feedId,
-        controlCursor,
-        native: this.#cursor ? {} : { ...this.#pendingNative },
-      };
-      this.#pendingNative = {};
-      return;
-    }
-    this.#cursor.controlCursor = Math.max(
-      this.#cursor.controlCursor,
-      controlCursor,
-    );
   }
 }
 

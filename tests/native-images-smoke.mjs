@@ -47,7 +47,7 @@ const work = mkdtempSync(join(tmpdir(), 'multiplex-native-images-'));
 const sourceConfig = process.env.AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG ?? join(homedir(), '.codex', 'config.toml');
 const sourceKey = process.env.AGENT_MULTIPLEX_LIVE_SOURCE_KEY ?? join(homedir(), '.codex', 'codex-lb-api-key');
 let providerUrl = ''; let key = '';
-const manifest = { schema:'native-image-smoke-v1', startedAt:new Date().toISOString(), status:'running', protocolVersion:5, gitHead:execFileSync('git', ['rev-parse','HEAD'], { cwd:root, encoding:'utf8' }).trim(), node:process.version, dependencyLockSha256:sha(readFileSync(join(root,'package-lock.json'))), testedBoundarySha256:before.sha256, maximumAuthorizedTurnsPerHarness:4, selectedHarnesses, calls:counts, credentialMaterialRecorded:false, providerEndpointRecorded:false, nativeAuthHomesRecorded:false, nativePackages:Object.fromEntries(['@openai/codex','@github/copilot','@github/copilot-sdk'].map((name)=>[name,JSON.parse(readFileSync(join(root,'node_modules',name,'package.json'),'utf8')).version])), harnesses:{}, limitations:['Targeted native runtime check; control-tree transport and browser display are qualified separately.'] };
+const manifest = { schema:'native-image-smoke-v1', startedAt:new Date().toISOString(), status:'running', protocolVersion:6, gitHead:execFileSync('git', ['rev-parse','HEAD'], { cwd:root, encoding:'utf8' }).trim(), node:process.version, dependencyLockSha256:sha(readFileSync(join(root,'package-lock.json'))), testedBoundarySha256:before.sha256, maximumAuthorizedTurnsPerHarness:4, selectedHarnesses, calls:counts, credentialMaterialRecorded:false, providerEndpointRecorded:false, nativeAuthHomesRecorded:false, nativePackages:Object.fromEntries(['@openai/codex','@github/copilot','@github/copilot-sdk'].map((name)=>[name,JSON.parse(readFileSync(join(root,'node_modules',name,'package.json'),'utf8')).version])), harnesses:{}, limitations:['Targeted native runtime check; control-tree transport and browser display are qualified separately.'] };
 const redact = (error) => String(error instanceof Error ? error.message : error).replaceAll(work,'<test-workdir>').replaceAll(key || '\0','<redacted>').replaceAll(providerUrl || '\0','<redacted-endpoint>').replace(/https?:\/\/[^\s"']+/g,'<redacted-endpoint>').replace(/\b(?:sk-[A-Za-z0-9_-]{15,}|gh[pousr]_[A-Za-z0-9_]{20,})\b/g,'<redacted>');
 const scrub = (error) => redact(error).slice(0,1500);
 const until = async (predicate, label, timeout=90_000) => {
@@ -90,7 +90,7 @@ async function qualify(harness) {
     const descriptor=await adapter.describe();
     assert(descriptor.available,`${harness} adapter unavailable`);
     result.nativeVersion=descriptor.version; result.runtimeVersion=descriptor.runtimeVersion ?? descriptor.version;
-    assert.equal(descriptor.version,harness==='codex'?'0.152.0':'1.0.13');
+    assert.equal(descriptor.version,harness==='codex'?'0.152.0':'1.0.14');
     cancel=new AbortController();
     collecting=(async()=>{for await(const event of service.events({native:{}},cancel.signal))events.push(event);})();
   };

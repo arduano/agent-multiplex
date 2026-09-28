@@ -9,7 +9,7 @@ host, secret, and audit controls where organizational users are involved.
 
 | Version | Security fixes |
 | --- | --- |
-| `0.1.x` (v4 release) and current protocol-v5 development | Yes |
+| Protocol-v4/v5 releases and current protocol-v6 development | Yes |
 | Protocol v3 and earlier | No |
 | Archived protocol-v2 host/worker source | No |
 
@@ -46,10 +46,25 @@ disclosure.
 ## Security boundaries
 
 - Control nodes are trusted canonical metadata/catalog authorities.
+- Answering or expiring an imported interaction preserves its admitted child
+  ownership. It does not authorize identity transfer or weaken snapshot and
+  terminal-response conflict checks.
+- Initial receipt handoff trusts the authenticated standalone child's prior
+  authority only during its first complete snapshot. The parent persists this
+  admission and accepts no later invented historical receipt or changed terminal
+  result. Existing subtree moves and undrained metadata work are rejected; a
+  network outage never invokes handoff or promotes an attached branch.
 - Runtimes are trusted with allowed workspaces, native harness credentials,
   provider secrets, app-server output, and the runtime account's OS authority.
 - Gateways are zero-authority protocol actors but can observe all data granted by
   their sources and route powerful actions.
+- `sessions.readLifecycle` requires `read` access. Its public v2 view is
+  payload-free and contains only an opaque observation ID, status, typed health
+  and host-computed action availability. Native task, queue, interaction,
+  child, message and command correlation identities stay in the runtime's
+  private reducer. The runtime is its only writer; control and gateway routes
+  must preserve the runtime boot, binding, native epoch, sequence, and
+  selected-source fences before stripping private fields.
 - Gateway plugins, runtime providers/backends, and adapters are trusted
   in-process modules. They are not tenant sandboxes.
 - A statically injected runtime path policy is also trusted application code
@@ -60,6 +75,27 @@ disclosure.
   locators, not identity.
 - Terminal output is opaque and unredacted. `terminal-control` is equivalent to
   typing at a native agent under the runtime account.
+- Live queue observations use `read` and may contain operator prompt text. They
+  require an active binding and neither activate stopped sessions nor persist
+  queue text in the catalog. Moving a queued message into a running turn requires
+  `agent-control` and the durable command fence; unknown results must not be
+  replaced by remove/resend.
+- Native Copilot task lists/progress use the active-binding `read` boundary
+  and can include commands, paths, prompt text and recent output. They never
+  resume stopped sessions or grant arbitrary shell/process access. Exact-ID
+  task promotion and cancellation require `agent-control` and the durable
+  command fence. False acknowledgements remain no-ops; an unknown result cannot
+  authorize another mutation, alternate task or process-termination fallback.
+- Native context compaction requires `agent-control` and the existing durable
+  command/binding fence. It can make provider/model requests and changes native
+  context. It does not resume stopped sessions, grant tool permissions or add
+  a synthetic user prompt. Codex start acknowledgement is not completion; native
+  Copilot false results remain false. Unknown outcomes must retain their original
+  operation identity without automatic retry.
+- Native Codex goal observations use the same live-binding `read` boundary.
+  Setting or clearing goals requires `agent-control` and a durable command ID;
+  setting an active goal may cause Codex to continue work under its native
+  behavior. Goal reads never resume a session or grant tool permissions.
 - Copilot's `setPermissionMode` command uses `agent-control` and changes the native
   session's tool, path and URL permission mode. Native managed policy remains
   enforced by Copilot. The adapter never substitutes unconditional approval
@@ -74,6 +110,18 @@ disclosure.
   injection, frames, or document navigation.
 - Allowed-root validation is a path policy, not process, network, credential, or
   filesystem isolation.
+
+## Authenticated renewal
+
+The [renewal contract](docs/design/p2prpc-renewal-vnext.md) renews credentials
+before the unchanged hard expiry while retaining physical stream identity.
+Generation-bound mutual transcripts, active-operation reauthorization and a
+single pending handoff fence replacement. Invalid credentials, revoked endpoint
+admission/policy, authority changes and unfinished expiry fail closed. No RPC
+mutation is automatically replayed. Offline token revocation remains limited by
+the configured verifier/introspection policy. All p2prpc consumers must upgrade
+together on the exact published renewal pin; old ALPN-bound tickets must be
+rotated during the coordinated maintenance window.
 
 ## Required deployment practices
 
@@ -97,6 +145,10 @@ disclosure.
   session metadata.
 - Reconcile `outcomeUnknown` by its stable operation/resource identity; do not
   blindly retry a potentially committed action.
+- Generic durable command errors use fixed public text, an allowlisted code,
+  stage, certainty and diagnostic ID. Never copy native exception text, stack or
+  causes into these receipts. This does not sanitize native history, opaque
+  terminal output, launch/archive errors, or arbitrary thrown RPC errors.
 - Treat a gateway `conflict` as a correctness incident; source priority cannot
   repair an authority or immutable-record fork.
 - Requalify the exact native and p2prpc dependency boundary before upgrades.
@@ -110,3 +162,12 @@ That trusted edge must verify credentials, assign action scopes, enforce origins
 and connection expiry, and retain the reference byte bounds. Declaring an external
 edge is not a remote or environment-controlled authentication bypass; the reference
 daemon retains its bearer/explicit-loopback policy.
+
+
+The optional authority storage worker is trusted code in the same OS process,
+not an isolation boundary for hostile plugins. Its private IPC accepts only
+allowlisted domain methods and authenticated endpoint context, then re-applies
+committed enrollment scopes and the original router validation. No SQL endpoint,
+stale authorization cache, remote worker configuration, lock deletion or automatic
+mutation replay is exposed. Loopback storage health contains fixed categories and
+aggregate timings only, with no native messages, SQL values or credentials.

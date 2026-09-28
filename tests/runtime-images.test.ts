@@ -87,7 +87,7 @@ describe('runtime-owned images', () => {
     const initial = new RuntimeNodeStore(filename); initial.close();
     const old = new DatabaseSync(filename);
     const large = JSON.stringify({ result:'x'.repeat(1_024 * 1_024) });
-    old.exec("DROP TABLE images; DELETE FROM schema_migrations WHERE version=5; PRAGMA user_version=4;");
+    old.exec("DROP TABLE images; DROP TABLE IF EXISTS lifecycle_state; DELETE FROM schema_migrations WHERE version>=5; PRAGMA user_version=4;");
     old.prepare("INSERT INTO command_journal(command_id,payload_hash,record_json,updated_at) VALUES (?,?,?,?)")
       .run(newCommandId(), 'migration-payload-hash', large, new Date().toISOString());
     old.close();
@@ -193,9 +193,9 @@ describe('runtime-owned images', () => {
       expect(executed).toHaveBeenCalledWith(expect.objectContaining({ command:expect.objectContaining({ input:[{ type:'image', image_url:`data:image/png;base64,${png.toString('base64')}` }] }) }));
       expect(JSON.stringify(store.getCommand(command.commandId))).not.toContain(png.toString('base64'));
       const disallowed = await service.execute({ ...command, commandId:newCommandId(), payloadHash:'images-disallowed-pointer', request:{ harness:'codex', command:{ type:'send', input:[{ type:'text', text:null }] } }, images:[{ ...command.images[0]!, pointer:'/command/input/0/text' }] });
-      expect(disallowed).toMatchObject({ state:'failed', error:expect.stringContaining('allowlist') });
+      expect(disallowed).toMatchObject({ state:'failed', error:{ code:'FENCED', certainty:'definiteFailure' } });
       const oversized = await service.execute({ ...command, commandId:newCommandId(), payloadHash:'images-oversized-total', images:Array.from({ length:6 }, (_, index) => ({ ...command.images[0]!, pointer:`/command/input/${index}/image_url`, image:{ ...image, byteLength:10 * 1_024 * 1_024 } })) });
-      expect(oversized).toMatchObject({ state:'failed', error:expect.stringContaining('50 MiB') });
+      expect(oversized).toMatchObject({ state:'failed', error:{ code:'RESOURCE_EXHAUSTED', certainty:'definiteFailure' } });
       expect(executed).toHaveBeenCalledTimes(1);
       const inherited = { image:null };
       const marker = 'multiplexImageCommandPrototypeSentinel';
@@ -209,7 +209,7 @@ describe('runtime-owned images', () => {
       });
       try {
         const rejected = await service.execute({ ...command, commandId:newCommandId(), payloadHash:'images-inherited-parent', images:[changedSlot] });
-        expect(rejected).toMatchObject({ state:'failed', error:expect.stringContaining('pointer is unsafe') });
+        expect(rejected).toMatchObject({ state:'failed', error:{ code:'FENCED', certainty:'definiteFailure' } });
         expect(inherited.image).toBeNull();
         expect(executed).toHaveBeenCalledTimes(1);
       } finally { read.mockRestore(); Reflect.deleteProperty(Object.prototype, marker); }

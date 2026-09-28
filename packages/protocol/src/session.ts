@@ -10,6 +10,7 @@ import {
   sessionIdSchema,
 } from "./ids.js";
 import { jsonValueSchema } from "./json.js";
+import { runtimeLifecycleProjectionSchema, sessionLifecycleViewSchema } from "./lifecycle.js";
 import {
   launchBackendIdSchema,
   launchContractVersionSchema,
@@ -99,16 +100,69 @@ const runtimeOwnedSessionFields = {
   lastActivityAt: isoDateSchema.nullable().default(null),
 } as const;
 
+function validateSessionLifecycleView(
+  record: {
+    harness: z.infer<typeof harnessSchema>;
+    runtimeEpoch: z.infer<typeof runtimeEpochSchema> | null;
+    availability: SessionAvailability;
+    lifecycle?: z.infer<typeof sessionLifecycleViewSchema> | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const lifecycle = record.lifecycle;
+  if (!lifecycle) return;
+  const offline = lifecycle.status === "offline";
+  if (record.harness !== "copilot" || (!offline && (
+    record.availability !== "active" || record.runtimeEpoch === null
+  ))) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["lifecycle"],
+      message: "lifecycle view requires an active Copilot runtime binding",
+    });
+  }
+}
+
+function validateRuntimeLifecycleProjection(
+  record: {
+    sessionId: string;
+    runtimeNodeId: string;
+    harness: z.infer<typeof harnessSchema>;
+    bindingRevision: number;
+    runtimeEpoch: z.infer<typeof runtimeEpochSchema> | null;
+    availability: SessionAvailability;
+    lifecycle?: z.infer<typeof runtimeLifecycleProjectionSchema> | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const lifecycle = record.lifecycle;
+  if (!lifecycle) return;
+  const fence = lifecycle.fence;
+  if (
+    record.harness !== "copilot" || record.availability !== "active" || record.runtimeEpoch === null ||
+    fence.sessionId !== record.sessionId || fence.runtimeNodeId !== record.runtimeNodeId ||
+    fence.bindingRevision !== record.bindingRevision || fence.runtimeEpoch !== record.runtimeEpoch
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["lifecycle"],
+      message: "runtime lifecycle projection must match an active Copilot binding",
+    });
+  }
+}
+
 /** Canonical control-node projection. Catalog fields are never runtime-owned. */
 export const sessionRecordSchema = z
   .object({
     ...runtimeOwnedSessionFields,
+    lifecycle: sessionLifecycleViewSchema.optional(),
     metadataAuthority: authorityRefSchema,
     catalogState: sessionCatalogStateSchema.default("open"),
     catalogRevision: z.number().int().positive().default(1),
     archivedAt: isoDateSchema.nullable().default(null),
   })
   .superRefine((record, ctx) => {
+    validateSessionLifecycleView(record, ctx);
     if (record.catalogState === "archived" && record.archivedAt === null) {
       ctx.addIssue({
         code: "custom",
@@ -137,9 +191,11 @@ export type SessionRecord = z.infer<typeof sessionRecordSchema>;
 export const runtimeNodeSessionRecordSchema = z
   .object({
     ...runtimeOwnedSessionFields,
+    lifecycle: runtimeLifecycleProjectionSchema.optional(),
     metadataAuthority: authorityRefSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine(validateRuntimeLifecycleProjection);
 export type RuntimeNodeSessionRecord = z.infer<
   typeof runtimeNodeSessionRecordSchema
 >;

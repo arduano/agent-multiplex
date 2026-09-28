@@ -1,5 +1,6 @@
 import {
   createP2PNode,
+  SESSION_RENEWAL_CONTRACT,
   type P2PNode,
   type P2PNodeLimits,
   type P2PNodeOptions,
@@ -84,6 +85,9 @@ export class MultiplexP2PNode<
   >(
     options: MultiplexP2PNodeOptions<TLocalRouter, TRemoteRouter>,
   ): Promise<MultiplexP2PNode<TLocalRouter, TRemoteRouter>> {
+    if (SESSION_RENEWAL_CONTRACT !== 1) {
+      throw new Error("Multiplex requires p2prpc authenticated renewal contract 1");
+    }
     const { sharedSecret, onPeer, onAnyPeer, ...nodeOptions } = options;
     const raw = await createP2PNode({
       ...nodeOptions,

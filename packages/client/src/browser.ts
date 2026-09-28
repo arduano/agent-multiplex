@@ -3,6 +3,7 @@
  * must not evaluate the synchronous command helpers or native p2prpc transport.
  */
 export * from "./images.js";
+export * from "./command-recovery.js";
 export {
   createAccessClient,
   type AccessClient,

@@ -84,10 +84,11 @@ describe("real-Iroh dynamic reverse bindings", () => {
     }
   });
 
-  it("uses the replacement child-control Peer for unary RPC and subscription restart after session expiry", {
+  it("retains one child-control feed and live unary routing across three auth renewals", {
     timeout: 30_000,
   }, async () => {
     const subscriptionSessionIds: string[] = [];
+    let cancelledSubscriptions = 0;
     const childRouter = t.router({
       link: t.router({
         harness: t.router({
@@ -114,6 +115,7 @@ describe("real-Iroh dynamic reverse bindings", () => {
                 const finish = (): void => resolve();
                 signal?.addEventListener("abort", finish, { once: true });
               });
+              cancelledSubscriptions += 1;
             }),
         }),
       }),
@@ -132,11 +134,10 @@ describe("real-Iroh dynamic reverse bindings", () => {
       | MultiplexP2PNode<TestChildRouter, TestParentRouter>
       | undefined;
     let firstIterator: AsyncIterator<AccessStreamItem> | undefined;
-    let secondIterator: AsyncIterator<AccessStreamItem> | undefined;
 
     try {
       const sharedSecret = "child-reverse-binding-test-secret".padEnd(64, "x");
-      const sessionTtlMs = 1_500;
+      const sessionTtlMs = 800;
       const iroh = {
         relay: { mode: "disabled" as const },
         allowAdvertisedAddress: () => true,
@@ -192,61 +193,43 @@ describe("real-Iroh dynamic reverse bindings", () => {
       });
       expect(subscriptionSessionIds).toEqual([firstInboundPeer.session.id]);
 
-      await expect.poll(
-        () => parent?.getPeerAs<TestChildRouter>(child!.id),
-        { timeout: 10_000 },
-      ).toBeUndefined();
-      await expect(
-        firstInboundPeer.rpc.link.harness.models.query({
-          ...binding,
-          runtimeNodeId,
-          harness: "codex",
-        }),
-      ).rejects.toMatchObject({ cause: { code: "DISCONNECTED" } });
-
-      // The child owns the outbound route. Its next parent-directed RPC
-      // performs a fresh handshake and publishes the replacement inbound Peer.
-      const heartbeat = await outboundPeer.rpc.heartbeat.query();
-      const secondInboundPeer = await waitForValue(
-        () => parent?.getPeerAs<TestChildRouter>(child!.id),
-      );
-      expect(secondInboundPeer).not.toBe(firstInboundPeer);
-      expect(secondInboundPeer.session.id).not.toBe(firstInboundPeer.session.id);
-      expect(heartbeat.authenticatedSessionId).toBe(secondInboundPeer.session.id);
-
-      const secondModels = await connection.listModels(runtimeNodeId, "copilot");
-      expect(secondModels).toEqual([{
-        harness: "copilot",
-        id: secondInboundPeer.session.id,
-      }]);
-      secondIterator = connection.subscribeAggregate(cursor)[Symbol.asyncIterator]();
-      await expect(secondIterator.next()).resolves.toMatchObject({
-        done: false,
-        value: { kind: "heartbeat" },
-      });
-      expect(subscriptionSessionIds).toEqual([
-        firstInboundPeer.session.id,
-        secondInboundPeer.session.id,
-      ]);
+      const firstSessionId = firstInboundPeer.session.id;
+      for (let generation = 0; generation < 3; generation += 1) {
+        const previousSessionId = firstInboundPeer.session.id;
+        await expect.poll(() => firstInboundPeer.session.id, {
+          timeout: 5_000,
+        }).not.toBe(previousSessionId);
+        expect(parent.getPeerAs<TestChildRouter>(child.id)?.session).toBe(firstInboundPeer.session);
+        const heartbeat = await outboundPeer.rpc.heartbeat.query();
+        expect(heartbeat.authenticatedSessionId).toBe(firstInboundPeer.session.id);
+        await expect(connection.listModels(runtimeNodeId, "copilot")).resolves.toEqual([{
+          harness: "copilot",
+          id: firstInboundPeer.session.id,
+        }]);
+        expect(subscriptionSessionIds).toEqual([firstSessionId]);
+      }
+      // Cancellation still reaches the original retained subscription.
+      await firstIterator.return?.();
+      await expect.poll(() => cancelledSubscriptions).toBe(1);
     } finally {
       await Promise.allSettled([
         firstIterator?.return?.(),
-        secondIterator?.return?.(),
       ]);
       await Promise.allSettled([child?.close(), parent?.close()]);
     }
   });
 
-  it("uses the replacement inbound Peer for unary RPC and event-pump retry after session expiry", {
+  it("retains one runtime event pump across three auth renewals", {
     timeout: 30_000,
   }, async () => {
     const subscriptionSessionIds: string[] = [];
+    let cancelledSubscriptions = 0;
     const runtimeNodeBootId = newRuntimeNodeBootId();
     const sessionId = newSessionId();
     const historyInput = {
       runtimeNodeBootId,
       sessionId,
-      request: { harness: "codex" as const, includeTurns: true },
+      request: { harness: "codex" as const, includeTurns: true, limit: 100 },
     };
     const runtimeRouter = t.router({
       sessions: t.router({
@@ -270,6 +253,7 @@ describe("real-Iroh dynamic reverse bindings", () => {
               const finish = (): void => resolve();
               signal?.addEventListener("abort", finish, { once: true });
             });
+            cancelledSubscriptions += 1;
           }),
       }),
     });
@@ -290,7 +274,7 @@ describe("real-Iroh dynamic reverse bindings", () => {
 
     try {
       const sharedSecret = "dynamic-reverse-binding-test-secret".padEnd(64, "x");
-      const sessionTtlMs = 1_500;
+      const sessionTtlMs = 800;
       const iroh = {
         relay: { mode: "disabled" as const },
         allowAdvertisedAddress: () => true,
@@ -337,39 +321,25 @@ describe("real-Iroh dynamic reverse bindings", () => {
       await expect.poll(() => observed.length, { timeout: 5_000 }).toBe(1);
       expect(subscriptionSessionIds).toEqual([firstInboundPeer.session.id]);
 
-      await expect.poll(
-        () => control?.getPeerAs<TestRuntimeRouter>(runtime!.id),
-        { timeout: 10_000 },
-      ).toBeUndefined();
-      await expect(
-        firstInboundPeer.rpc.sessions.readNativeHistory.query(historyInput),
-      ).rejects.toMatchObject({ cause: { code: "DISCONNECTED" } });
-
-      // The runtime owns the outbound route, so this operation performs the
-      // fresh handshake and publishes a new inbound Peer on the control node.
-      const heartbeat = await outboundPeer.rpc.heartbeat.query();
-      const secondInboundPeer = await waitForValue(
-        () => control?.getPeerAs<TestRuntimeRouter>(runtime!.id),
-      );
-      expect(secondInboundPeer).not.toBe(firstInboundPeer);
-      expect(secondInboundPeer.session.id).not.toBe(firstInboundPeer.session.id);
-      expect(heartbeat.authenticatedSessionId).toBe(secondInboundPeer.session.id);
-
-      const secondHistory = await connection.readNativeHistory(
-        sessionId,
-        historyInput.request,
-      );
-      expect(firstHistory.payload).toEqual({
-        authenticatedSessionId: firstInboundPeer.session.id,
-      });
-      expect(secondHistory.payload).toEqual({
-        authenticatedSessionId: secondInboundPeer.session.id,
-      });
-      await expect.poll(() => observed.length, { timeout: 5_000 }).toBe(2);
-      expect(subscriptionSessionIds).toEqual([
-        firstInboundPeer.session.id,
-        secondInboundPeer.session.id,
-      ]);
+      const firstSessionId = firstInboundPeer.session.id;
+      expect(firstHistory.payload).toEqual({ authenticatedSessionId: firstSessionId });
+      for (let generation = 0; generation < 3; generation += 1) {
+        const previousSessionId = firstInboundPeer.session.id;
+        await expect.poll(() => firstInboundPeer.session.id, {
+          timeout: 5_000,
+        }).not.toBe(previousSessionId);
+        expect(control.getPeerAs<TestRuntimeRouter>(runtime.id)?.session).toBe(firstInboundPeer.session);
+        const heartbeat = await outboundPeer.rpc.heartbeat.query();
+        expect(heartbeat.authenticatedSessionId).toBe(firstInboundPeer.session.id);
+        await expect(connection.readNativeHistory(sessionId, historyInput.request))
+          .resolves.toMatchObject({
+            payload: { authenticatedSessionId: firstInboundPeer.session.id },
+          });
+        expect(observed).toEqual([{ kind: "heartbeat" }]);
+        expect(subscriptionSessionIds).toEqual([firstSessionId]);
+      }
+      pump.stop();
+      await expect.poll(() => cancelledSubscriptions).toBe(1);
     } finally {
       pump?.stop();
       await Promise.allSettled([runtime?.close(), control?.close()]);

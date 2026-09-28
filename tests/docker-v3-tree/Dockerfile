@@ -36,7 +36,9 @@ COPY scripts/ ./scripts/
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 
-RUN npm run build -- --force \
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
+    --mount=type=cache,id=agent-multiplex-deterministic-npm,target=/root/.npm,sharing=locked \
+    npm run build -- --force \
     && npm prune --omit=dev \
     && test -f apps/control-node/dist/main.js \
     && test -f apps/runtime-node/dist/main.js \
@@ -60,5 +62,5 @@ RUN mkdir -p /state /workspace \
 COPY tests/docker-v3-tree/image.svg /workspace/image.svg
 COPY tests/docker-v3-tree/image-other.svg /workspace/image-other.svg
 
-LABEL org.opencontainers.image.title="Agent Multiplex protocol-v5 control-tree acceptance"
+LABEL org.opencontainers.image.title="Agent Multiplex protocol-v6 control-tree acceptance"
 LABEL org.opencontainers.image.description="Authority, attached branch, runtime node, and overlapping gateway sources"

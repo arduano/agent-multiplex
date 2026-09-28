@@ -9,3 +9,4 @@ export * from "./service.js";
 export * from "./store.js";
 export * from "./terminal.js";
 export * from "./images.js";
+export * from "./lifecycle.js";

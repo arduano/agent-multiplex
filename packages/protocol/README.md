@@ -1,6 +1,6 @@
 # @arduano/agent-multiplex-protocol
 
-Protocol-v4 wire schemas, identifiers, and tRPC-compatible contracts for Agent
+Protocol-v6 wire schemas, identifiers, and tRPC-compatible contracts for Agent
 Multiplex. This package defines the public access surface and the internal
 control-node/runtime-node link surfaces without selecting a transport or owning
 runtime state.

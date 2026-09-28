@@ -150,7 +150,7 @@ cleanup() {
     rm -rf -- "$RUNTIME_DIR"
   fi
   if (( COMPLETED == 0 )); then
-    printf 'Protocol-v5 tree acceptance failed. Inspect driver-failure.json and logs/.\n' \
+    printf 'Protocol-v6 tree acceptance failed. Inspect driver-failure.json and logs/.\n' \
       >"$RECEIPT_DIR/FAILED.txt"
   fi
   if (( status == 0 && COMPLETED == 1 )); then
@@ -209,7 +209,7 @@ wait_for_file() {
   fail "timed out waiting for $description"
 }
 
-note "building immutable protocol-v5 image"
+note "building immutable protocol-v6 image"
 if ! docker build --progress=plain \
   --secret "id=npmrc,src=$DOCKER_NPMRC" \
   --file "$SCRIPT_DIR/Dockerfile" \
@@ -231,6 +231,7 @@ docker run --detach \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_NAME=tree-authority \
+  --env AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER=worker \
   --env AGENT_MULTIPLEX_CONTROL_NODE_STATE=/state/control-node.sqlite \
   --env AGENT_MULTIPLEX_CONTROL_NODE_IDENTITY=/state/control-node.identity \
   --env AGENT_MULTIPLEX_CONTROL_NODE_HTTP_BIND=127.0.0.1 \
@@ -507,6 +508,7 @@ jq -e '.cleanupCompleted == true' "$RECEIPT_DIR/cleanup.json" >/dev/null \
 
 jq -n \
   --arg runId "$RUN_ID" --arg imageId "$IMAGE_ID" \
+  --slurpfile lockfile "$REPO_ROOT/package-lock.json" \
   --arg authorityId "$AUTHORITY_ID" --arg branchId "$BRANCH_ID" \
   --arg authorityEndpoint "$AUTHORITY_ENDPOINT" --arg branchEndpoint "$BRANCH_ENDPOINT" \
   --arg authorityTicketDigest "$(printf '%s' "$AUTHORITY_TICKET" | sha256sum | awk '{print $1}')" \
@@ -515,7 +517,8 @@ jq -n \
     runId:$runId,
     imageId:$imageId,
     passed:true,
-    multiplexProtocol:5,
+    multiplexProtocol:6,
+    transport:($lockfile[0].packages["node_modules/@arduano/p2prpc-core"] | {version,resolved,integrity}),
     topology:{authorityControlNodeId:$authorityId,branchControlNodeId:$branchId,runtimeNodes:1,gatewaySources:2},
     endpointPins:{authority:$authorityEndpoint,branch:$branchEndpoint,preservedAcrossRestart:true},
     receiptSecurity:{rawSecretsRecorded:false,rawTicketsRecorded:false,
@@ -533,4 +536,4 @@ jq -n \
 )
 
 COMPLETED=1
-note "all protocol-v5 control-tree assertions passed"
+note "all protocol-v6 control-tree assertions passed"

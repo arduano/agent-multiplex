@@ -141,7 +141,7 @@ try {
     timeoutMs,
     async () => {
       const description = await client.system.describe.query();
-      return description.protocolVersion === 5 &&
+      return description.protocolVersion === 6 &&
         description.componentKind === "access-gateway" &&
         description.dataAuthority === "none"
         ? description
@@ -158,7 +158,7 @@ try {
       return sources.length === 1 &&
         sources[0].sourceId === "canonical" &&
         sources[0].state === "selected" &&
-        sources[0].manifest?.protocolVersion === 5 &&
+        sources[0].manifest?.protocolVersion === 6 &&
         sources[0].manifest.coveredControlNodeIds.length === 1
         ? sources
         : undefined;
@@ -175,7 +175,7 @@ try {
         values[0].name === "scale-authority" &&
         values[0].presence === "online" &&
         values[0].dataRole.role === "authority" &&
-        values[0].protocolVersion === 5
+        values[0].protocolVersion === 6
         ? values
         : undefined;
     },
@@ -836,7 +836,7 @@ try {
 function isReadyMockRuntimeNode(runtimeNode) {
   return (
     runtimeNode.presence === "online" &&
-    runtimeNode.protocolVersion === 5 &&
+    runtimeNode.protocolVersion === 6 &&
     runtimeNode.harnesses.some(
       (entry) =>
         entry.harness === "codex" &&

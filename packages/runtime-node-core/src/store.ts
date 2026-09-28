@@ -13,8 +13,11 @@ import {
   archiveRequestSchema,
   canonicalJson,
   commandRecordSchema,
+  safeCommandError,
   jsonObjectSchema,
   launchRecordSchema,
+  lifecycleStateSchema,
+  type LifecycleState,
   launchRequestSchema,
   metadataOperationRecordSchema,
   metadataPatchSchema,
@@ -109,6 +112,26 @@ export class RuntimeNodeStore {
         version: 5,
         name: "runtime-node-store-v5-images",
         apply: migrateRuntimeNodeSchemaV5,
+      }, {
+        version: 6,
+        name: "runtime-node-store-v6-command-errors",
+        apply: migrateRuntimeNodeCommandErrors,
+      }, {
+        version: 7,
+        name: "runtime-node-store-v7-lifecycle-evidence",
+        apply: (database) => database.exec("CREATE TABLE lifecycle_state (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT"),
+      }, {
+        version: 8,
+        name: "runtime-node-store-v8-lifecycle-contract",
+        apply: migrateRuntimeNodeLifecycleContract,
+      }, {
+        version: 9,
+        name: "runtime-node-store-v9-copilot-startup-intent",
+        apply: (database) => database.exec("CREATE TABLE copilot_startup_intent (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT"),
+      }, {
+        version: 10,
+        name: "runtime-node-store-v10-lifecycle-activity-admission",
+        apply: migrateRuntimeNodeLifecycleActivityAdmission,
       }],
     });
     this.#db = this.#sqlite.database;
@@ -122,6 +145,17 @@ export class RuntimeNodeStore {
 
   public close(): void {
     this.#sqlite.close();
+  }
+
+  public getLifecycle(sessionId: SessionId): LifecycleState | undefined {
+    const row = this.#db.prepare("SELECT record_json FROM lifecycle_state WHERE session_id=?").get(sessionId) as Row | undefined;
+    return row ? lifecycleStateSchema.parse(decode(row.record_json)) : undefined;
+  }
+
+  public putLifecycle(state: LifecycleState): void {
+    const value = lifecycleStateSchema.parse(state);
+    this.#db.prepare("INSERT INTO lifecycle_state(session_id, record_json) VALUES (?, ?) ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json")
+      .run(value.fence.sessionId, encode(value));
   }
 
   public getImage(imageId: string): RuntimeImageEntry | undefined {
@@ -227,6 +261,62 @@ export class RuntimeNodeStore {
       .prepare("SELECT record_json FROM bindings ORDER BY updated_at DESC")
       .all() as Row[];
     return rows.map((row) => runtimeNodeSessionRecordSchema.parse(decode(row.record_json)));
+  }
+
+  /** Persist the previous process's exact Copilot binding before making it
+   * resumable. An interrupted recovery retains this intent on every boot. */
+  public prepareStartupBindings(): {
+    pendingCopilot: RuntimeNodeSessionRecord[];
+    normalized: RuntimeNodeSessionRecord[];
+  } {
+    const normalized: RuntimeNodeSessionRecord[] = [];
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const record of this.listSessions()) {
+        if (record.availability !== "active" && record.runtimeEpoch === null) continue;
+        const { lifecycle: _lifecycle, ...withoutLifecycle } = record;
+        const timestamp = new Date().toISOString();
+        const stopped = runtimeNodeSessionRecordSchema.parse({
+          ...withoutLifecycle,
+          availability: "resumable",
+          runtimeStatus: "stopped",
+          runtimeEpoch: null,
+          updatedAt: timestamp,
+          lastSeenAt: timestamp,
+        });
+        this.#putParsedSession(stopped);
+        if (record.harness === "copilot") {
+          this.#db.prepare(`INSERT INTO copilot_startup_intent(session_id, record_json) VALUES (?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json`)
+            .run(record.sessionId, encode(record));
+        }
+        normalized.push(stopped);
+      }
+      const pendingCopilot = (this.#db.prepare("SELECT record_json FROM copilot_startup_intent ORDER BY session_id").all() as Row[])
+        .map((row) => runtimeNodeSessionRecordSchema.parse(decode(row.record_json)));
+      this.#db.exec("COMMIT");
+      return { pendingCopilot, normalized };
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  /** An accepted native handle and removal of recovery intent are one commit. */
+  public commitStartupCopilotReattachment(record: RuntimeNodeSessionRecord): void {
+    const parsed = runtimeNodeSessionRecordSchema.parse(record);
+    if (parsed.harness !== "copilot" || parsed.availability !== "active" || parsed.runtimeEpoch === null) {
+      throw new Error("startup Copilot reattachment requires an active native binding");
+    }
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#putParsedSession(parsed);
+      this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(parsed.sessionId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      this.#db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   public deleteSession(sessionId: SessionId): boolean {
@@ -727,7 +817,7 @@ export class RuntimeNodeStore {
       this.putCommand({
         ...record,
         state: "outcomeUnknown",
-        error: "runtime node restarted after native dispatch; outcome requires reconciliation",
+        error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown" }),
         updatedAt: new Date().toISOString(),
       });
     }
@@ -1038,6 +1128,78 @@ function migrateRuntimeNodeSchemaV4(database: DatabaseSync): void {
     CREATE UNIQUE INDEX archived_native_bindings_session
       ON archived_native_bindings(session_id);
   `);
+}
+
+function migrateRuntimeNodeCommandErrors(database: DatabaseSync): void {
+  const update = database.prepare("UPDATE command_journal SET record_json=? WHERE command_id=?");
+  for (const row of database.prepare("SELECT command_id, record_json FROM command_journal").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (typeof value.error === "string") {
+      if (value.state !== "failed" && value.state !== "outcomeUnknown") {
+        throw new Error("command-error migration refused a nonterminal legacy error");
+      }
+      // Deterministic across runtime and replicated control receipts. The old
+      // freeform text is discarded, never inspected, logged or heuristically classified.
+      value.error = safeCommandError(undefined, { stage: "recovery",
+        certainty: value.state === "failed" ? "definiteFailure" : "outcomeUnknown",
+        diagnosticId: String(row.command_id) });
+    }
+    update.run(encode(commandRecordSchema.parse(value)), String(row.command_id));
+  }
+}
+
+function migrateRuntimeNodeLifecycleContract(database: DatabaseSync): void {
+  // Runtime session rows carried the old public fence projection. The durable
+  // lifecycle ledger below remains the authority and will republish the new
+  // opaque view after activation.
+  database.exec("UPDATE bindings SET record_json=json_remove(record_json, '$.lifecycle') WHERE json_type(record_json, '$.lifecycle') IS NOT NULL");
+  const update = database.prepare("UPDATE lifecycle_state SET record_json=? WHERE session_id=?");
+  for (const row of database.prepare("SELECT session_id, record_json FROM lifecycle_state").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (value.version !== 1) throw new Error("lifecycle migration refused an unknown contract version");
+    const tasks = lifecycleDimension(value.tasks, "tasks");
+    const queue = lifecycleDimension(value.queue, "queue");
+    value.version = 2;
+    value.tasks = tasks;
+    value.queue = queue;
+    value.aggregateActivity = "unknown";
+    value.nativeAdmission = { state: tasks.observation && (tasks.observation as Record<string, unknown>).stalled === true ||
+      queue.observation && (queue.observation as Record<string, unknown>).stalled === true ? "degraded" : "open" };
+    update.run(encode(lifecycleStateSchema.parse(value)), String(row.session_id));
+  }
+}
+
+function migrateRuntimeNodeLifecycleActivityAdmission(database: DatabaseSync): void {
+  const update = database.prepare("UPDATE lifecycle_state SET record_json=? WHERE session_id=?");
+  for (const row of database.prepare("SELECT session_id, record_json FROM lifecycle_state").all() as Row[]) {
+    const value = decode(row.record_json) as Record<string, unknown>;
+    if (value.version !== 2) throw new Error("lifecycle admission migration refused an unknown contract version");
+    if (value.aggregateActivity !== undefined && value.nativeAdmission !== undefined) continue;
+    const tasks = lifecycleDimension(value.tasks, "tasks");
+    const queue = lifecycleDimension(value.queue, "queue");
+    value.aggregateActivity = "unknown";
+    value.nativeAdmission = { state: (tasks.observation as Record<string, unknown>).stalled === true ||
+      (queue.observation as Record<string, unknown>).stalled === true ? "degraded" : "open" };
+    update.run(encode(lifecycleStateSchema.parse(value)), String(row.session_id));
+  }
+}
+
+function lifecycleDimension(value: unknown, name: string): Record<string, unknown> {
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new Error(`lifecycle migration refused an invalid ${name} dimension`);
+  }
+  const dimension = { ...(value as Record<string, unknown>) };
+  const freshness = dimension.freshness;
+  if (freshness !== "unknown" && freshness !== "observed") {
+    throw new Error(`lifecycle migration refused an invalid ${name} freshness`);
+  }
+  delete dimension.freshness;
+  dimension.observation = {
+    state: freshness === "observed" ? "observed" : "pending",
+    failures: 0,
+    stalled: false,
+  };
+  return dimension;
 }
 
 function migrateRuntimeNodeSchemaV5(database: DatabaseSync): void {

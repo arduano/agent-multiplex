@@ -42,7 +42,7 @@ function fixture() {
     allowedRoots: ["/work"],
     harnesses: [],
     launchProfiles: [],
-    protocolVersion: 5,
+    protocolVersion: 6,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -75,7 +75,7 @@ describe("control-node v4 session catalog", () => {
       allowedRoots: ["/work"],
       harnesses: [],
       launchProfiles: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     catalog.reconcileInventory({
       runtimeNodeId: secondRuntimeNodeId,
@@ -334,7 +334,7 @@ describe("control-node v4 session catalog", () => {
       allowedRoots: ["/work"],
       harnesses: [],
       launchProfiles: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     const [session] = initial.reconcileInventory({
       runtimeNodeId,
@@ -403,6 +403,8 @@ describe("control-node v4 session catalog", () => {
       DROP TABLE session_metadata_index;
       DROP TABLE launch_operations;
       DROP TABLE archive_operations;
+      DROP TABLE attachment_authority_handoffs;
+      DROP TABLE runtime_lifecycle_cursors;
       ALTER TABLE sessions DROP COLUMN catalog_state;
       ALTER TABLE sessions DROP COLUMN catalog_revision;
       ALTER TABLE sessions DROP COLUMN archived_at;
@@ -415,11 +417,11 @@ describe("control-node v4 session catalog", () => {
     downgrade.close();
 
     const migrated = new ControlNodeCatalog({ filename, now: () => new Date(later) });
-    expect(migrated.diagnostics().userVersion).toBe(5);
-    expect(migrated.localControlNode()).toMatchObject({ protocolVersion: 5 });
+    expect(migrated.diagnostics().userVersion).toBe(8);
+    expect(migrated.localControlNode()).toMatchObject({ protocolVersion: 6 });
     expect(migrated.localControlNode().feedId).not.toBe(previousFeedId);
     expect(migrated.getRuntimeNode(runtimeNodeId)).toMatchObject({
-      protocolVersion: 5,
+      protocolVersion: 6,
       launchProfiles: [],
     });
     expect(migrated.getSession(session.sessionId)).toMatchObject({
@@ -445,7 +447,7 @@ describe("control-node v4 session catalog", () => {
 });
 
 
-describe("control-node protocol-v5 storage upgrade", () => {
+describe("control-node protocol-v6 storage upgrade", () => {
   it("wraps old native receipts exactly once, preserves immutable command input, and rotates the feed", () => {
     const filename = join(mkdtempSync(join(tmpdir(), "multiplex-v5-migration-")), "catalog.sqlite");
     const initial = new ControlNodeCatalog({ filename, now: () => new Date(first) });
@@ -473,10 +475,10 @@ describe("control-node protocol-v5 storage upgrade", () => {
       .run(commandId, command.payloadHash, command.state, first, JSON.stringify(command));
     legacy.prepare("INSERT INTO interactions(interaction_id,session_id,state,created_at,record_json) VALUES(?,?,?,?,?)")
       .run(interactionId, sessionId, interaction.state, first, JSON.stringify(interaction));
-    legacy.exec("DELETE FROM schema_migrations WHERE version=5; PRAGMA user_version=4;");
+    legacy.exec("DROP TABLE attachment_authority_handoffs; DROP TABLE runtime_lifecycle_cursors; DELETE FROM schema_migrations WHERE version>=5; PRAGMA user_version=4;");
     legacy.close();
     const upgraded = new ControlNodeCatalog({ filename, now: () => new Date(later) });
-    expect(upgraded.diagnostics().userVersion).toBe(5);
+    expect(upgraded.diagnostics().userVersion).toBe(8);
     expect(upgraded.localControlNode().feedId).not.toBe(previousFeed);
     expect(upgraded.getCommand(commandId)).toEqual({ ...command, result: packNativePayload(nativeResult) });
     expect(upgraded.getInteraction(interactionId)).toEqual({
@@ -513,7 +515,7 @@ describe("control-node protocol-v5 storage upgrade", () => {
       .run(commandId, "unchanged-command-hash", "succeeded", first, command);
     legacy.prepare("INSERT INTO interactions(interaction_id,session_id,state,created_at,record_json) VALUES(?,?,?,?,?)")
       .run(interactionId, sessionId, "pending", first, interaction);
-    legacy.exec("DELETE FROM schema_migrations WHERE version=5; PRAGMA user_version=4;");
+    legacy.exec("DROP TABLE attachment_authority_handoffs; DELETE FROM schema_migrations WHERE version>=5; PRAGMA user_version=4;");
     legacy.close();
     expect(() => new ControlNodeCatalog({ filename })).toThrow(/protocol-v5 migration refused.*original database has been preserved/);
     const unchanged = new DatabaseSync(filename);

@@ -278,7 +278,7 @@ function attach(
     feedId: descriptor.feedId,
     name: descriptor.name,
     endpointId,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: descriptor.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

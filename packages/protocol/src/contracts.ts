@@ -1,6 +1,11 @@
 import { z } from "zod";
 
 import { accessSnapshotSchema } from "./access-snapshot.js";
+import {
+  runtimeLifecycleProjectionSchema,
+  sessionLifecycleViewSchema,
+} from "./lifecycle.js";
+import { commandObservationViewSchema } from "./command-observation.js";
 
 import {
   archiveRecordSchema,
@@ -27,6 +32,8 @@ import {
 import {
   harnessCatalogEntrySchema,
   harnessSchema,
+  nativeStateRequestSchema,
+  nativeStateResultSchema,
   nativeHistoryRequestSchema,
   nativeHistoryResultSchema,
   nativeModelSchema,
@@ -119,7 +126,7 @@ export type ComponentKind = z.infer<typeof componentKindSchema>;
 
 const systemDescriptionBase = {
   application: z.literal("agent-multiplex"),
-  protocolVersion: z.literal(5),
+  protocolVersion: z.literal(6),
   instanceId: z.string().min(1),
   capabilities: z.array(z.string().min(1).max(256)),
 } as const;
@@ -255,6 +262,17 @@ export const accessContract = {
     stop: { input: stopCommandSchema, output: commandRecordSchema },
     archive: { input: archiveRequestSchema, output: archiveRecordSchema },
     execute: { input: commandEnvelopeSchema, output: commandRecordSchema },
+    readLifecycle: {
+      input: z.object({ sessionId: sessionIdSchema }).strict(),
+      output: sessionLifecycleViewSchema,
+    },
+    readNativeState: {
+      input: z.object({
+        sessionId: sessionIdSchema,
+        request: nativeStateRequestSchema,
+      }),
+      output: nativeStateResultSchema,
+    },
     readNativeHistory: {
       input: z.object({
         sessionId: sessionIdSchema,
@@ -343,6 +361,7 @@ export const accessContract = {
   },
   commands: {
     get: { input: commandIdSchema, output: commandRecordSchema.nullable() },
+    observe: { input: commandIdSchema, output: commandObservationViewSchema.nullable() },
   },
 } as const;
 
@@ -433,6 +452,18 @@ export const runtimeNodeContract = {
         request: archiveRequestSchema,
       }),
       output: archiveRecordSchema,
+    },
+    readLifecycle: {
+      input: z.object({ runtimeNodeBootId: runtimeNodeBootIdSchema, sessionId: sessionIdSchema }).strict(),
+      output: runtimeLifecycleProjectionSchema,
+    },
+    readNativeState: {
+      input: z.object({
+        runtimeNodeBootId: runtimeNodeBootIdSchema,
+        sessionId: sessionIdSchema,
+        request: nativeStateRequestSchema,
+      }),
+      output: nativeStateResultSchema,
     },
     readNativeHistory: {
       input: z.object({
@@ -526,6 +557,13 @@ export const runtimeNodeContract = {
         commandId: commandIdSchema,
       }),
       output: commandRecordSchema.nullable(),
+    },
+    observe: {
+      input: z.object({
+        runtimeNodeBootId: runtimeNodeBootIdSchema,
+        commandId: commandIdSchema,
+      }),
+      output: commandObservationViewSchema.nullable(),
     },
   },
   metadata: {
@@ -767,6 +805,17 @@ export const controlNodeLinkContract = {
       input: controlNodeLinkFenceSchema.extend({ request: archiveRequestSchema }),
       output: archiveRecordSchema,
     },
+    readLifecycle: {
+      input: controlNodeLinkFenceSchema.extend({ sessionId: sessionIdSchema }).strict(),
+      output: sessionLifecycleViewSchema,
+    },
+    readNativeState: {
+      input: controlNodeLinkFenceSchema.extend({
+        sessionId: sessionIdSchema,
+        request: nativeStateRequestSchema,
+      }),
+      output: nativeStateResultSchema,
+    },
     readNativeHistory: {
       input: controlNodeLinkFenceSchema.extend({
         sessionId: sessionIdSchema,
@@ -839,6 +888,12 @@ export const controlNodeLinkContract = {
         commandId: commandIdSchema,
       }),
       output: commandRecordSchema.nullable(),
+    },
+    observe: {
+      input: controlNodeLinkFenceSchema.extend({
+        commandId: commandIdSchema,
+      }),
+      output: commandObservationViewSchema.nullable(),
     },
   },
   interactions: {

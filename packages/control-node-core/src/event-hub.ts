@@ -76,6 +76,8 @@ interface Listener {
   readonly queue: BoundedQueue<AccessStreamItem>;
   readonly sessions: ReadonlySet<SessionId> | null;
   readonly includeNative: boolean;
+  readonly feedId: StreamCursor["feedId"];
+  resetQueued: boolean;
 }
 
 /** Bounded live delivery layered over the catalog's durable control journal. */
@@ -84,6 +86,7 @@ export class ControlNodeEventHub {
   readonly #nativeRingSize: number;
   readonly #heartbeatMs: number;
   readonly #subscriberBufferSize: number;
+  #feedId: StreamCursor["feedId"];
   readonly #rings = new Map<SessionId, NativeEvent[]>();
   readonly #nativeSeen = new Map<
     SessionId,
@@ -94,6 +97,7 @@ export class ControlNodeEventHub {
 
   public constructor(options: ControlNodeEventHubOptions) {
     this.#catalog = options.catalog;
+    this.#feedId = options.catalog.feedCheckpoint().feedId;
     this.#nativeRingSize = options.nativeRingSize ?? 2_048;
     this.#heartbeatMs = options.heartbeatMs ?? 15_000;
     this.#subscriberBufferSize = options.subscriberBufferSize ?? 4_096;
@@ -101,6 +105,13 @@ export class ControlNodeEventHub {
       if (!Number.isSafeInteger(value) || value < 1) throw new RangeError("event-hub limits must be positive integers");
     }
     this.#unsubscribeControl = this.#catalog.onControl((item) => {
+      if (item.feedId !== this.#feedId) {
+        // Replay entries carry the authority provenance of their observation.
+        // Fresh subscribers after attachment must recover native history, not
+        // replay old-authority entries underneath the new snapshot fence.
+        this.#rings.clear();
+        this.#feedId = item.feedId;
+      }
       if (item.change.type === "session.upsert") {
         const latest = this.#nativeSeen.get(item.change.session.sessionId);
         if (
@@ -202,7 +213,8 @@ export class ControlNodeEventHub {
         removeAbortListener();
       },
     );
-    const listener: Listener = { queue, sessions, includeNative };
+    const listener: Listener = { queue, sessions, includeNative,
+      feedId: this.#catalog.feedCheckpoint().feedId, resetQueued: false };
     this.#listeners.add(listener);
     const close = (): void => queue.close();
     removeAbortListener = (): void => signal?.removeEventListener("abort", close);
@@ -214,9 +226,9 @@ export class ControlNodeEventHub {
     // after these snapshots is buffered; controls at or below the barrier are
     // skipped later because the durable journal is their source of truth.
     const checkpoint = this.#catalog.feedCheckpoint();
-    const nativeReplay = includeNative
+    const nativeReplay = new Map(includeNative
       ? [...this.#rings].map(([sessionId, ring]) => [sessionId, [...ring]] as const)
-      : [];
+      : []);
     const authorityRefs = [this.#catalog.authority()];
     let replayCursor = cursor?.controlCursor ?? checkpoint.controlCursor;
     try {
@@ -252,6 +264,23 @@ export class ControlNodeEventHub {
         }
       }
       if (includeNative && cursor) {
+        // A requested session can have lost its entire ring after restart or
+        // a feed/epoch change. Iterating retained rings alone silently hides it.
+        for (const sessionId of Object.keys(cursor.native) as SessionId[]) {
+          if (sessions !== null && !sessions.has(sessionId)) continue;
+          if (!nativeReplay.has(sessionId)) {
+            yield {
+              kind: "nativeGap",
+              sessionId,
+              reason: "requested native cursor has no retained ring",
+              recovery: "readNativeHistory",
+              provenance: {
+                originControlNodeId: this.#catalog.localControlNode().controlNodeId,
+                authority: this.#catalog.authority(),
+              },
+            };
+          }
+        }
         for (const [sessionId, ring] of nativeReplay) {
           if (sessions !== null && !sessions.has(sessionId)) continue;
           const wanted = cursor.native[sessionId];
@@ -260,7 +289,16 @@ export class ControlNodeEventHub {
           const wantedSequence = wanted?.runtimeEpoch === newestEpoch ? wanted.sequence : -1;
           const sameEpoch = ring.filter((event) => event.runtimeEpoch === newestEpoch);
           const first = sameEpoch[0];
-          if (first && wantedSequence + 1 < first.sequence) {
+          const last = sameEpoch.at(-1);
+          if (last && wantedSequence > last.sequence) {
+            yield {
+              kind: "nativeGap",
+              sessionId,
+              reason: `native ring ends at sequence ${last.sequence}, behind requested sequence ${wantedSequence}`,
+              recovery: "readNativeHistory",
+              provenance: last.provenance,
+            };
+          } else if (first && wantedSequence + 1 < first.sequence) {
             yield {
               kind: "nativeGap",
               sessionId,
@@ -313,13 +351,16 @@ export class ControlNodeEventHub {
   }
 
   #broadcast(item: AccessStreamItem): void {
-    // Promotion starts a new feed generation. Deliver its boundary event to
-    // every live subscriber so even a session-scoped stream resets before it
-    // can observe native items from the new authority epoch.
-    const generationBoundary = item.kind === "control" && item.change.type === "authority.promoted";
+    // Every feed rotation, including first attachment, crosses the subscriber's
+    // snapshot fence. Deliver that boundary even when its control event is
+    // outside the session filter, before any new-authority native output.
     for (const listener of this.#listeners) {
+      if (listener.resetQueued) continue;
+      const generationBoundary = (item.kind === "control" || item.kind === "heartbeat") &&
+        item.feedId !== listener.feedId;
       if (generationBoundary || selected(item, listener.sessions, listener.includeNative)) {
         listener.queue.push(item);
+        if (generationBoundary) listener.resetQueued = true;
       }
     }
   }

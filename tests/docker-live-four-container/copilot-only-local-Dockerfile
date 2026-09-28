@@ -1,0 +1,8 @@
+# syntax=docker/dockerfile:1.7
+# Credential-free local bind mode: only the Debian-native toolchain and CA
+# bundle. The exact prebuilt source/dependencies are mounted read-only at run.
+FROM node:24.19.0-bookworm-slim@sha256:a9f5f7c91a432850b2a8a7797adf5eadb6c733ceed61167806cee7ea7fbc29df
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates g++ make python3 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/src/agent-multiplex

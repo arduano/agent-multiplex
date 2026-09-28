@@ -62,7 +62,7 @@ export function createAccessGatewayRouter(
         .output(accessContract.system.describe.output)
         .query(() => ({
           application: "agent-multiplex" as const,
-          protocolVersion: 5 as const,
+          protocolVersion: 6 as const,
           instanceId: options.instanceId,
           componentKind: "access-gateway" as const,
           dataAuthority: "none" as const,
@@ -254,6 +254,16 @@ export function createAccessGatewayRouter(
         .input(accessContract.sessions.execute.input)
         .output(accessContract.sessions.execute.output)
         .mutation(({ input }) => guarded(() => projection.execute(input))),
+      readLifecycle: read
+        .input(accessContract.sessions.readLifecycle.input)
+        .output(accessContract.sessions.readLifecycle.output)
+        .query(({ input }) => guarded(() => projection.readLifecycle(input.sessionId))),
+      readNativeState: read
+        .input(accessContract.sessions.readNativeState.input)
+        .output(accessContract.sessions.readNativeState.output)
+        .query(({ input }) =>
+          guarded(() => projection.readNativeState(input.sessionId, input.request)),
+        ),
       readNativeHistory: read
         .input(accessContract.sessions.readNativeHistory.input)
         .output(accessContract.sessions.readNativeHistory.output)
@@ -406,6 +416,10 @@ export function createAccessGatewayRouter(
         .input(accessContract.commands.get.input)
         .output(accessContract.commands.get.output)
         .query(({ input }) => guarded(() => projection.getCommand(input))),
+      observe: read
+        .input(accessContract.commands.observe.input)
+        .output(accessContract.commands.observe.output)
+        .query(({ input }) => guarded(() => projection.observeCommand(input))),
     }),
   });
 }

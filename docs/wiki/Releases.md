@@ -11,12 +11,25 @@ current publication state. The [checkpoint](../checkpoint-v4.md#protocol-v5-rele
 owns immutable source/tag identities, workflow results, receipt digests, and
 artifact verification. Historical `v0.1.0` evidence is retained separately there.
 
-The public graph contains 16 packages under `@arduano/agent-multiplex-*` and
-pins `@arduano/p2prpc-core@0.2.1` exactly. GitHub Packages requires
+The released protocol-v5 graph contains 16 packages under
+`@arduano/agent-multiplex-*` and pins `@arduano/p2prpc-core@0.2.1` exactly.
+Current protocol-v6 release-preparation manifests declare
+`@arduano/p2prpc-core@0.3.0-renewal.1`. The source lock now pins its
+verified published registry bytes and the exact owner-fork Iroh archives;
+final source, native and packed-consumer qualification remain release gates.
+GitHub Packages requires
 authentication even for public installs. Local readers need a classic token
 with `read:packages`. This repository's CI and Dependabot use the
 `PACKAGES_READ_TOKEN` secret because their repository-scoped tokens do not
 implicitly receive access to the independently published p2prpc package.
+
+The `.19` source root pins the reviewed owner-fork Iroh archives as direct
+dependencies and overrides both transitive edges. Each isolated packed
+consumer check must install that same closure and verify its exact lockfile
+URLs and SHA-512 integrities. The p2prpc `.1` manifest keeps numeric Iroh
+dependencies; a bare install is not a supported native graph. The `.19` lock
+was regenerated through this repository's package-read CI credential after the
+fork archives and p2prpc `.1` were published and independently reviewed.
 
 ## Versioning rules
 
@@ -121,7 +134,9 @@ implicitly receive access to the independently published p2prpc package.
    and its declared transitive package dependencies. It runs publint, Are the
    Types Wrong, JavaScript import and TypeScript declaration checks, the public
    browser bundle check where applicable, and every packaged executable's
-   help/version path. It deliberately does not install one complete workspace
+   help/version path. CI passes its package-read token explicitly; a local run
+   may use an existing npm user configuration with GitHub Packages read access,
+   without copying its credential into the receipt. It deliberately does not install one complete workspace
    graph that could hide a missing published dependency.
 
    `release:sbom` creates a reproducible CycloneDX 1.6 release-build inventory.
@@ -133,6 +148,21 @@ implicitly receive access to the independently published p2prpc package.
    release-build inventory does not mean a package is installed downstream.
 
 ## Tag and publication flow
+
+### Temporary urgent deployment exception, 2026-09-07
+
+The owner requested rapid incremental deployments with focused checks and a
+single full release gate at the end. The `0.2.4-hotfix.*` candidates may therefore
+be distributed as explicitly unqualified GitHub prerelease tarballs under signed
+`hotfix-YYYY-MM-DD.*` tags. These use the exact release toolchain, clean committed
+source, normal artifact manifests/checksums, focused tests and a production
+build. Consumers still pin exact published tarball URLs and integrities. No
+local dependency, registry `latest` promotion, native-model qualification claim,
+or relaxation of the normal `v*` publication workflow is included. Run the full
+release gate after the urgent work, record its actual results, then publish the
+final stable version through the ordinary process.
+
+### Ordinary releases
 
 All workspace versions move together and must exactly match the root version.
 For `v0.2.2` and separately `v0.2.3`, the owner explicitly requested deployment

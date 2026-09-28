@@ -37,16 +37,19 @@ import {
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import { copilotJson } from "./json.js";
+import { CopilotReadRequests } from "./reads.js";
 import {
   CopilotAdapterSession,
   CopilotSessionBridge,
+  COPILOT_SESSION_DISCONNECT_TIMEOUT_MS,
   elicitationResponse,
   exitPlanResponse,
   type CopilotNativeSession,
   userInputResponse,
 } from "./session.js";
 
-export const COPILOT_SDK_VERSION = "1.0.13";
+export const COPILOT_SDK_VERSION = "1.0.14";
+export const COPILOT_GRACEFUL_SHUTDOWN_MS = COPILOT_SESSION_DISCONNECT_TIMEOUT_MS;
 
 export interface CopilotRuntimeStatus {
   version: string;
@@ -95,7 +98,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #providerModels: readonly string[];
   readonly #providerModelCapabilities: Readonly<Record<string, ModelCapabilities>>;
   readonly #active = new Map<string, CopilotAdapterSession>();
+  readonly #reads = new CopilotReadRequests();
   #startPromise: Promise<void> | undefined;
+  #closePromise: Promise<void> | undefined;
   #started = false;
   #closed = false;
 
@@ -116,7 +121,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       : configuredExecutable;
     const clientOptions: CopilotClientOptions = {
       mode: "copilot-cli",
-      // @github/copilot@1.0.81 tightened its platform-package exports and the
+      // @github/copilot@1.0.88 keeps the tightened platform-package exports and the
       // pinned SDK's automatic `@github/copilot-<platform>/sdk` resolver can
       // no longer see that subpath. Resolve the executable exported by the
       // package explicitly; embedders can still override `connection` below.
@@ -179,7 +184,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
       }));
     }
     await this.ensureStarted();
-    const models = await this.#client.listModels();
+    const models = await this.#reads.read("adapter:models", "", () => this.#client.listModels());
+    this.assertOpen();
     return models.map((model) => ({
       harness: "copilot",
       id: model.id,
@@ -190,7 +196,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
 
   public async listSessions(): Promise<NativeInventoryItem[]> {
     await this.ensureStarted();
-    const metadata = await this.#client.listSessions();
+    // Reconcile missed root lifecycle events from the existing native handle.
+    // This is observation only: never resume/replace a handle to query activity.
+    const [metadata] = await Promise.all([
+      this.#reads.read("adapter:sessions", "", () => this.#client.listSessions()),
+      Promise.all([...this.#active.values()].map(session => session.readActivity())),
+    ]);
+    this.assertOpen();
     const byId = new Map(metadata.map((entry) => [entry.sessionId, entry]));
     const result = metadata.map((entry) => this.inventoryItem(entry));
     for (const session of this.#active.values()) {
@@ -216,8 +228,12 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError(`Copilot adapter cannot spawn ${options.harness}`);
     }
     await this.ensureStarted();
+    this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
+    // This baseline must precede any callback or event that createSession can
+    // synchronously buffer. Later positive interaction facts then extend it.
+    bridge.interactionHydration(true);
     const vendorSessionId = nativeSessionId(options.native) ?? randomUUID();
     const model = options.model ?? this.#defaultModel;
     const config = this.sessionConfig(
@@ -251,6 +267,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         { cause },
       );
     }
+    if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
       native,
       options.cwd,
@@ -268,7 +285,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await session.readPermissions();
+    await Promise.all([session.readPermissions(), session.readModel(), session.readMode(), session.readActivity()]);
+    if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the created session could be returned");
     return session;
   }
 
@@ -278,13 +296,18 @@ export class CopilotAgentAdapter implements AgentAdapter {
       throw new TypeError(`Copilot adapter cannot resume ${options.harness}`);
     }
     await this.ensureStarted();
+    this.assertOpen();
 
     // One SDK handle is the sole upstream controller. An explicit resume is
     // also the recovery path after a runtime failure, so replace stale handles.
     const prior = this.#active.get(options.vendorSessionId);
     if (prior) await prior.stop();
+    this.assertOpen();
 
     const bridge = new CopilotSessionBridge();
+    // Resume cannot prove absence because pending callbacks are ephemeral, but
+    // its partial baseline must still precede any callback replay.
+    bridge.interactionHydration(false);
     const cwd = options.cwd ?? null;
     const model = options.model ?? this.#defaultModel;
     const config = this.resumeConfig(
@@ -313,11 +336,23 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native = await this.#client.resumeSession(options.vendorSessionId, config);
     } catch (cause) {
       bridge.close();
+      // Copilot can keep a never-used session in memory only.
+      // Its explicit load refusal means no resume effect occurred; retaining
+      // outcomeUnknown here would unnecessarily wedge the durable lifecycle.
+      // Keep the predicate exact: timeouts, transport failures and unrelated
+      // native errors remain ambiguous and must not be blindly retried.
+      if (isMissingNativeSession(cause, options.vendorSessionId)) {
+        throw new Error(
+          "Copilot has no saved history for this session. An empty session may not survive a host restart. Stop and archive this entry, then create a new session.",
+          { cause },
+        );
+      }
       throw new AdapterOutcomeUnknownError(
         `Copilot session ${options.vendorSessionId} may have resumed, but resume was not acknowledged`,
         { cause },
       );
     }
+    if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
       native,
       cwd,
@@ -335,32 +370,90 @@ export class CopilotAgentAdapter implements AgentAdapter {
         );
       }
     }
-    await session.readPermissions();
+    await Promise.all([
+      session.readPermissions(),
+      session.readPendingPermissions(),
+      session.readModel(),
+      session.readMode(),
+      session.readActivity(),
+    ]);
+    if (this.#closed) throw new AdapterOutcomeUnknownError("Copilot adapter closed before the resumed session could be returned");
     return session;
   }
 
-  public async close(): Promise<void> {
-    if (this.#closed) return;
+  private async rejectLateAttachment(native: CopilotNativeSession, bridge: CopilotSessionBridge): Promise<never> {
+    bridge.close();
+    try {
+      await native.disconnect();
+    } catch (cause) {
+      throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; native detachment was not acknowledged", { cause });
+    }
+    throw new AdapterOutcomeUnknownError("Copilot adapter closed during attachment; the late native handle was detached");
+  }
+
+  public close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
     this.#closed = true;
+    this.#closePromise = this.closeNativeRuntime();
+    return this.#closePromise;
+  }
+
+  private async closeNativeRuntime(): Promise<void> {
     const errors: unknown[] = [];
-    const stopped = await Promise.allSettled(
+    const gracefulDeadline = Date.now() + COPILOT_GRACEFUL_SHUTDOWN_MS;
+    const stopped = await settleWithin(
+      Promise.allSettled(
       [...this.#active.values()].map((session) => session.stop()),
+      ),
+      COPILOT_GRACEFUL_SHUTDOWN_MS,
     );
-    for (const result of stopped) {
-      if (result.status === "rejected") errors.push(result.reason);
+    let force = stopped.status !== "fulfilled";
+    if (stopped.status === "fulfilled") {
+      for (const result of stopped.value) {
+        if (result.status === "rejected") errors.push(result.reason);
+      }
+      force ||= errors.length > 0;
+    } else {
+      errors.push(stopped.status === "timedOut"
+        ? new Error("Copilot sessions did not disconnect within the graceful shutdown window")
+        : stopped.reason);
     }
     this.#active.clear();
     // A failed/eager UI-server probe may have constructed and started the
     // client without advancing this adapter's lazy-start flag. Always close
     // the client; stop implementations are required to be idempotent.
-    try {
-      errors.push(...(await this.#client.stop()));
-    } catch (error) {
-      errors.push(error);
-      try {
-        await this.#client.forceStop();
-      } catch (forceError) {
-        errors.push(forceError);
+    if (!force) {
+      const stoppedClient = await settleWithin(
+        this.#client.stop(),
+        Math.max(0, gracefulDeadline - Date.now()),
+      );
+      if (stoppedClient.status === "fulfilled") {
+        errors.push(...stoppedClient.value);
+        force = stoppedClient.value.length > 0;
+      } else {
+        force = true;
+        errors.push(stoppedClient.status === "timedOut"
+          ? new Error("Copilot CLI did not stop within the graceful shutdown window")
+          : stoppedClient.reason);
+      }
+    }
+    if (force) {
+      // The pinned SDK's forceStop() suppresses child.kill() errors and clears
+      // cliProcess without waiting for exit. Capture the owned child first;
+      // a fulfilled forceStop alone cannot authorize another native owner.
+      const exitProof = captureOwnedCliExit(this.#client);
+      const forced = await settleWithin(this.#client.forceStop(), COPILOT_GRACEFUL_SHUTDOWN_MS);
+      if (forced.status !== "fulfilled") {
+        exitProof?.cancel();
+        errors.push(forced.status === "timedOut"
+          ? new Error("Copilot CLI process termination could not be proved")
+          : forced.reason);
+      } else if (exitProof && await exitProof.wait) {
+        // The old native owner is gone. Earlier disconnect/stop failures no
+        // longer prevent the runtime supervisor from safely reattaching.
+        errors.length = 0;
+      } else {
+        errors.push(new Error("Copilot CLI process termination could not be proved"));
       }
     }
     if (errors.length > 0) throw new AggregateError(errors, "Failed to close Copilot adapter cleanly");
@@ -379,6 +472,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       native,
       bridge,
       settings,
+      reads: this.#reads,
       onStopped: () => {
         if (this.#active.get(native.sessionId) === session) {
           this.#active.delete(native.sessionId);
@@ -461,12 +555,19 @@ export class CopilotAgentAdapter implements AgentAdapter {
   }
 
   private async runtimeStatus(): Promise<CopilotRuntimeStatus> {
-    return this.#client.getStatus();
+    const status = await this.#reads.read("adapter:status", "", () => this.#client.getStatus());
+    this.assertOpen();
+    return status;
   }
 
   private assertOpen(): void {
     if (this.#closed) throw new Error("Copilot adapter is closed");
   }
+}
+
+function isMissingNativeSession(error: unknown, sessionId: string): boolean {
+  return error instanceof Error && "code" in error && error.code === -32603 &&
+    error.message === `Request session.resume failed with message: Failed to load session events: Session not found: ${sessionId}`;
 }
 
 function bundledCopilotExecutable(): string | undefined {
@@ -646,9 +747,11 @@ function codexLbModelInfo(id: string): ModelInfo | undefined {
   } as unknown as ModelInfo;
 }
 
-// Exact non-policy/non-billing entries reported by the pinned Copilot 1.0.79
-// runtime. Its wire catalog includes `none` and several capability properties
-// that are absent from the narrower SDK 1.0.13 TypeScript declaration.
+// Historical exact non-policy/non-billing entries reported by Copilot 1.0.79.
+// This table supplies conservative BYOK defaults only. Stock Copilot models,
+// including newly released models, always pass through native discovery above.
+// The wire catalog includes `none` and several capability properties that are
+// absent from the narrower SDK 1.0.14 TypeScript declaration.
 const COPILOT_CODEX_LB_MODELS: Record<string, {
   name: string;
   efforts: readonly string[];
@@ -681,6 +784,71 @@ const COPILOT_CODEX_LB_MODELS: Record<string, {
   },
 };
 
+type TimedSettlement<T> =
+  | { status: "fulfilled"; value: T }
+  | { status: "rejected"; reason: unknown }
+  | { status: "timedOut" };
+
+function settleWithin<T>(promise: Promise<T>, timeoutMs: number): Promise<TimedSettlement<T>> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: TimedSettlement<T>) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish({ status: "timedOut" }), Math.max(0, timeoutMs));
+    void promise.then(
+      value => finish({ status: "fulfilled", value }),
+      reason => finish({ status: "rejected", reason }),
+    );
+  });
+}
+
+interface OwnedCliExitProof {
+  wait: Promise<boolean>;
+  cancel(): void;
+}
+
+/** Only the pinned SDK's locally spawned CLI can establish process ownership. */
+function captureOwnedCliExit(client: CopilotAdapterClient): OwnedCliExitProof | undefined {
+  if (Reflect.get(client, "isExternalServer") !== false) return undefined;
+  const child: unknown = Reflect.get(client, "cliProcess");
+  if (!child || typeof child !== "object") return undefined;
+  const process = child as {
+    pid?: unknown;
+    exitCode?: unknown;
+    signalCode?: unknown;
+    once?: (event: string, listener: () => void) => void;
+    removeListener?: (event: string, listener: () => void) => void;
+  };
+  if (!Number.isSafeInteger(process.pid) || Number(process.pid) < 1 ||
+    typeof process.once !== "function" || typeof process.removeListener !== "function") return undefined;
+  const exited = (): boolean => process.exitCode !== null && process.exitCode !== undefined ||
+    process.signalCode !== null && process.signalCode !== undefined;
+  let finish!: (value: boolean) => void;
+  const wait = new Promise<boolean>(resolve => { finish = resolve; });
+  let settled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const settle = (value: boolean): void => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearTimeout(timer);
+    process.removeListener?.("exit", onExit);
+    finish(value);
+  };
+  const onExit = (): void => settle(exited());
+  if (exited()) {
+    settle(true);
+  } else {
+    process.once("exit", onExit);
+    if (exited()) settle(true);
+    else timer = setTimeout(() => settle(false), COPILOT_GRACEFUL_SHUTDOWN_MS);
+  }
+  return { wait, cancel: () => settle(false) };
+}
+
 function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabilities"] {
   const version = protocolVersion === undefined ? undefined : String(protocolVersion);
   return [
@@ -688,6 +856,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "session.create", version, experimental: false },
     { name: "session.resume", version, experimental: false },
     { name: "history.native", version, experimental: false },
+    { name: "history.native.primary", version: "v1", experimental: true },
     { name: "prompt.enqueue", version, experimental: false },
     { name: "prompt.steer.immediate", version, experimental: false },
     { name: "interrupt", version, experimental: false },
@@ -696,6 +865,13 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "reasoning-effort.create-resume", version, experimental: false },
     { name: "mode.native", version, experimental: true },
     { name: "permissions.mode", version: "v1", experimental: true },
+    { name: "context.compact", version: "v1", experimental: true },
+    { name: "queue.pending", version: "v1", experimental: true },
+    { name: "queue.sendNow", version: "v1", experimental: true },
+    { name: "tasks.list", version: "v1", experimental: true },
+    { name: "tasks.progress", version: "v1", experimental: true },
+    { name: "tasks.promoteToBackground", version: "v1", experimental: true },
+    { name: "tasks.cancel", version: "v1", experimental: true },
     { name: "interactions.permission", version, experimental: false },
     { name: "interactions.userInput", version, experimental: false },
     { name: "interactions.elicitation", version, experimental: true },

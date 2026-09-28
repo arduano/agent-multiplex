@@ -53,6 +53,18 @@ describe("Codex native image codec", () => {
     expect(target.storeBase64).not.toHaveBeenCalled();
   });
 
+  it("externalizes native turn summary images with the same item identity as live output", async () => {
+    const target = sink();
+    const item = { type: "imageView", id: "same-image", path: "/work/result.png" };
+    const native = { data: [{ id: "turn-1", itemsView: "summary", items: [item], status: "failed", error: { message: "native failure" } }], nextCursor: null, backwardsCursor: null };
+    const page = await codexImageCodec.externalize(native, target);
+    await codexImageCodec.externalize({ threadId: "thread", item }, target);
+    expect(page.images).toMatchObject([{ pointer: "/data/0/items/0/path", originalPath: item.path }]);
+    expect(page.json).toMatchObject({ data: [{ items: [{ path: null }], error: { message: "native failure" } }] });
+    expect(target.snapshotPath.mock.calls[0]).toEqual(target.snapshotPath.mock.calls[1]);
+    expect(codexHistoryPageBytes({ data: [{ id: "turn", itemsView: "summary", items: [{ type: "imageGeneration", result: "A".repeat(2_000_000) }] }], nextCursor: null })).toBeLessThan(2_000);
+  });
+
   it("rejects inline command images and allows only image URL upload slots", () => {
     const request = { harness: "codex", command: { type: "send", input: [{ type: "image", url: null }] } } as HarnessCommand;
     const slot = { pointer: "/command/input/0/url", representation: "dataUrl" } as CommandImageBinding;
@@ -66,6 +78,8 @@ describe("Codex native image codec", () => {
     const result = await codexImageCodec.externalize(payload, sink());
     expect(result.images).toEqual([]);
     expect(result.json).toEqual(payload);
+    const unknownView = { data: [{ id: "turn", itemsView: ["summary"], items: [{ type: "imageGeneration", result: png }] }], nextCursor: null };
+    expect((await codexImageCodec.externalize(unknownView, sink())).json).toEqual(unknownView);
   });
 
   it("preserves native paths and exact data URL prefixes with stable image source identities", async () => {

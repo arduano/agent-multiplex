@@ -111,7 +111,7 @@ const terminalControlPaths = new Set([
 ]);
 
 /**
- * Path- and procedure-aware authorization for a composite protocol-v5 control
+ * Path- and procedure-aware authorization for a composite protocol-v6 control
  * node. Access gateways have no implicit authority: each mutation category
  * requires an explicit effective scope.
  */

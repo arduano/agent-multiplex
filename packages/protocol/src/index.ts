@@ -1,4 +1,6 @@
 export * from "./command.js";
+export * from "./command-observation.js";
+export * from "./command-error.js";
 export * from "./archive.js";
 export * from "./access-snapshot.js";
 export * from "./authority.js";
@@ -10,6 +12,7 @@ export * from "./image.js";
 export * from "./interaction.js";
 export * from "./json.js";
 export * from "./launch.js";
+export * from "./lifecycle.js";
 export * from "./metadata.js";
 export * from "./runtime-node.js";
 export * from "./session.js";
@@ -19,4 +22,4 @@ export * from "./terminal.js";
 export * from "./topology.js";
 
 export const APPLICATION_ID = "agent-multiplex" as const;
-export const PROTOCOL_VERSION = 5 as const;
+export const PROTOCOL_VERSION = 6 as const;

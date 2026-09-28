@@ -20,6 +20,7 @@ import type {
   ArchiveRequest,
   CommandEnvelope,
   CommandId,
+  CommandObservationView,
   CommandRecord,
   Harness,
   InteractionRecord,
@@ -31,6 +32,9 @@ import type {
   LaunchProfileIdentity,
   LaunchRecord,
   LaunchRequest,
+  RuntimeLifecycleProjection,
+  NativeStateRequest,
+  NativeStateResult,
   NativeHistoryRequest,
   NativeHistoryResult,
   NativeModel,
@@ -95,10 +99,10 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
   }
 
   /**
-   * Resolve the authenticated reverse peer at dispatch time. p2prpc replaces
-   * its Peer object when an authenticated session is renewed, so retaining the
-   * object received during registration would permanently bind this logical
-   * runtime connection to an expired transport epoch.
+   * Resolve the authenticated reverse peer at dispatch time. Auth renewal
+   * preserves the connection and its streams; genuine connection loss can
+   * replace the inbound runtime, so durable reverse routes retain the pinned
+   * endpoint and reacquire its current authenticated peer.
    */
   public get peer(): Peer<RuntimeNodeRouter> {
     const peer = this.#resolvePeer();
@@ -212,6 +216,21 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
     return this.peer.rpc.commands.execute.mutate({
       runtimeNodeBootId: this.runtimeNodeBootId,
       command,
+    });
+  }
+
+  public readLifecycle(sessionId: SessionId): Promise<RuntimeLifecycleProjection> {
+    return this.peer.rpc.sessions.readLifecycle.query({ runtimeNodeBootId: this.runtimeNodeBootId, sessionId });
+  }
+
+  public readNativeState(
+    sessionId: SessionId,
+    request: NativeStateRequest,
+  ): Promise<NativeStateResult> {
+    return this.peer.rpc.sessions.readNativeState.query({
+      runtimeNodeBootId: this.runtimeNodeBootId,
+      sessionId,
+      request,
     });
   }
 
@@ -337,6 +356,13 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
 
   public getCommand(commandId: CommandId): Promise<CommandRecord | null> {
     return this.peer.rpc.commands.get.query({
+      runtimeNodeBootId: this.runtimeNodeBootId,
+      commandId,
+    });
+  }
+
+  public observeCommand(commandId: CommandId): Promise<CommandObservationView | null> {
+    return this.peer.rpc.commands.observe.query({
       runtimeNodeBootId: this.runtimeNodeBootId,
       commandId,
     });
@@ -481,7 +507,7 @@ interface ManagedRuntimeNodeSubscription {
   stopRequested: boolean;
 }
 
-/** Recreates a runtime-node subscription after p2prpc session replacement. */
+/** Recreates a runtime-node subscription after genuine transport loss. */
 export class RuntimeNodeEventPump {
   readonly #connection: P2PRuntimeNodeConnection;
   readonly #onItem: (item: RuntimeNodeEventItem) => Promise<boolean | void> | boolean | void;

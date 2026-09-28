@@ -576,7 +576,7 @@ assert_json "dashboard did not render the complete fleet" '
   .assertions.exactRuntimeNodeCards == true and
   .assertions.everyRuntimeNodeOnline == true and
   .assertions.exactSessionCards == true and
-  .assertions.everySessionActiveAndIdle == true and
+  .assertions.everySessionActiveAndReady == true and
   .assertions.fleetPinnedAndReachable == true and
   .assertions.sessionAndFleetScrollIndependently == true and
   .assertions.searchNarrowsToOneSession == true and
@@ -590,7 +590,7 @@ assert_json "dashboard did not render the complete fleet" '
   .visible.runtimeNodeCardCount == 10 and
   .visible.onlineRuntimeNodeCardCount == 10 and
   .visible.sessionCardCount == 100 and
-  .visible.activeIdleSessionCardCount == 100
+  .visible.activeReadySessionCardCount == 100
 ' "$RECEIPT_DIR/rpc/playwright-dashboard.json"
 if [[ ! -s "$RECEIPT_DIR/screenshots/dashboard-100-agents.png" ]]; then
   fail "Playwright did not write the scale screenshot"
@@ -711,7 +711,7 @@ jq -n \
         mockSessions: 10, publishedPorts: []
       })),
       transport: {
-        protocol: "p2prpc v1 over Iroh",
+        protocol: "p2prpc v5 / authenticated renewal contract 1 over Iroh",
         controlNodeEndpointId: $endpoint,
         ticketRecorded: false,
         ticketSha256: $ticketDigest
@@ -726,8 +726,7 @@ NODE_VERSION=$(docker exec "$CONTROL_NODE_CONTAINER" node --version | tr -d '\r\
 DOCKER_VERSION=$(docker version --format '{{.Server.Version}}')
 IFS=$'\t' read -r P2PRPC_VERSION P2PRPC_INTEGRITY < <(
   node -e '
-    const lock = require(process.argv[1]);
-    const dependency = lock.packages?.["node_modules/@arduano/p2prpc-core"];
+    const dependency = require(process.argv[1]).packages?.["node_modules/@arduano/p2prpc-core"];
     if (!dependency?.version || !dependency?.integrity) process.exit(1);
     process.stdout.write(`${dependency.version}\t${dependency.integrity}\n`);
   ' "$REPO_ROOT/package-lock.json"
@@ -772,7 +771,7 @@ jq -n \
       versions: {
         dockerServer: $docker,
         nodeInImage: $node,
-        multiplexProtocol: 5,
+        multiplexProtocol: 6,
         p2prpcVersion: $p2prpcVersion,
         p2prpcIntegrity: $p2prpcIntegrity
       },
@@ -826,7 +825,7 @@ jq -n \
           $lifecycle[0] | length == 12 and (map(.image) | unique | length) == 1
         ),
         gatewayHasNoDataAuthority: (
-          $system[0].protocolVersion == 5 and
+          $system[0].protocolVersion == 6 and
           $system[0].componentKind == "access-gateway" and
           $system[0].dataAuthority == "none"
         ),
@@ -839,7 +838,7 @@ jq -n \
         controlNodeIsCanonicalAuthority: (
           ($controls[0] | length) == 1 and
           $controls[0][0].dataRole.role == "authority" and
-          $controls[0][0].protocolVersion == 5
+          $controls[0][0].protocolVersion == 6
         ),
         unauthenticatedGatewayRpcRejected: ($auth[0].unauthenticatedRejected == true)
       },
@@ -973,7 +972,7 @@ assert_json "derived receipt checks did not pass" '.passed == true' \
   printf -- '- One runtime node was removed from the Docker network during native output, remained alive, rejoined, and replayed its event ring without gaps or duplicates.\n'
   printf -- '- Spawn metadata and three compare-and-set metadata rounds converged for all 100 sessions; a deliberately stale CAS was rejected without mutation.\n'
   printf -- '- All runtime nodes remained online and all sessions remained active/idle during the soak. No container restarted or was OOM-killed.\n'
-  printf -- '- The authenticated reference dashboard rendered exactly 10 online runtime nodes and 100 active/idle session cards. Fleet stayed pinned and independently scrollable, rows stayed fixed-height, search and selection remained responsive, the conversation stayed usable, and there were no browser errors, horizontal overflow, or serious/critical axe findings.\n\n'
+  printf -- '- The authenticated reference dashboard rendered exactly 10 online runtime nodes and 100 active/Ready session cards. Fleet stayed pinned and independently scrollable, rows stayed fixed-height, search and selection remained responsive, the conversation stayed usable, and there were no browser errors, horizontal overflow, or serious/critical axe findings.\n\n'
   printf '## Interpretation\n\n'
   printf 'This is strong evidence that the control-node catalog, authenticated gateway projection, p2prpc fan-in, runtime-node event rings, client cursors, metadata concurrency, and reference web surface reliably handle this deterministic 100-session workload on the recorded machine. It is not proof that 100 real Codex/Copilot app-server processes fit the same resource envelope: model subprocess memory, terminal workloads, network variability, and provider latency are deliberately absent.\n\n'
   printf '## Primary evidence\n\n'

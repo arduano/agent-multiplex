@@ -159,6 +159,20 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
             toTRPC(error);
           }
         }),
+      readLifecycle: t.procedure
+        .input(runtimeNodeContract.sessions.readLifecycle.input)
+        .output(runtimeNodeContract.sessions.readLifecycle.output)
+        .query(async ({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.readLifecycle(input.sessionId).catch(toTRPC);
+        }),
+      readNativeState: t.procedure
+        .input(runtimeNodeContract.sessions.readNativeState.input)
+        .output(runtimeNodeContract.sessions.readNativeState.output)
+        .query(async ({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.readNativeState(input.sessionId, input.request).catch(toTRPC);
+        }),
       readNativeHistory: t.procedure
         .input(runtimeNodeContract.sessions.readNativeHistory.input)
         .output(runtimeNodeContract.sessions.readNativeHistory.output)
@@ -309,6 +323,13 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
         .query(({ input }) => {
           assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
           return service.getCommand(input.commandId);
+        }),
+      observe: t.procedure
+        .input(runtimeNodeContract.commands.observe.input)
+        .output(runtimeNodeContract.commands.observe.output)
+        .query(({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.observeCommand(input.commandId);
         }),
     }),
     metadata: t.router({

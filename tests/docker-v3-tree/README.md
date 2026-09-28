@@ -1,4 +1,4 @@
-# Protocol-v5 control-tree Docker acceptance
+# Protocol-v6 control-tree Docker acceptance
 
 This acceptance starts four isolated containers:
 
@@ -28,9 +28,10 @@ is retained with `FAILED.txt`; a successful run contains `summary.json`, RPC
 and phase records, redacted container logs, Playwright screenshots, an exact
 cleanup receipt, and SHA-256 checksums for every artifact.
 
-The suite targets current protocol-v5 source. Existing command names and receipt
+The suite targets current protocol-v6 source. Existing command names and receipt
 directory paths containing `v4` remain stable; historical receipts retain their
-original protocol/source identity and do not qualify v5.
+original protocol/source identity and do not qualify v6. This mock/tree suite
+does not qualify native Copilot lifecycle behavior.
 
 Image acceptance covers multi-chunk upload/read, an exact repeated chunk,
 immutable runtime SVG path snapshots, resuming an upload through the selected

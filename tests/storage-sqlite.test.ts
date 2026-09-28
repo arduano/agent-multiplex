@@ -233,6 +233,7 @@ describe("HardenedSqliteDatabase", () => {
     const root = mkdtempSync(join(tmpdir(), "agent-multiplex-directory-mode-"));
     const stateDirectory = join(root, "state");
     mkdirSync(stateDirectory, { mode: 0o755 });
+    chmodSync(stateDirectory, 0o755); // Ensure the fixture is insecure even under umask 077.
     const filename = join(stateDirectory, "state.sqlite");
     expect(() => open(filename)).toThrowError(
       expect.objectContaining<Partial<SqliteStoreError>>({ code: "UNSAFE_PATH" }),
@@ -260,13 +261,13 @@ describe("HardenedSqliteDatabase", () => {
 });
 
 describe("RuntimeNodeStore SQLite schema", () => {
-  it("uses an independently identified v5 database with STRICT JSON tables", () => {
+  it("uses an independently identified v10 database with STRICT JSON tables", () => {
     const root = mkdtempSync(join(tmpdir(), "agent-multiplex-runtime-schema-"));
     const filename = join(root, "runtime.sqlite");
     const store = new RuntimeNodeStore(filename);
     expect(store.diagnostics()).toMatchObject({
       applicationId: 0x414d_5254,
-      userVersion: 5,
+      userVersion: 10,
       foreignKeys: true,
       synchronous: "full",
     });

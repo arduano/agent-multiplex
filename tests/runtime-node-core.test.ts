@@ -110,11 +110,53 @@ describe("RuntimeNodeStore", () => {
     const reopened = new RuntimeNodeStore(filename);
     expect(reopened.getCommand(commandId)).toMatchObject({
       state: "outcomeUnknown",
-      error: expect.stringContaining("requires reconciliation"),
+      error: { code: "OUTCOME_UNKNOWN", stage: "recovery", certainty: "outcomeUnknown" },
     });
     reopened.close();
     },
   );
+});
+
+describe("durable command error boundary", () => {
+  it.each([false, true])("sanitizes native failures, survives restart, and never repeats an uncertain dispatch (unknown=%s)", async (unknown) => {
+    const root = mkdtempSync(join(tmpdir(), "agent-multiplex-command-error-"));
+    const filename = join(root, "runtime.sqlite");
+    const store = new RuntimeNodeStore(filename);
+    const adapter = new FakeAdapter();
+    const runtimeNodeId = newRuntimeNodeId();
+    const service = new RuntimeNodeService({ store, adapters: [adapter], runtimeNodeId,
+      runtimeNodeBootId: newRuntimeNodeBootId(), name: "error-boundary", allowedRoots: [root] });
+    const sessionId = newSessionId();
+    const sentinel = "SYNTHETIC_SECRET_SENTINEL_DO_NOT_PERSIST";
+    let calls = 0;
+    let commandId = newCommandId();
+    let receipt: CommandRecord | undefined;
+    try {
+      await launchDirectWorkspace(service, { launchId: newLaunchId(), payloadHash: "error-boundary-launch",
+        sessionId, runtimeNodeId, harness: "codex", input: { cwd: root } });
+      const native = adapter.sessions.get("fake-1")!;
+      native.execute = async () => {
+        calls += 1;
+        throw unknown ? new AdapterOutcomeUnknownError(sentinel) : new Error(sentinel);
+      };
+      const command = { commandId, sessionId, runtimeNodeId, bindingRevision: 1,
+        payloadHash: "error-boundary-command", request: { harness: "codex" as const,
+          command: { type: "send" as const, input: "synthetic request" } } };
+      receipt = await service.execute(command);
+      expect(receipt).toMatchObject({ state: unknown ? "outcomeUnknown" : "failed", error: {
+        code: unknown ? "OUTCOME_UNKNOWN" : "NATIVE_FAILURE", stage: "native",
+        certainty: unknown ? "outcomeUnknown" : "definiteFailure",
+      } });
+      expect(JSON.stringify(receipt)).not.toContain(sentinel);
+      expect(await service.execute(command)).toEqual(receipt);
+      expect(calls).toBe(1);
+    } finally { await service.close(); store.close(); }
+    const reopened = new RuntimeNodeStore(filename);
+    try {
+      expect(reopened.getCommand(commandId)).toEqual(receipt);
+      expect(JSON.stringify(reopened.getCommand(commandId))).not.toContain(sentinel);
+    } finally { reopened.close(); rmSync(root, { recursive: true, force: true }); }
+  });
 });
 
 describe("runtime node metadata operation receipts", () => {
@@ -847,7 +889,7 @@ describe("RuntimeNodeService", () => {
     expect(selfDescription).toMatchObject({
       runtimeNodeId: service.runtimeNodeId,
       runtimeNodeBootId,
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     expect(selfDescription).not.toHaveProperty("ownerHostId");
     expect(selfDescription).not.toHaveProperty("reachability");
@@ -1278,7 +1320,7 @@ describe("RuntimeNodeService", () => {
       bindingRevision: 1,
     })).resolves.toMatchObject({
       state: "failed",
-      error: expect.stringContaining("already active"),
+      error: { code: "CONFLICT", certainty: "definiteFailure" },
     });
     expect(adapter.resumeCalls).toHaveLength(0);
 
@@ -1663,7 +1705,7 @@ describe("RuntimeNodeService", () => {
 
     expect(result).toMatchObject({
       state: "failed",
-      error: expect.stringContaining("outside configured allowed roots"),
+      error: { code: "FENCED", certainty: "definiteFailure" },
     });
     expect(adapter.resumeCalls).toHaveLength(0);
 
@@ -2070,7 +2112,7 @@ describe("RuntimeNodeService", () => {
 
     expect(result).toMatchObject({
       state: "failed",
-      error: expect.stringContaining("has no working directory"),
+      error: { code: "FENCED", certainty: "definiteFailure" },
     });
     expect(adapter.resumeCalls).toHaveLength(0);
 

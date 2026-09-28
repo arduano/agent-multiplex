@@ -47,10 +47,41 @@ jobs:
           test -n "$chrome"
           echo "AGENT_MULTIPLEX_CHROME_EXECUTABLE=$chrome" >> "$GITHUB_ENV"
           echo "AGENT_MULTIPLEX_PLAYWRIGHT_MODULE=playwright-core" >> "$GITHUB_ENV"
-      - name: Install and build
+      - name: Install locked dependencies
         env:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
-        run: npm ci --strict-allow-scripts && npm run build
+        run: npm ci --strict-allow-scripts
+      - name: Detect staged transport boundary
+        id: transport
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+          const path = 'transport-candidate/manifest.json';
+          const manifest = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : null;
+          if (manifest && (!/^[0-9a-f]{40}$/.test(manifest.upstreamCommit) ||
+              typeof manifest.releaseBlocked !== 'boolean')) throw new Error('Invalid transport candidate boundary');
+          appendFileSync(process.env.GITHUB_OUTPUT,
+            `candidate=${manifest !== null}\nrelease_blocked=${manifest?.releaseBlocked === true}\n` +
+            `upstream_commit=${manifest?.upstreamCommit ?? ''}\n`);
+          NODE
+      - name: Check out exact independent transport source
+        if: steps.transport.outputs.candidate == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: arduano/p2prpc
+          ref: ${{ steps.transport.outputs.upstream_commit }}
+          path: receipts/upstream-p2prpc
+          # Private source requires this read-only cross-repository token.
+          token: ${{ secrets.P2PRPC_SOURCE_READ_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Prepare reviewed transport candidate without changing pins
+        if: steps.transport.outputs.candidate == 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+        run: npm run prepare:transport-renewal -- receipts/upstream-p2prpc
+      - name: Build qualification source
+        run: npm run build
       - name: Create ephemeral Docker npm configuration
         id: npmrc
         shell: bash

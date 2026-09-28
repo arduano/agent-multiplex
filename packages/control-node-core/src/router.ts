@@ -190,6 +190,14 @@ export function createAccessRouter(service: ControlNodeService) {
         .input(accessContract.sessions.execute.input)
         .output(accessContract.sessions.execute.output)
         .mutation(({ input }) => guarded(() => service.execute(input))),
+      readLifecycle: scoped("read")
+        .input(accessContract.sessions.readLifecycle.input)
+        .output(accessContract.sessions.readLifecycle.output)
+        .query(({ input }) => guarded(() => service.readLifecycle(input.sessionId))),
+      readNativeState: scoped("read")
+        .input(accessContract.sessions.readNativeState.input)
+        .output(accessContract.sessions.readNativeState.output)
+        .query(({ input }) => guarded(() => service.readNativeState(input.sessionId, input.request))),
       readNativeHistory: scoped("read")
         .input(accessContract.sessions.readNativeHistory.input)
         .output(accessContract.sessions.readNativeHistory.output)
@@ -305,6 +313,10 @@ export function createAccessRouter(service: ControlNodeService) {
         .input(accessContract.commands.get.input)
         .output(accessContract.commands.get.output)
         .query(({ input }) => service.recoverCommand(input)),
+      observe: scoped("read")
+        .input(accessContract.commands.observe.input)
+        .output(accessContract.commands.observe.output)
+        .query(({ input }) => guarded(() => service.observeCommand(input))),
     }),
   });
 }
@@ -453,6 +465,14 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
         .input(controlNodeLinkContract.sessions.archive.input)
         .output(controlNodeLinkContract.sessions.archive.output)
         .mutation(({ input, ctx }) => checked(ctx, input, () => service.archive(input.request))),
+      readLifecycle: t.procedure
+        .input(controlNodeLinkContract.sessions.readLifecycle.input)
+        .output(controlNodeLinkContract.sessions.readLifecycle.output)
+        .query(({ input, ctx }) => checked(ctx, input, () => service.readLifecycle(input.sessionId))),
+      readNativeState: t.procedure
+        .input(controlNodeLinkContract.sessions.readNativeState.input)
+        .output(controlNodeLinkContract.sessions.readNativeState.output)
+        .query(({ input, ctx }) => checked(ctx, input, () => service.readNativeState(input.sessionId, input.request))),
       readNativeHistory: t.procedure
         .input(controlNodeLinkContract.sessions.readNativeHistory.input)
         .output(controlNodeLinkContract.sessions.readNativeHistory.output)
@@ -525,6 +545,10 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
         .input(controlNodeLinkContract.commands.get.input)
         .output(controlNodeLinkContract.commands.get.output)
         .query(({ input, ctx }) => checked(ctx, input, () => service.recoverCommand(input.commandId))),
+      observe: t.procedure
+        .input(controlNodeLinkContract.commands.observe.input)
+        .output(controlNodeLinkContract.commands.observe.output)
+        .query(({ input, ctx }) => checked(ctx, input, () => service.observeCommand(input.commandId))),
     }),
     interactions: t.router({
       resolve: t.procedure

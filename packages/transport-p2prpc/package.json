@@ -1,7 +1,7 @@
 {
   "name": "@arduano/agent-multiplex-transport-p2prpc",
-  "version": "0.2.3",
-  "description": "Authenticated p2prpc node-to-node transport bindings for Agent Multiplex protocol v5.",
+  "version": "0.2.4-hotfix.19",
+  "description": "Authenticated p2prpc node-to-node transport bindings for Agent Multiplex protocol v6.",
   "private": false,
   "type": "module",
   "main": "./dist/index.js",
@@ -33,10 +33,10 @@
     "access": "public"
   },
   "dependencies": {
-    "@arduano/agent-multiplex-control-node-core": "0.2.3",
-    "@arduano/agent-multiplex-protocol": "0.2.3",
-    "@arduano/agent-multiplex-runtime-node-core": "0.2.3",
-    "@arduano/p2prpc-core": "0.2.1",
+    "@arduano/agent-multiplex-control-node-core": "0.2.4-hotfix.19",
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.19",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.19",
+    "@arduano/p2prpc-core": "0.3.0-renewal.1",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0",
     "@types/ws": "8.18.1"

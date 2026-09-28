@@ -32,7 +32,7 @@ describe("protocol-v4 graceful-detach safety boundary", () => {
       controlNodeBootId: local.controlNodeBootId,
       feedId: local.feedId,
       name: local.name,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: local.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),

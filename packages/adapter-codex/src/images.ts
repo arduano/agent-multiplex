@@ -66,6 +66,7 @@ export function codexImageLeaves(payload: JsonValue): NativeImageLeaf[] {
   if (Array.isArray(root.data) && Object.hasOwn(root, "nextCursor")) root.data.forEach((entry, index) => {
     const row = object(entry);
     if (typeof row?.turnId === "string") item(row.item, `/data/${index}/item`);
+    else if (typeof row?.id === "string" && typeof row.itemsView === "string" && ["notLoaded", "summary", "full"].includes(row.itemsView)) turn(row, `/data/${index}`);
   });
   turn(root.turn, "/turn");
   const thread = object(root.thread);

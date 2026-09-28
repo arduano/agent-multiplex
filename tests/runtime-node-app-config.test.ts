@@ -18,6 +18,10 @@ const requiredEnvironment = (): NodeJS.ProcessEnv => ({
 });
 
 describe("runtime node Copilot BYOK configuration", () => {
+  it("accepts an explicit runtime transport bind without changing default discovery", () => {
+    expect(configFromEnvironment(requiredEnvironment()).p2pBindAddress).toBeUndefined();
+    expect(configFromEnvironment({ ...requiredEnvironment(), AGENT_MULTIPLEX_RUNTIME_NODE_P2P_BIND: "127.0.0.1:0" }).p2pBindAddress).toBe("127.0.0.1:0");
+  });
   it("keeps the hidden Copilot UI-server disabled unless explicitly opted in", () => {
     expect(configFromEnvironment(requiredEnvironment())).toMatchObject({
       copilotExperimentalUiServer: false,
@@ -25,10 +29,10 @@ describe("runtime node Copilot BYOK configuration", () => {
     expect(configFromEnvironment({
       ...requiredEnvironment(),
       AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_EXPERIMENTAL_UI_SERVER: "1",
-      AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_BINARY: "/opt/copilot-1.0.81",
+      AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_BINARY: "/opt/copilot-1.0.88",
     })).toMatchObject({
       copilotExperimentalUiServer: true,
-      copilotBinary: "/opt/copilot-1.0.81",
+      copilotBinary: "/opt/copilot-1.0.88",
     });
     expect(() => configFromEnvironment({
       ...requiredEnvironment(),
@@ -43,7 +47,7 @@ describe("runtime node Copilot BYOK configuration", () => {
         ...requiredEnvironment(),
         AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_EXPERIMENTAL_UI_SERVER: "1",
         AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_BINARY:
-          "/definitely/not/a/copilot-1.0.81-binary",
+          "/definitely/not/a/copilot-1.0.88-binary",
       });
       const components = await createRuntimeComponents(config);
       expect(components.adapters).toHaveLength(1);

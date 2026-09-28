@@ -41,6 +41,61 @@ export const repositoryUrl = "git+https://github.com/arduano/agent-multiplex.git
 export const homepageUrl = "https://github.com/arduano/agent-multiplex#readme";
 export const bugsUrl = "https://github.com/arduano/agent-multiplex/issues";
 
+const irohRelease = "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/";
+export const reviewedIrohClosure = Object.freeze([
+  Object.freeze({
+    name: "@momics/iroh-http-node",
+    url: `${irohRelease}iroh-http-node-0.6.2-fork-linux-win-x64.tgz`,
+    integrity: "sha512-CPRn15sDElYcARIbGcdJJtQj1jH9er3ytl7xkXqUSSk6GjsL8xwLrrGKi2izP58XZMjkCQKJA7xi7Be2Z8Q99Q==",
+  }),
+  Object.freeze({
+    name: "@momics/iroh-http-shared",
+    url: `${irohRelease}iroh-http-shared-0.6.2-fork.tgz`,
+    integrity: "sha512-LI6vNhKQQZBJV+pC3w/yNxXQoP+pMpmYVHrOo9Y3IHFbMnvkWhV1qzArOn34lQ8JU/pbEMdHVHgZYwmTFnDIDQ==",
+  }),
+]);
+export const reviewedKoffi = Object.freeze({
+  version: "3.2.1",
+  integrity: "sha512-0qE3lZ8jllRqPN4Ob6Ajl7c2bJSJDhQWuKLGP5hIEpHLllJWv1ydHFMhHmHc5p/W9GticKVDbYzZd7TBoQ4CZg==",
+});
+
+export function assertReviewedIrohManifest(manifest) {
+  for (const { name, url } of reviewedIrohClosure) {
+    assert(manifest.dependencies?.[name] === url, `root must pin the reviewed ${name} URL`);
+    assert(manifest.overrides?.[name] === `$${name}`, `root must override transitive ${name}`);
+  }
+}
+
+export function assertReviewedIrohLock(lock) {
+  assert(lock.lockfileVersion === 3, "consumer lock must use format 3");
+  assert(lock.packages && typeof lock.packages === "object", "consumer lock has no packages");
+  for (const { name, url, integrity } of reviewedIrohClosure) {
+    assert(lock.packages?.[""]?.dependencies?.[name] === url, `consumer lock root differs for ${name}`);
+    const path = `node_modules/${name}`;
+    const expected = lock.packages?.[path];
+    assert(expected?.version === "0.6.2" && expected.resolved === url && expected.integrity === integrity,
+      `consumer lock differs from reviewed ${name}`);
+    for (const [nestedPath, nested] of Object.entries(lock.packages)) {
+      if (nestedPath !== path && nestedPath.endsWith(`/${path}`)) {
+        assert(nested.version === expected.version && nested.resolved === url && nested.integrity === integrity,
+          `nested consumer ${name} differs from reviewed fork`);
+      }
+    }
+  }
+}
+
+export function assertReviewedKoffiLock(lock) {
+  const root = readJson("package-lock.json").packages?.["node_modules/koffi"];
+  assert(root?.version === reviewedKoffi.version && root.integrity === reviewedKoffi.integrity,
+    "root koffi differs from reviewed lock");
+  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+    if (path === "node_modules/koffi" || path.endsWith("/node_modules/koffi")) {
+      assert(entry.version === reviewedKoffi.version && entry.integrity === reviewedKoffi.integrity,
+        "isolated consumer koffi differs from reviewed lock");
+    }
+  }
+}
+
 export function packageManifest(entry) {
   return readJson(`${entry.workspace}/package.json`);
 }

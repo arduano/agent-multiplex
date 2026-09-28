@@ -1,5 +1,6 @@
 export * from "./client.js";
 export * from "./commands.js";
+export * from "./command-recovery.js";
 export * from "./cursor.js";
 export * from "./access-watch.js";
 export * from "./http.js";

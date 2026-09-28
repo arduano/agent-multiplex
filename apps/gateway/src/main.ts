@@ -31,7 +31,7 @@ import {
   type SourceId,
   type StreamCursor,
 } from "@arduano/agent-multiplex-protocol";
-import type { PinnedPeerTarget } from "@arduano/agent-multiplex-transport-p2prpc";
+import type { MultiplexRelayPolicy, PinnedPeerTarget } from "@arduano/agent-multiplex-transport-p2prpc";
 
 import {
   createGatewayHttpSurface,
@@ -57,7 +57,7 @@ const DEFAULT_STATE_PATH = ".agent-multiplex/access-gateway.sqlite";
 const DEFAULT_HTTP_PORT = 4318;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
 const SOURCE_CONFIG_VERSION = 1 as const;
-const VERSION = "0.2.3";
+const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 const DEFAULT_SOURCE_SCOPES = Object.freeze([
   "read",
 ] satisfies readonly ActionScope[]);
@@ -80,6 +80,7 @@ export interface GatewayAppConfig {
   readonly bindAddress: string;
   readonly port: number;
   readonly reconnectMaxMs: number;
+  readonly irohRelay?: MultiplexRelayPolicy;
   readonly auth?: GatewayBearerAuthConfig;
 }
 
@@ -178,7 +179,8 @@ export async function runGateway(
       },
       iroh: {
         secretKey,
-        relay: { mode: "default" },
+        relay: config.irohRelay ?? { mode: "default" },
+        ...(config.irohRelay?.mode === "custom" ? { discovery: { dns: false, mdns: false } } : {}),
         allowDirectAddress: () => true,
         allowRelayUrl: () => true,
       },

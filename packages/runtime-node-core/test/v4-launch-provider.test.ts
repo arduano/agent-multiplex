@@ -350,7 +350,7 @@ describe("runtime v4 launch providers", () => {
     expect(service.metadataOutbox()).toHaveLength(1);
     expect(service.createLaunch(request)).toEqual(succeeded);
     expect(adapter.spawned).toHaveLength(1);
-    expect((await service.describe()).protocolVersion).toBe(5);
+    expect((await service.describe()).protocolVersion).toBe(6);
 
     await service.close();
     store.close();
@@ -403,6 +403,57 @@ describe("runtime v4 launch providers", () => {
     });
     await iterator.return?.();
 
+    await fixture.service.close();
+    fixture.store.close();
+  });
+
+  it("replays stopped bindings after restart and resumes only on an explicit command", async () => {
+    const fixture = createProviderFixture();
+    const request = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(request);
+    await waitForLaunch(fixture.service, request.launchId, "succeeded");
+    const before = fixture.store.getSession(request.sessionId)!;
+    await fixture.service.close();
+
+    const restarted = fixture.makeService();
+    const expected = { sessionId: request.sessionId, availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null };
+    expect(fixture.store.getSession(request.sessionId)).toMatchObject({ ...before, ...expected, updatedAt: expect.any(String), lastSeenAt: expect.any(String) });
+    const iterator = restarted.events({ native: {} })[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toMatchObject({ value: { kind: "control", change: { type: "session.upsert", session: expected } } });
+    await iterator.return?.();
+    expect((await restarted.refreshInventory()).sessions[0]).toMatchObject({ availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null });
+    expect(fixture.adapter.resumed).toHaveLength(0);
+    const resumed = await restarted.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "0123456789abcdef", sessionId: request.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1 });
+    expect(resumed.state).toBe("succeeded");
+    expect(fixture.adapter.resumed).toHaveLength(1);
+    expect((await restarted.refreshInventory()).sessions[0]).toMatchObject({ availability: "active", runtimeStatus: "idle" });
+    await restarted.close();
+    fixture.store.close();
+  });
+
+  it("does not advertise a temporary history attachment as command-ready", async () => {
+    const fixture = createProviderFixture();
+    const request = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(request);
+    await waitForLaunch(fixture.service, request.launchId, "succeeded");
+    await fixture.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "0123456789abcdef", sessionId: request.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1 });
+    let attached!: () => void;
+    const attachedPromise = new Promise<void>(resolve => { attached = resolve; });
+    let finish!: () => void;
+    const reading = new Promise<void>(resolve => { finish = resolve; });
+    const resume = fixture.adapter.resume.bind(fixture.adapter);
+    fixture.adapter.resume = async options => {
+      const handle = await resume(options);
+      const read = handle.readNativeHistory.bind(handle);
+      handle.readNativeHistory = async request => { attached(); await reading; return read(request); };
+      return handle;
+    };
+    const history = fixture.service.readNativeHistory(request.sessionId, { harness: "codex", limit: 20 });
+    await attachedPromise;
+    expect((await fixture.adapter.listSessions())[0]).toMatchObject({ availability: "active" });
+    expect((await fixture.service.refreshInventory()).sessions[0]).toMatchObject({ availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null });
+    finish();
+    await history;
     await fixture.service.close();
     fixture.store.close();
   });
@@ -717,7 +768,7 @@ describe("runtime v4 launch providers", () => {
   });
 });
 
-describe("runtime store v3 to v5", () => {
+describe("runtime store v3 to v10", () => {
   it("adds launch journals and backfills runtime session fields", () => {
     const filename = join(
       mkdtempSync(join(tmpdir(), "multiplex-v4-migration-")),
@@ -753,14 +804,14 @@ describe("runtime store v3 to v5", () => {
     downgrade.prepare("UPDATE bindings SET record_json=? WHERE session_id=?")
       .run(JSON.stringify(legacyJson), legacyCompatible.sessionId);
     downgrade.exec(
-      "DROP TABLE images; DROP TABLE launch_journal; DROP TABLE archive_journal; DROP TABLE archived_native_bindings",
+      "DROP TABLE images; DROP TABLE launch_journal; DROP TABLE archive_journal; DROP TABLE archived_native_bindings; DROP TABLE IF EXISTS lifecycle_state; DROP TABLE IF EXISTS copilot_startup_intent",
     );
     downgrade.prepare("DELETE FROM schema_migrations WHERE version>=4").run();
     downgrade.exec("PRAGMA user_version=3");
     downgrade.close();
 
     const migrated = new RuntimeNodeStore(filename);
-    expect(migrated.diagnostics().userVersion).toBe(5);
+    expect(migrated.diagnostics().userVersion).toBe(10);
     expect(migrated.getSession(legacyCompatible.sessionId)).toMatchObject({
       launchProvenance: null,
       lastActivityAt: timestamp,

@@ -88,8 +88,16 @@ binary data. Each adapter allowlists its native image input pointers; references
 cannot inject image bytes into arbitrary tool arguments. Image-free commands retain their existing request/hash semantics.
 
 History still comes from native APIs. Codex uses bounded `thread/items/list`
-pages for item history, while metadata-only reads use `thread/read`; the client
-follows native cursors. Both adapters budget history pages with the same wire
+pages for item history and opt-in `thread/turns/list` pages for turn status/error,
+while thread metadata-only reads use `thread/read`; the client follows the
+appropriate native cursors separately. Turn summary items at native
+`data[].items` use the same allowlisted image leaves and stable item source keys
+as item history and live events. The native `itemsView` identifies summary or
+unloaded detail; it does not grant access to arbitrary nested objects. A single
+oversized turn summary may be re-read through native `itemsView: "notLoaded"`
+to preserve status/error without transferring its items. This neither truncates
+image bytes nor changes runtime image retention or path policy.
+Both adapters budget history pages with the same wire
 size estimator, including retained path/prefix metadata and image sidecars.
 Neither runtime nor UI parses vendor history files.
 

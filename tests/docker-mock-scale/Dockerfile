@@ -36,7 +36,9 @@ COPY scripts/ ./scripts/
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 
-RUN npm run build -- --force \
+RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=true \
+    --mount=type=cache,id=agent-multiplex-deterministic-npm,target=/root/.npm,sharing=locked \
+    npm run build -- --force \
     && npm prune --omit=dev \
     && test -f apps/control-node/dist/main.js \
     && test -f apps/runtime-node/dist/main.js \
@@ -57,5 +59,5 @@ COPY --from=build /opt/src/agent-multiplex/ /opt/src/agent-multiplex/
 RUN mkdir -p /state /workspace \
     && chown -R 1000:100 /state /workspace
 
-LABEL org.opencontainers.image.title="Agent Multiplex protocol-v4 mock scale acceptance"
+LABEL org.opencontainers.image.title="Agent Multiplex protocol-v6 mock scale acceptance"
 LABEL org.opencontainers.image.description="Control node, authenticated access gateway, and ten mock runtime nodes"

@@ -92,7 +92,8 @@ p2pNode = await createHostP2PNode<CompositeHostRouter, AnyTRPCRouter>({
   iroh: {
     secretKey: hostSecretKey,
     ticketTtlMs: 30 * 24 * 60 * 60_000,
-    relay: { mode: "default" },
+    relay: config.irohRelay ?? { mode: "default" },
+    ...(config.irohRelay?.mode === "custom" ? { discovery: { dns: false, mdns: false } } : {}),
     allowAdvertisedAddress: () => true,
     allowDirectAddress: () => true,
     allowRelayUrl: () => true,

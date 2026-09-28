@@ -98,7 +98,13 @@ try {
         /^(?:COPILOT_CLI_PATH|COPILOT_CONNECTION_TOKEN|COPILOT_SDK_AUTH_TOKEN|COPILOT_GITHUB_TOKEN|GH_TOKEN|GITHUB_TOKEN|NODE_AUTH_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|COPILOT_OFFLINE)$/i.test(key)) delete env[key];
   }
   const binary = require.resolve("@github/copilot-win32-x64");
-  assert.match(execFileSync(binary, ["--version"], { env, encoding: "utf8", timeout: 30_000 }), /GitHub Copilot CLI 1\.0\.81\./);
+  const expectedCliVersion = JSON.parse(readFileSync("packages/adapter-copilot/package.json", "utf8"))
+    .dependencies["@github/copilot"];
+  assert.equal(JSON.parse(readFileSync("node_modules/@github/copilot/package.json", "utf8")).version, expectedCliVersion);
+  assert.equal(JSON.parse(readFileSync("node_modules/@github/copilot-win32-x64/package.json", "utf8")).version, expectedCliVersion);
+  const reportedCliVersion = execFileSync(binary, ["--version"], { env, encoding: "utf8", timeout: 30_000 });
+  assert.ok(reportedCliVersion.includes(`GitHub Copilot CLI ${expectedCliVersion}.`),
+    `native Copilot version differs from the adapter pin: ${reportedCliVersion.trim()}`);
   const client = new CopilotClient({
     mode: "copilot-cli", useLoggedInUser: false, baseDirectory: copilotHome, env, logLevel: "none",
     connection: RuntimeConnection.forStdio({ path: binary }),
@@ -110,7 +116,7 @@ try {
   assert.ok(status.runtimeVersion.length > 0, "SDK runtime status has its own version, separate from the CLI package version");
   assert.equal((await client.getAuthStatus()).isAuthenticated, false, "smoke must not inherit an authenticated account");
   await adapter.close(); adapter = undefined;
-  checks.push("Copilot SDK 1.0.13 / CLI 1.0.81 structured startup, unauthenticated status, graceful shutdown; no sessions or prompts");
+  checks.push("Copilot SDK 1.0.14 / CLI 1.0.88 structured startup, unauthenticated status, graceful shutdown; no sessions or prompts");
 } finally {
   await adapter?.close().catch(() => undefined);
   await endpoint?.close().catch(() => undefined);
@@ -119,9 +125,17 @@ try {
   rmSync(root, { recursive: true, force: true });
 }
 
+const transport = JSON.parse(readFileSync("package-lock.json", "utf8"))
+  .packages?.["node_modules/@arduano/p2prpc-core"];
+const installedTransport = JSON.parse(readFileSync("node_modules/@arduano/p2prpc-core/package.json", "utf8"));
+assert.equal(transport?.version, installedTransport.version, "receipt must identify the installed transport");
+assert.equal(transport.version, "0.3.0-renewal.1");
+assert.match(transport.integrity, /^sha512-/);
+
 const receipt = {
   result: "passed", source: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   lockfileSha256: createHash("sha256").update(readFileSync("package-lock.json")).digest("hex"),
+  transport: { version: transport.version, integrity: transport.integrity },
   node: process.version, platform: process.platform, arch: process.arch, checks,
   scope: "native Windows x64 startup and private persistence only; corporate authentication, network policy, and model turns require laptop UAT",
   modelCalls: 0, retainedCredentials: false,

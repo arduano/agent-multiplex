@@ -145,7 +145,7 @@ On registration it reports:
   "capacity": { "sessions": 8, "cpu": 16, "memory_mb": 32768 },
   "adapters": {
     "codex": { "version": "0.150.1", "native": true },
-    "copilot": { "cli_version": "1.0.81", "sdk_version": "1.0.11" },
+    "copilot": { "cli_version": "1.0.88", "sdk_version": "1.0.14" },
     "acp": { "version": "1" }
   }
 }

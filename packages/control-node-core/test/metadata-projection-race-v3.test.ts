@@ -15,6 +15,7 @@ import {
   newRuntimeNodeBootId,
   newRuntimeNodeId,
   newSessionId,
+  safeCommandError,
   type AccessSnapshot,
   type AdapterScopeId,
   type ControlNodeAttachment,
@@ -46,7 +47,7 @@ function addSession(catalog: ControlNodeCatalog, vendorSessionId: string) {
     name: `runtime-${vendorSessionId}`,
     allowedRoots: ["/work"],
     harnesses: [],
-    protocolVersion: 5,
+    protocolVersion: 6,
   });
   const [session] = catalog.reconcileInventory({
     runtimeNodeId,
@@ -159,7 +160,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -452,7 +453,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -466,7 +467,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       name: "command-child-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     parent.replaceChildSnapshot(
       childNode.controlNodeId,
@@ -553,7 +554,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       feedId: childNode.feedId,
       name: childNode.name,
       endpointId: childEndpointId,
-      protocolVersion: 5,
+      protocolVersion: 6,
       capabilities: childNode.capabilities,
       expectedParentControlNodeId: parent.localControlNode().controlNodeId,
       childProof: child.attachmentProof(),
@@ -567,7 +568,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       name: "proxy-command-runtime",
       allowedRoots: ["/work"],
       harnesses: [],
-      protocolVersion: 5,
+      protocolVersion: 6,
     });
     parent.replaceChildSnapshot(
       childNode.controlNodeId,
@@ -617,6 +618,23 @@ describe("protocol-v4 child metadata projection ordering", () => {
     // is not meaningful state and must not break the aggregate pump.
     expect(parent.getCommand(commandId)).toEqual(parentStarted);
 
+    // Each forwarding hop can lose its reply with a different diagnostic.
+    // These observations must not conflict or tear down the child feed.
+    const parentUnknown = { ...parentStarted, state: "outcomeUnknown" as const,
+      error: safeCommandError(new Error("child reply lost"), { stage: "dispatch", certainty: "outcomeUnknown" }),
+      updatedAt: completedAt };
+    const childUnknown = { ...childStarted, state: "outcomeUnknown" as const,
+      error: safeCommandError(new Error("runtime reply lost"), { stage: "dispatch", certainty: "outcomeUnknown" }),
+      updatedAt: childStartedAt };
+    parent.updateCommand(parentUnknown);
+    const beforeUnknown = child.controlCursor();
+    child.updateCommand(childUnknown);
+    const [unknownEvent] = child.controlEventsAfter(beforeUnknown);
+    if (!unknownEvent) throw new Error("child did not publish its ambiguous command");
+    expect(parent.importChildControl(childNode.controlNodeId,
+      attached.attachment.attachmentId, unknownEvent).accepted).toBe(true);
+    expect(parent.getCommand(commandId)).toEqual(parentUnknown);
+
     const childTerminal = commandRecordSchema.parse({
       ...childStarted,
       state: "succeeded",
@@ -624,7 +642,7 @@ describe("protocol-v4 child metadata projection ordering", () => {
       updatedAt: completedAt,
     });
     const beforeTerminal = child.controlCursor();
-    child.updateCommand(childTerminal);
+    child.recoverCommandOutcome(childTerminal);
     const [terminalEvent] = child.controlEventsAfter(beforeTerminal);
     if (!terminalEvent) throw new Error("child did not publish its terminal command");
     expect(parent.importChildControl(
@@ -637,14 +655,20 @@ describe("protocol-v4 child metadata projection ordering", () => {
       createdAt: parentStartedAt,
     });
 
-    // Timestamp tolerance applies only to the duplicate in-flight state. A
-    // second terminal payload remains a hard conflict and is rolled back with
-    // the child checkpoint.
+    // A read can settle before an older ambiguous feed observation arrives.
+    const delayedUnknownEvent = { ...unknownEvent,
+      eventId: randomUUID(), cursor: terminalEvent.cursor + 1 };
+    expect(parent.importChildControl(childNode.controlNodeId,
+      attached.attachment.attachmentId, delayedUnknownEvent).accepted).toBe(true);
+    expect(parent.getCommand(commandId)?.state).toBe("succeeded");
+
+    // Known terminal payloads remain immutable; conflicting results still roll
+    // back both the command and child checkpoint.
     const checkpoint = parent.childCheckpoint(childNode.controlNodeId);
     const forgedTerminalEvent = {
       ...terminalEvent,
       eventId: randomUUID(),
-      cursor: terminalEvent.cursor + 1,
+      cursor: delayedUnknownEvent.cursor + 1,
       change: {
         type: "command.changed" as const,
         command: { ...childTerminal, result: packNativePayload({ forged: true }) },
@@ -704,7 +728,7 @@ function attachControlNode(
     feedId: local.feedId,
     name: local.name,
     endpointId: local.endpointId,
-    protocolVersion: 5,
+    protocolVersion: 6,
     capabilities: local.capabilities,
     expectedParentControlNodeId: parent.localControlNode().controlNodeId,
     childProof: child.attachmentProof(),

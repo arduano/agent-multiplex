@@ -38,12 +38,15 @@ import type {
   LaunchRequest,
   LineageId,
   MetadataOperationRecord,
+  NativeStateRequest,
+  NativeStateResult,
   NativeHistoryRequest,
   NativeHistoryResult,
   NativeModel,
   ResolveInteractionInput,
   RuntimeNodeBootId,
   RuntimeNodeId,
+  SessionLifecycleView,
   SessionId,
   SessionRecord,
   SessionSearchInput,
@@ -181,6 +184,17 @@ interface ControlNodeLinkPeerRpc {
         input: ControlNodeLinkFence & { request: ArchiveRequest },
       ): Promise<ArchiveRecord>;
     };
+    readLifecycle: {
+      query(input: ControlNodeLinkFence & { sessionId: SessionId }): Promise<SessionLifecycleView>;
+    };
+    readNativeState: {
+      query(
+        input: ControlNodeLinkFence & {
+          sessionId: SessionId;
+          request: NativeStateRequest;
+        },
+      ): Promise<NativeStateResult>;
+    };
     readNativeHistory: {
       query(
         input: ControlNodeLinkFence & {
@@ -246,6 +260,15 @@ interface ControlNodeLinkPeerRpc {
           >[0];
         },
       ): ReturnType<NonNullable<ChildControlNodeConnection["getCommand"]>>;
+    };
+    observe: {
+      query(
+        input: ControlNodeLinkFence & {
+          commandId: Parameters<
+            NonNullable<ChildControlNodeConnection["observeCommand"]>
+          >[0];
+        },
+      ): ReturnType<NonNullable<ChildControlNodeConnection["observeCommand"]>>;
     };
   };
   interactions: {
@@ -314,8 +337,9 @@ export function childControlNodeConnectionFromPeer(
 
 /**
  * Adapt a logical child edge while resolving its current authenticated Peer
- * for every RPC and subscription attempt. An attachment outlives any one
- * p2prpc authentication epoch, but remains pinned to one endpoint key.
+ * for every RPC and subscription attempt. An attachment survives genuine
+ * p2prpc reconnection while remaining pinned to one endpoint key. Healthy
+ * authentication renewal retains the stream and needs no port replacement.
  */
 export function childControlNodeConnectionFromPeerResolver(
   endpointId: string,
@@ -405,6 +429,9 @@ export function childControlNodeConnectionFromPeerResolver(
     getArchive: (archiveOperationId) =>
       rpc().archives.get.query({ ...fence(), archiveOperationId }),
     execute: (command) => rpc().commands.execute.mutate({ ...fence(), command }),
+    readLifecycle: (sessionId) => rpc().sessions.readLifecycle.query({ ...fence(), sessionId }),
+    readNativeState: (sessionId, request) =>
+      rpc().sessions.readNativeState.query({ ...fence(), sessionId, request }),
     readNativeHistory: (sessionId, request) =>
       rpc().sessions.readNativeHistory.query({ ...fence(), sessionId, request }),
     beginImageUpload: (request) => rpc().images.beginUpload.mutate({ ...fence(), request }),
@@ -448,6 +475,8 @@ export function childControlNodeConnectionFromPeerResolver(
       rpc().interactions.resolve.mutate({ ...fence(), interaction }),
     getCommand: (commandId) =>
       rpc().commands.get.query({ ...fence(), commandId }),
+    observeCommand: (commandId) =>
+      rpc().commands.observe.query({ ...fence(), commandId }),
     applyMetadata: (operation) =>
       rpc().metadata.settle.mutate({ ...fence(), operation }),
     applyDetachment: (receipt) =>

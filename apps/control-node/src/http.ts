@@ -35,7 +35,13 @@ export interface ControlNodeHttpSurface {
 export function createControlNodeHttpSurface(
   service: ControlNodeService,
 ): ControlNodeHttpSurface {
-  const router = createAccessRouter(service);
+  return createControlNodeHttpSurfaceFromRouter(createAccessRouter(service));
+}
+
+export function createControlNodeHttpSurfaceFromRouter(
+  router: AccessRouter,
+  health?: () => { ready: boolean; [key: string]: unknown },
+): ControlNodeHttpSurface {
   const trpcHandler = createHTTPHandler({
     router,
     basePath: "/trpc/",
@@ -45,6 +51,12 @@ export function createControlNodeHttpSurface(
   const server = createServer((request, response) => {
     const styleNonce = newStyleNonce();
     applyControlNodeSecurityHeaders(response, styleNonce);
+    if (request.url === "/health" && health) {
+      const status = health();
+      response.writeHead(status.ready ? 200 : 503, { "content-type": "application/json", "cache-control": "no-store" });
+      response.end(JSON.stringify(status));
+      return;
+    }
     if (request.url?.startsWith("/trpc/")) {
       trpcHandler(request, response);
       return;

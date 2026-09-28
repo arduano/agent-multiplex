@@ -11,19 +11,20 @@ import { delimiter, resolve } from "node:path";
 
 import {
   assert,
+  assertReviewedIrohLock,
+  assertReviewedKoffiLock,
   releasePackages,
   releaseVersion,
   repositoryRoot,
+  reviewedIrohClosure,
 } from "./release-config.mjs";
 import { validateReleaseArtifactSet } from "./release-artifact-validation.mjs";
 
 const outputDirectory = resolve(repositoryRoot, process.argv[2] ?? "release-artifacts");
 const verifyRegistry = process.env.AGENT_MULTIPLEX_VERIFY_REGISTRY === "1";
-assert(
-  typeof process.env.NODE_AUTH_TOKEN === "string" && process.env.NODE_AUTH_TOKEN.length > 0,
-  "NODE_AUTH_TOKEN with GitHub Packages read access is required",
-);
 const { artifacts } = validateReleaseArtifactSet(outputDirectory);
+const reviewedIrohShared = reviewedIrohClosure.find(({ name }) => name === "@momics/iroh-http-shared");
+assert(reviewedIrohShared !== undefined, "reviewed Iroh shared package is missing");
 
 const publint = resolve(repositoryRoot, "node_modules/.bin/publint");
 const attw = resolve(repositoryRoot, "node_modules/.bin/attw");
@@ -41,7 +42,7 @@ console.log(`Verified ${artifacts.length} packed packages in role-isolated consu
 function verifyIsolatedConsumer(subject) {
   const directory = mkdtempSync(resolve(tmpdir(), "agent-multiplex-packed-consumer-"));
   try {
-    const dependencies = verifyRegistry
+    const frameworkDependencies = verifyRegistry
       ? { [subject.name]: subject.version }
       : Object.fromEntries(
         internalDependencyClosure(subject).map((artifact) => [
@@ -49,6 +50,14 @@ function verifyIsolatedConsumer(subject) {
           `file:${artifact.path}`,
         ]),
       );
+    const dependencies = {
+      ...frameworkDependencies,
+      ...Object.fromEntries(reviewedIrohClosure.map(({ name, url }) => [name, url])),
+    };
+    const overrides = {
+      ...Object.fromEntries(reviewedIrohClosure.map(({ name }) => [name, `$${name}`])),
+      koffi: "3.2.1",
+    };
     writeFileSync(
       resolve(directory, "package.json"),
       `${JSON.stringify({
@@ -57,14 +66,17 @@ function verifyIsolatedConsumer(subject) {
         private: true,
         type: "module",
         allowScripts: {
+          [reviewedIrohShared.url]: false,
           "esbuild@0.25.12": true,
           "esbuild@0.28.2": true,
           "fsevents@2.3.3": false,
           "koffi@3.2.1": true,
+          "koffi@3.3.1": true,
           "msgpackr-extract@3.0.4": true,
           "node-pty@1.1.0": true,
         },
         dependencies,
+        overrides,
       }, null, 2)}\n`,
     );
     const npmrc = [
@@ -85,9 +97,17 @@ function verifyIsolatedConsumer(subject) {
       "--strict-allow-scripts",
     ], {
       cwd: directory,
-      env: { ...process.env, NPM_CONFIG_USERCONFIG: npmrcPath },
+      // CI supplies NODE_AUTH_TOKEN through this temporary config. Local
+      // qualification may use npm's existing read-only user config instead.
+      env: {
+        ...process.env,
+        ...(process.env.NODE_AUTH_TOKEN ? { NPM_CONFIG_USERCONFIG: npmrcPath } : {}),
+      },
       timeout: 300_000,
     });
+    const lock = JSON.parse(readFileSync(resolve(directory, "package-lock.json"), "utf8"));
+    assertReviewedIrohLock(lock);
+    assertReviewedKoffiLock(lock);
 
     if (subject.workspace.startsWith("packages/") || subject.workspace === "apps/web") {
       writeFileSync(
