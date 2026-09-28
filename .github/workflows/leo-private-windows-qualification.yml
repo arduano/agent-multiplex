@@ -202,13 +202,13 @@ jobs:
 
   bootstrap:
     runs-on: windows-2025
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - name: Check out exact private continuation helper
+      - name: Check out exact private ACL batching candidate
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: afe182ca48a2e9f122957a9ee40efc939efeee4b
+          ref: b079646b75402ee644338e1db9debe41e1724917
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -216,11 +216,16 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Smoke partial-root continuation under PowerShell 5.1
+      - name: Smoke exact pinned ACL script and unsafe-DACL refusal under Windows
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne 'afe182ca48a2e9f122957a9ee40efc939efeee4b') { throw 'Wrong continuation helper commit' }
-          if (git status --porcelain) { throw 'Continuation helper checkout is dirty' }
-          & .\tests\continue-windows-v6-smoke.ps1
-          Write-Host 'Native continuation helper smoke passed'
+          $ErrorActionPreference = 'Continue'
+          if ((git rev-parse HEAD).Trim() -ne 'b079646b75402ee644338e1db9debe41e1724917') { throw 'Wrong ACL candidate commit' }
+          if (git status --porcelain) { throw 'ACL candidate checkout is dirty' }
+          $log = Join-Path $env:RUNNER_TEMP 'leo-acl-install.log'
+          npm.cmd ci --omit=dev --strict-allow-scripts *> $log
+          if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 80; throw 'Production dependency install failed' }
+          $log = Join-Path $env:RUNNER_TEMP 'leo-acl-smoke.log'
+          node --test tests/private-path-batch.test.mjs *> $log
+          if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 100; throw 'ACL fixture failed' }
+          Write-Host 'Native 260-path batch creation, private ACL validation, unsafe-DACL refusal, and no-repair smoke passed'
