@@ -19,13 +19,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 2f67f3513a6fe7cc8b922c2c06f29ef395597ba3
+          ref: 3a5ca7d79197a99e433d8e072125593c2fd7dfd8
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Verify source identity
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD).Trim() -ne '2f67f3513a6fe7cc8b922c2c06f29ef395597ba3') { throw 'Wrong Leo source commit' }
+          if ((git rev-parse HEAD).Trim() -ne '3a5ca7d79197a99e433d8e072125593c2fd7dfd8') { throw 'Wrong Leo source commit' }
           if (git status --porcelain) { throw 'Leo checkout is dirty' }
       - name: Set up exact Node without shared cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -97,20 +97,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 2f67f3513a6fe7cc8b922c2c06f29ef395597ba3
+          ref: 3a5ca7d79197a99e433d8e072125593c2fd7dfd8
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Verify source identity
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD).Trim() -ne '2f67f3513a6fe7cc8b922c2c06f29ef395597ba3') { throw 'Wrong Leo source commit' }
+          if ((git rev-parse HEAD).Trim() -ne '3a5ca7d79197a99e433d8e072125593c2fd7dfd8') { throw 'Wrong Leo source commit' }
           if (git status --porcelain) { throw 'Leo checkout is dirty' }
       - name: Set up exact Node without shared cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Qualify full behavioral suite
+      - name: Install and build exact published Leo source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -118,25 +118,50 @@ jobs:
             $log = Join-Path $env:RUNNER_TEMP ("leo-behavior-" + $Name + ".log")
             & $Action *> $log
             $code = $LASTEXITCODE
-            if ($code -ne 0) { Write-Host "$Name failed with exit $code"; exit $code }
+            if ($code -ne 0) {
+              node (Join-Path $env:RUNNER_TEMP 'encrypt-leo-failure.mjs') $log (Join-Path $env:RUNNER_TEMP 'leo-full-test.enc.json')
+              throw "$Name failed with exit $code"
+            }
             Write-Host "$Name passed"
           }
           Invoke-Stage 'npm-ci' { npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --strict-allow-scripts }
+          Invoke-Stage 'typecheck' { npm.cmd run typecheck }
           Invoke-Stage 'build' { npm.cmd run build }
-          Invoke-Stage 'prepare-temp' { node scripts/prepare-windows-ci-temp.mjs }
-          $log = Join-Path $env:RUNNER_TEMP 'leo-behavior-full-test.log'
-          npm.cmd test -- --maxWorkers=2 --minWorkers=2 *> $log
-          if ($LASTEXITCODE -ne 0) {
-            node (Join-Path $env:RUNNER_TEMP 'encrypt-leo-failure.mjs') $log (Join-Path $env:RUNNER_TEMP 'leo-full-test.enc.json')
-            if ($LASTEXITCODE -ne 0) { throw 'Failure log encryption failed' }
-            throw 'Full behavioral suite failed; encrypted diagnostic artifact uploaded'
+      - name: Prepare protected disposable Windows TEMP
+        shell: pwsh
+        run: |
+          node scripts/prepare-windows-ci-temp.mjs *> (Join-Path $env:RUNNER_TEMP 'leo-final-temp.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP preparation failed' }
+      - name: Qualify final native graph and root payload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Stage([string]$Name, [scriptblock]$Action) {
+            $log = Join-Path $env:RUNNER_TEMP ("leo-final-" + $Name + ".log")
+            & $Action *> $log
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              node (Join-Path $env:RUNNER_TEMP 'encrypt-leo-failure.mjs') $log (Join-Path $env:RUNNER_TEMP 'leo-full-test.enc.json')
+              throw "$Name failed with exit $code"
+            }
+            Write-Host "$Name passed"
           }
-          Write-Host 'full-test passed'
+          Invoke-Stage 'published-graph' { node scripts/check-published-graph.mjs }
+          Invoke-Stage 'native-load' { node --input-type=module -e "await import('@momics/iroh-http-node'); await import('@arduano/p2prpc-core')" }
+          Invoke-Stage 'work-command' { node tests/windows-work-command-smoke.mjs }
+          Invoke-Stage 'work-shell' { node tests/windows-work-shell-smoke.mjs }
+          Invoke-Stage 'stock-node-task' { node tests/windows-fresh-task-smoke.mjs }
+          Invoke-Stage 'production-ci' { npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --omit=dev --strict-allow-scripts }
+          $release = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'release'
+          Invoke-Stage 'private-release' { node --input-type=module -e "import { privateDirectory } from '@arduano/agent-multiplex-storage-sqlite'; await privateDirectory(process.argv[1])" $release }
+          Invoke-Stage 'stage-root' { node scripts/stage-fresh-payload.mjs --payload (Join-Path $release 'payload') }
+          $nodeExe = (Get-Command node.exe).Source
+          Invoke-Stage 'seal-root' { node scripts/fresh-install.mjs seal --artifact (Join-Path $release 'payload') --revision 3a5ca7d79197a99e433d8e072125593c2fd7dfd8 --roles root --node $nodeExe }
       - name: Upload encrypted failure diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: leo-v6-behavior-encrypted-${{ github.run_id }}
+          name: leo-v6-final-native-encrypted-${{ github.run_id }}
           path: ${{ runner.temp }}/leo-full-test.enc.json
           if-no-files-found: ignore
           retention-days: 1
