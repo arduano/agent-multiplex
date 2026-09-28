@@ -201,7 +201,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Disposable TEMP cleanup failed' }
 
   bootstrap:
-    if: true
+    if: false
     runs-on: windows-2025
     timeout-minutes: 180
     steps:
@@ -345,7 +345,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP cleanup failed' }
 
   helper_pin:
-    if: false
+    if: true
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -353,7 +353,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 4c738941e69991c44dea0770d0a796a2c7ef9c79
+          ref: 7bd50496ef096809e0adfa4ddaabbaaf9d8b55c9
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -365,7 +365,28 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne '4c738941e69991c44dea0770d0a796a2c7ef9c79') { throw 'Wrong fast helper pin' }
+          if ((git rev-parse HEAD).Trim() -ne '7bd50496ef096809e0adfa4ddaabbaaf9d8b55c9') { throw 'Wrong lean helper pin' }
           if (git status --porcelain) { throw 'Fast helper checkout is dirty' }
           & .\tests\windows-bootstrap-progress.ps1
-          Write-Host 'Native Windows fast bootstrap pin, parser, progress, and final JSON smoke passed'
+          $taskName = 'leo-v6-handover-smoke-' + [Guid]::NewGuid().ToString('N')
+          $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          $node = (Get-Command node.exe -ErrorAction Stop).Source
+          $action = New-ScheduledTaskAction -Execute $node -Argument '--version'
+          $trigger = New-ScheduledTaskTrigger -AtLogOn -User $ownerSid
+          $principal = New-ScheduledTaskPrincipal -UserId $ownerSid -LogonType Interactive -RunLevel Limited
+          try {
+            Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -ErrorAction Stop | Out-Null
+            $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+            if ([string]$task.State -ne 'Ready' -or $task.Principal.UserId -ne $ownerSid -or
+                [string]$task.Principal.LogonType -ne 'Interactive' -or [string]$task.Principal.RunLevel -ne 'Limited' -or
+                @($task.Triggers).Count -ne 1 -or $task.Triggers[0].CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger' -or
+                $task.Triggers[0].UserId -ne $ownerSid) { throw 'Registered task differs from handover fence' }
+            Disable-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop | Out-Null
+            if ([string](Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop).State -ne 'Disabled') {
+              throw 'Disabled task state differs from handover fence'
+            }
+          } finally {
+            $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue
+            if ($task) { Unregister-ScheduledTask -TaskPath '\' -TaskName $taskName -Confirm:$false -ErrorAction Stop }
+          }
+          Write-Host 'Native Windows lean helper pin, parser, progress, and task handover property smoke passed'
