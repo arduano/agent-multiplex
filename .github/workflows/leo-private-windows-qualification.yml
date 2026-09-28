@@ -353,7 +353,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 7bd50496ef096809e0adfa4ddaabbaaf9d8b55c9
+          ref: ef02c75f928faafa76d0923147b97785b8b984a8
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -365,11 +365,15 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne '7bd50496ef096809e0adfa4ddaabbaaf9d8b55c9') { throw 'Wrong lean helper pin' }
+          if ((git rev-parse HEAD).Trim() -ne 'ef02c75f928faafa76d0923147b97785b8b984a8') { throw 'Wrong lean helper pin' }
           if (git status --porcelain) { throw 'Fast helper checkout is dirty' }
           & .\tests\windows-bootstrap-progress.ps1
           $taskName = 'leo-v6-handover-smoke-' + [Guid]::NewGuid().ToString('N')
           $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+          function Sid([string]$Name) {
+            if ($Name -match '^S-1-') { return $Name }
+            return ([Security.Principal.NTAccount]::new($Name)).Translate([Security.Principal.SecurityIdentifier]).Value
+          }
           $node = (Get-Command node.exe -ErrorAction Stop).Source
           $action = New-ScheduledTaskAction -Execute $node -Argument '--version'
           $trigger = New-ScheduledTaskTrigger -AtLogOn -User $ownerSid
@@ -379,18 +383,18 @@ jobs:
             $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
             $checks = [ordered]@{
               StateReady = [string]$task.State -eq 'Ready'
-              PrincipalOwner = $task.Principal.UserId -eq $ownerSid
+              PrincipalOwner = (Sid $task.Principal.UserId) -eq $ownerSid
               Interactive = [string]$task.Principal.LogonType -eq 'Interactive'
               Limited = [string]$task.Principal.RunLevel -eq 'Limited'
               OneTrigger = @($task.Triggers).Count -eq 1
               LogonTrigger = $task.Triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger'
-              TriggerOwner = $task.Triggers[0].UserId -eq $ownerSid
+              TriggerOwner = (Sid $task.Triggers[0].UserId) -eq $ownerSid
             }
             Write-Host (ConvertTo-Json -InputObject $checks -Compress)
-            if ([string]$task.State -ne 'Ready' -or $task.Principal.UserId -ne $ownerSid -or
+            if ([string]$task.State -ne 'Ready' -or (Sid $task.Principal.UserId) -ne $ownerSid -or
                 [string]$task.Principal.LogonType -ne 'Interactive' -or [string]$task.Principal.RunLevel -ne 'Limited' -or
                 @($task.Triggers).Count -ne 1 -or $task.Triggers[0].CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger' -or
-                $task.Triggers[0].UserId -ne $ownerSid) { throw 'Registered task differs from handover fence' }
+                (Sid $task.Triggers[0].UserId) -ne $ownerSid) { throw 'Registered task differs from handover fence' }
             Disable-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop | Out-Null
             if ([string](Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop).State -ne 'Disabled') {
               throw 'Disabled task state differs from handover fence'
