@@ -42,8 +42,8 @@ Zod validator. It adds no third-party dependency or copied vendor implementation
 The native components retain their terms above.
 
 Authenticated renewal uses the independently published MIT-licensed
-`@arduano/p2prpc-core@0.3.0-renewal.0` from exact source commit
-`ca7bb6fb7b791813c937ddbf9bde62423d097373`. Its license and notices remain
+`@arduano/p2prpc-core@0.3.0-renewal.1` from exact source commit
+`97161e1bd44dbe30ba957092bc82ebf707716fd9`. Its license and notices remain
 in the package; the framework manifest and lockfile pin its registry integrity.
 The temporary local source patch and injection scripts were removed. See the
 [design/migration](docs/design/p2prpc-renewal-vnext.md).

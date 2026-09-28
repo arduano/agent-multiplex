@@ -129,7 +129,7 @@ const transport = JSON.parse(readFileSync("package-lock.json", "utf8"))
   .packages?.["node_modules/@arduano/p2prpc-core"];
 const installedTransport = JSON.parse(readFileSync("node_modules/@arduano/p2prpc-core/package.json", "utf8"));
 assert.equal(transport?.version, installedTransport.version, "receipt must identify the installed transport");
-assert.equal(transport.version, "0.3.0-renewal.0");
+assert.equal(transport.version, "0.3.0-renewal.1");
 assert.match(transport.integrity, /^sha512-/);
 
 const receipt = {

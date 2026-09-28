@@ -477,10 +477,10 @@ function validateReceipt(snapshot, directory, expectedCommit) {
   assertLockedVersion(lockfile, "@github/copilot", copilotVersion);
   assertLockedVersion(lockfile, "@github/copilot-sdk", copilotSdkVersion);
   assert(
-    p2prpc?.version === "0.3.0-renewal.0" &&
+    p2prpc?.version === "0.3.0-renewal.1" &&
       typeof p2prpc.integrity === "string" &&
       p2prpc.integrity.startsWith("sha512-"),
-    "source lockfile does not contain the qualified p2prpc 0.3.0-renewal.0 dependency",
+    "source lockfile does not contain the qualified p2prpc 0.3.0-renewal.1 dependency",
   );
 
   assertExactKeys(manifest, [
