@@ -377,6 +377,16 @@ jobs:
           try {
             Register-ScheduledTask -TaskPath '\' -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -ErrorAction Stop | Out-Null
             $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+            $checks = [ordered]@{
+              StateReady = [string]$task.State -eq 'Ready'
+              PrincipalOwner = $task.Principal.UserId -eq $ownerSid
+              Interactive = [string]$task.Principal.LogonType -eq 'Interactive'
+              Limited = [string]$task.Principal.RunLevel -eq 'Limited'
+              OneTrigger = @($task.Triggers).Count -eq 1
+              LogonTrigger = $task.Triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger'
+              TriggerOwner = $task.Triggers[0].UserId -eq $ownerSid
+            }
+            Write-Host (ConvertTo-Json -InputObject $checks -Compress)
             if ([string]$task.State -ne 'Ready' -or $task.Principal.UserId -ne $ownerSid -or
                 [string]$task.Principal.LogonType -ne 'Interactive' -or [string]$task.Principal.RunLevel -ne 'Limited' -or
                 @($task.Triggers).Count -ne 1 -or $task.Triggers[0].CimClass.CimClassName -ne 'MSFT_TaskLogonTrigger' -or
