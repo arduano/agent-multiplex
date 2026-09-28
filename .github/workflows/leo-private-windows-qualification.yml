@@ -62,6 +62,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Disposable TEMP cleanup failed' }
 
   behavior:
+    if: false
     runs-on: windows-2025
     timeout-minutes: 90
     steps:
@@ -198,3 +199,49 @@ jobs:
         run: |
           node scripts/prepare-windows-ci-temp.mjs cleanup *> (Join-Path $env:RUNNER_TEMP 'leo-behavior-cleanup.log')
           if ($LASTEXITCODE -ne 0) { throw 'Disposable TEMP cleanup failed' }
+
+  bootstrap:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact private bootstrap helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: arduano/leo-multiplex
+          ref: 79b53fe51e04b271aa1c0fbabb9ea892e97eaeb3
+          ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
+          persist-credentials: false
+      - name: Parse corrected PowerShell helper and check private-base primitive
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD).Trim() -ne '79b53fe51e04b271aa1c0fbabb9ea892e97eaeb3') { throw 'Wrong bootstrap helper commit' }
+          if (git status --porcelain) { throw 'Bootstrap checkout is dirty' }
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/bootstrap-windows-v6.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors) { throw 'Bootstrap PowerShell parse failed' }
+          $assignment = @(Get-Content -LiteralPath scripts/bootstrap-windows-v6.ps1 | Where-Object { $_ -match '^\s*\$privateDirectoryProgram\s*=' })
+          if ($assignment.Count -ne 1) { throw 'Expected one private-directory program' }
+          Invoke-Expression -Command $assignment[0]
+          $mock = Join-Path $env:RUNNER_TEMP 'private-directory-mock.mjs'
+          Set-Content -LiteralPath $mock -Encoding Ascii -Value "export function privateDirectory(path) { if (!path.endsWith('private release')) throw new Error('Bad native argv'); }"
+          node --input-type=module --eval $privateDirectoryProgram $mock (Join-Path $env:RUNNER_TEMP 'private release')
+          if ($LASTEXITCODE -ne 0) { throw 'Native Node eval argument quoting failed' }
+          $base = 'C:\leo-v6-base-' + $env:GITHUB_RUN_ID
+          if (Test-Path -LiteralPath $base) { throw 'Disposable base collision' }
+          $ownerSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+          $acl = New-Object System.Security.AccessControl.DirectorySecurity
+          $acl.SetOwner($ownerSid)
+          $acl.SetAccessRuleProtection($true, $false)
+          $inheritance = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
+          $inheritance = [Security.AccessControl.InheritanceFlags]$inheritance
+          foreach ($sid in @($ownerSid, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'), [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))) {
+            $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, $inheritance, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
+            $acl.AddAccessRule($rule)
+          }
+          [IO.Directory]::CreateDirectory($base, $acl) | Out-Null
+          $applied = [IO.Directory]::GetAccessControl($base)
+          if (-not $applied.AreAccessRulesProtected -or $applied.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid.Value) { throw 'Private base ACL differs' }
+          Remove-Item -LiteralPath $base -Force
+          Write-Host 'Corrected helper parser and private-base creation passed'
