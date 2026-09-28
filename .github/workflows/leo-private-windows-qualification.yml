@@ -350,7 +350,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 3d5e351f4ce0bcb6c84ce68d899841448cb038d0
+          ref: 3c51cb88bace82aeea129dc50edcd91fd53d6295
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -362,7 +362,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne '3d5e351f4ce0bcb6c84ce68d899841448cb038d0') { throw 'Wrong fast helper pin' }
+          if ((git rev-parse HEAD).Trim() -ne '3c51cb88bace82aeea129dc50edcd91fd53d6295') { throw 'Wrong fast helper pin' }
           if (git status --porcelain) { throw 'Fast helper checkout is dirty' }
           & .\tests\windows-bootstrap-progress.ps1
           Write-Host 'Native Windows fast bootstrap pin, parser, progress, and final JSON smoke passed'
