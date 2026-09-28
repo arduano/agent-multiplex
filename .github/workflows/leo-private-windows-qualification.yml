@@ -97,14 +97,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 3a5ca7d79197a99e433d8e072125593c2fd7dfd8
+          ref: 6465fad4efbda499ce1ba0bd846453ba63a94b22
+          fetch-depth: 5
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Verify source identity
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD).Trim() -ne '3a5ca7d79197a99e433d8e072125593c2fd7dfd8') { throw 'Wrong Leo source commit' }
+          if ((git rev-parse HEAD).Trim() -ne '6465fad4efbda499ce1ba0bd846453ba63a94b22') { throw 'Wrong Leo helper commit' }
           if (git status --porcelain) { throw 'Leo checkout is dirty' }
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/bootstrap-windows-v6.ps1), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors) { $errors | Format-List; throw 'Bootstrap PowerShell parse failed' }
       - name: Set up exact Node without shared cache
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -132,10 +137,33 @@ jobs:
         run: |
           node scripts/prepare-windows-ci-temp.mjs *> (Join-Path $env:RUNNER_TEMP 'leo-final-temp.log')
           if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP preparation failed' }
+      - name: Build exact production source under protected Windows ancestry
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Invoke-Stage([string]$Name, [scriptblock]$Action) {
+            $log = Join-Path $env:RUNNER_TEMP ("leo-protected-" + $Name + ".log")
+            & $Action *> $log
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              node (Join-Path $env:RUNNER_TEMP 'encrypt-leo-failure.mjs') $log (Join-Path $env:RUNNER_TEMP 'leo-full-test.enc.json')
+              throw "$Name failed with exit $code"
+            }
+            Write-Host "$Name passed"
+          }
+          $source = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'source'
+          Invoke-Stage 'clone' { git clone --no-hardlinks $env:GITHUB_WORKSPACE $source }
+          Invoke-Stage 'checkout' { git -C $source checkout --detach 3a5ca7d79197a99e433d8e072125593c2fd7dfd8 }
+          Set-Location -LiteralPath $source
+          Invoke-Stage 'npm-ci' { npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --strict-allow-scripts }
+          Invoke-Stage 'build' { npm.cmd run build }
+          Invoke-Stage 'production-ci' { npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --omit=dev --strict-allow-scripts }
+          Invoke-Stage 'graph' { node scripts/check-published-graph.mjs }
       - name: Qualify final native graph and root payload
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          Set-Location -LiteralPath (Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'source')
           function Invoke-Stage([string]$Name, [scriptblock]$Action) {
             $log = Join-Path $env:RUNNER_TEMP ("leo-final-" + $Name + ".log")
             & $Action *> $log
@@ -151,7 +179,6 @@ jobs:
           Invoke-Stage 'work-command' { node tests/windows-work-command-smoke.mjs }
           Invoke-Stage 'work-shell' { node tests/windows-work-shell-smoke.mjs }
           Invoke-Stage 'stock-node-task' { node tests/windows-fresh-task-smoke.mjs }
-          Invoke-Stage 'production-ci' { npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --omit=dev --strict-allow-scripts }
           $release = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'release'
           Invoke-Stage 'private-release' { node --input-type=module -e "import { privateDirectory } from './dist/apps/host/src/private-state.js'; await privateDirectory(process.argv[1])" $release }
           Invoke-Stage 'stage-root' { node scripts/stage-fresh-payload.mjs --payload (Join-Path $release 'payload') }
