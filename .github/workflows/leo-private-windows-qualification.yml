@@ -210,7 +210,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 1a59cd2263bd9c3a56fe3a07d7d4c301fcfc8153
+          ref: 677706df845ee8190e6ba99261c5c53ff036388b
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -222,7 +222,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
-          if ((git rev-parse HEAD).Trim() -ne '1a59cd2263bd9c3a56fe3a07d7d4c301fcfc8153') { throw 'Wrong lean candidate commit' }
+          if ((git rev-parse HEAD).Trim() -ne '677706df845ee8190e6ba99261c5c53ff036388b') { throw 'Wrong lean candidate commit' }
           if (git status --porcelain) { throw 'Integrated candidate checkout is dirty' }
           function Invoke-Checked([string]$Name, [scriptblock]$Command) {
             $log = Join-Path $env:RUNNER_TEMP ("leo-full-" + $Name + '.log')
@@ -264,19 +264,19 @@ jobs:
             Write-Host "$Name passed"
           }
           Invoke-Checked 'clone' { git clone --no-hardlinks $env:GITHUB_WORKSPACE $source }
-          Invoke-Checked 'checkout' { git -C $source checkout --detach 1a59cd2263bd9c3a56fe3a07d7d4c301fcfc8153 }
+          Invoke-Checked 'checkout' { git -C $source checkout --detach 677706df845ee8190e6ba99261c5c53ff036388b }
           Set-Location -LiteralPath $source
           Invoke-Checked 'npm-ci' { npm.cmd ci --strict-allow-scripts }
           Invoke-Checked 'build' { npm.cmd run build }
           Invoke-Checked 'production-ci' { npm.cmd ci --omit=dev --strict-allow-scripts }
           Invoke-Checked 'graph' { node scripts/check-published-graph.mjs }
-          if ((git rev-parse HEAD).Trim() -ne '1a59cd2263bd9c3a56fe3a07d7d4c301fcfc8153' -or (git status --porcelain)) { throw 'Protected source identity drifted' }
+          if ((git rev-parse HEAD).Trim() -ne '677706df845ee8190e6ba99261c5c53ff036388b' -or (git status --porcelain)) { throw 'Protected source identity drifted' }
       - name: Time full native Root stage, seal, and stopped install
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
           Set-Location -LiteralPath (Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'source')
-          $revision = '1a59cd2263bd9c3a56fe3a07d7d4c301fcfc8153'
+          $revision = '677706df845ee8190e6ba99261c5c53ff036388b'
           $release = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'release-root'
           $payload = Join-Path $release 'payload'
           $installParent = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'installed-root'
@@ -353,7 +353,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 3c51cb88bace82aeea129dc50edcd91fd53d6295
+          ref: 4c738941e69991c44dea0770d0a796a2c7ef9c79
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -365,7 +365,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne '3c51cb88bace82aeea129dc50edcd91fd53d6295') { throw 'Wrong fast helper pin' }
+          if ((git rev-parse HEAD).Trim() -ne '4c738941e69991c44dea0770d0a796a2c7ef9c79') { throw 'Wrong fast helper pin' }
           if (git status --porcelain) { throw 'Fast helper checkout is dirty' }
           & .\tests\windows-bootstrap-progress.ps1
           Write-Host 'Native Windows fast bootstrap pin, parser, progress, and final JSON smoke passed'
