@@ -344,7 +344,7 @@ for (const [filename, sha256] of Object.entries({
   );
   assert(
     createHash("sha256").update(readFileSync(path)).digest("hex") === sha256,
-    `packages/adapter-codex/licenses/${filename} differs from OpenAI Codex 0.152.0`,
+    `packages/adapter-codex/licenses/${filename} differs from OpenAI Codex 0.158.0`,
   );
 }
 

@@ -45,7 +45,7 @@ describe("CodexAdapter", () => {
     await expect(adapter.describe()).resolves.toMatchObject({
       harness: "codex",
       available: true,
-      runtimeVersion: "0.152.0",
+      runtimeVersion: "0.158.0",
       capabilities: expect.arrayContaining([
         { name: "turn.settings.update", version: "v2", experimental: true },
         { name: "background-terminals", version: "v2", experimental: true },
@@ -572,7 +572,7 @@ const thread = (turns = []) => ({
   parentThreadId: null, preview: "hello from test", ephemeral: false, section: null,
   sectionEnteredAt: null, projectId: null, historyMode: "full", modelProvider: "openai",
   createdAt: 1, updatedAt: 2, recencyAt: 2, status: { type: "idle" }, path: null,
-  cwd, cliVersion: "0.152.0", source: "appServer", canAcceptDirectInput: true,
+  cwd, cliVersion: "0.158.0", source: "appServer", canAcceptDirectInput: true,
   threadSource: null, agentNickname: null, agentRole: null, gitInfo: null, name: "fake", turns,
 });
 const childThread = () => ({

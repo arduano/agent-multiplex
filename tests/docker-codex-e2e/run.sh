@@ -524,7 +524,7 @@ note "worker is online and reports Codex 0.152 ready"
 
 run_cli "$RECEIPT_DIR/rpc/catalog.json" catalog "$WORKER_NAME"
 assert_json "Codex catalog entry is not available" '
-  any(.[]; .harness == "codex" and .available == true and .runtimeVersion == "0.152.0")
+  any(.[]; .harness == "codex" and .available == true and .runtimeVersion == "0.158.0")
 ' "$RECEIPT_DIR/rpc/catalog.json"
 
 run_cli "$RECEIPT_DIR/rpc/models.json" models "$WORKER_NAME" codex

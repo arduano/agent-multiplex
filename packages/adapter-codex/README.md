@@ -58,7 +58,7 @@ The objective is limited to 4,000 characters. Native refusals remain errors, and
 missing mutation acknowledgements remain `outcomeUnknown` under the original
 command ID. Never resend a goal mutation to infer its outcome.
 
-These APIs already exist in the generated Codex `0.152.0` contract. Goal state is
+These APIs already exist in the generated Codex `0.158.0` contract. Goal state is
 native state, not session metadata, a collaboration mode or a synthetic chat turn.
 
 The package pins the Codex CLI version used to generate and qualify its protocol

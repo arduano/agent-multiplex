@@ -55,7 +55,7 @@ import {
   type CodexServerRequest,
 } from "./rpc.js";
 
-const CODEX_VERSION = "0.152.0";
+const CODEX_VERSION = "0.158.0";
 
 const json = (value: unknown): JsonValue =>
   toJsonValue(JSON.parse(JSON.stringify(value)) as unknown);
