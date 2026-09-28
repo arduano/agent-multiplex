@@ -1,5 +1,39 @@
 # Release qualification checkpoint
 
+## Codex 0.158.0 source release preparation — 2026-09-28
+
+The isolated `0.2.4-hotfix.20` source candidate advances all 16 maintained
+package identities and their internal dependencies together. Codex adapter
+source commit `19923c540f24f4b69965fa0da0fa20acc0533e28` pins
+`@openai/codex@0.158.0`, regenerates the app-server declarations from that
+binary, updates the adapter version boundary, and retains the exact published
+transport and Copilot pins. The release-version change and a longer wait in
+three asynchronous startup test assertions follow that source commit. No
+protocol, migration, or transport change is claimed for this candidate.
+
+The focused Codex adapter suite passed 95 tests against the pinned CLI.
+One authorized `gpt-6-luna` text-and-image turn
+through `CodexAdapter` and `RuntimeNodeService` passed with one Codex request
+and no Copilot request. The adapter observed native turn/item events and token
+usage, transferred image data through the runtime image path, returned a native
+history page with an image descriptor, and served stopped and restarted reads.
+The local scrubbed receipt is
+`receipts/codex-0158-luna-one-turn-20260928/`; its `SHA256SUMS` SHA-256 is
+`468a747cbe83ec43468eb508bb71df846e1ab769127d8f81db9fc8d1e22e0fcc`.
+The receipt records Node `24.19.0`, source head `19923c5`, dependency-lock
+SHA-256 `d40f18f474054e97f87ea3d668a795889a3ea2b03a36f20f0a12033755d67620`,
+and unchanged tested boundary SHA-256
+`7c0ed006429c40417b3adbe82ec3d349569d55d0904d5dfcfd485997c8fbbda9`.
+Its scope is the adapter/runtime path before the `.20` package-version change.
+
+`npm ci`, typecheck, production build, release metadata, documentation,
+checkpoint and source-secret checks pass in the `.20` preparation worktree.
+`npm audit --audit-level=high` has no high or critical findings; two moderate
+Vitest development dependency advisories remain. A passing full deterministic
+suite against the final clean `.20` source, isolated packed consumers, SBOM,
+exact-commit native four-container soak, Windows and deployed-host checks
+remain open. No tag, publication, or rollout is claimed.
+
 ## Published-core protocol-v6 source gate — 2026-09-23
 
 The `0.2.4-hotfix.17` framework source pins the independently published

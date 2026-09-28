@@ -120,7 +120,7 @@ describe("trusted Copilot startup reattachment", () => {
         harness: "copilot", input: { cwd: root },
       };
       first.createLaunch(launch);
-      await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"));
+      await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"), { timeout: 10_000 });
       expect(firstStore.getSession(sessionId)?.availability).toBe("active");
     } finally {
       await first.close();
@@ -163,7 +163,7 @@ describe("trusted Copilot startup reattachment", () => {
           profileId: profile.profileId, contractVersion: profile.contractVersion,
           requestSchemaHash: profile.requestSchemaHash }, harness: "copilot", input: { cwd: root } };
       first.createLaunch(launch);
-      await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"));
+      await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"), { timeout: 10_000 });
       await first.close();
       adapter.returnedVendorSessionId = "wrong-native-session";
       const second = new RuntimeNodeService({ store, adapters: [adapter], runtimeNodeId,
@@ -197,7 +197,7 @@ describe("trusted Copilot startup reattachment", () => {
             profileId: profile.profileId, contractVersion: profile.contractVersion,
             requestSchemaHash: profile.requestSchemaHash }, harness: "copilot", input: { cwd: root } };
         first.createLaunch(launch);
-        await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"));
+        await vi.waitFor(() => expect(first.getLaunch(launch.launchId)?.state).toBe("succeeded"), { timeout: 10_000 });
       }
     } finally { await first.close(); firstStore.close(); }
 

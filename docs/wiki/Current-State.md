@@ -5,7 +5,26 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-23 (protocol-v6 lifecycle with published transport renewal pinned).
+Last reconciled: 2026-09-28 (Codex 0.158.0 source release preparation).
+
+## Codex 0.158.0 source release candidate
+
+The isolated `0.2.4-hotfix.20` preparation branch advances the Codex app-server
+CLI pin from the signed `.19` prerelease's `0.152.0` to `0.158.0` across the maintained adapter and its
+generated protocol declarations. The 16 maintained framework package versions
+and internal dependencies advance together. The protocol remains v6; the
+published `@arduano/p2prpc-core@0.3.0-renewal.1` and Copilot pins remain exact.
+This is source preparation, not a published or deployed framework release.
+
+One disposable Linux `gpt-6-luna` text-and-image turn passed through the
+`0.158.0` Codex adapter at source commit `19923c5`. Native events, image
+transfer, paged native history and stopped/restarted reads were checked. Its
+scrubbed, checksummed local receipt and exact limits are in the
+[checkpoint](../checkpoint-v4.md#codex-01580-source-release-preparation--2026-09-28).
+That run preceded the lockstep `.20` version bump and does not qualify the final
+release commit, packed consumers, Windows, the four-container native soak, or
+deployment. The standalone `@openai/codex-sdk` is not this adapter's runtime
+dependency; this adapter launches the pinned `@openai/codex` app server.
 
 ## Unreleased protocol-v6 Copilot lifecycle candidate
 
@@ -64,10 +83,11 @@ The [evidence audit](../audits/copilot-lifecycle-vnext-audit.md) records which
 SDK and repository assumptions are confirmed, disproved, conditional, or still
 blocked.
 
-This combined candidate has no live/native-model, production, Windows, final
-published-framework-graph, or maintenance-window qualification and has not been
-published or deployed. Deterministic source qualification must be read from the
-final exact-source receipts in the [checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23);
+At the 2026-09-23 checkpoint, this combined candidate had no live/native-model,
+production, Windows, final published-framework-graph, or maintenance-window
+qualification and had not been published or deployed. Deterministic source
+qualification must be read from the final exact-source receipts in the
+[checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23);
 historical protocol-v5 release evidence does not qualify this boundary. The
 remaining release history below describes published
 boundaries, not this candidate.
@@ -326,10 +346,10 @@ Suggested first prompt for a new session:
 | Wire protocol | `6` in maintained source; coordinated upgrade required from protocol v5 |
 | Signed stable release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3), protocol v5; later published hotfix prereleases are recorded above |
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
-| Public package graph | 16 released lockstep `@arduano/agent-multiplex-*` packages at `0.2.3` |
+| Public package graph | Signed stable `0.2.3`; latest signed Leo V6 hotfix tag `hotfix-2026-09-28.1` contains 16 lockstep packages at `0.2.4-hotfix.19` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 release-preparation lock pins published `0.3.0-renewal.1` and the reviewed Iroh closure, with final framework qualification pending |
-| Native package pins | Codex CLI `0.152.0`; Copilot SDK `1.0.14` and optional CLI `1.0.88`; GPT-6 Sol availability is publicly documented but not account-qualified here |
+| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; current `.20` source candidate: Codex CLI `0.158.0`. Copilot SDK `1.0.14` and optional CLI `1.0.88` are unchanged. |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
 The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains
@@ -342,7 +362,9 @@ identities, workflow links and artifact verification.
 
 The signed release facts in the preceding paragraphs remain protocol-v5
 history. Protocol-v6 release-preparation manifests declare `0.3.0-renewal.1`;
-native pins are unchanged and new control/runtime migrations are unreleased.
+relative to the `.19` V6 prerelease source, `.20` changes the Codex native pin
+and package version, while control/runtime migration identities remain
+unchanged.
 The prior `v0.2.1` Windows patch had an owner-authorized five-minute native soak;
 that evidence remains historical and does not requalify later patches or the transport
 renewal boundary.
