@@ -254,7 +254,9 @@ jobs:
       - name: Build future source and prepare protected TEMP
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
+          # PS 5.1 promotes redirected native stderr warnings to error records.
+          # Native exit codes below remain the authority for each command.
+          $ErrorActionPreference = 'Continue'
           npm.cmd exec --yes --package=npm@11.17.0 -- npm ci --strict-allow-scripts *> (Join-Path $env:RUNNER_TEMP 'leo-progress-npm.log')
           if ($LASTEXITCODE -ne 0) { throw 'Future source npm ci failed' }
           Write-Host 'Future source npm ci passed'
@@ -267,7 +269,7 @@ jobs:
       - name: Run focused native stage and install progress fixtures
         shell: powershell
         run: |
-          $ErrorActionPreference = 'Stop'
+          $ErrorActionPreference = 'Continue'
           node --test --test-name-pattern='one-command reviewed release installs|shared install phases are durable|stages only the reviewed native payload inputs' tests/fresh-install.test.mjs tests/stage-fresh-payload.test.mjs *> (Join-Path $env:RUNNER_TEMP 'leo-progress-fixtures.log')
           if ($LASTEXITCODE -ne 0) { throw 'Focused native progress fixtures failed' }
           Write-Host 'Focused native stage, seal and install progress fixtures passed'
