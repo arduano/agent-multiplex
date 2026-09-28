@@ -208,14 +208,14 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: 79b53fe51e04b271aa1c0fbabb9ea892e97eaeb3
+          ref: b26911deafa50e49a4a8bc1c2d465669aab4d655
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Parse corrected PowerShell helper and check private-base primitive
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          if ((git rev-parse HEAD).Trim() -ne '79b53fe51e04b271aa1c0fbabb9ea892e97eaeb3') { throw 'Wrong bootstrap helper commit' }
+          if ((git rev-parse HEAD).Trim() -ne 'b26911deafa50e49a4a8bc1c2d465669aab4d655') { throw 'Wrong bootstrap helper commit' }
           if (git status --porcelain) { throw 'Bootstrap checkout is dirty' }
           $tokens = $null
           $errors = $null
