@@ -99,7 +99,7 @@ try {
   }
   const binary = require.resolve("@github/copilot-win32-x64");
   const expectedCliVersion = JSON.parse(readFileSync("packages/adapter-copilot/package.json", "utf8"))
-    .devDependencies["@github/copilot"];
+    .dependencies["@github/copilot"];
   assert.equal(JSON.parse(readFileSync("node_modules/@github/copilot/package.json", "utf8")).version, expectedCliVersion);
   assert.equal(JSON.parse(readFileSync("node_modules/@github/copilot-win32-x64/package.json", "utf8")).version, expectedCliVersion);
   const reportedCliVersion = execFileSync(binary, ["--version"], { env, encoding: "utf8", timeout: 30_000 });
