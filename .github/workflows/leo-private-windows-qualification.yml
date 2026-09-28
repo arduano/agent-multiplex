@@ -202,13 +202,14 @@ jobs:
 
   bootstrap:
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 180
     steps:
-      - name: Check out exact private ACL batching candidate
+      - name: Check out exact integrated private candidate
+        id: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: arduano/leo-multiplex
-          ref: b079646b75402ee644338e1db9debe41e1724917
+          ref: aa77e12aeda0c0977cb91bf2be65d44b479edcfd
           ssh-key: ${{ secrets.TEMP_LEO_WINDOWS_READ_KEY }}
           persist-credentials: false
       - name: Set up Node 24 without shared cache
@@ -216,16 +217,126 @@ jobs:
         with:
           node-version-file: .node-version
           package-manager-cache: false
-      - name: Smoke exact pinned ACL script and unsafe-DACL refusal under Windows
+      - name: Build exact integrated candidate
         shell: powershell
         run: |
           $ErrorActionPreference = 'Continue'
-          if ((git rev-parse HEAD).Trim() -ne 'b079646b75402ee644338e1db9debe41e1724917') { throw 'Wrong ACL candidate commit' }
-          if (git status --porcelain) { throw 'ACL candidate checkout is dirty' }
-          $log = Join-Path $env:RUNNER_TEMP 'leo-acl-install.log'
-          npm.cmd ci --omit=dev --strict-allow-scripts *> $log
-          if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 80; throw 'Production dependency install failed' }
-          $log = Join-Path $env:RUNNER_TEMP 'leo-acl-smoke.log'
-          node --test tests/private-path-batch.test.mjs *> $log
-          if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 100; throw 'ACL fixture failed' }
-          Write-Host 'Native 260-path batch creation, private ACL validation, unsafe-DACL refusal, and no-repair smoke passed'
+          if ((git rev-parse HEAD).Trim() -ne 'aa77e12aeda0c0977cb91bf2be65d44b479edcfd') { throw 'Wrong integrated candidate commit' }
+          if (git status --porcelain) { throw 'Integrated candidate checkout is dirty' }
+          function Invoke-Checked([string]$Name, [scriptblock]$Command) {
+            $log = Join-Path $env:RUNNER_TEMP ("leo-full-" + $Name + '.log')
+            & $Command *> $log
+            if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 80; throw "$Name failed" }
+            Write-Host "$Name passed"
+          }
+          Invoke-Checked 'npm-ci' { npm.cmd ci --strict-allow-scripts }
+          Invoke-Checked 'build' { npm.cmd run build }
+      - name: Prepare protected disposable Windows TEMP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          node scripts/prepare-windows-ci-temp.mjs *> (Join-Path $env:RUNNER_TEMP 'leo-full-temp.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP preparation failed' }
+      - name: Run ACL and rename fixtures in protected TEMP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          function Invoke-Checked([string]$Name, [scriptblock]$Command) {
+            $log = Join-Path $env:RUNNER_TEMP ("leo-full-" + $Name + '.log')
+            & $Command *> $log
+            if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 80; throw "$Name failed" }
+            Write-Host "$Name passed"
+          }
+          Invoke-Checked 'acl-fixture' { node --test tests/private-path-batch.test.mjs }
+          Invoke-Checked 'rename-fixture' { node --test tests/windows-fresh-move-smoke.mjs }
+      - name: Build exact production source in protected TEMP
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $source = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'source'
+          function Invoke-Checked([string]$Name, [scriptblock]$Command) {
+            $log = Join-Path $env:RUNNER_TEMP ("leo-full-protected-" + $Name + '.log')
+            & $Command *> $log
+            if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath $log -Tail 80; throw "$Name failed" }
+            Write-Host "$Name passed"
+          }
+          Invoke-Checked 'clone' { git clone --no-hardlinks $env:GITHUB_WORKSPACE $source }
+          Invoke-Checked 'checkout' { git -C $source checkout --detach aa77e12aeda0c0977cb91bf2be65d44b479edcfd }
+          Set-Location -LiteralPath $source
+          Invoke-Checked 'npm-ci' { npm.cmd ci --strict-allow-scripts }
+          Invoke-Checked 'build' { npm.cmd run build }
+          Invoke-Checked 'production-ci' { npm.cmd ci --omit=dev --strict-allow-scripts }
+          Invoke-Checked 'graph' { node scripts/check-published-graph.mjs }
+          if ((git rev-parse HEAD).Trim() -ne 'aa77e12aeda0c0977cb91bf2be65d44b479edcfd' -or (git status --porcelain)) { throw 'Protected source identity drifted' }
+      - name: Time full native Root stage, seal, and stopped install
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Set-Location -LiteralPath (Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'source')
+          $revision = 'aa77e12aeda0c0977cb91bf2be65d44b479edcfd'
+          $release = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'release-root'
+          $payload = Join-Path $release 'payload'
+          $installParent = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'installed-root'
+          $root = Join-Path $installParent 'leo-multiplex-v6-fresh'
+          $nodeExe = (Get-Command node.exe).Source
+          $privateHelper = Join-Path (Get-Location).Path 'dist/apps/host/src/private-state.js'
+          $privateDirectoryProgram = "const m = await import((await import('node:url')).pathToFileURL(process.argv[1]).href); await m.privateDirectory(process.argv[2]);"
+          function Invoke-Timed([string]$Name, [scriptblock]$Command) {
+            $log = Join-Path $env:RUNNER_TEMP ("leo-full-" + $Name + '.log')
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            & $Command *> $log
+            $code = $LASTEXITCODE
+            $watch.Stop()
+            if ($code -ne 0) { Get-Content -LiteralPath $log -Tail 80; throw "$Name failed after $($watch.Elapsed.TotalSeconds) seconds" }
+            Write-Host ('{0}_SECONDS={1:F1}' -f $Name.ToUpperInvariant(), $watch.Elapsed.TotalSeconds)
+            return (Get-Content -LiteralPath $log | Where-Object { $_.Trim() } | Select-Object -Last 1)
+          }
+          & node --input-type=module --eval $privateDirectoryProgram $privateHelper $release
+          if ($LASTEXITCODE -ne 0) { throw 'Private release creation failed' }
+          & node --input-type=module --eval $privateDirectoryProgram $privateHelper $installParent
+          if ($LASTEXITCODE -ne 0) { throw 'Private install parent creation failed' }
+          $stage = (Invoke-Timed 'stage' { node scripts/stage-fresh-payload.mjs --payload $payload }) | ConvertFrom-Json
+          if ($stage.outcome -ne 'STAGED_UNSEALED' -or $stage.files -lt 28000) { throw 'Full production payload was not staged' }
+          Write-Host "STAGE_FILES=$($stage.files)"
+          $seal = (Invoke-Timed 'seal' { node scripts/fresh-install.mjs seal --artifact $payload --revision $revision --roles root --node $nodeExe }) | ConvertFrom-Json
+          $manifestPath = Join-Path $payload 'artifact.json'
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $artifactSha = (Get-FileHash -Algorithm SHA256 -LiteralPath $manifestPath).Hash.ToLowerInvariant()
+          if ($seal.artifactSha256 -ne $artifactSha -or $seal.graphSha256 -ne '0742b9a4ff36a663a895dfdddb0ba60d9d81e0a19318096e3a552b9fa6f4599a' -or $manifest.revision -ne $revision) { throw 'Sealed identity mismatch' }
+          $config = Join-Path $release 'config.json'
+          $plan = Join-Path $release 'install-plan.json'
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          [IO.File]::WriteAllText($config, '{"root":{}}', $utf8)
+          [IO.File]::WriteAllText($plan, (ConvertTo-Json -InputObject @{ version = 1; root = $root; config = $config; service = 'task' } -Compress), $utf8)
+          $taskName = 'leo-v6-fresh-root'
+          if (Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction SilentlyContinue) { throw 'Root task already exists on disposable runner' }
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "LEO_FULL_TASK_WAS_ABSENT=1`n")
+          $install = (Invoke-Timed 'install' { node (Join-Path $payload 'scripts/fresh-install.mjs') install --artifact-sha256 $artifactSha }) | ConvertFrom-Json
+          if ($install.outcome -ne 'INSTALLED_STOPPED') { throw 'Full install did not stop at the reviewed receipt' }
+          $installedNode = Join-Path $root 'native/node.exe'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $installedNode).Hash.ToLowerInvariant() -ne $manifest.nodeSha256) { throw 'Installed Node digest differs' }
+          $task = Get-ScheduledTask -TaskPath '\' -TaskName $taskName -ErrorAction Stop
+          $expectedArguments = ('"{0}" "run" "--root" "{1}" "--role" "root"' -f (Join-Path $root 'artifact/scripts/fresh-install.mjs'), $root)
+          if ($task.State -ne 'Ready' -or @($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ine $installedNode -or
+              $task.Actions[0].Arguments -cne $expectedArguments -or $task.Actions[0].WorkingDirectory -ine $root) { throw 'Installed stock-Node task is not stopped and pinned' }
+          Write-Host 'FULL_ROOT_STAGED_SEALED_INSTALLED_STOPPED=PASS'
+      - name: Remove only the task registered by this disposable run
+        if: always() && steps.checkout.outcome == 'success'
+        shell: powershell
+        run: |
+          if ($env:LEO_FULL_TASK_WAS_ABSENT -ne '1' -or -not $env:LEO_WINDOWS_TEST_TEMP_ROOT) { return }
+          $root = Join-Path $env:LEO_WINDOWS_TEST_TEMP_ROOT 'installed-root/leo-multiplex-v6-fresh'
+          $installedNode = Join-Path $root 'native/node.exe'
+          $task = Get-ScheduledTask -TaskPath '\' -TaskName 'leo-v6-fresh-root' -ErrorAction SilentlyContinue
+          if ($task) {
+            if (@($task.Actions).Count -ne 1 -or $task.Actions[0].Execute -ine $installedNode) { throw 'Unexpected task identity; refusing cleanup' }
+            Unregister-ScheduledTask -TaskPath '\' -TaskName 'leo-v6-fresh-root' -Confirm:$false
+          }
+          if (Get-ScheduledTask -TaskPath '\' -TaskName 'leo-v6-fresh-root' -ErrorAction SilentlyContinue) { throw 'Disposable task cleanup failed' }
+      - name: Remove disposable protected Windows TEMP
+        if: always() && steps.checkout.outcome == 'success'
+        shell: powershell
+        run: |
+          if (-not $env:LEO_WINDOWS_TEST_TEMP_ROOT) { return }
+          node scripts/prepare-windows-ci-temp.mjs cleanup *> (Join-Path $env:RUNNER_TEMP 'leo-full-cleanup.log')
+          if ($LASTEXITCODE -ne 0) { throw 'Protected disposable TEMP cleanup failed' }
