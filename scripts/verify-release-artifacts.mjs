@@ -23,6 +23,8 @@ import { validateReleaseArtifactSet } from "./release-artifact-validation.mjs";
 const outputDirectory = resolve(repositoryRoot, process.argv[2] ?? "release-artifacts");
 const verifyRegistry = process.env.AGENT_MULTIPLEX_VERIFY_REGISTRY === "1";
 const { artifacts } = validateReleaseArtifactSet(outputDirectory);
+const reviewedIrohShared = reviewedIrohClosure.find(({ name }) => name === "@momics/iroh-http-shared");
+assert(reviewedIrohShared !== undefined, "reviewed Iroh shared package is missing");
 
 const publint = resolve(repositoryRoot, "node_modules/.bin/publint");
 const attw = resolve(repositoryRoot, "node_modules/.bin/attw");
@@ -64,6 +66,7 @@ function verifyIsolatedConsumer(subject) {
         private: true,
         type: "module",
         allowScripts: {
+          [reviewedIrohShared.url]: false,
           "esbuild@0.25.12": true,
           "esbuild@0.28.2": true,
           "fsevents@2.3.3": false,
