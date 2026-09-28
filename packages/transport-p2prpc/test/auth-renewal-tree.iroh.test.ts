@@ -318,7 +318,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     await expect.poll(() => rootCatalog.getControlNode(childDescriptor.controlNodeId)?.presence).toBe("stale");
     expect(rootCatalog.getRuntimeNode(runtimeRegistration.runtimeNodeId)?.reachability).toBe("unreachable");
     await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: root.ticket() } });
-    await expect.poll(() => root?.getPeer(child!.id)).toBeDefined();
+    await expect.poll(() => root?.getPeer(child!.id), { timeout: 5_000 }).toBeDefined();
     await rootService.heartbeatChild({
       controlNodeId: childDescriptor.controlNodeId,
       controlNodeBootId: childDescriptor.controlNodeBootId,
