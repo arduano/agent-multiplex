@@ -31,7 +31,7 @@ routes additionally carry the authenticated attachment/lineage fence.
 | Procedures | Required access scope | Behavior |
 | --- | --- | --- |
 | `beginUpload`, `writeUpload`, `commitUpload`, `abortUpload` | `agent-control` | Allocate and commit immutable runtime image bytes |
-| `resolvePath` | `read` | Snapshot an eligible runtime image path on first resolution |
+| `resolvePath` | `read` | Snapshot an eligible runtime image, PDF, or text path on first resolution |
 | `read`, `limits` | `read` | Retrieve bounded chunks or configured runtime limits |
 
 A caller supplies a stable image ID, declared size, hash, and MIME type before
@@ -103,18 +103,28 @@ Neither runtime nor UI parses vendor history files.
 
 ## Paths, SVG, and external URLs
 
-The direct backend resolves image paths inside the bound workspace plus explicit
-image output roots. Broad launch `allowedRoots` are not an image-read grant.
-Relative image paths resolve against the bound session `cwd`; absolute paths
-remain subject to the same confinement checks. A relative path without a
-session workspace is rejected. Symlink escapes, non-regular files,
-remote schemes, and reads into the private image store fail closed. Custom
-container/remote backends must implement their own bounded `readImageFile`
-against the backend filesystem and enforce equivalent policy.
+The direct backend resolves preview paths inside the bound workspace plus
+explicit image output roots. Broad launch `allowedRoots` are not a preview-read
+grant. Explicit `resolvePath` can return an image, a `%PDF-` PDF up to 10 MiB,
+or allowlisted UTF-8 text up to 2 MiB. Text cannot contain NUL bytes, and an
+unsupported extension or media type is rejected. PDF/text descriptors use the
+same immutable, session/binding/boot-fenced byte transport, but upload and
+native command attachment remain image-only.
 
-`resolvePath` uses a stable source key for the native item or Markdown image.
+Relative paths resolve against the bound session `cwd`; absolute paths remain
+subject to the same confinement checks. A relative path without a session
+workspace is rejected. Symlink escapes, non-regular files, remote schemes,
+UNC/device/alternate-stream Windows paths, and reads into the private image
+store fail closed. Linux checks the opened file through `/proc/self/fd`;
+Windows checks canonical path and opened file identity before and after the
+bounded read and rejects linked files. Other platforms have no built-in
+confined preview reader. Custom container/remote backends must implement their
+own bounded `readImageFile` against the backend filesystem and enforce
+equivalent policy.
+
+`resolvePath` uses a stable source key for the native item or Markdown preview.
 Its first successful snapshot is immutable; later path changes or deletion do
-not silently replace that image. A new native image occurrence needs a new key.
+not silently replace that preview. A new native occurrence needs a new key.
 
 SVG crosses the runtime/control plane as `image/svg+xml` bytes. Runtime code
 must not execute, render, rasterize, or convert SVG, nor fetch external URLs.
@@ -154,9 +164,10 @@ not expose usable Windows directory handles for directory-entry fsync, so that
 additional POSIX durability barrier is unavailable: the Windows startup smoke
 proves process restart retention, not directory-entry survival after sudden
 power loss. Missing bytes after a storage failure remain unavailable and are
-never silently reconstructed. Confined native/Markdown file snapshots currently
-require Linux opened-file identity and explicitly return unsupported on Windows;
-ordinary uploaded Copilot blob attachments do not require a native path read.
+never silently reconstructed. Confined file previews now have a Windows
+path/handle identity implementation, but its native Windows qualification is a
+separate release gate; the Linux tests alone establish no Windows acceptance.
+Ordinary uploaded Copilot blob attachments do not require a native path read.
 
 ## Upgrade boundary
 

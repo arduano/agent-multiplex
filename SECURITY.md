@@ -102,9 +102,11 @@ disclosure.
   callbacks, resolves unrelated questions, or treats an unacknowledged toggle
   as enabled. Disabling it cannot undo work already dispatched or remove
   independently granted native approval rules.
-- Image `read` includes immutable bytes and first-display snapshots inside the
-  session workspace plus explicitly configured image output roots. Uploads use
-  `agent-control`; quotas and exact binding/boot/source fences bound the operation.
+- Preview `read` includes immutable image, PDF and allowlisted UTF-8 text bytes
+  and first-display snapshots inside the session workspace plus explicitly
+  configured image output roots. The same exact binding/boot/source fences and
+  byte quotas bound the operation. PDF/text previews are read-only; uploads and
+  native command attachments remain image-only and use `agent-control`.
 - SVG is transferred as bytes. Runtime code never renders/converts it or fetches
   remote URLs; clients must use an inert image context rather than markup
   injection, frames, or document navigation.
