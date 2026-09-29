@@ -75,6 +75,11 @@ fork archives and p2prpc `.1` were published and independently reviewed.
    ```
 
 6. Run deterministic current-source tree and 100-session mock qualifications.
+   On a Docker host whose automatic bridge address pool is exhausted, set
+   `AGENT_MULTIPLEX_TREE_NETWORK_SUBNET` or
+   `AGENT_MULTIPLEX_SCALE_NETWORK_SUBNET` to a separately checked, unused
+   IPv4 CIDR for the corresponding isolated runner. The default remains
+   Docker's automatic allocation.
 7. After the candidate is merged, check out a clean `main` that exactly equals
    `origin/main`, then run the real four-container Codex/Copilot qualification.
    The runner records that exact commit in the receipt and refuses a dirty

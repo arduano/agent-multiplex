@@ -279,7 +279,11 @@ fi
 IMAGE_BUILT=1
 IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")
 
-docker network create --driver bridge "$NETWORK_NAME" >/dev/null
+NETWORK_ARGS=(--driver bridge)
+if [[ -n ${AGENT_MULTIPLEX_SCALE_NETWORK_SUBNET:-} ]]; then
+  NETWORK_ARGS+=(--subnet "$AGENT_MULTIPLEX_SCALE_NETWORK_SUBNET")
+fi
+docker network create "${NETWORK_ARGS[@]}" "$NETWORK_NAME" >/dev/null
 NETWORK_CREATED=1
 
 note "starting hidden canonical control-node container"
