@@ -1,5 +1,29 @@
 # Release qualification checkpoint
 
+## Copilot gap diagnostic hotfix — 2026-09-29
+
+The SSH-signed [`hotfix-2026-09-29.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-29.1)
+publishes all 16 lockstep packages at `0.2.4-hotfix.21` from source commit
+`dd0b6962c6690b0b53c8b5d09dc44d4489ec9fc6`. The protocol stays v6;
+Codex CLI `0.158.0`, Copilot SDK `1.0.14`, and independently published
+`@arduano/p2prpc-core@0.3.0-renewal.1` are unchanged. The change persists a
+bounded, payload-free native gap stage and ID for a later incident; it does
+not identify the cause of the September 29 incident.
+
+Node `24.19.0` and npm `11.17.0` passed typecheck, production build, 1,100
+tests across 117 files, documentation, release-metadata, checkpoint and source
+secret checks, and high-severity npm audit. The audit reported two moderate
+Vitest development dependency findings and no high or critical result.
+All 16 exact-source tarballs passed role-isolated packed-consumer verification;
+the release-build SBOM has 506 components, including all 16 published packages
+and 125 web-bundled component identities. The pack manifest SHA-256 is
+`98a0a3689e5574c3617cbba1779a8eaec1e8e81bc5a453406ed0aae562cc516e`;
+the `SHA256SUMS` SHA-256 is
+`3b1c3f1f8dbb9387b512fd96bad2c2bf4cc0961b48cd63b48cc059256cd0f8e7`.
+All 19 GitHub assets were independently downloaded, and each tarball passed
+that inventory. No native-model or installed-host qualification is claimed by
+this framework release; those are separate consumer deployment checks.
+
 ## Codex 0.158.0 source release preparation — 2026-09-28
 
 The isolated `0.2.4-hotfix.20` source candidate advances all 16 maintained

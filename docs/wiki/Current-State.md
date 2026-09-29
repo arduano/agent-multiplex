@@ -5,9 +5,9 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-29 (Copilot gap diagnostic hotfix.21 candidate).
+Last reconciled: 2026-09-29 (published Copilot gap diagnostic hotfix.21).
 
-## Copilot gap diagnostic hotfix.21 candidate
+## Published Copilot gap diagnostic hotfix.21
 
 This checkout has a source-only follow-up to the Windows Copilot session
 continuity incident. The runtime now classifies a native gap by fixed failure
@@ -20,18 +20,22 @@ exception messages and private configuration are excluded.
 The trigger of the September 29 incident remains unknown; these diagnostics
 will identify the stage if it recurs after a coordinated deployment. The
 existing cold Copilot resume certificate remains the source of interaction
-certainty. This source advances the lockstep graph to `.21`; publication and
-installed deployment are separate steps. A Leo Copilot Host using this hook
-requires the `.21` runtime-node package. The
+certainty. The SSH-signed
+[`hotfix-2026-09-29.1`](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-29.1)
+prerelease contains the lockstep `.21` graph. Installed deployment is a
+separate Leo operation. A Leo Copilot Host using this hook requires the `.21`
+runtime-node package. The
 [lifecycle design](../design/copilot-session-lifecycle-vnext.md#recovery-crash-and-gaps)
 defines the evidence boundary.
 
-The `.21` candidate passed typecheck, a clean full suite (117 files, 1,100
+The `.21` release source passed typecheck, a clean full suite (117 files, 1,100
 tests, four workers and a 60-second per-test limit), production build,
 documentation, release-metadata, checkpoint and high-severity audit gates.
 The audit reported only two moderate findings in Vitest's development-time
-mocking dependency. Packed artifact and distribution verification remain
-separate release steps.
+mocking dependency. All 16 packed consumers passed independently, and all 19
+published assets passed an independent download and checksum check. The
+[checkpoint](../checkpoint-v4.md#copilot-gap-diagnostic-hotfix--2026-09-29)
+records the exact source and artifact identities.
 
 ## Published Codex 0.158.0 hotfix.20 baseline
 
@@ -370,10 +374,10 @@ Suggested first prompt for a new session:
 | Wire protocol | `6` in maintained source; coordinated upgrade required from protocol v5 |
 | Signed stable release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3), protocol v5; later published hotfix prereleases are recorded above |
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
-| Public package graph | Signed stable `0.2.3`; latest signed Leo V6 hotfix tag `hotfix-2026-09-28.2` contains 16 lockstep packages at `0.2.4-hotfix.20`; `.21` is a source candidate |
+| Public package graph | Signed stable `0.2.3`; latest signed Leo V6 hotfix tag `hotfix-2026-09-29.1` contains 16 lockstep packages at `0.2.4-hotfix.21` |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 release-preparation lock pins published `0.3.0-renewal.1` and the reviewed Iroh closure, with final framework qualification pending |
-| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; published `.20` and candidate `.21`: Codex CLI `0.158.0`. Copilot SDK `1.0.14` and optional CLI `1.0.88` are unchanged. |
+| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; published `.20` and `.21`: Codex CLI `0.158.0`. Copilot SDK `1.0.14` and optional CLI `1.0.88` are unchanged. |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
 The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains
