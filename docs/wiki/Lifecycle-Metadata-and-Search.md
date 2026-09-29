@@ -16,6 +16,17 @@ An unreachable open binding appears in the stopped bucket so it remains visible,
 but archive admission is stricter: the binding must be non-active and the
 runtime status must explicitly be `stopped`.
 
+If a complete native inventory omits a logical session, the control node marks
+native availability `unavailable`. A prior confirmed `stopped` status remains
+`stopped` with no runtime epoch, so the owner can explicitly archive the
+retained runtime binding. This does not claim the native session can resume;
+runtime archive still verifies its own stopped binding and runs resource
+release. A formerly active or uncertain session remains `unknown` and needs
+an explicit successful Stop before Archive. Existing `unavailable/unknown`
+rows from older control code can take that same Stop then Archive path after
+the corrected control is installed; never rewrite catalog or runtime SQLite
+rows to repair them.
+
 Stop preserves the logical ID, vendor binding, launch provenance, and provider
 resources required for resume. Archive is never automatic and is not the same
 as Codex's own native thread-archive concept.

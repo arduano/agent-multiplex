@@ -1,5 +1,25 @@
 # Release qualification checkpoint
 
+## Stopped binding inventory correction candidate — 2026-09-29
+
+The isolated `fix/unavailable-stopped-inventory-20260929` branch starts from
+signed hotfix.21 source `dd0b6962c6690b0b53c8b5d09dc44d4489ec9fc6`.
+It changes only control catalog reconciliation and its documentation/tests;
+package versions, protocol, migrations and dependency pins remain at the
+published `.21` baseline. A complete native inventory omission now preserves
+a previously confirmed stopped status while reporting native availability
+unavailable. A formerly active binding still becomes unknown and needs an
+explicit Stop before Archive. No native work is inferred from inventory.
+
+Three new focused cases cover Codex and Copilot confirmed stops, repeated
+omission after catalog restart, archive admission, and an active-missing
+binding that needs a new Stop. The neighboring control hardening suite also
+passed. The isolated source passed `npm ci`, typecheck, production build,
+**1,103 tests across 117 files**, checkpoint, documentation and release
+metadata checks. No model call, published artifact, installed update or live
+catalog repair is claimed. Exact package publication and consumer qualification
+belong to a later coordinated release.
+
 ## Codex 0.158.0 source release preparation — 2026-09-28
 
 The isolated `0.2.4-hotfix.20` source candidate advances all 16 maintained

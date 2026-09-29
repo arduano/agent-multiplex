@@ -1599,10 +1599,16 @@ export class ControlNodeCatalog {
           this.#stalePendingInteractionsForSession(existing.sessionId, timestamp);
           this.#putRuntimeLifecycleCursor(existing.sessionId, undefined);
           const { lifecycle: _lifecycle, ...withoutLifecycle } = existing;
+          // Absence from native discovery cannot revoke a previously confirmed
+          // stop. Keep that durable cleanup fence so an owner can still archive
+          // the Host's retained binding. A formerly active or uncertain session
+          // stays unknown: inventory absence does not prove it stopped.
+          const confirmedStopped = existing.runtimeStatus === "stopped" &&
+            existing.availability !== "active" && existing.runtimeEpoch === null;
           const unavailable = sessionRecordSchema.parse({
             ...withoutLifecycle,
             availability: "unavailable",
-            runtimeStatus: "unknown",
+            runtimeStatus: confirmedStopped ? "stopped" : "unknown",
             runtimeEpoch: null,
             updatedAt: timestamp,
           });

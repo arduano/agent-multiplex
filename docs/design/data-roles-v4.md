@@ -346,6 +346,17 @@ bucket so it remains discoverable, but archive admission is intentionally
 stricter: the binding must be non-active and explicitly
 `runtimeStatus=stopped`.
 
+Complete native inventory absence removes proof of native resumability, so the
+catalog sets `availability=unavailable` and clears the runtime epoch and
+Copilot lifecycle view. It must preserve a previously confirmed `stopped`
+status, including a successful explicit Stop, as a durable cleanup fence.
+Inventory absence cannot turn a formerly active or uncertain row into a
+stopped row. Runtime archive independently requires its own retained stopped
+binding and runs the normal backend/provider release before the authority
+archives the row. A pre-fix `unavailable/unknown` row is repaired through a
+new explicit Stop; later missing inventories then preserve that confirmed
+status. No direct SQLite edit or inferred archive is part of recovery.
+
 Stopping preserves the logical session, native binding, launch provenance, and
 provider resources needed for resume. It immediately persists a resumable
 runtime record and retires pending interactions. Archiving is a separate,

@@ -25,13 +25,11 @@ import { ControlNodeCatalog, ControlNodeCoreError } from "../src/index.js";
 const first = "2037-01-02T03:04:05.000Z";
 const later = "2037-01-02T04:04:05.000Z";
 
-function fixture() {
+function fixture(harness: "codex" | "copilot" = "codex") {
   let time = first;
+  const filename = join(mkdtempSync(join(tmpdir(), "agent-multiplex-control-v4-")), "catalog.sqlite");
   const catalog = new ControlNodeCatalog({
-    filename: join(
-      mkdtempSync(join(tmpdir(), "agent-multiplex-control-v4-")),
-      "catalog.sqlite",
-    ),
+    filename,
     now: () => new Date(time),
   });
   const runtimeNodeId = newRuntimeNodeId();
@@ -50,7 +48,7 @@ function fixture() {
     complete: true,
     capturedAt: first,
     sessions: [{
-      harness: "codex",
+      harness,
       adapterScopeId: "codex-v4" as AdapterScopeId,
       vendorSessionId: "native-v4",
       cwd: "/work/project",
@@ -61,10 +59,57 @@ function fixture() {
     }],
   });
   if (!session) throw new Error("fixture session missing");
-  return { catalog, runtimeNodeId, session, later: () => { time = later; } };
+  return { catalog, filename, runtimeNodeId, session, later: () => { time = later; } };
 }
 
 describe("control-node v4 session catalog", () => {
+  it.each(["codex", "copilot"] as const)("keeps a confirmed stopped %s binding archivable when complete native inventory omits it, including after restart", (harness) => {
+    const { catalog, filename, runtimeNodeId, session, later: advance } = fixture(harness);
+    const stopped = catalog.markSessionStopped(session.sessionId, session.bindingRevision);
+    advance();
+    catalog.reconcileInventory({ runtimeNodeId, generation: "native-omitted", complete: true, capturedAt: later, sessions: [] });
+    expect(catalog.getSession(session.sessionId)).toMatchObject({
+      catalogState: "open", availability: "unavailable", runtimeStatus: "stopped", runtimeEpoch: null,
+      lastSeenAt: stopped.lastSeenAt,
+    });
+    catalog.close();
+
+    const reopened = new ControlNodeCatalog({ filename, now: () => new Date(later) });
+    try {
+      reopened.reconcileInventory({ runtimeNodeId, generation: "native-still-omitted", complete: true, capturedAt: later, sessions: [] });
+      const missing = reopened.getSession(session.sessionId)!;
+      expect(missing).toMatchObject({ availability: "unavailable", runtimeStatus: "stopped", runtimeEpoch: null });
+      const archiveOperationId = newArchiveOperationId();
+      expect(reopened.recordArchive({
+        archiveOperationId,
+        payloadHash: canonicalJson({ archiveOperationId }).padEnd(16, "0"),
+        sessionId: missing.sessionId,
+        runtimeNodeId,
+        bindingRevision: missing.bindingRevision,
+        expectedAuthority: missing.metadataAuthority,
+        authority: missing.metadataAuthority,
+        state: "succeeded",
+        releasedAt: later,
+        catalogRevision: missing.catalogRevision + 1,
+        createdAt: later,
+        updatedAt: later,
+      }).state).toBe("succeeded");
+      expect(reopened.getSession(session.sessionId)?.catalogState).toBe("archived");
+    } finally { reopened.close(); }
+  });
+
+  it("requires a new explicit Stop after a formerly active native binding disappears", () => {
+    const { catalog, runtimeNodeId, session, later: advance } = fixture();
+    advance();
+    catalog.reconcileInventory({ runtimeNodeId, generation: "active-missing", complete: true, capturedAt: later, sessions: [] });
+    expect(catalog.getSession(session.sessionId)).toMatchObject({ availability: "unavailable", runtimeStatus: "unknown" });
+    const stopped = catalog.markSessionStopped(session.sessionId, session.bindingRevision);
+    expect(stopped).toMatchObject({ availability: "resumable", runtimeStatus: "stopped" });
+    catalog.reconcileInventory({ runtimeNodeId, generation: "still-missing-after-stop", complete: true, capturedAt: later, sessions: [] });
+    expect(catalog.getSession(session.sessionId)).toMatchObject({ availability: "unavailable", runtimeStatus: "stopped" });
+    catalog.close();
+  });
+
   it("indexes structural metadata, distinguishes null from missing, and fences cursors", () => {
     const { catalog, session } = fixture();
     const secondRuntimeNodeId = newRuntimeNodeId();

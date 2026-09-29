@@ -7,6 +7,18 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-29 (Copilot gap diagnostic hotfix.21 candidate).
 
+## Stopped binding inventory correction candidate
+
+Complete native inventories that omit a previously confirmed stopped session
+now mark its native availability unavailable while retaining `runtimeStatus`
+`stopped`. This keeps the explicit, runtime-validated Archive path available
+after Codex or Copilot native discovery loses a saved session. Formerly active
+or uncertain sessions remain unknown until a successful explicit Stop. No
+native history is restored or inferred, and older unavailable/unknown rows
+need that Stop before Archive after installation. This source change is not an
+installed fleet repair or a published package release. See
+[lifecycle guidance](Lifecycle-Metadata-and-Search.md#session-states).
+
 ## Copilot gap diagnostic hotfix.21 candidate
 
 This checkout has a source-only follow-up to the Windows Copilot session
