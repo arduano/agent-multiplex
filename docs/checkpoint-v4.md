@@ -20,6 +20,22 @@ metadata checks. No model call, published artifact, installed update or live
 catalog repair is claimed. Exact package publication and consumer qualification
 belong to a later coordinated release.
 
+## Copilot reasoning effort source candidate — 2026-09-29
+
+The isolated source branch adds Copilot `setEffort` to the command contract,
+the runtime's change-settings lifecycle gate and the Copilot adapter's pinned
+session model RPC. Applied effort is read from the native model snapshot and
+kept independent of a previous model's selection. A failed or unconfirmed
+model switch clears both projected selection values until native observation.
+The initial candidate passed `npm run typecheck`, production build and the full
+117-file suite (1,101 tests) after rebuilding the pinned `node-pty` native
+addon in this isolated worktree. A later full rerun, concurrent with another
+framework suite on the NAS, failed 26 unrelated 15-second integration
+timeouts and six worker RPC timeouts; the final failure-path refinement then
+passed all 27 focused Copilot adapter tests with one worker. A quiet full
+suite rerun, package release, Leo consumer qualification and live candidate
+behavior are pending. No installed Host changed.
+
 ## Codex 0.158.0 source release preparation — 2026-09-28
 
 The isolated `0.2.4-hotfix.20` source candidate advances all 16 maintained

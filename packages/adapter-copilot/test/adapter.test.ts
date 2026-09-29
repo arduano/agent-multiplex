@@ -292,25 +292,57 @@ describe("CopilotAgentAdapter", () => {
     expect(received.filter((item) => item.kind === "settings")).toEqual([
       {
         kind: "settings",
-        settings: { model: "gpt-5.4", mode: "plan", effort: "high" },
+        settings: { model: "gpt-5.4", mode: "plan" },
       },
       {
         kind: "settings",
-        settings: { model: "gpt-5.4", mode: "autopilot", effort: "high" },
+        settings: { model: "gpt-5.4", mode: "autopilot" },
       },
     ]);
     expect(session.settings?.()).toEqual({
       model: "gpt-5.4",
       mode: "autopilot",
-      effort: "high",
     });
     await expect(adapter.listSessions()).resolves.toMatchObject([{
       harnessSettings: {
         model: "gpt-5.4",
         mode: "autopilot",
-        effort: "high",
       },
     }]);
+    await adapter.close();
+  });
+
+  it("reads and changes the applied Copilot reasoning level without switching models", async () => {
+    const client = new Client();
+    let nativeEffort = "medium";
+    const getCurrent = vi.fn(async () => ({ modelId: "gpt-6-luna", reasoningEffort: nativeEffort }));
+    const setReasoningEffort = vi.fn(async ({ reasoningEffort }: { reasoningEffort: string }) => {
+      nativeEffort = reasoningEffort;
+      return { reasoningEffort };
+    });
+    const create = client.createSession.bind(client);
+    client.createSession = async config => {
+      const native = await create(config) as NativeSession;
+      native.rpc.model = { getCurrent, setReasoningEffort };
+      return native;
+    };
+    const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", model: "gpt-6-luna", reasoningEffort: "medium", native: { sessionId: "effort-session" } });
+    expect(session.settings?.()).toMatchObject({ model: "gpt-6-luna", effort: "medium" });
+    const received: AdapterEvent[] = [];
+    session.subscribe(item => received.push(item));
+    await expect(session.execute({ harness: "copilot", command: { type: "setEffort", effort: "high" } }))
+      .resolves.toEqual({ effort: "high" });
+    expect(setReasoningEffort).toHaveBeenCalledExactlyOnceWith({ reasoningEffort: "high" });
+    expect(client.sessions.get("effort-session")?.setModel).not.toHaveBeenCalled();
+    expect(session.settings?.()).toMatchObject({ model: "gpt-6-luna", effort: "high" });
+    expect(received.filter(item => item.kind === "settings").at(-1)).toMatchObject({ kind: "settings", settings: { model: "gpt-6-luna", effort: "high" } });
+    await expect(adapter.listSessions()).resolves.toMatchObject([{ harnessSettings: { model: "gpt-6-luna", effort: "high" } }]);
+    client.sessions.get("effort-session")?.setModel.mockRejectedValueOnce(new Error("native model switch failed"));
+    await expect(session.execute({ harness: "copilot", command: { type: "setModel", model: "gpt-5.4" } }))
+      .rejects.toThrow("native outcome is unknown");
+    expect(session.settings?.()).not.toHaveProperty("model");
+    expect(session.settings?.()).not.toHaveProperty("effort");
     await adapter.close();
   });
 

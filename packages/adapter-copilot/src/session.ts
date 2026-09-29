@@ -49,6 +49,7 @@ export interface CopilotSessionRpc {
   };
   model?: {
     getCurrent(): Promise<unknown>;
+    setReasoningEffort?(input: { reasoningEffort: string }): Promise<unknown>;
   };
   history?: {
     compact(input: { trigger: "manual" }): Promise<unknown>;
@@ -127,6 +128,10 @@ export class CopilotSessionBridge {
   #modelRevision = 0;
   #modelChangeRevision = 0;
   #modelChanged: (() => void) | undefined;
+  #effort: string | undefined;
+  #effortRevision = 0;
+  #effortChangeRevision = 0;
+  #effortChanged: (() => void) | undefined;
   #mode: string | undefined;
   #modeRevision = 0;
   #modeChangeRevision = 0;
@@ -202,7 +207,10 @@ export class CopilotSessionBridge {
       this.observePermissions({ mode: data.mode });
     }
     if (event.type === "session.model_change") {
-      this.observeModel(isObject(event.data) ? event.data.newModel : undefined);
+      const data: Record<string, unknown> = isObject(event.data) ? event.data : {};
+      // A model switch can reset the applied effort. Missing native data is
+      // unknown, not proof that the old model's effort is still selected.
+      this.observeModelSelection(data.newModel, data.reasoningEffort);
     }
     if (event.type === "session.mode_changed") {
       this.observeMode(isObject(event.data) ? event.data.newMode : undefined);
@@ -235,6 +243,68 @@ export class CopilotSessionBridge {
     this.#model = typeof value === "string" && value.length > 0 ? value : undefined;
     this.#modelRevision += 1;
     this.#modelChanged?.();
+  }
+
+  /** Model and effort form one native selection snapshot. Publish them in one
+   * settings event so a new model is never briefly paired with stale effort. */
+  public observeModelSelection(
+    model: unknown,
+    effort: unknown,
+    expectedModelChangeRevision?: number,
+    expectedEffortChangeRevision?: number,
+  ): void {
+    if (this.#closed) return;
+    let changed = false;
+    if (expectedModelChangeRevision === undefined || expectedModelChangeRevision === this.#modelChangeRevision) {
+      this.#modelChangeRevision += 1;
+      this.#model = typeof model === "string" && model.length > 0 ? model : undefined;
+      this.#modelRevision += 1;
+      changed = true;
+    }
+    if (expectedEffortChangeRevision === undefined || expectedEffortChangeRevision === this.#effortChangeRevision) {
+      this.#effortChangeRevision += 1;
+      this.#effort = typeof effort === "string" && effort.length > 0 ? effort : undefined;
+      this.#effortRevision += 1;
+      changed = true;
+    }
+    if (changed) (this.#modelChanged ?? this.#effortChanged)?.();
+  }
+  public observeModelSelectionRead(model: unknown, effort: unknown, expectedModelRevision: number, expectedEffortRevision: number): void {
+    if (this.#closed) return;
+    let changed = false;
+    if (expectedModelRevision === this.#modelRevision) {
+      this.#model = typeof model === "string" && model.length > 0 ? model : undefined;
+      this.#modelRevision += 1;
+      changed = true;
+    }
+    if (expectedEffortRevision === this.#effortRevision) {
+      this.#effort = typeof effort === "string" && effort.length > 0 ? effort : undefined;
+      this.#effortRevision += 1;
+      changed = true;
+    }
+    if (changed) (this.#modelChanged ?? this.#effortChanged)?.();
+  }
+
+  public attachEffort(initialEffort: string | undefined, onChanged: () => void): void {
+    if (this.#effortRevision === 0) this.#effort = initialEffort;
+    this.#effortChanged = onChanged;
+  }
+  public get effortRevision(): number { return this.#effortRevision; }
+  public get effortChangeRevision(): number { return this.#effortChangeRevision; }
+  public effort(): string | undefined { return this.#effort; }
+  public observeEffort(value: unknown, expectedChangeRevision?: number): void {
+    if (this.#closed || expectedChangeRevision !== undefined && expectedChangeRevision !== this.#effortChangeRevision) return;
+    this.#effortChangeRevision += 1;
+    this.updateEffort(value);
+  }
+  public observeEffortRead(value: unknown, expectedRevision: number): void {
+    if (this.#closed || expectedRevision !== this.#effortRevision) return;
+    this.updateEffort(value);
+  }
+  private updateEffort(value: unknown): void {
+    this.#effort = typeof value === "string" && value.length > 0 ? value : undefined;
+    this.#effortRevision += 1;
+    this.#effortChanged?.();
   }
 
   public attachMode(initialMode: string | undefined, onChanged: () => void): void {
@@ -514,6 +584,7 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#reads = options.reads ?? new CopilotReadRequests();
     this.vendorSessionId = options.native.sessionId;
     this.#bridge.attachModel(options.settings.model, () => this.#bridge.settings(this.settings()));
+    this.#bridge.attachEffort(options.settings.effort ?? undefined, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachMode(options.settings.mode, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachPermissions(this.#native.rpc.permissions, () => this.#bridge.settings(this.settings()));
   }
@@ -530,12 +601,14 @@ export class CopilotAdapterSession implements AdapterSession {
   public settings(): HarnessSessionSettings {
     const copilotPermissions = this.#bridge.permissionMode();
     const model = this.#bridge.model();
+    const effort = this.#bridge.effort();
     const mode = this.#bridge.mode();
     const settings = { ...this.#settings };
     delete settings.copilotPermissions;
     delete settings.model;
+    delete settings.effort;
     delete settings.mode;
-    return { ...settings, ...(model === undefined ? {} : { model }), ...(mode === undefined ? {} : { mode }), ...(copilotPermissions === undefined ? {} : { copilotPermissions }) };
+    return { ...settings, ...(model === undefined ? {} : { model }), ...(effort === undefined ? {} : { effort }), ...(mode === undefined ? {} : { mode }), ...(copilotPermissions === undefined ? {} : { copilotPermissions }) };
   }
 
   /** Read the native selection on every attachment, including a resume with no
@@ -544,11 +617,15 @@ export class CopilotAdapterSession implements AdapterSession {
     const read = this.#native.rpc.model?.getCurrent;
     if (typeof read !== "function") return;
     const generation = this.#bridge.modelRevision;
+    const effortGeneration = this.#bridge.effortRevision;
     try {
       const result = await this.read("model", String(generation), () => read.call(this.#native.rpc.model));
-      this.#bridge.observeModelRead(isObject(result) ? result.modelId : undefined, generation);
+      this.#bridge.observeModelSelectionRead(isObject(result) ? result.modelId : undefined,
+        isObject(result) ? result.reasoningEffort : undefined, generation, effortGeneration);
     } catch (error) {
-      if (!(error instanceof CopilotReadBusyError)) this.#bridge.observeModelRead(undefined, generation);
+      if (!(error instanceof CopilotReadBusyError)) {
+        this.#bridge.observeModelSelectionRead(undefined, undefined, generation, effortGeneration);
+      }
     }
   }
 
@@ -678,14 +755,37 @@ export class CopilotAdapterSession implements AdapterSession {
       }
       case "setModel": {
         const generation = this.#bridge.modelChangeRevision;
+        const effortGeneration = this.#bridge.effortChangeRevision;
         try {
           await this.mutation("change Copilot model", () => this.#native.setModel(command.model));
         } catch (error) {
-          this.#bridge.observeModel(undefined, generation);
+          // A failed RPC can leave the native result uncertain. Neither the
+          // previous model nor its effort is a confirmed current selection.
+          this.#bridge.observeModelSelection(undefined, undefined, generation, effortGeneration);
           throw error;
         }
-        this.#bridge.observeModel(command.model, generation);
+        // Native model changes can reset effort. If no event supplied the new
+        // value, withhold the old model's effort until a native read confirms it.
+        this.#bridge.observeModelSelection(command.model, undefined, generation, effortGeneration);
         return { model: command.model };
+      }
+      case "setEffort": {
+        const set = this.#native.rpc.model?.setReasoningEffort;
+        if (typeof set !== "function") throw new Error("Copilot reasoning selection is unavailable on this native session");
+        const generation = this.#bridge.effortChangeRevision;
+        let applied: unknown;
+        try {
+          applied = await this.mutation("change Copilot reasoning effort", () => set.call(this.#native.rpc.model, { reasoningEffort: command.effort }));
+        } catch (error) {
+          this.#bridge.observeEffort(undefined, generation);
+          throw error;
+        }
+        if (!isObject(applied) || applied.reasoningEffort !== command.effort) {
+          this.#bridge.observeEffort(undefined, generation);
+          throw new TypeError("Copilot did not confirm the requested reasoning effort");
+        }
+        this.#bridge.observeEffort(applied.reasoningEffort, generation);
+        return { effort: applied.reasoningEffort };
       }
       case "setMode": {
         const revision = this.#bridge.modeChangeRevision;

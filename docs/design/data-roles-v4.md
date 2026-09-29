@@ -488,6 +488,14 @@ snapshots. Missing, malformed or unsupported state does not imply off or on.
 Copilot model projection likewise reads the native current model on each
 attachment/resume and observes root model-change events. Native model IDs remain
 unchanged, including explicit auto selection; absence does not imply a default.
+The same native snapshot carries the applied reasoning effort. The fenced
+`setEffort` command calls the pinned session model API without switching models
+and projects only its exact acknowledgement. Model-change events and reads
+publish model and effort together; a model switch with no reported effort
+clears the old value rather than presenting the prior model's setting as
+current. The runtime applies Copilot change-settings lifecycle admission to
+this command, and native rejection or uncertainty does not fabricate an
+applied level.
 Newer native changes or acknowledged selections fence delayed reads, and newer
 native changes also fence delayed mutation acknowledgements. Descendant model
 changes do not alter the root settings. Its assistant-loop idle signal does not

@@ -17,6 +17,12 @@ An adapter owns one `harness` and `adapterScopeId` and implements:
 - optional read-only native state views for an already active binding;
 - stop and optional idempotent session release.
 
+Copilot exposes model-specific string reasoning choices in native model
+metadata. Create and resume accept `reasoningEffort`; an active session uses a
+fenced `setEffort` command. Its reported `harnessSettings.effort` comes from
+the native current-model snapshot, a root model-change event, or an exact
+setter acknowledgement. An absent effort means the applied level is unknown.
+
 The runtime wraps adapters in named backends. A successful launch records the
 provider, profile, implementation, backend, adapter scope, vendor session ID,
 and binding revision. Resume, history, stop, and archive use that provenance

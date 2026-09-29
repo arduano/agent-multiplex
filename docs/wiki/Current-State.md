@@ -19,6 +19,15 @@ need that Stop before Archive after installation. This source change is not an
 installed fleet repair or a published package release. See
 [lifecycle guidance](Lifecycle-Metadata-and-Search.md#session-states).
 
+## Copilot reasoning effort source candidate
+
+This source-only branch adds a fenced Copilot `setEffort` command using the
+pinned SDK's session model API. Native current-model reads and root model
+change events report model and applied effort together, including after resume.
+An unknown effort stays unknown rather than inheriting a previous model's
+value. Focused adapter tests passed; full gates, package publication, Leo
+source pinning, live candidate qualification and deployment remain separate.
+
 ## Copilot gap diagnostic hotfix.21 candidate
 
 This checkout has a source-only follow-up to the Windows Copilot session
