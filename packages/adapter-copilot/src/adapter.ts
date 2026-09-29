@@ -857,6 +857,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "session.resume", version, experimental: false },
     { name: "history.native", version, experimental: false },
     { name: "history.native.primary", version: "v1", experimental: true },
+    { name: "history.native.child", version: "v1", experimental: true },
     { name: "prompt.enqueue", version, experimental: false },
     { name: "prompt.steer.immediate", version, experimental: false },
     { name: "interrupt", version, experimental: false },

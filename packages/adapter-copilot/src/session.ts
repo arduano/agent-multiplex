@@ -33,7 +33,7 @@ import { copilotJson, jsonRecord, requiredString } from "./json.js";
 import { taskId, taskSnapshot } from "./tasks.js";
 import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
-import { readPrimaryHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
+import { readPrimaryHistory, readSubagentHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
 import { copilotLifecycleFacts } from "./lifecycle.js";
 
@@ -830,12 +830,14 @@ export class CopilotAdapterSession implements AdapterSession {
     if (request.harness !== "copilot") {
       throw new TypeError(`Copilot session cannot read ${request.harness} history`);
     }
-    if (request.native?.view === "primary") {
+    if (request.native?.view === "primary" || request.native?.view === "subagent") {
       const eventLog = this.#native.rpc.eventLog;
-      if (typeof eventLog?.read !== "function") throw new Error("Copilot primary history is unavailable on this native session");
+      if (typeof eventLog?.read !== "function") throw new Error(`Copilot ${request.native.view === "primary" ? "primary" : "subagent"} history is unavailable on this native session`);
       const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
-      return readPrimaryHistory(this.vendorSessionId, request, async input => {
-        const result = await this.read("primaryHistory", JSON.stringify(input), () => eventLog.read(input), deadlineAt);
+      const readScoped = request.native.view === "subagent" ? readSubagentHistory : readPrimaryHistory;
+      return readScoped(this.vendorSessionId, request, async input => {
+        const lane = input.agentIds ? `subagentHistory:${input.agentIds[0]}` : "primaryHistory";
+        const result = await this.read(lane, JSON.stringify(input), () => eventLog.read(input), deadlineAt);
         this.assertActive();
         return result;
       });

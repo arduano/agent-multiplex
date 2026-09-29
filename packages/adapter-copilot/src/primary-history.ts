@@ -12,11 +12,17 @@ export interface CopilotEventLogReadRequest {
   cursor?: string;
   max: number;
   direction: "forward" | "backward";
-  agentScope: "primary";
+  agentScope?: "primary";
+  agentIds?: [string];
   includeEphemeral: false;
 }
 
-const CURSOR_PREFIX = "copilot:primary:v1:";
+type HistoryScope = { readonly view: "primary" } | { readonly view: "subagent"; readonly agentId: string };
+
+function scopePrefix(scope: HistoryScope): string {
+  return scope.view === "primary" ? "copilot:primary:v1:"
+    : `copilot:subagent:v1:${Buffer.from(scope.agentId).toString("base64url")}:`;
+}
 
 /** Native ownership filtering happens before the bounded page reaches Multiplex. */
 export async function readPrimaryHistory(
@@ -24,11 +30,33 @@ export async function readPrimaryHistory(
   request: NativeHistoryRequest,
   read: (request: CopilotEventLogReadRequest) => Promise<unknown>,
 ): Promise<AdapterNativeHistoryResult> {
+  return readScopedHistory(vendorSessionId, request, read, { view: "primary" });
+}
+
+/** Read one native child's durable events without materializing getEvents(). */
+export async function readSubagentHistory(
+  vendorSessionId: string,
+  request: NativeHistoryRequest,
+  read: (request: CopilotEventLogReadRequest) => Promise<unknown>,
+): Promise<AdapterNativeHistoryResult> {
+  const agentId = request.native?.agentId;
+  if (typeof agentId !== "string" || agentId.length < 1 || agentId.length > 256 || /[\u0000-\u001f\u007f]/.test(agentId)) {
+    throw new TypeError("Invalid Copilot subagent identifier");
+  }
+  return readScopedHistory(vendorSessionId, request, read, { view: "subagent", agentId });
+}
+
+async function readScopedHistory(
+  vendorSessionId: string,
+  request: NativeHistoryRequest,
+  read: (request: CopilotEventLogReadRequest) => Promise<unknown>,
+  scope: HistoryScope,
+): Promise<AdapterNativeHistoryResult> {
   const sortDirection = request.native?.sortDirection ?? "asc";
   if (sortDirection !== "asc" && sortDirection !== "desc") throw new TypeError("Invalid Copilot history sort direction");
-  const prefix = `${CURSOR_PREFIX}${sortDirection}:`;
+  const prefix = `${scopePrefix(scope)}${sortDirection}:`;
   if (request.cursor !== undefined && (!request.cursor.startsWith(prefix) || request.cursor.length <= prefix.length)) {
-    throw new TypeError("Invalid Copilot primary history cursor");
+    throw new TypeError(`Invalid Copilot ${scope.view} history cursor`);
   }
   const cursor = request.cursor?.slice(prefix.length);
   let maximum = request.limit;
@@ -37,17 +65,20 @@ export async function readPrimaryHistory(
       ...(cursor === undefined ? {} : { cursor }),
       max: maximum,
       direction: sortDirection === "desc" ? "backward" : "forward",
-      agentScope: "primary",
+      ...(scope.view === "primary" ? { agentScope: "primary" as const } : { agentIds: [scope.agentId] as [string] }),
       includeEphemeral: false,
     });
     if (!object(value) || !Array.isArray(value.events) || value.events.length > maximum ||
       typeof value.cursor !== "string" || value.cursor.length > 8_192 || typeof value.hasMore !== "boolean" ||
       (value.cursorStatus !== "ok" && value.cursorStatus !== "expired") ||
       value.events.some(event => !object(event) || typeof event.id !== "string" || typeof event.type !== "string")) {
-      throw new TypeError("Unrecognized Copilot primary history page");
+      throw new TypeError(`Unrecognized Copilot ${scope.view} history page`);
+    }
+    if (scope.view === "subagent" && value.events.some(event => !belongsToAgent(event, scope.agentId))) {
+      throw new TypeError("Copilot subagent history returned an event from another owner");
     }
     if (value.cursorStatus === "expired") throw new Error("Copilot history cursor expired; reload the conversation");
-    if (value.hasMore && (!value.cursor || value.cursor === cursor)) throw new Error("Copilot primary history cursor did not advance");
+    if (value.hasMore && (!value.cursor || value.cursor === cursor)) throw new Error("Copilot scoped history cursor did not advance");
     // Native backward pages are still chronological within each page. The
     // existing Multiplex sortDirection contract orders the payload itself.
     const events = sortDirection === "desc" ? [...value.events].reverse() : value.events;
@@ -82,6 +113,12 @@ export async function readPrimaryHistory(
       },
     };
   }
+}
+
+function belongsToAgent(value: unknown, agentId: string): boolean {
+  if (!object(value)) return false;
+  const data = object(value.data) ? value.data : undefined;
+  return value.agentId === agentId || data?.agentId === agentId || data?.parentToolCallId === agentId;
 }
 
 function object(value: unknown): value is Record<string, unknown> {

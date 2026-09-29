@@ -49,6 +49,19 @@ requested ascending/descending order. These cursors are opaque and incompatible
 with the full-history index cursors. The omitted view keeps the existing full
 history behavior. Unsupported native methods fail explicitly.
 
+Adapters advertising `history.native.child` v1 offer a separate selected-child
+item view. Copilot accepts `native: { view: "subagent", agentId, sortDirection:
+"desc" }` and delegates the filter to native `eventLog.read({ agentIds:
+[agentId] })`. The adapter rejects returned events owned by another agent and
+binds the opaque cursor to that exact agent. Codex accepts `native: { view:
+"child", threadId, sortDirection: "desc" }` with `includeTurns: true`. It reads
+native `thread/read` parent links, checks the same native session tree and an
+ancestry path to the managed root, then pages only that thread's
+`thread/items/list`. A foreign, orphaned or cyclic thread fails closed. Child
+pages retain the logical root `vendorSessionId`; the Codex payload also carries
+the verified `threadId` for client routing. These reads are bounded and
+read-only, do not attach a new session, and do not alter root-history cursors.
+
 Primary pages that exceed the wire envelope are re-read at the same native input
 cursor with a smaller limit. The adapter never truncates a page while advancing
 past the untransferred events. A single oversized item uses the explicit omission

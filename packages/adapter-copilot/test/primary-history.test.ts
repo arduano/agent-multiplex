@@ -1,7 +1,7 @@
 import { NATIVE_PAYLOAD_MAX_BYTES, type JsonValue } from "@arduano/agent-multiplex-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { copilotHistoryEventBytes } from "../src/images.js";
-import { readPrimaryHistory, type CopilotEventLogReadRequest } from "../src/primary-history.js";
+import { readPrimaryHistory, readSubagentHistory, type CopilotEventLogReadRequest } from "../src/primary-history.js";
 
 const request = { harness: "copilot" as const, limit: 100, native: { view: "primary", sortDirection: "desc" } };
 const event = (id: string, type = "assistant.message", data: JsonValue = { content: id }) => ({
@@ -102,5 +102,34 @@ describe("Copilot primary native history", () => {
   it("rejects a nonadvancing continuation instead of allowing repeated pagination", async () => {
     await expect(readPrimaryHistory("native-session", { ...request, cursor: "copilot:primary:v1:desc:native-older" },
       async () => page([], "native-older"))).rejects.toThrow("cursor did not advance");
+  });
+});
+
+describe("Copilot scoped subagent history", () => {
+  const childRequest = { harness: "copilot" as const, limit: 100,
+    native: { view: "subagent", agentId: "child-agent", sortDirection: "desc" } };
+
+  it("pages one native child without fetching the full event log or another agent", async () => {
+    const childEvent = { ...event("child-reply"), agentId: "child-agent" };
+    const read = vi.fn(async () => page([childEvent], "older", true));
+    const first = await readSubagentHistory("native-session", childRequest, read);
+    expect(read).toHaveBeenCalledExactlyOnceWith({ max: 100, direction: "backward",
+      agentIds: ["child-agent"], includeEphemeral: false });
+    expect(first).toMatchObject({ payload: [childEvent], complete: false });
+    expect(first.nextCursor).toContain("copilot:subagent:v1:");
+    const second = await readSubagentHistory("native-session", { ...childRequest, cursor: first.nextCursor },
+      async () => page([], "done", false));
+    expect(second.complete).toBe(true);
+    await expect(readSubagentHistory("native-session", { ...childRequest,
+      native: { ...childRequest.native, agentId: "another-child" }, cursor: first.nextCursor }, read))
+      .rejects.toThrow("Invalid Copilot subagent history cursor");
+  });
+
+  it("rejects malformed child IDs and any event owned by a different agent", async () => {
+    const read = vi.fn(async () => page([{ ...event("foreign"), agentId: "other-child" }]));
+    await expect(readSubagentHistory("native-session", { ...childRequest,
+      native: { view: "subagent", agentId: "" } }, read)).rejects.toThrow("Invalid Copilot subagent identifier");
+    expect(read).not.toHaveBeenCalled();
+    await expect(readSubagentHistory("native-session", childRequest, read)).rejects.toThrow("another owner");
   });
 });

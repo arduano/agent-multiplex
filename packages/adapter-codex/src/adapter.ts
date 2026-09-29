@@ -243,6 +243,7 @@ export class CodexAdapter implements AgentAdapter {
           { name: "thread.loaded.list", version: "v2", experimental: false },
           { name: "thread.read-native-history", version: "v2", experimental: false },
           { name: "history.native.turns", version: "v1", experimental: false },
+          { name: "history.native.child", version: "v1", experimental: true },
           { name: "turn.steer", version: "v2", experimental: false },
           { name: "turn.interrupt", version: "v2", experimental: false },
           { name: "turn.settings.update", version: "v2", experimental: true },
@@ -597,6 +598,8 @@ class CodexSession implements AdapterSession {
   >();
   /** Root command items keyed by turn, used to stop only interrupted-turn terminals. */
   readonly #commandItemsByTurn = new Map<string, Set<string>>();
+  /** Native parent links are immutable for a thread; cache verified descendants. */
+  readonly #authorizedHistoryChildren = new Set<string>();
   /** Count of turn/start requests sent but not yet acknowledged. */
   #turnStartsInFlight = 0;
   /** Root turns whose completion arrived before their turn/start continuation. */
@@ -845,11 +848,14 @@ class CodexSession implements AdapterSession {
 
   public async readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
     if (request.harness !== "codex") throw new Error("history request harness mismatch");
-    if (request.native?.view !== undefined && request.native.view !== "turns") throw new TypeError("Unsupported Codex native history view");
+    if (request.native?.view !== undefined && request.native.view !== "turns" && request.native.view !== "child") throw new TypeError("Unsupported Codex native history view");
     if (request.native?.view === "turns") {
       if (!request.includeTurns) throw new TypeError("Codex turns history requires includeTurns");
       return this.#readNativeTurns(request);
     }
+    const childThreadId = request.native?.view === "child"
+      ? await this.#authorizedChildThreadId(request.native.threadId) : undefined;
+    if (childThreadId && !request.includeTurns) throw new TypeError("Codex child history requires item pagination");
     if (request.includeTurns) {
       const sortDirection = request.native?.sortDirection ?? "asc";
       if (sortDirection !== "asc" && sortDirection !== "desc") throw new TypeError("Invalid Codex history sort direction");
@@ -857,8 +863,8 @@ class CodexSession implements AdapterSession {
       let response: ThreadItemsListResponse;
       for (;;) {
         response = await this.#rpc.request<ThreadItemsListResponse>("thread/items/list", {
-          ...Object.fromEntries(Object.entries(request.native ?? {}).filter(([key]) => key !== "omitOversizedItems")),
-          threadId: this.vendorSessionId,
+          ...Object.fromEntries(Object.entries(request.native ?? {}).filter(([key]) => key !== "omitOversizedItems" && key !== "view" && key !== "threadId")),
+          threadId: childThreadId ?? this.vendorSessionId,
           limit,
           sortDirection,
           cursor: request.cursor ?? null,
@@ -873,7 +879,7 @@ class CodexSession implements AdapterSession {
           // visible omission instead of truncating or inventing native output.
           return {
             harness: "codex", vendorSessionId: this.vendorSessionId, sortDirection,
-            payload: json({ ...response, data: [] }),
+            payload: json({ ...response, data: [], ...(childThreadId ? { threadId: childThreadId } : {}) }),
             complete: response.nextCursor === null,
             ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
             unavailableItem: { reason: "exceedsWireLimit",
@@ -887,7 +893,8 @@ class CodexSession implements AdapterSession {
         limit = Math.max(1, Math.floor(limit / 2));
       }
       return {
-        harness: "codex", vendorSessionId: this.vendorSessionId, payload: json(response), sortDirection,
+        harness: "codex", vendorSessionId: this.vendorSessionId,
+        payload: json({ ...response, ...(childThreadId ? { threadId: childThreadId } : {}) }), sortDirection,
         complete: response.nextCursor === null,
         ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
       };
@@ -903,6 +910,32 @@ class CodexSession implements AdapterSession {
       payload: json(response),
       complete: true,
     };
+  }
+
+  async #authorizedChildThreadId(value: unknown): Promise<string> {
+    if (typeof value !== "string" || value.length < 1 || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value) || value === this.vendorSessionId) {
+      throw new TypeError("Invalid Codex child thread identifier");
+    }
+    if (this.#authorizedHistoryChildren.has(value)) return value;
+    const seen = new Set<string>();
+    let threadId = value;
+    for (let depth = 0; depth < 32; depth++) {
+      if (seen.has(threadId)) throw new TypeError("Cyclic Codex child ancestry");
+      seen.add(threadId);
+      const response = await this.#rpc.request<ThreadReadResponse>("thread/read", { threadId, includeTurns: false });
+      const thread = response?.thread;
+      if (thread?.id !== threadId || thread.sessionId !== this.#state.thread.sessionId) {
+        throw new TypeError("Codex child thread belongs to another session tree");
+      }
+      const parentId = thread.parentThreadId;
+      if (parentId === this.vendorSessionId) {
+        for (const id of seen) this.#authorizedHistoryChildren.add(id);
+        return value;
+      }
+      if (typeof parentId !== "string" || !parentId) throw new TypeError("Codex thread is not a descendant of this session");
+      threadId = parentId;
+    }
+    throw new TypeError("Codex child ancestry exceeds the supported bound");
   }
 
   async #readNativeTurns(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {

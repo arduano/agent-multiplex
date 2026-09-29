@@ -94,6 +94,15 @@ truncated with the original next cursor. Native cursor expiry fails explicitly
 and requires client window reset; it must not silently repeat the fresh tail as
 older history. Gateways add no transcript or history-cursor authority.
 
+Selected child history is a distinct native view under the existing logical
+session binding. Copilot's native event-log `agentIds` filter selects one child
+before pagination and the adapter validates every returned owner marker. Codex
+verifies native parent links from the requested child to the managed root in the
+same native session tree before paging that child's items. Child cursors cannot
+be reused for another child. The access gateway and control tree route the read
+without learning or owning a child transcript; the runtime still owns the
+native handle and the browser bounds its retained child window.
+
 Live native state is a separate read-only observation via
 `sessions.readNativeState`, including Copilot's `pendingMessages` and Codex's
 `goal` views. It routes

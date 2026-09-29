@@ -37,6 +37,19 @@ command/lifecycle journals; a matching Leo UI candidate consumes the Host
 view. Publication, packed-consumer qualification and installed activation
 remain separate campaign gates. See [adapter guidance](Adapters-and-Terminals.md#host-message-delivery).
 
+## Unreleased selected-subagent history candidate
+
+The isolated `fix/subagent-history-20260929` worktree adds bounded native
+selected-child history to the Codex and Copilot adapters. It is not a published
+package or installed Host update. The `history.native.child` v1 capability
+requires a coordinated framework graph and Leo consumer pin before activation.
+See [bounded native history](Adapters-and-Terminals.md#bounded-native-history)
+for the cursor and ownership contract. The live five-Host baseline showed child
+answers in the Copilot stream but no child answer rows after fresh primary
+history; Codex root history likewise omitted child-thread answer rows. The Leo
+campaign record owns the sanitized disposable receipts and exact remaining
+live integration gate.
+
 ## Published Copilot gap diagnostic hotfix.21
 
 This checkout has a source-only follow-up to the Windows Copilot session
