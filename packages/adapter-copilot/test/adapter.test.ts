@@ -513,6 +513,7 @@ describe("CopilotAgentAdapter", () => {
     native.events.push(primary, child);
     native.rpc.eventLog = { read: vi.fn(async () => ({ events: [primary], cursor: "native-end", hasMore: false, cursorStatus: "ok" })) };
     expect((await adapter.describe()).capabilities).toContainEqual(expect.objectContaining({ name: "history.native.primary", version: "v1" }));
+    expect((await adapter.describe()).capabilities).toContainEqual({ name: "reasoning-effort.switch", version: "v1", experimental: false });
     expect((await adapter.describe()).capabilities).toContainEqual({ name: "context.compact", version: "v1", experimental: true });
     const getEvents = vi.spyOn(native, "getEvents");
     expect((await session.readNativeHistory({ harness: "copilot", limit: 100, native: { view: "primary", sortDirection: "desc" } })).payload).toEqual([primary]);

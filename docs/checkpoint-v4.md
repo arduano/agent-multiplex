@@ -1,5 +1,19 @@
 # Release qualification checkpoint
 
+## Aggregate defect integration candidate — 2026-09-29
+
+An isolated integration branch combines the unpublished D1 confirmed-stop
+projection correction, D2 Copilot reasoning selection, D4 Host message delivery
+view, D6 bounded file previews, and D7 bounded child native history. Copilot
+now advertises `reasoning-effort.switch` only with the new native command
+contract, so a mixed-version UI can hide that control. No package version was
+advanced, published, installed, or sent a model prompt from this branch.
+
+The combined source passed typecheck, production build, 117 focused tests and
+the full **1,115-test / 119-file** suite with two workers. Checkpoint,
+documentation and release-metadata checks passed. Packed consumer, native
+Windows, installed-host and disposable model qualifications remain separate.
+
 ## Stopped binding inventory correction candidate — 2026-09-29
 
 The isolated `fix/unavailable-stopped-inventory-20260929` branch starts from

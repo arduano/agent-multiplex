@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-29 (Copilot gap diagnostic hotfix.21 candidate).
+Last reconciled: 2026-09-29 (aggregate defect integration candidate).
 
 ## Stopped binding inventory correction candidate
 

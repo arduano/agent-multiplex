@@ -864,6 +864,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "models.list", version, experimental: false },
     { name: "models.switch", version, experimental: false },
     { name: "reasoning-effort.create-resume", version, experimental: false },
+    { name: "reasoning-effort.switch", version: "v1", experimental: false },
     { name: "mode.native", version, experimental: true },
     { name: "permissions.mode", version: "v1", experimental: true },
     { name: "context.compact", version: "v1", experimental: true },
