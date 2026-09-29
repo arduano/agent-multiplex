@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   newRuntimeNodeId, newRuntimeNodeBootId, newSessionId, newRuntimeEpoch,
   newCommandId, newArchiveOperationId, newAuthorityEpochId, newControlNodeId, newRealmId, emptyMetadataSnapshot,
-  type ImageTarget, type AdapterScopeId,
+  type ImageTarget, type AdapterScopeId, type NativeGapDiagnostic,
 } from "@arduano/agent-multiplex-protocol";
 import { RuntimeImages, readConfinedImage } from "../packages/runtime-node-core/src/images.js";
 import { RuntimeNodeStore } from "../packages/runtime-node-core/src/store.js";
@@ -312,6 +312,20 @@ describe('runtime-owned images', () => {
     expect((await service.execute({ commandId:newCommandId(), payloadHash:'overflow-stopped-command', ...target, request:{ harness:'codex', command:{ type:'send', input:'stale command' } } })).state).toBe('failed');
   });
 
+  it('reports a bounded, payload-free diagnostic at the native queue overflow site', async () => {
+    const { service, target, emit, started, release, gaps } = eventQueueFixture();
+    await service.resume({ operation:'resume', commandId:newCommandId(), payloadHash:'diagnostic-overflow-resume', ...target });
+    emit({ kind:'native', nativeType:'slow-image', payload:'slow', ephemeral:false });
+    await started;
+    emit({ kind:'native', nativeType:'queued-image', payload:'queued', ephemeral:false });
+    emit({ kind:'native', nativeType:'private-image', payload:'PRIVATE IMAGE CONTENT', ephemeral:false });
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ code:'queueOverflow', eventKind:'native', pendingEvents:2 });
+    expect(gaps[0]?.diagnosticId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(JSON.stringify(gaps)).not.toContain('PRIVATE IMAGE CONTENT');
+    release();
+  });
+
   it('retains settlements for pending and queued interactions while rejecting excess image payloads', async () => {
     const queue = eventQueueFixture();
     const { service, store, target, emit, extracted, started, release } = queue;
@@ -366,6 +380,7 @@ function eventQueueFixture() {
   const gate = new Promise<void>((resolve) => { release=resolve; });
   const started = new Promise<void>((resolve) => { markStarted=resolve; });
   const extracted:unknown[] = [];
+  const gaps: NativeGapDiagnostic[] = [];
   const native:AdapterSession = { harness:'codex', adapterScopeId:'images:fake' as AdapterScopeId, vendorSessionId:'native-images', cwd:directory, runtimeEpoch:newRuntimeEpoch(), status:()=> 'idle', subscribe:(listener)=>{ emit=listener; return ()=>{}; }, execute:async()=>null, stop:async()=>{}, readNativeHistory:async()=>({ harness:'codex', vendorSessionId:'native-images', payload:null }) };
   const imageCodec:NativeImageCodec = { externalize:async (payload) => {
     if (typeof payload === 'string') extracted.push(payload);
@@ -374,8 +389,9 @@ function eventQueueFixture() {
   } };
   const adapter:AgentAdapter = { harness:'codex', adapterScopeId:native.adapterScopeId, imageCodec, describe:async()=>({ harness:'codex', adapterScopeId:native.adapterScopeId, available:true, capabilities:[] }), listModels:async()=>[], listSessions:async()=>[], spawn:async()=>native, resume:async()=>native, close:async()=>{} };
   store.putSession(storedSession(target,directory));
-  const service = new RuntimeNodeService({ store, runtimeNodeId:target.runtimeNodeId, runtimeNodeBootId:target.runtimeNodeBootId, adapters:[adapter], allowedRoots:[directory], name:'image overflow', nativeEventQueueLimit:2 });
+  const service = new RuntimeNodeService({ store, runtimeNodeId:target.runtimeNodeId, runtimeNodeBootId:target.runtimeNodeBootId, adapters:[adapter], allowedRoots:[directory], name:'image overflow', nativeEventQueueLimit:2,
+    onNativeGapDiagnostic: diagnostic => gaps.push(diagnostic) });
   // Close before the fixture-owned SQLite connection and image directory.
   releases.unshift(async () => { release(); await service.close(); });
-  return { service, store, target, emit:(event:AdapterEvent)=>emit(event), extracted, started, release };
+  return { service, store, target, emit:(event:AdapterEvent)=>emit(event), extracted, started, release, gaps };
 }

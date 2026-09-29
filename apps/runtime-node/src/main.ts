@@ -30,6 +30,7 @@ import {
   newRuntimeNodeId,
   runtimeNodeIdSchema,
   type NativeInventoryItem,
+  type NativeGapDiagnostic,
   type RuntimeNodeBootId,
   type RuntimeNodeId,
   type SessionRecord,
@@ -73,6 +74,8 @@ const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", impor
 
 /** Embedded consumers can fail closed when their published daemon lacks this hook. */
 export const runtimePathPolicyInjectionVersion = 1 as const;
+/** Embedded Hosts can require this exact payload-free diagnostic hook. */
+export const nativeGapDiagnosticsVersion = 1 as const;
 
 type HarnessName = "codex" | "copilot";
 type AdapterMode = "native" | "mock";
@@ -188,6 +191,7 @@ export async function runRuntimeNode(
       recoverySessionId = sessionId;
       recovery.abort();
     },
+    ...(options.onNativeGapDiagnostic ? { onNativeGapDiagnostic: options.onNativeGapDiagnostic } : {}),
     });
   } catch (error) {
     // Registration can reject a conflicting static provider/backend. The service
@@ -570,6 +574,8 @@ export interface RuntimeNodeAppOptions {
   pathPolicy?: RuntimePathPolicy;
   /** Called once after startup reattachment and first control registration. */
   onReady?: () => void;
+  /** Fixed-code native-gap diagnostics after durable lifecycle persistence. */
+  onNativeGapDiagnostic?: (diagnostic: NativeGapDiagnostic) => void;
 }
 
 export async function createRuntimeComponents(

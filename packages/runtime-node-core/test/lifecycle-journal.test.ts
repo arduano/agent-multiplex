@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { newCommandId, newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId, newSessionId, packNativePayload } from "@arduano/agent-multiplex-protocol";
+import { newCommandId, newOperationId, newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId, newSessionId, packNativePayload } from "@arduano/agent-multiplex-protocol";
 import { RuntimeNodeStore } from "../src/store.js";
 import { RuntimeLifecycleJournal } from "../src/lifecycle.js";
 
@@ -50,4 +50,24 @@ describe("durable bounded correlation window", () => {
       expect(journal.read(fence).commands[0]!.payloadHash).toBe("one");
     } finally { store.close(); }
   });
+});
+
+it("retains a payload-free native gap diagnostic after idle and store reopen", () => {
+  const root = mkdtempSync(join(tmpdir(), "lifecycle-gap-"));
+  const filename = join(root, "runtime.sqlite");
+  const fence = { sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), bindingRevision: 1, runtimeEpoch: newRuntimeEpoch() };
+  const diagnostic = { diagnosticId: newOperationId(), at: "2026-09-29T00:38:42.809Z", code: "eventHandling" as const,
+    eventKind: "native" as const, pendingEvents: 1, pendingEventBytes: 2048, eventBytes: 512, errorClass: "schema" as const };
+  let store = new RuntimeNodeStore(filename);
+  try {
+    const journal = new RuntimeLifecycleJournal(store);
+    journal.append(fence, { type: "gap", diagnostic });
+    journal.append(fence, { type: "rootIdle", aborted: false });
+    store.close();
+    store = new RuntimeNodeStore(filename);
+    const recovered = new RuntimeLifecycleJournal(store);
+    expect(recovered.read(fence).lastGap).toEqual(diagnostic);
+    expect(recovered.projection(fence).view.health.issues).toContainEqual({ scope: "lifecycle", code: "incompleteNativeState", diagnosticId: diagnostic.diagnosticId });
+    expect(() => recovered.append(fence, { type: "gap", diagnostic: { ...diagnostic, payload: "not allowed" } } as never)).toThrow();
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });

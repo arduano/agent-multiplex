@@ -7,6 +7,18 @@ export const LIFECYCLE_VERSION = 2 as const;
 const opaqueId = z.string().min(1).max(4_096);
 const counter = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const diagnosticId = z.uuid();
+/** Only fixed codes and counts cross this diagnostic boundary; never SDK payloads. */
+export const nativeGapDiagnosticSchema = z.object({
+  diagnosticId,
+  at: z.iso.datetime({ offset: true }),
+  code: z.enum(["eventSerialization", "eventHandling", "imageExtraction", "queueOverflow", "deferredLifecycle"]),
+  eventKind: z.enum(["native", "interaction", "interactionSettled", "status", "settings", "lifecycle"]),
+  pendingEvents: counter,
+  pendingEventBytes: counter,
+  eventBytes: counter.optional(),
+  errorClass: z.enum(["schema", "type", "range", "syntax", "other"]).optional(),
+}).strict();
+export type NativeGapDiagnostic = z.infer<typeof nativeGapDiagnosticSchema>;
 const observationHealthSchema = z.object({
   state: z.enum(["pending", "retrying", "observed"]),
   failures: counter,
@@ -45,6 +57,8 @@ export type LifecycleCommand = z.infer<typeof commandSchema>;
 export const lifecycleStateSchema = z.object({
   version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema,
   nextSequence: counter, continuity: z.enum(["continuous", "gap"]),
+  /** Retained across idle/recovery; one bounded record per binding. */
+  lastGap: nativeGapDiagnosticSchema.optional(),
   aggregateActivity: z.enum(["unknown", "active", "inactive"]),
   nativeAdmission: z.object({ state: z.enum(["open", "degraded"]), diagnosticId: diagnosticId.optional() }).strict(),
   root: z.object({ phase: z.enum(["unknown", "paused", "idle", "working"]), cycle: opaqueId.nullable(), outcome: z.enum(["none", "finished", "interrupted", "failed"]) }).strict(),
@@ -102,7 +116,7 @@ export const lifecycleFactSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("messageConsumed"), messageId: opaqueId, owner: lifecycleOwnerSchema }).strict(),
   z.object({ type: z.literal("commandSettled"), commandId: commandIdSchema, payloadHash: z.string().min(1).max(256) }).strict(),
   z.object({ type: z.literal("compaction"), phase: z.enum(["running", "observedComplete"]) }).strict(),
-  z.object({ type: z.literal("gap") }).strict(),
+  z.object({ type: z.literal("gap"), diagnostic: nativeGapDiagnosticSchema.optional() }).strict(),
 ]);
 export type LifecycleFact = z.infer<typeof lifecycleFactSchema>;
 export const lifecycleEvidenceSchema = z.object({ version: z.literal(LIFECYCLE_VERSION), fence: lifecycleFenceSchema, sequence: counter, fact: lifecycleFactSchema }).strict();
@@ -146,7 +160,7 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
   let s: LifecycleState = { ...state, nextSequence: evidence.sequence + 1 };
   const f = evidence.fact;
   switch (f.type) {
-    case "gap": return invalidate(s);
+    case "gap": return { ...invalidate(s), ...(f.diagnostic ? { lastGap: f.diagnostic } : {}) };
     case "rootStarted": return startRootCycle(s, f.cycleId);
     // Model-loop idle is weaker than whole-session idle. Keep it distinct so a
     // complete task/queue snapshot cannot accidentally project Ready while an
@@ -427,7 +441,8 @@ export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProj
   const issues: LifecycleIssue[] = [];
   if (state.nativeAdmission.state === "degraded") issues.push({ scope: "lifecycle", code: "nativeReadStalled",
     ...(state.nativeAdmission.diagnosticId === undefined ? {} : { diagnosticId: state.nativeAdmission.diagnosticId }) });
-  if (state.continuity === "gap") issues.push({ scope: "lifecycle", code: "continuityGap" });
+  if (state.continuity === "gap") issues.push({ scope: "lifecycle", code: "continuityGap",
+    ...(state.lastGap ? { diagnosticId: state.lastGap.diagnosticId } : {}) });
   for (const [scope, observation] of [["tasks", state.tasks.observation], ["queue", state.queue.observation]] as const) {
     if (observation.state === "pending") issues.push({ scope, code: "observationPending" });
     if (observation.state === "retrying") issues.push({
@@ -437,7 +452,8 @@ export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProj
     });
   }
   if (state.interactions.completeness === "partial" || state.children.completeness === "partial") {
-    issues.push({ scope: "lifecycle", code: "incompleteNativeState" });
+    issues.push({ scope: "lifecycle", code: "incompleteNativeState",
+      ...(state.lastGap && state.interactions.completeness === "partial" ? { diagnosticId: state.lastGap.diagnosticId } : {}) });
   }
   const health: LifecycleHealth = {
     state: stalled ? "degraded" : issues.length > 0 ? "recovering" : "healthy",

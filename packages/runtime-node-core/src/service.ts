@@ -14,6 +14,7 @@ import {
   nativePayloadSchema,
   nativeImagePointerValue,
   type NativePayload,
+  type NativeGapDiagnostic,
   type NativeImageSlot,
   type ImageBeginUploadInput,
   type ImageWriteUploadInput,
@@ -179,6 +180,8 @@ export interface RuntimeNodeServiceOptions {
   nativeEventQueueBytes?: number;
   /** Trusted process supervisor hook. It must stop this runtime before retrying. */
   onCopilotObservationRecoveryRequired?: (sessionId: SessionId) => void;
+  /** Payload-free, best-effort operator diagnostics; lifecycle state is persisted first. */
+  onNativeGapDiagnostic?: (diagnostic: NativeGapDiagnostic) => void;
 }
 
 interface ActiveBinding {
@@ -255,6 +258,7 @@ export class RuntimeNodeService {
   readonly #nativeEventQueueLimit: number;
   readonly #nativeEventQueueBytes: number;
   readonly #onCopilotObservationRecoveryRequired: ((sessionId: SessionId) => void) | undefined;
+  readonly #onNativeGapDiagnostic: ((diagnostic: NativeGapDiagnostic) => void) | undefined;
   #acceptingNativeEvents = true;
   #lastSnapshot: InventorySnapshot | undefined;
   #closed = false;
@@ -271,6 +275,7 @@ export class RuntimeNodeService {
     this.#name = options.name;
     this.#endpointId = options.endpointId;
     this.#onCopilotObservationRecoveryRequired = options.onCopilotObservationRecoveryRequired;
+    this.#onNativeGapDiagnostic = options.onNativeGapDiagnostic;
     this.#resolvedInteractionCacheSize = options.resolvedInteractionCacheSize ?? 1_024;
     if (
       !Number.isSafeInteger(this.#resolvedInteractionCacheSize) ||
@@ -2999,26 +3004,30 @@ export class RuntimeNodeService {
     // terminal statuses still need to retire a stopped binding immediately.
     if (binding.pendingEvents === 0 && (event.kind === "lifecycle" ? Boolean(session) : (!hasPayload || (session && !codec)))) {
       try { this.#onAdapterEvent(sessionId, binding, event); }
-      catch { this.#publishNativeGap(sessionId, binding, "native payload validation failed"); }
+      catch (error) { this.#publishNativeGap(sessionId, binding, "eventHandling", event, undefined, error); }
       return;
     }
-    const bytes = Buffer.byteLength(JSON.stringify(event));
+    let bytes: number;
+    try { bytes = Buffer.byteLength(JSON.stringify(event)); }
+    catch (error) { this.#publishNativeGap(sessionId, binding, "eventSerialization", event, undefined, error); return; }
     if (binding.pendingEvents >= this.#nativeEventQueueLimit || binding.pendingEventBytes + bytes > this.#nativeEventQueueBytes) {
       binding.eventOverflowed = binding.pendingEvents > 0;
       if (!hasPayload) this.#deferLifecycleEvent(sessionId, binding, event);
-      this.#publishNativeGap(sessionId, binding, "native image extraction queue overflowed");
+      this.#publishNativeGap(sessionId, binding, "queueOverflow", event, bytes);
       return;
     }
     binding.pendingEvents += 1;
     binding.pendingEventBytes += bytes;
     if (event.kind === "interaction") binding.queuedInteractions.add(event);
+    let stage: NativeGapDiagnostic["code"] = "imageExtraction";
     const task = binding.events.then(async () => {
       const current = this.#store.getSession(sessionId);
       if (!current || this.#active.get(sessionId) !== binding) return;
       const payload = hasPayload ? await this.#externalize(current, event.payload) : undefined;
+      stage = "eventHandling";
       this.#onAdapterEvent(sessionId, binding, event, payload);
-    }).catch(() => {
-      this.#publishNativeGap(sessionId, binding, "native image extraction failed");
+    }).catch((error: unknown) => {
+      this.#publishNativeGap(sessionId, binding, stage, event, bytes, error);
     });
     binding.events = task;
     this.#nativeEventTasks.set(task, sessionId);
@@ -3033,7 +3042,7 @@ export class RuntimeNodeService {
         // have drained. A stopped binding then rejects every later callback.
         for (const update of deferred) {
           try { this.#onAdapterEvent(sessionId, binding, update); }
-          catch { this.#publishNativeGap(sessionId, binding, "native lifecycle validation failed"); }
+          catch (error) { this.#publishNativeGap(sessionId, binding, "deferredLifecycle", update, undefined, error); }
         }
         binding.eventOverflowed = false;
       }
@@ -3041,9 +3050,21 @@ export class RuntimeNodeService {
     });
   }
 
-  #publishNativeGap(sessionId: SessionId, binding: ActiveBinding, reason: string): void {
-    this.#appendLifecycle(sessionId, binding, { type: "gap" });
-    this.#events.publish({ kind: "nativeGap", sessionId, reason, recovery: "readNativeHistory" });
+  #publishNativeGap(sessionId: SessionId, binding: ActiveBinding, code: NativeGapDiagnostic["code"],
+    event: AdapterEvent, eventBytes?: number, error?: unknown): void {
+    const errorClass: NativeGapDiagnostic["errorClass"] = error instanceof TypeError ? "type"
+      : error instanceof RangeError ? "range"
+        : error instanceof SyntaxError ? "syntax"
+          : error instanceof Error && error.name === "ZodError" ? "schema" : "other";
+    const diagnostic: NativeGapDiagnostic = {
+      diagnosticId: newOperationId(), at: now(), code, eventKind: event.kind,
+      pendingEvents: binding.pendingEvents, pendingEventBytes: binding.pendingEventBytes,
+      ...(eventBytes === undefined ? {} : { eventBytes }),
+      ...(error === undefined ? {} : { errorClass }),
+    };
+    this.#appendLifecycle(sessionId, binding, { type: "gap", diagnostic });
+    this.#events.publish({ kind: "nativeGap", sessionId, reason: `native ${code} (diagnostic ${diagnostic.diagnosticId})`, recovery: "readNativeHistory" });
+    try { this.#onNativeGapDiagnostic?.(diagnostic); } catch { /* Diagnostics never replace native behavior. */ }
   }
 
   #deferLifecycleEvent(

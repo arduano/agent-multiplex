@@ -40,7 +40,7 @@ availability. Internal reducer fields and cursors are not a browser contract.
 The state is:
 
 ```text
-(version, fence, nextSequence, continuity,
+(version, fence, nextSequence, continuity, lastGap?,
  aggregateActivity, nativeAdmission, root, tasks, children, queue, interactions,
  commands, displayedMessageIds, consumedMessageIds, compaction)
 ```
@@ -53,6 +53,7 @@ version `6` so a later lifecycle revision can be negotiated deliberately.
 | `fence` | `(sessionId, runtimeNodeId, runtimeNodeBootId, bindingRevision, runtimeEpoch)` | Exact execution incarnation. Every member must match. A replacement boot, binding or native epoch starts an uncertified state; evidence never crosses the fence. |
 | `nextSequence` | Nonnegative integer | Next runtime lifecycle-evidence sequence for this exact fence. Duplicate/old evidence is ignored. A jump invalidates certainty. |
 | `continuity` | `continuous \| gap` | Whether projection has an unbroken baseline for the current foreground cycle. An authoritative replacement snapshot or new fence can clear a gap. A uniquely identified later root start establishes continuity for its new foreground cycle; a later root whole-session idle establishes a quiescent root boundary. Other invalidated dimensions retain their own unknown markers. |
+| `lastGap` | Optional bounded diagnostic | The latest gap's ID, time, fixed failure stage and event kind, queue counts, and optional error class. It contains no SDK payload, message text or exception text and remains available after an idle event for incident correlation. It is evidence about runtime admission, not a certificate of recovered interaction state. |
 | `aggregateActivity` | `unknown \| active \| inactive` | The SDK's `metadata.activity()` bit covers root turns **or** tasks. It may block a Ready/Finished projection while active, but cannot start, finish, or identify a root cycle. A gap resets it to unknown. |
 | `nativeAdmission` | `{state: open \| degraded, diagnosticId?}` | Runtime-owned native-read health for this binding. Degraded blocks further Copilot mutations and starts a bounded recovery deadline. Only fresh task and queue observations can reopen it. It persists across restart until a new binding is established. |
 | `root` | `{phase, cycle, outcome}` | Root model/session dimension. `phase` is `unknown`, `paused`, `idle`, or `working`; `paused` means the model loop paused or an aggregate inactive read paused a working root, while `idle` requires a whole-session idle or explicit root failure. `cycle` is the unique observed root-start event ID or `null`; `outcome` is `none`, `finished`, `interrupted`, or `failed`. A new explicit root start clears the prior outcome. |
@@ -117,6 +118,13 @@ For an incoming lifecycle evidence envelope:
 | `sequence > nextSequence`, fact is `rootStarted` | Invalidate all dimensions, advance `nextSequence`, then accept the unique start as the continuous boundary for its new root cycle. Tasks, queue, children and interactions remain unknown. |
 | `sequence === nextSequence` | Advance once and apply the fact below. |
 | Exact `gap` fact | Apply the same invalidation after consuming its exact sequence. |
+
+A runtime-generated exact `gap` fact may carry the bounded `lastGap`
+diagnostic. The runtime persists it before publishing the native-gap stream
+event or invoking the Host's best-effort diagnostic hook. The hook may write a
+protected, rotating log and must not affect the native event path if logging
+fails. The public lifecycle health issue carries only the diagnostic ID; the
+internal journal retains fixed codes and counts for later inspection.
 
 Invalidation clears root phase/cycle/outcome certainty; advances task and queue
 revisions and marks both pending; marks children unknown; clears interactions

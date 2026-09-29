@@ -5,16 +5,40 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-28 (Codex 0.158.0 source release preparation).
+Last reconciled: 2026-09-29 (Copilot gap diagnostic hotfix.21 candidate).
 
-## Codex 0.158.0 source release candidate
+## Copilot gap diagnostic hotfix.21 candidate
 
-The isolated `0.2.4-hotfix.20` preparation branch advances the Codex app-server
-CLI pin from the signed `.19` prerelease's `0.152.0` to `0.158.0` across the maintained adapter and its
-generated protocol declarations. The 16 maintained framework package versions
-and internal dependencies advance together. The protocol remains v6; the
-published `@arduano/p2prpc-core@0.3.0-renewal.1` and Copilot pins remain exact.
-This is source preparation, not a published or deployed framework release.
+This checkout has a source-only follow-up to the Windows Copilot session
+continuity incident. The runtime now classifies a native gap by fixed failure
+stage and event kind, records its diagnostic ID and bounded counts in the
+durable lifecycle journal, and supplies the same payload-free record to a
+best-effort Host logging hook. The public lifecycle view exposes only the
+correlating diagnostic ID on relevant health issues. SDK payloads, prompts,
+exception messages and private configuration are excluded.
+
+The trigger of the September 29 incident remains unknown; these diagnostics
+will identify the stage if it recurs after a coordinated deployment. The
+existing cold Copilot resume certificate remains the source of interaction
+certainty. This source advances the lockstep graph to `.21`; publication and
+installed deployment are separate steps. A Leo Copilot Host using this hook
+requires the `.21` runtime-node package. The
+[lifecycle design](../design/copilot-session-lifecycle-vnext.md#recovery-crash-and-gaps)
+defines the evidence boundary.
+
+The `.21` candidate passed typecheck, a clean full suite (117 files, 1,100
+tests, four workers and a 60-second per-test limit), production build,
+documentation, release-metadata, checkpoint and high-severity audit gates.
+The audit reported only two moderate findings in Vitest's development-time
+mocking dependency. Packed artifact and distribution verification remain
+separate release steps.
+
+## Published Codex 0.158.0 hotfix.20 baseline
+
+The signed `hotfix-2026-09-28.2` prerelease publishes 16 packages at
+`0.2.4-hotfix.20`. It advances the Codex app-server CLI pin from `.19`'s
+`0.152.0` to `0.158.0`. The `.21` candidate retains that pin, protocol v6,
+the published `@arduano/p2prpc-core@0.3.0-renewal.1`, and Copilot pins.
 
 One disposable Linux `gpt-6-luna` text-and-image turn passed through the
 `0.158.0` Codex adapter at source commit `19923c5`. Native events, image
@@ -346,10 +370,10 @@ Suggested first prompt for a new session:
 | Wire protocol | `6` in maintained source; coordinated upgrade required from protocol v5 |
 | Signed stable release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3), protocol v5; later published hotfix prereleases are recorded above |
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
-| Public package graph | Signed stable `0.2.3`; latest signed Leo V6 hotfix tag `hotfix-2026-09-28.1` contains 16 lockstep packages at `0.2.4-hotfix.19` |
+| Public package graph | Signed stable `0.2.3`; latest signed Leo V6 hotfix tag `hotfix-2026-09-28.2` contains 16 lockstep packages at `0.2.4-hotfix.20`; `.21` is a source candidate |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
 | Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 release-preparation lock pins published `0.3.0-renewal.1` and the reviewed Iroh closure, with final framework qualification pending |
-| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; current `.20` source candidate: Codex CLI `0.158.0`. Copilot SDK `1.0.14` and optional CLI `1.0.88` are unchanged. |
+| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; published `.20` and candidate `.21`: Codex CLI `0.158.0`. Copilot SDK `1.0.14` and optional CLI `1.0.88` are unchanged. |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
 The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains
