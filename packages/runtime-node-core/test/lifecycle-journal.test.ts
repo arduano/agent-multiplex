@@ -28,10 +28,28 @@ it("repairs the receipt/ledger crash window by exact identity without dispatch a
     const state = recovered.read(fence);
     expect(state.commands[0]).toMatchObject({ admission: "accepted", displayed: true, consumed: false, settled: false });
     expect(recovered.read(fence)).toEqual(state);
-    expect(recovered.read({ ...fence, runtimeNodeBootId: newRuntimeNodeBootId() }).commands).toEqual([]);
+    const rebooted = recovered.read({ ...fence, runtimeNodeBootId: newRuntimeNodeBootId() });
+    expect(rebooted.commands[0]).toMatchObject({ commandId, admission: "accepted", displayed: true });
+    expect(rebooted.queue.observation.state).toBe("pending");
     expect(recovered.read({ ...fence, runtimeEpoch: newRuntimeEpoch() }).root.phase).toBe("unknown");
     expect(recovered.read({ ...fence, bindingRevision: 2 }).root.phase).toBe("unknown");
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});
+
+it("recovers a Codex client message ID from the durable request after a receipt-first crash", () => {
+  const store = new RuntimeNodeStore(":memory:");
+  try {
+    const fence = { sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(), bindingRevision: 1, runtimeEpoch: newRuntimeEpoch() };
+    const journal = new RuntimeLifecycleJournal(store), commandId = newCommandId(), payloadHash = "codex-crash-window";
+    journal.append(fence, { type: "commandPrepared", commandId, payloadHash, kind: "steer" });
+    journal.append(fence, { type: "commandReceipt", commandId, payloadHash, admission: "dispatched" });
+    journal.append(fence, { type: "messageConsumed", owner: "root", messageId: "client-exact" });
+    store.putCommand({ commandId, payloadHash, sessionId: fence.sessionId, runtimeNodeId: fence.runtimeNodeId, state: "succeeded",
+      request: { bindingRevision: 1, request: { harness: "codex", command: { type: "steer", input: "fixture", native: { clientUserMessageId: "client-exact" } } } },
+      createdAt: "2026-09-29T00:00:00.000Z", updatedAt: "2026-09-29T00:00:00.000Z" });
+    expect(journal.read(fence).commands[0]).toMatchObject({ admission: "accepted", messageId: "client-exact", consumed: true });
+    expect(journal.command(commandId, fence)).toMatchObject({ delivery: "consumed", continuation: "complete" });
+  } finally { store.close(); }
 });
 
 describe("durable bounded correlation window", () => {

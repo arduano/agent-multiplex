@@ -28,7 +28,16 @@ An unknown effort stays unknown rather than inheriting a previous model's
 value. Focused adapter tests passed; full gates, package publication, Leo
 source pinning, live candidate qualification and deployment remain separate.
 
-## Copilot gap diagnostic hotfix.21 candidate
+## Host message delivery source candidate
+
+This isolated source branch also contains an unpublished `messages.delivery`
+v1 runtime candidate for Codex and Copilot. The runtime projects bounded
+unresolved message admission and exact native delivery from its durable
+command/lifecycle journals; a matching Leo UI candidate consumes the Host
+view. Publication, packed-consumer qualification and installed activation
+remain separate campaign gates. See [adapter guidance](Adapters-and-Terminals.md#host-message-delivery).
+
+## Published Copilot gap diagnostic hotfix.21
 
 This checkout has a source-only follow-up to the Windows Copilot session
 continuity incident. The runtime now classifies a native gap by fixed failure

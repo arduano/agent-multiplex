@@ -276,6 +276,28 @@ native tool only to create harmless fixture work; the public adapter exposes
 only the native task controls. Windows and model-driven agent/client behavior
 remain separate UAT.
 
+### Host message delivery
+
+The runtime advertises `messages.delivery` v1 for Codex and Copilot and serves
+`{ harness, view: "messageDeliveries" }` through `sessions.readNativeState`.
+This is a bounded Host-owned view of at most 32 unresolved send/steer commands,
+each with its original command ID, admission or exact native delivery state,
+a 2,048-character preview and image count. The original durable command
+receipt and runtime's private correlation journal own this state; a browser
+never creates a second native queue. The view requires an active binding and
+read access, and never sends a prompt, resumes a session or scans native
+history.
+
+Codex uses the request's `clientUserMessageId` and an exact root-thread
+`userMessage` item echo to move from accepted to consumed. If the native echo
+is absent, the Host keeps Accepted rather than matching text or elapsed time.
+Copilot uses its acknowledged logical `messageId`; only a fresh native queue
+item with the same ID proves Queued, and only an exact root `user.message`
+proves display or consumption. Text-only steering entries have no causal ID
+and remain Accepted until the exact message event arrives. Command receipts
+and exact message evidence survive a runtime boot or resume for the same
+binding revision; task, queue and interaction observations start fresh.
+
 ### Copilot pending messages
 
 `queue.pending` v1 advertises `sessions.readNativeState` with

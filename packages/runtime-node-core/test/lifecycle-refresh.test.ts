@@ -173,6 +173,25 @@ const queueResult = {
 };
 
 describe("server-owned Copilot lifecycle refresh", () => {
+  it("shows exact queued messages from the Host and never attributes anonymous steering text", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
+    await vi.waitFor(async () => expect((await lifecycleState(f)).queue.observation.state).toBe("observed"));
+    f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    f.session.emit({ kind: "lifecycle", fact: { type: "rootStarted", cycleId: "cycle-1" } });
+    f.session.execute = async () => ({ messageId: "message-1" });
+    const commandId = newCommandId();
+    const receipt = await f.service.execute({ commandId, payloadHash: "copilot-queue-hash", sessionId: f.launch.sessionId,
+      runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "copilot", command: { type: "steer", prompt: "Steer pending", mode: "immediate" } } });
+    expect(receipt.state).toBe("succeeded");
+    const read = () => f.service.readNativeState(f.launch.sessionId, { harness: "copilot", view: "messageDeliveries" });
+    expect((await read()).payload.json).toMatchObject({ items: [{ commandId, state: "queued", messageId: "message-1" }], queueObservation: "observed" });
+    f.session.emit({ kind: "lifecycle", fact: { type: "messageConsumed", messageId: "unrelated-message", owner: "root" } });
+    expect((await read()).payload.json).toMatchObject({ items: [{ commandId, state: "queued" }] });
+    f.session.emit({ kind: "lifecycle", fact: { type: "messageConsumed", messageId: "message-1", owner: "root" } });
+    expect((await read()).payload.json).toMatchObject({ items: [] });
+  });
+
   it("does not turn root idle into Ready while a fresh task snapshot is running", async () => {
     const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
     await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));

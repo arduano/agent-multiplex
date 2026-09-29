@@ -26,6 +26,19 @@ function step(state: LifecycleState, fact: LifecycleFact): LifecycleState {
 }
 
 describe("command observation continuation", () => {
+  it("enriches an accepted receipt with a later exact native ID without downgrading admission", () => {
+    const commandId = newCommandId(), sessionId = newSessionId(), runtimeNodeId = newRuntimeNodeId();
+    const receipt: CommandRecord = { commandId, payloadHash: "late-native-id", sessionId, runtimeNodeId, state: "succeeded",
+      request: { request: { harness: "codex", command: { type: "steer", input: "fixture" } } }, createdAt: timestamp, updatedAt: timestamp };
+    let state = initialLifecycle({ sessionId, runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(), runtimeEpoch: newRuntimeEpoch(), bindingRevision: 1 });
+    state = step(state, { type: "commandPrepared", commandId, payloadHash: "late-native-id", kind: "steer" });
+    state = step(state, { type: "commandReceipt", commandId, payloadHash: "late-native-id", admission: "accepted" });
+    state = step(state, { type: "messageConsumed", owner: "root", messageId: "native-late" });
+    state = step(state, { type: "commandReceipt", commandId, payloadHash: "late-native-id", admission: "accepted", messageId: "native-late" });
+    expect(commandObservationView(receipt, state)).toMatchObject({ delivery: "consumed", continuation: "complete" });
+    expect(() => step(state, { type: "commandReceipt", commandId, payloadHash: "late-native-id", admission: "accepted", messageId: "another-id" })).toThrow("identity conflict");
+  });
+
   it.each(["send", "steer"] as const)("ends automatic delivery observation when a successful %s has no exact native message ID", (kind) => {
     const commandId = newCommandId();
     const sessionId = newSessionId();

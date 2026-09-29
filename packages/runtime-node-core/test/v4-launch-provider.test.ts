@@ -236,6 +236,43 @@ class FakeProvider implements RuntimeLaunchProvider {
 }
 
 describe("runtime v4 launch providers", () => {
+  it("owns Codex steering acceptance until the exact native user item is observed", async () => {
+    const fixture = createProviderFixture();
+    const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(launch);
+    await waitForLaunch(fixture.service, launch.launchId, "succeeded");
+    const session = fixture.adapter.sessions.get("native-1")!;
+    const command = { commandId: newCommandId(), payloadHash: "codex-message-hash", sessionId: launch.sessionId,
+      runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "codex" as const, command: { type: "steer" as const, input: "A queued steer",
+        native: { clientUserMessageId: "client-message-1" } } } };
+    expect((await fixture.service.catalog())[0]?.capabilities).toContainEqual({ name: "messages.delivery", version: "v1", experimental: false });
+    expect((await fixture.service.execute(command)).state).toBe("succeeded");
+    const read = () => fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" });
+    expect((await read()).payload.json).toMatchObject({ items: [{ commandId: command.commandId, state: "accepted", text: "A queued steer", messageId: "client-message-1" }] });
+    session.emit({ kind: "native", nativeType: "item/started", ephemeral: false, payload: { threadId: session.vendorSessionId,
+      item: { type: "userMessage", clientId: "another-message" } } });
+    expect((await read()).payload.json).toMatchObject({ items: [{ commandId: command.commandId, state: "accepted" }] });
+    session.emit({ kind: "native", nativeType: "item/started", ephemeral: false, payload: { threadId: session.vendorSessionId,
+      item: { type: "userMessage", clientId: "client-message-1" } } });
+    expect((await read()).payload.json).toMatchObject({ items: [] });
+    expect(fixture.service.observeCommand(command.commandId)).toMatchObject({ delivery: "consumed", continuation: "complete" });
+    let release!: () => void;
+    session.execute = () => new Promise(resolve => { release = () => resolve({ ok: true }); });
+    const waiting = { ...command, commandId: newCommandId(), payloadHash: "codex-waiting-hash",
+      request: { harness: "codex" as const, command: { type: "steer" as const, input: "Second steer",
+        native: { clientUserMessageId: "client-message-2" } } } };
+    const mutation = fixture.service.execute(waiting);
+    await eventually(() => typeof release === "function" ? true : undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const whileNativePending = await Promise.race([read(), new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error("Host delivery read waited behind the native steer")), 1_000);
+    })]).finally(() => clearTimeout(timer));
+    expect(whileNativePending.payload.json).toMatchObject({ items: [{ commandId: waiting.commandId, state: "dispatched" }] });
+    release(); expect((await mutation).state).toBe("succeeded");
+    await fixture.service.close(); fixture.store.close();
+  });
+
   it("durably records a definite input-validation failure before provider work", async () => {
     const fixture = createProviderFixture();
     const request = launchRequest(

@@ -4,6 +4,7 @@ import {
   lifecycleProjection,
   lifecycleNativeObservationDegraded,
   lifecycleFactSchema,
+  projectDelivery,
   sameLifecycleFence,
   type LifecycleFact,
   type LifecycleFence,
@@ -423,11 +424,14 @@ export class RuntimeNodeService {
     );
     return entries.map((entry) => {
       const backend = this.#terminals.providerBackend(entry.harness, entry.adapterScopeId);
-      if (!backend || !entry.available) return entry;
+      const capabilities = entry.harness === "codex" || entry.harness === "copilot"
+        ? [...entry.capabilities, { name: "messages.delivery", version: "v1", experimental: false }]
+        : entry.capabilities;
+      if (!backend || !entry.available) return { ...entry, capabilities };
       return {
         ...entry,
         capabilities: [
-          ...entry.capabilities,
+          ...capabilities,
           {
             name: "terminal.side-channel",
             version: "v1",
@@ -951,10 +955,10 @@ export class RuntimeNodeService {
         this.#launchRegistry.backendForSession(record).adapter.imageCodec?.validateCommand?.(input.request);
         const reconstructed = await this.#reconstructImages(input, record);
         const request = await this.#nativePathPolicy.command(reconstructed);
-        if (request.harness === "copilot") {
+        if (request.harness === "copilot" || request.harness === "codex" && (request.command.type === "send" || request.command.type === "steer")) {
           const kind = request.command.type === "send" || request.command.type === "steer" || request.command.type === "compact" ? request.command.type : "other";
-          this.#appendLifecycle(input.sessionId, active, { type: "commandPrepared", commandId: input.commandId, payloadHash: input.payloadHash, kind });
-          this.#appendLifecycle(input.sessionId, active, { type: "commandReceipt", commandId: input.commandId, payloadHash: input.payloadHash, admission: "dispatched" });
+          this.#appendMessageDelivery(input.sessionId, active, { type: "commandPrepared", commandId: input.commandId, payloadHash: input.payloadHash, kind });
+          this.#appendMessageDelivery(input.sessionId, active, { type: "commandReceipt", commandId: input.commandId, payloadHash: input.payloadHash, admission: "dispatched" });
         }
         const result = await active.session.execute(request);
         this.#syncHarnessSettings(input.sessionId, active);
@@ -971,7 +975,7 @@ export class RuntimeNodeService {
     const receipt = this.#store.getCommand(commandId);
     if (!receipt) return null;
     const binding = receipt.sessionId === null ? undefined : this.#active.get(receipt.sessionId);
-    const fence = binding && this.#lifecycleFence(receipt.sessionId!, binding);
+    const fence = binding && this.#messageDeliveryFence(receipt.sessionId!, binding);
     return this.#lifecycle.command(commandId, fence);
   }
 
@@ -996,6 +1000,9 @@ export class RuntimeNodeService {
   }
 
   public readNativeState(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult> {
+    // Delivery is a runtime journal read. Keeping it behind the per-session
+    // native mutation lock would hide Dispatched while the SDK call is slow.
+    if (request.view === "messageDeliveries") return this.#admit(() => this.#readNativeState(sessionId, request));
     return this.#admit(() => this.#serialize(sessionId, () => this.#readNativeState(sessionId, request)));
   }
 
@@ -1011,6 +1018,25 @@ export class RuntimeNodeService {
     const active = this.#active.get(sessionId);
     if (!active || record.availability !== "active") throw new RuntimeNodeProtocolError("CONFLICT", "native state requires an active session binding");
     if (expectedBinding && active !== expectedBinding) throw new RuntimeNodeProtocolError("FENCED", "native state binding changed before observation");
+    if (request.view === "messageDeliveries") {
+      const fence = this.#messageDeliveryFence(sessionId, active);
+      if (!fence) throw new RuntimeNodeProtocolError("FENCED", "message delivery binding is unavailable");
+      const state = this.#lifecycle.read(fence);
+      const unresolved = state.commands.filter(command => (command.kind === "send" || command.kind === "steer") &&
+        !command.consumed && !command.settled && command.admission !== "failed");
+      const items = unresolved.slice(-32).map(command => {
+        const receipt = this.#store.getCommand(command.commandId);
+        if (!receipt || receipt.sessionId !== sessionId || receipt.payloadHash !== command.payloadHash) return undefined;
+        const source = messageRequest(receipt);
+        if (!source || source.harness !== record.harness || source.command.type !== command.kind) return undefined;
+        return { commandId: command.commandId, kind: command.kind, state: projectDelivery(command, state).toLowerCase(),
+          text: messagePreview(source), imageCount: messageImageCount(receipt), createdAt: receipt.createdAt,
+          ...(command.messageId ? { messageId: command.messageId } : {}) };
+      }).filter(item => item !== undefined);
+      return { harness: record.harness, vendorSessionId: record.vendorSessionId,
+        payload: packNativePayload({ items, omitted: Math.max(0, unresolved.length - 32),
+          ...(record.harness === "copilot" ? { queueObservation: state.queue.observation.state } : {}) }) };
+    }
     if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");
     const lifecycleFence = this.#lifecycleFence(sessionId, active);
     const observation = recordLifecycle && lifecycleFence ? this.#lifecycle.read(lifecycleFence) : undefined;
@@ -2442,8 +2468,13 @@ export class RuntimeNodeService {
 
   #lifecycleFence(sessionId: SessionId, binding: ActiveBinding): LifecycleFence | undefined {
     if (binding.session.harness !== "copilot") return undefined;
+    return this.#messageDeliveryFence(sessionId, binding);
+  }
+
+  #messageDeliveryFence(sessionId: SessionId, binding: ActiveBinding): LifecycleFence | undefined {
     const record = this.#store.getSession(sessionId);
-    if (!record || record.runtimeEpoch !== binding.session.runtimeEpoch || record.availability !== "active") return undefined;
+    if (!record || record.runtimeEpoch !== binding.session.runtimeEpoch || record.availability !== "active" ||
+      record.harness !== binding.session.harness || record.vendorSessionId !== binding.session.vendorSessionId) return undefined;
     return { sessionId, runtimeNodeId: this.#runtimeNodeId, runtimeNodeBootId: this.#runtimeNodeBootId,
       bindingRevision: record.bindingRevision, runtimeEpoch: binding.session.runtimeEpoch };
   }
@@ -2520,6 +2551,13 @@ export class RuntimeNodeService {
     }
     const record = this.#store.getSession(sessionId);
     if (record) this.#publishSession(record);
+  }
+
+  #appendMessageDelivery(sessionId: SessionId, binding: ActiveBinding, fact: LifecycleFact): void {
+    if (binding.session.harness === "copilot") { this.#appendLifecycle(sessionId, binding, fact); return; }
+    if (this.#active.get(sessionId) !== binding) return;
+    const fence = this.#messageDeliveryFence(sessionId, binding);
+    if (fence) this.#lifecycle.append(fence, fact);
   }
 
   #scheduleLifecycleRefresh(
@@ -3103,6 +3141,14 @@ export class RuntimeNodeService {
       return;
     }
     if (event.kind === "native") {
+      if (binding.session.harness === "codex" && (event.nativeType === "item/started" || event.nativeType === "item/completed")) {
+        const native = objectRecord(event.payload);
+        const item = objectRecord(native?.item);
+        const clientId = item?.type === "userMessage" && native?.threadId === binding.session.vendorSessionId ? item.clientId : undefined;
+        if (typeof clientId === "string" && clientId.length > 0 && clientId.length <= 4_096) {
+          this.#appendMessageDelivery(sessionId, binding, { type: "messageConsumed", messageId: clientId, owner: "root" });
+        }
+      }
       const timestamp = Date.now();
       if (timestamp - binding.lastActivityPersistedAt >= 1_000) {
         const record = this.#store.getSession(sessionId);
@@ -3362,8 +3408,13 @@ export class RuntimeNodeService {
       const current = this.#store.getSession(sessionId);
       if (binding && current?.bindingRevision === original.bindingRevision) {
         const value = record.result?.json;
-        const messageId = value && typeof value === "object" && !Array.isArray(value) && typeof value.messageId === "string" ? value.messageId : undefined;
-        this.#appendLifecycle(sessionId, binding, { type: "commandReceipt", commandId, payloadHash,
+        const source = messageRequest(record);
+        const nativeMessageId = source?.harness === "codex" && (source.command.type === "send" || source.command.type === "steer")
+          ? source.command.native?.clientUserMessageId : undefined;
+        const messageId = binding.session.harness === "codex"
+          ? typeof nativeMessageId === "string" && nativeMessageId.length > 0 && nativeMessageId.length <= 4_096 ? nativeMessageId : undefined
+          : value && typeof value === "object" && !Array.isArray(value) && typeof value.messageId === "string" ? value.messageId : undefined;
+        this.#appendMessageDelivery(sessionId, binding, { type: "commandReceipt", commandId, payloadHash,
           admission: record.state === "succeeded" ? "accepted" : record.state === "failed" ? "failed" : "outcomeUnknown",
           ...(messageId ? { messageId } : {}) });
       }
@@ -3508,6 +3559,36 @@ function isTerminalArchive(state: ArchiveRecord["state"]): boolean {
 function errorText(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return (message || "unknown runtime error").slice(0, 16_384);
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function messageRequest(receipt: CommandRecord): HarnessCommand | undefined {
+  const candidate = objectRecord(receipt.request)?.request;
+  const parsed = harnessCommandSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function messagePreview(request: HarnessCommand): string {
+  let text = "";
+  if (request.harness === "codex" && (request.command.type === "send" || request.command.type === "steer")) {
+    const input = request.command.input;
+    text = typeof input === "string" ? input : input.flatMap(part => {
+      const item = objectRecord(part);
+      return item?.type === "text" && typeof item.text === "string" ? [item.text] : [];
+    }).join("\n");
+  } else if (request.harness === "copilot" && (request.command.type === "send" || request.command.type === "steer")) {
+    const prompt = request.command.prompt;
+    text = typeof prompt === "string" ? prompt : typeof prompt.prompt === "string" ? prompt.prompt : "";
+  }
+  return text.length > 2_048 ? `${text.slice(0, 2_048)}…` : text;
+}
+
+function messageImageCount(receipt: CommandRecord): number {
+  const images = objectRecord(receipt.request)?.images;
+  return Array.isArray(images) ? images.length : 0;
 }
 
 function deduplicateModels(models: readonly NativeModel[]): NativeModel[] {

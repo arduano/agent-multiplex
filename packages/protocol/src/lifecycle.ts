@@ -271,7 +271,14 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
       if (old.payloadHash !== f.payloadHash || (old.messageId !== undefined && f.messageId !== undefined && old.messageId !== f.messageId)) throw new Error("lifecycle command identity conflict");
       if (old.admission === "accepted" || old.admission === "failed") {
         if ((f.admission === "accepted" || f.admission === "failed") && old.admission !== f.admission) throw new Error("lifecycle terminal receipt conflict");
-        return s;
+        // A receipt may become durable before its native identity is appended.
+        // Enrich that exact terminal admission without regressing its state.
+        if (f.messageId === undefined || old.messageId !== undefined) return s;
+        const messageId = f.messageId;
+        return { ...s, commands: s.commands.map(c => c !== old ? c : { ...c, messageId,
+          displayed: c.displayed || s.displayedMessageIds.includes(messageId),
+          consumed: c.consumed || s.consumedMessageIds.includes(messageId),
+        }) };
       }
       if (old.admission === "outcomeUnknown" && f.admission === "dispatched") return s;
       const messageId = f.messageId ?? old.messageId;

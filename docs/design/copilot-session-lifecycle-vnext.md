@@ -288,6 +288,18 @@ delivery refinement. A successful send or steer with no exact native message
 ID ends at Accepted because later evidence cannot be joined safely. An
 `outcomeUnknown` receipt requires manual review and never authorizes replay.
 
+The runtime's `messages.delivery` v1 read projects a bounded unresolved
+send/steer subset from this same private journal. Codex participates using
+its caller-supplied `clientUserMessageId` as the correlation identity and the
+root-thread native `userMessage` item as consumption evidence. A successful
+Codex steer with no exact echo remains Accepted. The read returns a preview
+from the original durable request, not a browser-authored queue or a new
+catalog record. On boot or native resume, exact command and message facts for
+the same session/runtime/binding revision carry forward; queue freshness,
+tasks, root activity and interactions reset under the new lifecycle fence.
+An accepted receipt can gain its exact native ID after the receipt write,
+including during crash repair, without changing its terminal admission.
+
 ## UI projections
 
 Session state and per-command delivery are two projections. A UI should display
