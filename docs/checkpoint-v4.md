@@ -6,13 +6,19 @@ An isolated integration branch combines the unpublished D1 confirmed-stop
 projection correction, D2 Copilot reasoning selection, D4 Host message delivery
 view, D6 bounded file previews, and D7 bounded child native history. Copilot
 now advertises `reasoning-effort.switch` only with the new native command
-contract, so a mixed-version UI can hide that control. No package version was
-advanced, published, installed, or sent a model prompt from this branch.
+contract, so a mixed-version UI can hide that control. The integration source
+commit did not advance a package version or send a model prompt.
 
 The combined source passed typecheck, production build, 117 focused tests and
 the full **1,115-test / 119-file** suite with two workers. Checkpoint,
 documentation and release-metadata checks passed. Packed consumer, native
 Windows, installed-host and disposable model qualifications remain separate.
+
+The separate `prep/defect-graph-hotfix22-20260929` worktree advances all 16
+package manifests and the lockfile to `0.2.4-hotfix.22` solely to prepare a
+distinct local package graph. This preparation has not been published or
+installed. The preceding source-suite result applies to the `.21` integration
+commit; exact `.22` package and consumer gates are recorded separately.
 
 ## Stopped binding inventory correction candidate — 2026-09-29
 
