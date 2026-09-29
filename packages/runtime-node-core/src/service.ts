@@ -1230,7 +1230,7 @@ export class RuntimeNodeService {
     return this.#admit(() => this.#serialize(input.sessionId, async () => {
       const session = this.#imageSession(input);
       const backend = this.#launchRegistry.backendForSession(session);
-      return this.#images.snapshot(input, input.sourceKey, input.path, session, backend, this.#localImageBackends.has(backend.backendId));
+      return this.#images.snapshot(input, input.sourceKey, input.path, session, backend, this.#localImageBackends.has(backend.backendId), true);
     }));
   }
   public imageLimits(input: ImageTarget) {

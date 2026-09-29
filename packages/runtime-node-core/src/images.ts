@@ -1,15 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
   IMAGE_MAX_BYTES, IMAGE_MAX_CHUNK_BYTES, IMAGE_MAX_COMMAND_IMAGES,
-  imageBeginUploadInputSchema, imageDescriptorSchema, imageReadInputSchema,
+  imageBeginUploadInputSchema, imageDescriptorSchema, imageMediaTypeSchema, imageReadInputSchema,
   imageWriteUploadInputSchema, imageUploadIdInputSchema,
-  type ImageBeginUploadInput, type ImageDescriptor, type ImageLimits,
-  type ImageReadInput, type ImageReadResult, type ImageTarget,
+  type ImageBeginUploadInput, type ImageDescriptor, type ImageLimits, type ImageMediaType,
+  type ImageReadInput, type ImageReadResult, type ImageTarget, type PreviewMediaType,
   type ImageUploadIdInput, type ImageUploadState, type ImageWriteUploadInput,
   type RuntimeNodeSessionRecord, type RuntimeNodeId, type SessionId,
 } from "@arduano/agent-multiplex-protocol";
@@ -170,6 +170,7 @@ export class RuntimeImages {
 
   getBytes(target: ImageTarget, image: ImageDescriptor): Promise<Buffer> {
     return this.#serialize(async () => {
+      if (!imageMediaTypeSchema.safeParse(image.mediaType).success) throw new RuntimeImageError("FENCED", "only images may be attached to commands");
       const entry = this.#require({ ...target, imageId: image.imageId });
       if (!entry.committed || JSON.stringify(this.#descriptor(entry)) !== JSON.stringify(imageDescriptorSchema.parse(image))) {
         throw new RuntimeImageError("FENCED", "command image descriptor differs from runtime-owned image");
@@ -186,11 +187,11 @@ export class RuntimeImages {
     });
   }
 
-  snapshot(target: ImageTarget, sourceKey: string, path: string, session: RuntimeNodeSessionRecord, backend: RuntimeAgentBackend, localFilesystem: boolean): Promise<ImageDescriptor> {
+  snapshot(target: ImageTarget, sourceKey: string, path: string, session: RuntimeNodeSessionRecord, backend: RuntimeAgentBackend, localFilesystem: boolean, previewDocuments = false): Promise<ImageDescriptor> {
     return this.#serialize(async () => {
       const existing = this.#store.listImages(target.sessionId).find((entry) => entry.sourceKey === sourceKey);
       if (existing?.committed) { this.#owned(existing, target); return this.#descriptor(existing); }
-      if (!path || path.startsWith("//") || path.includes("\\") || /[\x00-\x1f\x7f]/.test(path) || /^[a-z][a-z0-9+.-]*:/i.test(path)) {
+      if (!validPreviewPath(path)) {
         throw new RuntimeImageError("FENCED", "image path must be a local workspace path");
       }
       if (!isAbsolute(path) && !session.cwd) throw new RuntimeImageError("FENCED", "relative image path requires a session workspace");
@@ -200,9 +201,9 @@ export class RuntimeImages {
         : localFilesystem
           ? await readConfinedImage(nativePath, [session.cwd, ...(this.#options.outputRoots ?? [])].filter((root): root is string => root !== null), IMAGE_MAX_BYTES, [await this.#root])
           : (() => { throw new RuntimeImageError("UNSUPPORTED", "custom image backend requires its own file reader"); })();
-      if (bytes.length > IMAGE_MAX_BYTES) throw new RuntimeImageError("RESOURCE_EXHAUSTED", "image exceeds maximum byte length");
+      if (bytes.length > IMAGE_MAX_BYTES) throw new RuntimeImageError("RESOURCE_EXHAUSTED", "preview exceeds maximum byte length");
       if (existing) await this.#remove(existing);
-      return this.#storeBytes(target, bytes, sourceKey);
+      return this.#storeBytes(target, bytes, sourceKey, previewDocuments ? identifyPathPreview(nativePath, bytes) : identifyImage(bytes));
     });
   }
 
@@ -290,7 +291,7 @@ export class RuntimeImages {
       return bytes;
     } finally { await file.close(); }
   }
-  async #reserve(input: ImageBeginUploadInput, sourceKey: string | null): Promise<void> {
+  async #reserve(input: Pick<ImageDescriptor, "imageId" | "sessionId" | "bindingRevision" | "sha256" | "byteLength" | "mediaType">, sourceKey: string | null): Promise<void> {
     const entries = this.#store.listImages();
     const total = entries.reduce((sum, entry) => sum + entry.byteLength, 0);
     const sessionTotal = entries.filter((entry) => entry.sessionId === input.sessionId).reduce((sum, entry) => sum + entry.byteLength, 0);
@@ -302,12 +303,12 @@ export class RuntimeImages {
     await file.close();
     await this.#syncDirectory();
   }
-  async #storeBytes(target: ImageTarget, bytes: Buffer, sourceKey: string | null): Promise<ImageDescriptor> {
-    const mediaType = identifyImage(bytes);
+  async #storeBytes(target: ImageTarget, bytes: Buffer, sourceKey: string | null, previewMediaType?: PreviewMediaType): Promise<ImageDescriptor> {
+    const mediaType = previewMediaType ?? identifyImage(bytes);
     const sha256 = digest(bytes);
     const existing = this.#store.listImages(target.sessionId).find((entry) => entry.committed && entry.sha256 === sha256 && entry.sourceKey === sourceKey);
     if (existing) return this.#descriptor(existing);
-    const input = imageBeginUploadInputSchema.parse({ ...target, imageId: randomUUID(), sha256, byteLength: bytes.length, mediaType });
+    const input = imageDescriptorSchema.parse({ ...target, imageId: randomUUID(), sha256, byteLength: bytes.length, mediaType });
     await this.#expire();
     await this.#reserve(input, sourceKey);
     const file = await open(await this.#path(input.imageId), constants.O_WRONLY | constants.O_NOFOLLOW);
@@ -335,7 +336,7 @@ export function decodeCanonicalBase64(value: string, maximumBytes: number): Buff
 }
 function digest(bytes: Uint8Array): string { return createHash("sha256").update(bytes).digest("hex"); }
 
-export function identifyImage(bytes: Buffer): ImageDescriptor["mediaType"] {
+export function identifyImage(bytes: Buffer): ImageMediaType {
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
   if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
   if (["GIF87a", "GIF89a"].includes(bytes.subarray(0, 6).toString("ascii"))) return "image/gif";
@@ -344,22 +345,62 @@ export function identifyImage(bytes: Buffer): ImageDescriptor["mediaType"] {
   throw new RuntimeImageError("UNSUPPORTED", "unsupported image file format");
 }
 
+const textPreviewExtensions = new Set([
+  ".txt", ".md", ".markdown", ".log", ".json", ".jsonc", ".yaml", ".yml", ".toml",
+  ".xml", ".html", ".htm", ".css", ".scss", ".ts", ".tsx", ".js", ".jsx",
+  ".mjs", ".cjs", ".py", ".rs", ".go", ".java", ".c", ".h", ".cpp", ".hpp",
+  ".sh", ".bash", ".zsh", ".ps1", ".sql", ".csv", ".diff", ".patch", ".ini",
+  ".cfg", ".conf", ".gitignore", ".env.example",
+]);
+
+function identifyPathPreview(path: string, bytes: Buffer): PreviewMediaType {
+  try { return identifyImage(bytes); }
+  catch (error) {
+    if (!(error instanceof RuntimeImageError) || error.code !== "UNSUPPORTED") throw error;
+  }
+  if (bytes.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  if (!textPreviewExtensions.has(extname(path).toLowerCase()) &&
+      !["dockerfile", "makefile", "license", "readme", ".gitignore", ".env.example"].includes((path.split(/[\\/]/).at(-1) ?? "").toLowerCase())) {
+    throw new RuntimeImageError("UNSUPPORTED", "file type has no read-only preview");
+  }
+  if (bytes.length > 2 * 1_024 * 1_024) throw new RuntimeImageError("RESOURCE_EXHAUSTED", "text preview exceeds 2 MiB");
+  if (bytes.includes(0)) throw new RuntimeImageError("UNSUPPORTED", "binary file has no text preview");
+  try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch { throw new RuntimeImageError("UNSUPPORTED", "text preview is not valid UTF-8"); }
+  return "text/plain; charset=utf-8";
+}
+
+export function validPreviewPath(path: string, platform: NodeJS.Platform = process.platform): boolean {
+  if (!path || path !== path.trim() || path.startsWith("//") || path.startsWith("\\\\") ||
+      /[\x00-\x1f\x7f]/.test(path)) return false;
+  if (platform !== "win32") return !path.includes("\\") && !/^[a-z][a-z0-9+.-]*:/i.test(path);
+  // No UNC, device namespace, alternate data stream, or URL scheme.
+  if (/^[a-z]:[\\/]/i.test(path)) return !path.slice(2).includes(":");
+  return !path.includes(":");
+}
+
 /** Check the opened inode, not just a pathname that can change before open. */
 export async function readConfinedImage(path: string, roots: readonly string[], maximumBytes = IMAGE_MAX_BYTES, excludedRoots: readonly string[] = []): Promise<Buffer> {
-  if (process.platform !== "linux") throw new RuntimeImageError("UNSUPPORTED", "confined image reads require Linux opened-file identity");
+  if (process.platform !== "linux" && process.platform !== "win32") throw new RuntimeImageError("UNSUPPORTED", "confined previews require opened-file identity");
   if (!isAbsolute(path) || roots.length === 0) throw new RuntimeImageError("FENCED", "image path must be absolute and inside the session workspace");
   const canonicalRoots = await Promise.all(roots.map(async (root) => realpath(root)));
+  const beforePath = process.platform === "win32" ? await realpath(path) : undefined;
+  const beforeIdentity = process.platform === "win32" ? await stat(path, { bigint: true }) : undefined;
   const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
-    const opened = await realpath(`/proc/self/fd/${file.fd}`);
-    if (excludedRoots.some((root) => opened === root || opened.startsWith(`${root}${sep}`))) throw new RuntimeImageError("FENCED", "private runtime image storage is not a native output root");
-    const inside = canonicalRoots.some((root) => {
-      const suffix = relative(root, opened);
-      return suffix !== "" && suffix !== ".." && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix);
-    });
+    const opened = process.platform === "linux" ? await realpath("/proc/self/fd/" + file.fd) : beforePath!;
+    if (excludedRoots.some((root) => insideRoot(root, opened, true))) throw new RuntimeImageError("FENCED", "private runtime image storage is not a native output root");
+    const inside = canonicalRoots.some((root) => insideRoot(root, opened, false));
     if (!inside) throw new RuntimeImageError("FENCED", "opened image file is outside configured roots");
     const before = await file.stat();
     if (!before.isFile()) throw new RuntimeImageError("FENCED", "image path must refer to a regular file");
+    if (process.platform === "win32") {
+      const openedIdentity = await file.stat({ bigint: true });
+      if (!beforeIdentity || beforeIdentity.ino === 0n || beforeIdentity.nlink !== 1n ||
+          !sameFileIdentity(beforeIdentity, openedIdentity)) {
+        throw new RuntimeImageError("FENCED", "preview file identity changed or is linked");
+      }
+    }
     if (before.size < 1 || before.size > maximumBytes) throw new RuntimeImageError("RESOURCE_EXHAUSTED", "image file exceeds maximum byte length");
     const bytes = Buffer.alloc(before.size);
     let offset = 0;
@@ -370,6 +411,22 @@ export async function readConfinedImage(path: string, roots: readonly string[], 
     }
     const after = await file.stat();
     if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs) throw new RuntimeImageError("CONFLICT", "image file changed while reading");
+    if (process.platform === "win32") {
+      const afterPath = await realpath(path);
+      const afterIdentity = await stat(path, { bigint: true });
+      const openedIdentity = await file.stat({ bigint: true });
+      if (afterPath !== opened || !sameFileIdentity(afterIdentity, openedIdentity) || afterIdentity.nlink !== 1n) {
+        throw new RuntimeImageError("FENCED", "preview path changed while reading");
+      }
+    }
     return bytes;
   } finally { await file.close(); }
+}
+
+function sameFileIdentity(a: { dev: bigint; ino: bigint }, b: { dev: bigint; ino: bigint }): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+function insideRoot(root: string, path: string, includeRoot: boolean): boolean {
+  const suffix = relative(root, path);
+  return (includeRoot || suffix !== "") && suffix !== ".." && !suffix.startsWith(".." + sep) && !isAbsolute(suffix);
 }

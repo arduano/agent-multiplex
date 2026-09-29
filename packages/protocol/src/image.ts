@@ -16,6 +16,10 @@ export const imageMediaTypeSchema = z.enum([
   "image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml",
 ]);
 export type ImageMediaType = z.infer<typeof imageMediaTypeSchema>;
+/** Path previews share the immutable, session-fenced image byte transport. */
+export const pathPreviewMediaTypeSchema = z.enum(["application/pdf", "text/plain; charset=utf-8"]);
+export const previewMediaTypeSchema = z.union([imageMediaTypeSchema, pathPreviewMediaTypeSchema]);
+export type PreviewMediaType = z.infer<typeof previewMediaTypeSchema>;
 
 export const imageTargetSchema = z.object({
   sessionId: sessionIdSchema,
@@ -32,7 +36,7 @@ export const imageDescriptorSchema = z.object({
   bindingRevision: z.number().int().positive(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   byteLength: z.number().int().positive().max(IMAGE_MAX_BYTES),
-  mediaType: imageMediaTypeSchema,
+  mediaType: previewMediaTypeSchema,
 });
 export type ImageDescriptor = z.infer<typeof imageDescriptorSchema>;
 
@@ -199,7 +203,7 @@ export interface ImagePort {
 /** Validate identity-bearing image responses before a proxy releases bytes. */
 export function assertImageResponseTarget(target: ImageTarget & {
   imageId?: string; offset?: number; length?: number; byteLength?: number;
-  sha256?: string; mediaType?: ImageMediaType;
+  sha256?: string; mediaType?: PreviewMediaType;
 }, result: unknown): void {
   if (result === null || typeof result !== "object") return;
   const value = result as Record<string, unknown>;
