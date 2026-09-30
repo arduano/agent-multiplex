@@ -1,7 +1,7 @@
 import { TRPCError } from "@trpc/server";
 import { serialize } from "node:v8";
 
-import { ControlNodeCoreError, type ControlNodeCoreErrorCode } from "./errors.js";
+import { asTrpcError, ControlNodeCoreError, readValidatedTRPCClientErrorCode, type ControlNodeCoreErrorCode } from "./errors.js";
 
 export const ISOLATED_RPC_LIMITS = Object.freeze({ pending: 256, pendingBytes: 32 * 1024 * 1024, messageBytes: 8 * 1024 * 1024, timeoutMs: 30_000, streams: 128 });
 type Failure = { kind: "control"; code: ControlNodeCoreErrorCode; message: string } | { kind: "trpc"; code: TRPCError["code"]; message: string };
@@ -97,6 +97,12 @@ export class IsolatedRpc {
     if (this.#closed) return;
     let failure: Failure | undefined;
     const uncertain = (message: string): Failure => ({ kind: "control", code: request.mutation ? "OUTCOME_UNKNOWN" : "UNAVAILABLE", message });
+    // Reverse child calls reject with a validated TRPCClientError, not our local
+    // TRPCError. Preserve definitive remote codes across IPC without transferring
+    // private native text, data or causes. The existing classifier also keeps a
+    // stronger indeterminate outcome in the cause chain; unknown errors retain
+    // the conservative read/write behavior below.
+    if (readValidatedTRPCClientErrorCode(error) !== undefined) error = asTrpcError(error);
     if (error !== undefined) failure = error instanceof TRPCError && !(request.mutation && error.code === "INTERNAL_SERVER_ERROR") ? { kind: "trpc", code: error.code, message: error.message } : error instanceof ControlNodeCoreError
       ? { kind: "control", code: error.code, message: error.message }
       : uncertain("control storage operation failed; reconcile any submitted operation ID");

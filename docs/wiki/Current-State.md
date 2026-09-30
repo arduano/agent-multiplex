@@ -5,7 +5,24 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-29 (aggregate defect integration candidate).
+Last reconciled: 2026-09-30 (isolated authority reverse-error source candidate).
+
+## Isolated authority reverse-error correction candidate
+
+This source-only correction preserves validated child tRPC rejection codes
+across the authority's worker IPC. Missing resources, stale fences and conflicting
+state remain definitive rejections with fixed public text; they no longer become
+generic unavailable reads or unknown mutation outcomes solely because they
+crossed the worker boundary. Native error messages, auxiliary data and causes
+are not transferred. Truly indeterminate dispatch, internal mutation failures,
+worker exit and caller deadlines retain their original recovery semantics.
+Publication and installed fleet repair remain separate steps. See the
+[storage-worker contract](../design/data-roles-v4.md#storage-progress-admission-and-projection-recovery).
+
+Typecheck and the focused worker/IPC suite passed (32 tests; the two long stall
+tests were excluded). Restoring the published behavior made eight of the 14
+new reverse-error regressions fail. Full-suite and release qualification remain
+pending; no native model calls or installed service changes were made.
 
 ## Stopped binding inventory correction candidate
 

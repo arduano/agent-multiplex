@@ -787,6 +787,15 @@ re-derives enrollment scopes from committed catalog state and executes the exist
 input/output, authority, endpoint, boot and operation-identity checks. Transport
 identity remains in the outer process. No cache has authorization authority.
 
+The worker IPC preserves definitive reverse-child failures only from validated
+tRPC client envelopes, using the existing dependency-error classifier and fixed
+public messages. It transfers semantic codes rather than native messages, data,
+stacks or cause chains. Missing resources, stale fences and conflicting state do
+not become transport unavailability or mutation uncertainty merely by crossing
+IPC. Stronger indeterminate-dispatch evidence is retained; unknown/internal
+mutation failures, owner exit and dispatched caller deadlines still require
+original-operation-ID reconciliation and never authorize automatic replay.
+
 Success publication follows the FULL SQLite commit. Adjacent child control events
 may share one bounded commit (64 events, 1 MiB, 20 ms collection window); native
 events and resnapshot boundaries keep their original order. All event identities,

@@ -155,8 +155,16 @@ payload. Response credits are released only after the receiving thread consumes
 them; buffered large replies are capped at 32 MiB with bounded small error replies.
 A queued request whose deadline expires is rejected before dispatch. A dispatched
 mutation timeout, owner exit or untransferable result is outcome unknown under its
-original operation ID. Read failures remain unavailable. Timed-out lanes stay
-occupied until settlement; no timer creates another writer or replays a mutation.
+original operation ID. Unclassified read failures remain unavailable. Timed-out
+lanes stay occupied until settlement; no timer creates another writer or replays
+a mutation.
+
+Definitive child tRPC rejections retain their validated semantic code across
+IPC with fixed public text, so missing resources, stale fences and conflicts
+can be distinguished from unavailable transport. Remote messages, data and
+causes never cross this error boundary. A genuine indeterminate dispatch remains
+unknown even when its cause also contains a transient transport failure.
+
 Streams pull one item at a time and retain at most 128 handles. Idle pulls have no
 synthetic deadline; late stream opens are closed and cancellation retains its slot
 until native settlement.
