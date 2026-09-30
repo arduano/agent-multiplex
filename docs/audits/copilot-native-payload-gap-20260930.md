@@ -125,6 +125,11 @@ Focused source build and five test files passed: **38 tests**, one worker,
 process-only `TMPDIR=/dev/shm`. The first run failed two new fixture cases because
 the fixture included `runtimeNodeBootId` in a strict stored-session record. The
 fixture was corrected; the published store validator was preserved. That failed
-run is retained as a diagnostic, not passing evidence. Exact source and receipt
-hashes are recorded in the agent handoff/checkpoint after commit. Repository-wide
-gates, packed consumers and publication remain separate root-coordinated gates.
+run is retained as a diagnostic, not passing evidence. Exact code/source commit:
+`d0c855c44229d9ae65a8ec39fd0ad10d3237d90b`. Passing local receipt:
+`receipts/copilot-gap-diagnosis-focused-20260930/summary.json`, SHA-256
+`3160d2d58b8d623e5741495e8c1d5e714f2dffc20506f943ec29ffc08eabfd25`.
+The failed fixture run is preserved at
+`receipts/copilot-gap-diagnosis-diagnostic-1-20260930/summary.json`.
+Repository-wide gates, packed consumers and publication remain separate
+root-coordinated gates.
