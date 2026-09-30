@@ -23,9 +23,20 @@ The optional `retainedBindings` ingress field extends the existing protocol-v6
 reconciliation input. Output shape, protocol version, released hashes, operation
 IDs, migration names, launch contracts and dependency pins stay unchanged.
 Activation needs coordinated protocol, control-node-core, runtime-node-core and
-runtime-node app packages. This is isolated source only; publication, packed
-consumer and installed-fleet qualification remain separate. See the
+runtime-node app packages. This is isolated source only; publication and installed-fleet qualification
+remain separate. Exact source and local packed-consumer checks passed below. See the
 [source checkpoint](../checkpoint-v4.md#retained-binding-metadata-bootstrap-candidate--2026-09-30).
+
+At code `f7c6cbe3dcf44e0d3c7456ebb2bd07c275f3273a`, the combined
+IPC/archive/bootstrap candidate passed typecheck, production build, **122
+files / 1,147 tests** with one worker, checkpoint/docs/release/secrets gates,
+all 16 local packed consumers and 11 packaged bootstrap regressions. The
+standard verifier hit GitHub Packages E401 for the transport dependency. The
+receipt-contained public-transport variant used the exact already-reviewed
+published `p2prpc-core@0.3.0-renewal.1` tarball, verifying URL/version/SRI in
+every disposable consumer while preserving script policy. Registry access was
+not qualified. These are unpublished local artifacts; do not replace published
+`.22` bytes. The checkpoint records exact receipt/hash and rollout limits.
 
 ## Child archive projection correction candidate
 

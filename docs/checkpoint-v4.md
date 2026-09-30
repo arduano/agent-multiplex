@@ -30,7 +30,7 @@ This is a qualification-environment choice, not a deployed storage change.
 Affected TypeScript projects compiled with
 `npx tsc -b packages/control-node-core packages/runtime-node-core apps/runtime-node --pretty false`.
 Documentation, checkpoint, release-metadata, secrets and whitespace gates passed.
-No new broad suite or production build was run on the live-serving NAS.
+That focused checkpoint did not run a new broad suite or production build.
 
 The scrubbed focused log is
 `receipts/retained-binding-authority-bootstrap-20260930/focused-tests.log`;
@@ -39,6 +39,40 @@ The local summary binds the exact commit, lockfile and source diff to those
 logs and their checksums. No native model calls, publication, push, deployment,
 live service/config/pin changes or installed-state mutation occurred. Full
 candidate, packed-consumer and native installed qualification remain separate.
+
+### Combined full source and local packed gate
+
+Exact code `f7c6cbe3dcf44e0d3c7456ebb2bd07c275f3273a` subsequently passed
+`npm run typecheck`, `npm test -- --maxWorkers=1 --minWorkers=1` (**122
+files / 1,147 tests**, including its production pretest build and posttest
+checkpoint), docs/release/secrets checks, and local packing of all 16 modules.
+Tests used `TMPDIR=/dev/shm` with one worker and no concurrent broad suite.
+No installed service or state was changed.
+
+`npm run release:verify` exited 1 at GitHub Packages E401 for
+`@arduano/p2prpc-core` with no authentication token. Its original log is
+preserved. All 16 role-isolated consumers then passed the receipt-contained
+public-transport verifier variant. It substitutes only the exact previously
+reviewed published `p2prpc-core@0.3.0-renewal.1` GitHub tarball and asserts its
+version, resolved URL and SHA-512 integrity in every disposable lockfile.
+Framework tarballs, reviewed Iroh/Koffi pins, type/export/browser/bin checks
+and strict script policy are unchanged. All 11 bootstrap regressions also
+passed against the installed local tarball graph. This qualifies that public
+artifact boundary, not registry authentication.
+
+Local summary:
+`receipts/retained-binding-authority-bootstrap-full-20260930/summary.json`;
+SHA-256 `2fa3caeb3d1da766a4af720a43ee07359ba6fd3d540b99e6b224a16efc32808a`.
+Artifact SHA-256 inventory digest:
+`c7a9bcac69694c33fda237e111525d8d553900371e46c8ddded0da594f9119f7`.
+The directory retains original diagnostics, passing logs and checksummed
+qualification helper code. These are **unpublished local `.22` candidate
+artifacts**, never replacements for the existing published `.22` release.
+A future release needs a new coordinated version/source and its own artifact
+qualification before independently operated deployment. Native SDK/model,
+Windows, Docker topology/scale and installed qualification were not run for
+this source-only checkpoint. Protocol/migrations/released hashes and Leo's
+published dependency boundary remain unchanged.
 
 ## Root child-error and archive projection candidates — 2026-09-30
 
