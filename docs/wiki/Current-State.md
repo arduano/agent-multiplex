@@ -5,7 +5,30 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-30 (retained binding metadata bootstrap source candidate).
+Last reconciled: 2026-09-30 (private Copilot payload-gap diagnostics source candidate).
+
+## Private Copilot payload-gap diagnostics candidate
+
+Code `d0c855c44229d9ae65a8ec39fd0ad10d3237d90b` adds fixed validation
+categories only to the private native-gap logging hook. Persisted/public
+lifecycle schemas and rollback parsing remain unchanged, as do envelope bounds,
+continuity gates, profile hashes and dependency pins. Synthetic retained-text
+events reproduce both observed admission sizes as wire-envelope failures, while
+recognized inline images of the same sizes shrink successfully. The original
+owner event's exact condition remains unproven; existing logs cannot supply the
+missing category retroactively. See [the diagnosis](../audits/copilot-native-payload-gap-20260930.md).
+
+The combined candidate includes the B1 IPC/archive/bootstrap fixes below.
+Exact checkout `714682b3241c3cd03a815ef800d0607f82e49675` passed
+typecheck, production build, **1,162 tests / 124 files**, source checks, all
+16 role-isolated local packed consumers and SBOM generation. Packed consumers
+used the reviewed public transport URL/version/SRI; private-registry
+authentication was not qualified. The local `.22` tarballs remain unpublished
+and must never overwrite the published `.22` assets. Publication needs a new
+coordinated version, fresh artifact receipt and independent consumer activation.
+No model call, live service or owner-session action occurred. The
+[checkpoint](../checkpoint-v4.md#private-copilot-payload-gap-diagnostics-candidate--2026-09-30)
+records hashes and exact limits.
 
 ## Retained binding metadata bootstrap correction candidate
 
@@ -485,10 +508,10 @@ Suggested first prompt for a new session:
 | Wire protocol | `6` in maintained source; coordinated upgrade required from protocol v5 |
 | Signed stable release | [`v0.2.3`](https://github.com/arduano/agent-multiplex/releases/tag/v0.2.3), protocol v5; later published hotfix prereleases are recorded above |
 | Signed release commit | `7b9d3e383fceb299cf3c1f1404358466abe7be23` |
-| Public package graph | Signed stable `0.2.3`; latest signed Leo V6 hotfix tag `hotfix-2026-09-28.2` contains 16 lockstep packages at `0.2.4-hotfix.20`; `.21` is a source candidate |
+| Public package graph | Signed stable `0.2.3`; published Leo V6 tag `hotfix-2026-09-29.2` contains 16 lockstep packages at `0.2.4-hotfix.22`. The B1/B12 source corrections above have no published release. |
 | Node runtime / release toolchain | Node `>=24`; releases use Node `24.19.0` and npm `11.17.0` |
-| Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; current v6 release-preparation lock pins published `0.3.0-renewal.1` and the reviewed Iroh closure, with final framework qualification pending |
-| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; published `.20` and candidate `.21`: Codex CLI `0.158.0`. Copilot SDK `1.0.14` and optional CLI `1.0.88` are unchanged. |
+| Node transport | Released v5 graph: `@arduano/p2prpc-core@0.2.1`; V6 `.22` and these local candidates retain published `0.3.0-renewal.1` and the reviewed Iroh closure. |
+| Native package pins | Signed `v0.2.3`: Codex CLI `0.152.0`; V6 `.22` and these local candidates retain Codex CLI `0.158.0`, Copilot SDK `1.0.14` and optional CLI `1.0.88`. |
 | Qualified deployment | Linux x86-64 containers; Windows x64 Copilot startup with private local state |
 
 The signed `v0.2.3` release adds the embedded control-ticket accessor. It retains

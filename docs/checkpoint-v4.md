@@ -1,5 +1,42 @@
 # Release qualification checkpoint
 
+## Private Copilot payload-gap diagnostics candidate — 2026-09-30
+
+Code `d0c855c44229d9ae65a8ec39fd0ad10d3237d90b`, documentation/packed
+source `714682b3241c3cd03a815ef800d0607f82e49675`, retains the qualified
+B1 corrections and adds only fixed private-hook validation detail. The durable
+lifecycle diagnostic schema is unchanged, preserving `.22` rollback parsing.
+Synthetic exact-size retained text/tool output fails the envelope; recognized
+inline image data can shrink successfully. The original owner event remains
+unproven. See [the diagnosis](audits/copilot-native-payload-gap-20260930.md).
+
+Passed typecheck, production pretest build, **1,162 tests / 124 files** with
+one worker, posttest checkpoint, docs/release/secrets checks, packing all 16
+modules, all 16 role-isolated packed consumers and the release-build SBOM.
+Process-only `TMPDIR=/dev/shm` applies only to disposable qualification.
+
+- Full source receipt `receipts/copilot-gap-full-20260930-2/summary.json`:
+  SHA-256 `8df15931ac1fe047cbab6bd7c14b432914b61d905e4349fc39aa104ffa34dc0d`.
+- Packed receipt `receipts/copilot-gap-packed-20260930/summary.json`:
+  SHA-256 `2a24ed0f21418865a29ca2aeff8cfb8d956bff766225624e6e01a519f380e407`.
+- Artifact inventory `release-artifacts/SHA256SUMS`:
+  SHA-256 `d05ab9ebdca33526684a2c2b3e02fc7734d69dbc7fcd36836fa3b4660803563b`.
+
+The receipt-contained verifier is the previously reviewed public-transport
+variant, copied without changes. Each consumer asserts the exact published
+`p2prpc-core@0.3.0-renewal.1` URL/version/SRI and reviewed Iroh/Koffi closure
+under strict script policy. Standard private-registry authentication remains
+unqualified; no registry credential/policy changed. Tarballs retain local `.22`
+candidate identities and must never replace published `.22` bytes. Future
+publication needs a new coordinated version and fresh exact-source artifacts.
+
+Focused diagnostics retain the corrected synthetic strict-schema fixture
+failure. The root's initial full-gate admission stopped before running a gate
+because a documentation commit advanced HEAD; the successful exact checkout
+is recorded above. No model calls, private native history/log reads, installed
+service changes or owner-session actions occurred. No new Docker/native-model
+qualification or installed acceptance is claimed.
+
 ## Retained binding metadata bootstrap candidate — 2026-09-30
 
 Isolated source based on `d9c9038` adds canonical metadata bootstrap for exact

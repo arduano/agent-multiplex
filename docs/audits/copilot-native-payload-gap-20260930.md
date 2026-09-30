@@ -131,5 +131,10 @@ run is retained as a diagnostic, not passing evidence. Exact code/source commit:
 `3160d2d58b8d623e5741495e8c1d5e714f2dffc20506f943ec29ffc08eabfd25`.
 The failed fixture run is preserved at
 `receipts/copilot-gap-diagnosis-diagnostic-1-20260930/summary.json`.
-Repository-wide gates, packed consumers and publication remain separate
-root-coordinated gates.
+Repository-wide gates and packed consumers were later completed by the root:
+1,162 tests / 124 files, production build/typecheck and source checks, all 16
+role-isolated packed consumers through the reviewed public transport boundary,
+and SBOM generation. The
+[exact checkpoint](../checkpoint-v4.md#private-copilot-payload-gap-diagnostics-candidate--2026-09-30)
+owns receipts and hashes. Publication and installed activation remain pending;
+the original owner event's exact validation condition is still unknown.
