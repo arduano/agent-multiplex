@@ -5,7 +5,28 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-30 (private Copilot payload-gap diagnostics source candidate).
+Last reconciled: 2026-09-30 (unpublished lockstep hotfix.23 release qualification).
+
+## Unpublished lockstep hotfix.23 release candidate
+
+Clean artifact source `a36c000814c344fce1d5ad3d45ed344c6d0a79cc`
+advances all 16 packages/root/internal edges/lock to `0.2.4-hotfix.23`.
+It combines the B1 IPC/archive/bootstrap corrections and private B12 payload
+categories below. No protocol/native/transport pin, profile hash, migration or
+functional code changed during version preparation. Earlier local and published
+`.22` bytes remain unchanged; the original Copilot trigger remains unproven.
+
+Exact-source gates passed typecheck, production build, **1,162 tests / 124 files**,
+source checks, all 16 role-isolated packed consumers, 11 packaged B1 regressions,
+SBOM, deterministic Docker tree and 10-runtime/100-session scale with complete
+cleanup. The public-transport verifier was unchanged; registry authentication
+and native-model qualification are not claimed. The source is **not yet tagged,
+published, framework-main merged, consumer-staged or deployed** by this lane.
+The proposed unused tag must be rechecked before owner-authorized publication.
+See [the release record](../audits/hotfix23-release-preparation-20260930.md) and
+[exact checkpoint](../checkpoint-v4.md#lockstep-hotfix23-b1b12-local-release-qualification--2026-09-30)
+for hashes, preserved preparation failures and staging boundaries. No live-state
+or model action occurred.
 
 ## Private Copilot payload-gap diagnostics candidate
 

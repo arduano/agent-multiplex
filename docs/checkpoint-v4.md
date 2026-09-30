@@ -1,5 +1,38 @@
 # Release qualification checkpoint
 
+## Lockstep hotfix.23 B1/B12 local release qualification — 2026-09-30
+
+The new **unpublished** `0.2.4-hotfix.23` 16-package graph is packed once
+from clean source `a36c000814c344fce1d5ad3d45ed344c6d0a79cc`.
+The preparation commit changes only `.22` -> `.23` manifests/internal edges/lock;
+existing B1 corrections and private B12 categories are included without further
+code changes. Protocol/native/transport pins, released profile hashes and
+migrations are unchanged. The original Copilot trigger remains unproven.
+
+Exact Node 24.19.0 / npm 11.17.0 passed typecheck, production pretest build,
+**1,162 tests / 124 files**, checkpoint/docs/release/secrets, offline strict
+install/graph, all 16 role-isolated packed consumers, 11 packaged B1 regressions,
+and 506-component SBOM. Current-source deterministic Docker tree and
+10-runtime/100-session scale both passed with cleanup and all 96 receipt files
+independently rehashed. The first obsolete-browser-path failure is retained;
+the successful process-only Chromium override did not change source/policy.
+
+Source summary SHA-256 `1cf9ac888a265922e58a909679d6dca6dc16f9816e8bf45f6afece9e495bd461`; packed summary
+`74dfb4d9eafb5a9c2b8ef2003d0f0ef6b35a688c674cccb171220b4c143fdfdd`; successful Docker summary
+`d2bb97e6f17457ae3f05050fa210bdf9ec0beec1a7ffb97f6f93aa88335c5b08`; artifact inventory
+`612ed0504c9a2d34dc93efeedd194b410a00240b45f935ef1c80c9080655987d`.
+[The release qualification record](audits/hotfix23-release-preparation-20260930.md)
+contains full paths/hashes, exact changelog, safe staging procedure and limits.
+
+The reviewed public transport verifier was reused byte-for-byte. Registry
+authentication and native-model release qualification are not claimed. No tag,
+publication, `latest` promotion, framework-main merge or installed activation
+occurred in this lane. Proposed `hotfix-2026-09-30.1` was absent at preparation;
+recheck before any owner-authorized publication. Earlier `.22` artifacts remain
+unchanged. Future consumer staging must use independently verified **published**
+URLs/integrities; these disposable local `file:` consumers are not deployment
+pins. No real model calls or live-state modifications occurred.
+
 ## Private Copilot payload-gap diagnostics candidate — 2026-09-30
 
 Code `d0c855c44229d9ae65a8ec39fd0ad10d3237d90b`, documentation/packed
