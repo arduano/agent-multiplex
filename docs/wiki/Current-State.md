@@ -20,7 +20,10 @@ without a resnapshot; publication and installed repair remain separate.
 The new four-case regression failed in all four cases before the correction.
 Afterward it and the related catalog, child-import and Gateway suites passed
 (70 tests). Typecheck, documentation, checkpoint, release-metadata and secret
-checks passed. Full-suite and published-consumer qualification remain pending.
+checks passed. The combined exact-source local suite later passed 121 files /
+1,133 tests with one worker, including production build and checkpoint checks;
+see the [September 30 source checkpoint](../checkpoint-v4.md#root-child-error-and-archive-projection-candidates--2026-09-30).
+Published-consumer qualification and deployment remain pending.
 
 An older retained runtime binding can still lack `metadataAuthority` when native
 discovery omits it before canonical reconciliation. That is a distinct pending
@@ -44,8 +47,9 @@ Publication and installed fleet repair remain separate steps. See the
 
 Typecheck and the focused worker/IPC suite passed (32 tests; the two long stall
 tests were excluded). Restoring the published behavior made eight of the 14
-new reverse-error regressions fail. Full-suite and release qualification remain
-pending; no native model calls or installed service changes were made.
+new reverse-error regressions fail. The combined local full suite now passes
+as recorded in the checkpoint above. Release qualification remains pending;
+no native model calls or installed service changes were made.
 
 ## Stopped binding inventory correction candidate
 

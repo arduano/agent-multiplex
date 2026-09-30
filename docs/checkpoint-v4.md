@@ -1,5 +1,35 @@
 # Release qualification checkpoint
 
+## Root child-error and archive projection candidates — 2026-09-30
+
+Isolated source `d452014adeaa1faeeba48d0ee25ab9b730b7ad57` combines
+definitive sanitized child-error normalization (`4f0e5bc`) and transactional
+publication of the canonical archived session when importing child Archive.
+The new IPC regressions and warm Root/child/Gateway regressions reproduced
+the published defects before the corrections. Typecheck and the focused
+32-test IPC / 70-test archive-neighbor suites passed, as did documentation,
+release-metadata, checkpoint, secrets and whitespace checks.
+
+The exact combined source passed `npm test -- --maxWorkers=1`: **121 files,
+1,133 tests**, including the production pretest build and posttest checkpoint
+check. The first `npm test -- --maxWorkers=2` run failed seven suites at missing
+`node-pty` native startup, two 15-second test timeouts and one worker RPC timeout
+(1,098 tests passed). `npm rebuild node-pty --foreground-scripts` was refused
+by `ESTRICTALLOWSCRIPTS` for an uncovered transitive prepare script. No approval
+policy was changed. Running the already pinned target package's own
+`npm --prefix node_modules/node-pty run install` succeeded; all nine failed
+files then passed with one worker (70 tests), followed by the passing full run.
+
+The local scrubbed summary is
+`receipts/d1-combined-full-20260930/summary.json`; SHA-256:
+`70072826147fb532feb2150fc5f6b39fa36491423978f454e05b45f2807228f3`.
+It records exact source, Node, command outcomes and log checksums. Package
+versions, dependency pins, wire contracts and migrations are unchanged.
+No publication, deployment, model prompt or installed-state mutation occurred.
+Packed-consumer release qualification remains separate. Canonical metadata
+bootstrap for retained bindings omitted by native inventory remains a pending
+prevention fix; the fenced settlement workaround does not restore native history.
+
 ## Aggregate defect integration candidate — 2026-09-29
 
 An isolated integration branch combines the unpublished D1 confirmed-stop
