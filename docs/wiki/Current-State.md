@@ -5,9 +5,9 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-30 (unpublished lockstep hotfix.23 release qualification).
+Last reconciled: 2026-09-30 (published lockstep hotfix.23 prerelease; consumer staging pending).
 
-## Unpublished lockstep hotfix.23 release candidate
+## Published lockstep hotfix.23 prerelease
 
 Clean artifact source `a36c000814c344fce1d5ad3d45ed344c6d0a79cc`
 advances all 16 packages/root/internal edges/lock to `0.2.4-hotfix.23`.
@@ -20,9 +20,13 @@ Exact-source gates passed typecheck, production build, **1,162 tests / 124 files
 source checks, all 16 role-isolated packed consumers, 11 packaged B1 regressions,
 SBOM, deterministic Docker tree and 10-runtime/100-session scale with complete
 cleanup. The public-transport verifier was unchanged; registry authentication
-and native-model qualification are not claimed. The source is **not yet tagged,
-published, framework-main merged, consumer-staged or deployed** by this lane.
-The proposed unused tag must be rechecked before owner-authorized publication.
+and native-model qualification are not claimed. The owner-authorized release operator
+SSH-signed exact artifact source under `hotfix-2026-09-30.1`, published the
+16 tarballs and three inventories, then independently downloaded and matched
+all 19 assets byte-for-byte. Checksum inventory SHA-256:
+`612ed0504c9a2d34dc93efeedd194b410a00240b45f935ef1c80c9080655987d`.
+Framework main merge and installed deployment remain separate. Leo owns consumer
+staging and its exact published-byte qualification; no npm latest promotion.
 See [the release record](../audits/hotfix23-release-preparation-20260930.md) and
 [exact checkpoint](../checkpoint-v4.md#lockstep-hotfix23-b1b12-local-release-qualification--2026-09-30)
 for hashes, preserved preparation failures and staging boundaries. No live-state

@@ -1,5 +1,17 @@
 # Release qualification checkpoint
 
+## Hotfix.23 prerelease publication — 2026-09-30
+
+Signed tag `hotfix-2026-09-30.1` peels to exact once-packed artifact source
+`a36c000814c344fce1d5ad3d45ed344c6d0a79cc`. All 19 published assets
+independently match retained local bytes; checksum inventory SHA-256
+`612ed0504c9a2d34dc93efeedd194b410a00240b45f935ef1c80c9080655987d`.
+Independent consumer-repository verification receipt SHA-256
+`063782299da8f126ccf592bdb2a7fda036d063da9a0fa6780705c7d52fcb67d7`.
+See [publication evidence](audits/hotfix23-release-preparation-20260930.md#publication-receipt--september-30).
+Local source/package/Docker gates passed; registry auth, native models, hosted CI
+and installed acceptance are unclaimed. No live service or model call occurred.
+
 ## Lockstep hotfix.23 B1/B12 local release qualification — 2026-09-30
 
 The new **unpublished** `0.2.4-hotfix.23` 16-package graph is packed once

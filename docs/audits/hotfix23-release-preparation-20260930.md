@@ -1,7 +1,7 @@
 # Hotfix.23 B1/B12 release qualification and staging boundary
 
-This record qualifies a new **unpublished** coordinated package graph. Publication
-and consumer staging are owned by Leo's release operator; no installed service
+This record qualifies the new **published prerelease** coordinated package graph.
+Consumer staging is owned by Leo's release operator; no installed service
 or owner session was changed by these framework checks.
 
 ## Source and change scope
@@ -135,3 +135,22 @@ version and `npm install --package-lock-only --ignore-scripts --offline --no-aud
 regenerated the lock successfully. The exact-diff assertion and offline strict
 `npm ci` subsequently passed. The original failure is preserved in the
 preparation receipt; no credential/global configuration was changed.
+
+## Publication receipt — September 30
+
+Under the retained owner publish/build authorization and documented hotfix
+exception, the release operator created and verified an SSH-signed
+`hotfix-2026-09-30.1` tag at the exact artifact source `a36c000`.
+[The GitHub prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-09-30.1)
+contains all 16 reviewed once-packed tarballs, pack manifest, checksum inventory
+and SBOM. All 19 assets were independently downloaded and matched the retained
+source artifacts byte-for-byte; verification receipt SHA-256:
+`063782299da8f126ccf592bdb2a7fda036d063da9a0fa6780705c7d52fcb67d7`.
+The receipt is retained in Leo's `receipts/qualification-release-native-wsl-20260930/`.
+
+Initial `git push origin qualify/release-hotfix23-20260930 refs/tags/hotfix-2026-09-30.1`
+failed because HTTPS had no credential helper. A process-only Git credential
+helper invoking existing GitHub CLI authentication succeeded; no global
+authentication configuration changed. No npm latest promotion, native-model
+qualification, framework-main merge or live activation occurred. Hosted CI
+remains intentionally unavailable under the owner's billing deferral.
