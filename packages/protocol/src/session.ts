@@ -200,6 +200,17 @@ export type RuntimeNodeSessionRecord = z.infer<
   typeof runtimeNodeSessionRecordSchema
 >;
 
+/** Exact retained binding identity; never a claim of native availability. */
+export const sessionBindingRefSchema = z.object({
+  sessionId: sessionIdSchema,
+  runtimeNodeId: runtimeNodeIdSchema,
+  harness: harnessSchema,
+  adapterScopeId: adapterScopeIdSchema,
+  vendorSessionId: runtimeOwnedSessionFields.vendorSessionId,
+  bindingRevision: runtimeOwnedSessionFields.bindingRevision,
+}).strict();
+export type SessionBindingRef = z.infer<typeof sessionBindingRefSchema>;
+
 export const nativeInventoryItemSchema = z.object({
   harness: harnessSchema,
   adapterScopeId: adapterScopeIdSchema,

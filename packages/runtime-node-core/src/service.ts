@@ -69,6 +69,7 @@ import {
   type ResumeCommand,
   type SessionId,
   type SessionRecord,
+  type SessionBindingRef,
   type StopCommand,
   type RuntimeNodeBootId,
   type RuntimeNodeEventCursor,
@@ -636,7 +637,14 @@ export class RuntimeNodeService {
     return this.#lastSnapshot;
   }
 
-  public applyCanonicalSessions(records: readonly SessionRecord[]): void {
+  /** Durable local identities for metadata bootstrap, not native inventory. */
+  public retainedSessionBindings(): SessionBindingRef[] {
+    return this.#store.listSessions().map(({ sessionId, runtimeNodeId, harness, adapterScopeId, vendorSessionId, bindingRevision }) =>
+      ({ sessionId, runtimeNodeId, harness, adapterScopeId, vendorSessionId, bindingRevision }));
+  }
+
+  public applyCanonicalSessions(records: readonly SessionRecord[], retainedBindings: readonly SessionBindingRef[] = []): void {
+    const retained = new Map(retainedBindings.map(binding => [binding.sessionId, binding]));
     const nativeOwners = new Map(
       this.#store.listSessions().map((record) => [nativeBindingKey(record), record.sessionId]),
     );
@@ -665,6 +673,14 @@ export class RuntimeNodeService {
       }
       batchSessionIds.add(record.sessionId);
       const previous = this.#store.getSession(record.sessionId);
+      const binding = retained.get(record.sessionId);
+      if (binding && (!previous || nativeBindingKey(binding) !== nativeBindingKey(record) ||
+        binding.bindingRevision !== record.bindingRevision || record.catalogState !== "open")) {
+        throw new RuntimeNodeProtocolError("FENCED", "canonical metadata targets a changed or no longer retained binding");
+      }
+      if (binding && previous && previous.metadataAuthority === undefined && previous.metadata.revision !== 0) {
+        throw new RuntimeNodeProtocolError("FENCED", "cannot bootstrap retained metadata authority after its unowned revision advanced");
+      }
       if (previous) assertSameNativeBinding(previous, record);
       const existingOwner = nativeOwners.get(nativeBindingKey(record));
       if (existingOwner !== undefined && existingOwner !== record.sessionId) {

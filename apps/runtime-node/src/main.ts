@@ -34,6 +34,7 @@ import {
   type RuntimeNodeBootId,
   type RuntimeNodeId,
   type SessionRecord,
+  type SessionBindingRef,
 } from "@arduano/agent-multiplex-protocol";
 import {
   createMultiplexP2PNode,
@@ -283,7 +284,7 @@ export async function runRuntimeNode(
 }
 
 type MaintenanceService = Pick<RuntimeNodeService,
-  "runtimeNodeId" | "describe" | "refreshInventory" | "applyCanonicalSessions" |
+  "runtimeNodeId" | "describe" | "refreshInventory" | "retainedSessionBindings" | "applyCanonicalSessions" |
   "metadataOutbox" | "settleMetadataOutbox"
 >;
 type MaintenanceConfig = Pick<RuntimeNodeAppConfig,
@@ -469,7 +470,7 @@ export async function sendHeartbeat(
 
 export async function refreshAndReconcile(
   peer: ControlNodePeer,
-  service: Pick<RuntimeNodeService, "refreshInventory" | "applyCanonicalSessions">,
+  service: Pick<RuntimeNodeService, "refreshInventory" | "retainedSessionBindings" | "applyCanonicalSessions">,
   runtimeNodeBootId: RuntimeNodeBootId,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -484,26 +485,38 @@ export async function refreshAndReconcile(
     return;
   }
   if (signal?.aborted) return;
-  const result = await peer.rpc.ingress.runtimeNodes.reconcile.mutate({
-    runtimeNodeId: inventory.runtimeNodeId,
-    runtimeNodeBootId,
-    snapshot: inventory,
-  });
-  if (signal?.aborted) return;
-  assertReconciliationMatchesInventory(inventory.runtimeNodeId, inventory.sessions, result.sessions);
-  service.applyCanonicalSessions(result.sessions);
+  const discovered = new Set(inventory.sessions.map(nativeInventoryKey));
+  const retained = service.retainedSessionBindings().filter(binding => !discovered.has(nativeInventoryKey(binding)));
+  // Each request explicitly names at most 1,000 retained identities. Reusing
+  // the native snapshot keeps later metadata batches on its no-op replay path.
+  for (let offset = 0; offset < Math.max(1, retained.length); offset += 1_000) {
+    if (signal?.aborted) return;
+    const retainedBindings = retained.slice(offset, offset + 1_000);
+    const result = await peer.rpc.ingress.runtimeNodes.reconcile.mutate({
+      runtimeNodeId: inventory.runtimeNodeId,
+      runtimeNodeBootId,
+      snapshot: inventory,
+      ...(retainedBindings.length === 0 ? {} : { retainedBindings }),
+    });
+    if (signal?.aborted) return;
+    assertReconciliationMatchesInventory(inventory.runtimeNodeId, inventory.sessions, result.sessions, retainedBindings);
+    if (retainedBindings.length > 0) service.applyCanonicalSessions(result.sessions, retainedBindings);
+    else service.applyCanonicalSessions(result.sessions);
+  }
 }
 
 function assertReconciliationMatchesInventory(
   runtimeNodeId: RuntimeNodeId,
   inventory: readonly NativeInventoryItem[],
   sessions: readonly SessionRecord[],
+  retainedBindings: readonly SessionBindingRef[],
 ): void {
   const expected = new Set(inventory.map(nativeInventoryKey));
   if (expected.size !== inventory.length) {
     throw new Error("runtime-node inventory contains duplicate native session identities");
   }
   const observed = new Set<string>();
+  const retained = new Map(retainedBindings.map(binding => [binding.sessionId, binding]));
   for (const session of sessions) {
     if (session.runtimeNodeId !== runtimeNodeId) {
       throw new Error(
@@ -511,9 +524,12 @@ function assertReconciliationMatchesInventory(
       );
     }
     const key = nativeInventoryKey(session);
-    if (!expected.has(key)) {
+    const binding = retained.get(session.sessionId);
+    if (!expected.has(key) && (!binding || nativeInventoryKey(binding) !== key ||
+      binding.runtimeNodeId !== session.runtimeNodeId || binding.bindingRevision !== session.bindingRevision ||
+      session.catalogState !== "open")) {
       throw new Error(
-        `control node returned native session ${session.vendorSessionId} that was not submitted`,
+        `control node returned native session ${session.vendorSessionId} that was not submitted or retained with the exact binding`,
       );
     }
     if (observed.has(key)) {
@@ -525,9 +541,9 @@ function assertReconciliationMatchesInventory(
   }
   // The authority may deliberately defer an unknown native binding while a
   // launch or legacy lifecycle operation is still resolving its preallocated
-  // logical session ID. Returned records must be a valid subset of the
-  // submitted inventory; a later event/reconciliation supplies the deferred
-  // canonical binding without forcing the runtime connection to restart.
+  // logical session ID. Returned records must be a valid subset of submitted
+  // native inventory or the exact retained identities. Later reconciliation
+  // supplies deferred bindings without forcing the connection to restart.
 }
 
 function nativeInventoryKey(

@@ -401,15 +401,30 @@ retains its original child provenance. Gateways retire the hot row from the
 canonical session event rather than infer a transition from `archive.changed`.
 
 Native discovery and metadata authority bootstrap are separate concerns.
-Currently reconciliation returns only bindings submitted in native inventory;
-an older retained stopped binding omitted by discovery can therefore remain
-without runtime `metadataAuthority`. Archive must continue to reject that
-unknown fence. Authenticated terminal metadata settlement can establish an
-absent authority only while the retained metadata revision is zero, preserving
-all existing values and binding identity. Bootstrap coverage for omitted
-retained bindings remains a pending source prevention change; it must not
-advertise them as natively resumable or assign authority from an untrusted
-request. See [cleanup operations](../wiki/Operations.md#retained-binding-cleanup).
+The runtime may submit up to 1,000 exact local `retainedBindings` alongside a
+native inventory snapshot. Each reference fixes logical session, runtime,
+harness, adapter scope, vendor session and binding revision. References are
+unique and match the authenticated runtime/boot fence. They are never part of
+native inventory and cannot create a catalog row or prove resumability.
+The owning control checks all existing open references before inventory
+admission and returns their canonical records under its current authority,
+including the ancestor Root authority when attached. Unknown and archived rows
+are skipped. A known mismatching binding or authority is fenced. Later batches
+reuse the same snapshot generation without introducing another inventory claim.
+
+The runtime accepts a returned row only from its submitted native inventory or
+the exact retained identities. Retained rows must still exist locally and have
+the same binding revision; canonical metadata/authority import never overwrites
+runtime liveness, availability, native identity, launch provenance or settings.
+Local deletion and archive tombstones prevent resurrection. An absent authority
+may bootstrap only at unowned metadata revision zero; advanced unowned state
+requires investigation. Same-authority metadata stays monotonic; deliberate
+attachment starts a new authority revision domain without retargeting old
+metadata operations. Connection retirement/deadlines discard late local results
+and prevent later batches, but do not undo an already admitted inventory update.
+Archive continues to reject an unknown or stale authority. The fenced terminal
+settlement procedure remains an older-install repair path; see
+[cleanup operations](../wiki/Operations.md#retained-binding-cleanup).
 
 The backend runs first because the provider may own the container, worktree, or
 other substrate required to reach it. A known cleanup failure leaves the

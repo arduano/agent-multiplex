@@ -49,6 +49,13 @@ A runtime connects to exactly one control. A control outage does not stop an
 agent; the runtime reconnects, reconciles inventory, and flushes durable outbox
 work after the route returns.
 
+Canonical metadata bootstrap also names locally retained bindings omitted by
+native discovery. Those exact references are not inventory claims: the owning
+control may return metadata for a matching open canonical binding, and the
+runtime preserves its own native availability, liveness and binding revision.
+Unknown or archived rows never create a runtime binding through this path.
+See [the retained binding contract](../design/data-roles-v4.md#session-catalog-lifecycle).
+
 ### Access gateway
 
 The gateway is a zero-authority observer and command edge. It persists source

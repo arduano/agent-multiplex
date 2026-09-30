@@ -76,6 +76,7 @@ import {
 } from "./runtime-node.js";
 import {
   inventorySnapshotSchema,
+  sessionBindingRefSchema,
   sessionRecordSchema,
   sessionSearchInputSchema,
   sessionSearchPageSchema,
@@ -671,6 +672,9 @@ export const controlNodeIngressContract = {
     reconcile: {
       input: runtimeNodeFenceSchema.extend({
         snapshot: inventorySnapshotSchema,
+        // Retained identities bootstrap canonical metadata independently of
+        // harness discovery. They cannot create catalog/native bindings.
+        retainedBindings: z.array(sessionBindingRefSchema).max(1_000).optional(),
       }).superRefine((input, ctx) => {
         if (input.snapshot.runtimeNodeId !== input.runtimeNodeId) {
           ctx.addIssue({
@@ -678,6 +682,14 @@ export const controlNodeIngressContract = {
             path: ["snapshot", "runtimeNodeId"],
             message: "inventory snapshot must match the runtime-node fence",
           });
+        }
+        const identities = new Set<string>();
+        for (const [index, binding] of (input.retainedBindings ?? []).entries()) {
+          if (binding.runtimeNodeId !== input.runtimeNodeId || identities.has(binding.sessionId)) {
+            ctx.addIssue({ code: "custom", path: ["retainedBindings", index],
+              message: "retained bindings must be unique and match the runtime-node fence" });
+          }
+          identities.add(binding.sessionId);
         }
       }),
       output: z.object({

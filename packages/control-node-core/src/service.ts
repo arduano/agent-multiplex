@@ -28,6 +28,7 @@ import {
   commandRecordSchema,
   controlNodeSubtreeSnapshotPageSchema,
   controlNodeSubtreeSnapshotRequestSchema,
+  controlNodeIngressContract,
   gatewayEnrollmentSchema,
   interactionRecordSchema,
   inventorySnapshotSchema,
@@ -99,6 +100,7 @@ import {
   type RuntimeNodeId,
   type RuntimeNodeRegistration,
   type SessionLifecycleView,
+  type SessionBindingRef,
   type SessionId,
   type SessionRecord,
   type SessionSearchInput,
@@ -871,7 +873,7 @@ export class ControlNodeService {
   }
 
   public reconcile(
-    input: RuntimeNodeFence & { snapshot: InventorySnapshot },
+    input: RuntimeNodeFence & { snapshot: InventorySnapshot; retainedBindings?: SessionBindingRef[] | undefined },
     context: RuntimeNodeIngressContext = {},
   ) {
     const snapshot = inventorySnapshotSchema.parse(input.snapshot);
@@ -879,7 +881,30 @@ export class ControlNodeService {
     if (snapshot.runtimeNodeId !== input.runtimeNodeId) {
       throw new ControlNodeCoreError("FENCED", "inventory does not match runtime-node fence");
     }
-    return { sessions: this.catalog.reconcileInventory(snapshot), controlCursor: this.catalog.controlCursor() };
+    const { retainedBindings = [] } = controlNodeIngressContract.runtimeNodes.reconcile.input.parse({ ...input, snapshot });
+    // Check every retained identity before admitting inventory changes. Only
+    // this authenticated runtime's existing open canonical rows may bootstrap
+    // metadata; absence/archival never recreates a binding or proves resumability.
+    for (const binding of retainedBindings) {
+      const session = this.catalog.getSession(binding.sessionId);
+      if (!session || session.catalogState === "archived") continue;
+      if (session.runtimeNodeId !== input.runtimeNodeId ||
+        session.harness !== binding.harness || session.adapterScopeId !== binding.adapterScopeId ||
+        session.vendorSessionId !== binding.vendorSessionId || session.bindingRevision !== binding.bindingRevision ||
+        !sameAuthority(session.metadataAuthority, this.catalog.authority())) {
+        throw new ControlNodeCoreError("FENCED", "retained binding does not match the canonical session");
+      }
+    }
+    const sessions = this.catalog.reconcileInventory(snapshot);
+    const returned = new Set(sessions.map(session => session.sessionId));
+    for (const binding of retainedBindings) {
+      if (returned.has(binding.sessionId)) continue;
+      const session = this.catalog.getSession(binding.sessionId);
+      if (session?.catalogState !== "open") continue;
+      sessions.push(session);
+      returned.add(session.sessionId);
+    }
+    return { sessions, controlCursor: this.catalog.controlCursor() };
   }
 
   public publishRuntimeEvent(

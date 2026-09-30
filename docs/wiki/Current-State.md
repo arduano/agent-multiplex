@@ -5,7 +5,27 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-30 (isolated authority errors and child archive projection source candidates).
+Last reconciled: 2026-09-30 (retained binding metadata bootstrap source candidate).
+
+## Retained binding metadata bootstrap correction candidate
+
+Runtime reconciliation now submits exact identities for locally retained
+bindings omitted by native discovery, bounded to 1,000 per request. Its owning
+control returns only matching open canonical rows under the current authority;
+references cannot create catalog bindings or claim native resumability. The
+runtime imports canonical metadata and authority while preserving local binding
+identity, revision, native availability and liveness. Unknown or archived
+catalog rows are skipped. A changed binding, retired connection, local removal
+or advanced unowned metadata fails closed rather than resurrecting or rewriting
+state. Attached controls continue to return the Root's authority.
+
+The optional `retainedBindings` ingress field extends the existing protocol-v6
+reconciliation input. Output shape, protocol version, released hashes, operation
+IDs, migration names, launch contracts and dependency pins stay unchanged.
+Activation needs coordinated protocol, control-node-core, runtime-node-core and
+runtime-node app packages. This is isolated source only; publication, packed
+consumer and installed-fleet qualification remain separate. See the
+[source checkpoint](../checkpoint-v4.md#retained-binding-metadata-bootstrap-candidate--2026-09-30).
 
 ## Child archive projection correction candidate
 
@@ -25,13 +45,10 @@ checks passed. The combined exact-source local suite later passed 121 files /
 see the [September 30 source checkpoint](../checkpoint-v4.md#root-child-error-and-archive-projection-candidates--2026-09-30).
 Published-consumer qualification and deployment remain pending.
 
-An older retained runtime binding can still lack `metadataAuthority` when native
-discovery omits it before canonical reconciliation. That is a distinct pending
-prevention fix: metadata bootstrap must reach retained bindings independently
-of native availability. Until implemented, use the authenticated, fenced
-metadata settlement path described in [operations](Operations.md#retained-binding-cleanup)
-and verify its durable receipt before Archive. No direct store edit or inferred
-native recovery is supported.
+Before the metadata bootstrap candidate above is installed, older retained
+bindings can still lack runtime `metadataAuthority`. The authenticated, fenced
+settlement repair in [operations](Operations.md#retained-binding-cleanup) remains
+available. Neither source correction restores missing native history.
 
 ## Isolated authority reverse-error correction candidate
 

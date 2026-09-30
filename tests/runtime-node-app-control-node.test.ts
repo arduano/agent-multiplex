@@ -9,10 +9,13 @@ import {
   newSessionId,
   newRuntimeNodeBootId,
   newRuntimeNodeId,
+  sessionRecordSchema,
   type InventorySnapshot,
   type MetadataOperationRecord,
   type MetadataPatch,
   type RuntimeNodeRegistration,
+  type SessionBindingRef,
+  type SessionRecord,
 } from "@arduano/agent-multiplex-protocol";
 import type { RuntimeNodeStore } from "@arduano/agent-multiplex-runtime-node-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -70,6 +73,7 @@ function maintenanceFixture() {
     runtimeNodeId,
     describe: vi.fn(async () => registration),
     refreshInventory: vi.fn(async () => inventory),
+    retainedSessionBindings: vi.fn(() => []),
     applyCanonicalSessions: vi.fn(),
     metadataOutbox: vi.fn(() => [patch]),
     settleMetadataOutbox: vi.fn(),
@@ -77,7 +81,8 @@ function maintenanceFixture() {
   const makePeer = () => {
     const register = vi.fn(async () => ({ accepted: true }));
     const heartbeat = vi.fn(async () => ({ accepted: true }));
-    const reconcile = vi.fn(async () => ({ sessions: [], controlCursor: 1 }));
+    const reconcile = vi.fn(async (_input: unknown): Promise<{ sessions: SessionRecord[]; controlCursor: number }> =>
+      ({ sessions: [], controlCursor: 1 }));
     const pushOutbox = vi.fn(async (): Promise<MetadataOperationRecord[]> => []);
     const peer = {
       rpc: { ingress: {
@@ -350,6 +355,7 @@ describe("runtime-node control-node RPC path", () => {
     const applyCanonicalSessions = vi.fn();
     await refreshAndReconcile(peer, {
       refreshInventory: async () => inventory,
+      retainedSessionBindings: () => [],
       applyCanonicalSessions,
     }, runtimeNodeBootId);
     const settleMetadataOutbox = vi.fn();
@@ -422,6 +428,7 @@ describe("runtime-node control-node RPC path", () => {
 
     await expect(refreshAndReconcile(peer, {
       refreshInventory: async () => inventory,
+      retainedSessionBindings: () => [],
       applyCanonicalSessions,
     }, runtimeNodeBootId)).rejects.toThrow("was not submitted");
     expect(applyCanonicalSessions).not.toHaveBeenCalled();
@@ -460,8 +467,57 @@ describe("runtime-node control-node RPC path", () => {
 
     await expect(refreshAndReconcile(peer, {
       refreshInventory: async () => inventory,
+      retainedSessionBindings: () => [],
       applyCanonicalSessions,
     }, runtimeNodeBootId)).resolves.toBeUndefined();
     expect(applyCanonicalSessions).toHaveBeenCalledWith([]);
+  });
+
+  it("bounds omitted retained binding bootstrap to 1,000 exact identities per request", async () => {
+    const f = maintenanceFixture();
+    const retained: SessionBindingRef[] = Array.from({ length: 1_001 }, (_, index) => ({
+      sessionId: newSessionId(), runtimeNodeId: f.inventory.runtimeNodeId, harness: "codex",
+      adapterScopeId: adapterScopeIdSchema.parse("retained-batch"), vendorSessionId: `old-native-${index}`, bindingRevision: 1,
+    }));
+    await refreshAndReconcile(f.first.peer, { ...f.service, retainedSessionBindings: () => retained },
+      (await f.service.describe()).runtimeNodeBootId);
+    expect(f.first.reconcile).toHaveBeenCalledTimes(2);
+    expect(f.first.reconcile.mock.calls.map(([input]) => (input as { retainedBindings: SessionBindingRef[] }).retainedBindings.length))
+      .toEqual([1_000, 1]);
+    expect(f.first.reconcile.mock.calls.map(([input]) => (input as { snapshot: InventorySnapshot }).snapshot))
+      .toEqual([f.inventory, f.inventory]);
+    expect(f.service.applyCanonicalSessions).toHaveBeenNthCalledWith(1, [], retained.slice(0, 1_000));
+    expect(f.service.applyCanonicalSessions).toHaveBeenNthCalledWith(2, [], retained.slice(1_000));
+  });
+
+  it("rejects a returned retained row with a changed binding revision before local application", async () => {
+    const f = maintenanceFixture();
+    const binding: SessionBindingRef = { sessionId: newSessionId(), runtimeNodeId: f.inventory.runtimeNodeId,
+      harness: "copilot", adapterScopeId: adapterScopeIdSchema.parse("retained-revision"), vendorSessionId: "old-native", bindingRevision: 7 };
+    const timestamp = new Date().toISOString();
+    const session = sessionRecordSchema.parse({ ...binding, bindingRevision: 8, runtimeEpoch: null, cwd: "/tmp",
+      availability: "unavailable", runtimeStatus: "stopped", metadata: emptyMetadataSnapshot(),
+      metadataAuthority: f.patch.expectedAuthority, createdAt: timestamp, updatedAt: timestamp, lastSeenAt: timestamp });
+    f.first.reconcile.mockResolvedValueOnce({ sessions: [session], controlCursor: 1 });
+    await expect(refreshAndReconcile(f.first.peer, { ...f.service, retainedSessionBindings: () => [binding] },
+      (await f.service.describe()).runtimeNodeBootId)).rejects.toThrow("exact binding");
+    expect(f.service.applyCanonicalSessions).not.toHaveBeenCalled();
+  });
+
+  it("discards a retired connection's bootstrap reply and stops later batches", async () => {
+    const f = maintenanceFixture();
+    const retained: SessionBindingRef[] = Array.from({ length: 1_001 }, (_, index) => ({
+      sessionId: newSessionId(), runtimeNodeId: f.inventory.runtimeNodeId, harness: "codex",
+      adapterScopeId: adapterScopeIdSchema.parse("retired-bootstrap"), vendorSessionId: `old-native-${index}`, bindingRevision: 1,
+    }));
+    const abort = new AbortController();
+    f.first.reconcile.mockImplementationOnce(async () => {
+      abort.abort();
+      return { sessions: [], controlCursor: 1 };
+    });
+    await refreshAndReconcile(f.first.peer, { ...f.service, retainedSessionBindings: () => retained },
+      (await f.service.describe()).runtimeNodeBootId, abort.signal);
+    expect(f.first.reconcile).toHaveBeenCalledTimes(1);
+    expect(f.service.applyCanonicalSessions).not.toHaveBeenCalled();
   });
 });

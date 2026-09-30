@@ -1,5 +1,45 @@
 # Release qualification checkpoint
 
+## Retained binding metadata bootstrap candidate — 2026-09-30
+
+Isolated source based on `d9c9038` adds canonical metadata bootstrap for exact
+locally retained native bindings omitted by discovery. The existing
+protocol-v6 reconciliation input gains optional bounded `retainedBindings`;
+the response shape, protocol version, operation identities, released hashes,
+launch contracts, migrations and dependency pins remain unchanged. Activation
+requires the coordinated protocol, control-node-core, runtime-node-core and
+runtime-node app graph. Catalog authority stays with control; no Gateway or
+native-history authority is added.
+
+Two synthetic Codex/Copilot old-state cases reproduced the missing authority
+before the source correction. The final focused run passed **8 files / 132
+tests**, with one worker. Eleven new disposable fixture cases cover stopped
+resumable/unavailable bindings, runtime/control restart, canonical metadata,
+Root attachment and former-authority rejection, supported Archive and retained
+tombstones, native discovery failure, endpoint/boot/binding fences, local
+removal during bootstrap, and advanced unowned metadata. Three new maintenance
+cases cover 1,000-reference batching, changed response revisions and discarded
+late results after connection retirement. Nearby runtime, metadata, control
+hardening, lifecycle and child-archive projection regressions also passed.
+
+The initial normal-temp run timed out during disposable SQLite filesystem
+sync; its worker was observed waiting in `bch2_closure_sync_timeou`. After that
+run exited, `TMPDIR=/dev/shm` provided disposable memory-backed fixture storage
+for both the actual pre-fix assertion reproduction and passing qualification.
+This is a qualification-environment choice, not a deployed storage change.
+Affected TypeScript projects compiled with
+`npx tsc -b packages/control-node-core packages/runtime-node-core apps/runtime-node --pretty false`.
+Documentation, checkpoint, release-metadata, secrets and whitespace gates passed.
+No new broad suite or production build was run on the live-serving NAS.
+
+The scrubbed focused log is
+`receipts/retained-binding-authority-bootstrap-20260930/focused-tests.log`;
+SHA-256: `9c36cc88f4209695f0e575a5afaf04e45c4b3cb70a61753ba3a4976ec1315046`.
+The local summary binds the exact commit, lockfile and source diff to those
+logs and their checksums. No native model calls, publication, push, deployment,
+live service/config/pin changes or installed-state mutation occurred. Full
+candidate, packed-consumer and native installed qualification remain separate.
+
 ## Root child-error and archive projection candidates — 2026-09-30
 
 Isolated source `d452014adeaa1faeeba48d0ee25ab9b730b7ad57` combines

@@ -141,11 +141,19 @@ runtime/native binding and operation receipts before cleanup. A successful
 explicit Stop establishes the runtime's stopped fence; it does not recover
 native history. Archive remains a separate backend/provider release operation.
 
-An older binding may lack the runtime's metadata authority because inventory
-reconciliation returns only sessions currently discovered by the harness.
-Archive correctly rejects an unknown authority. For a retained binding at
-metadata revision zero, an ordinary authenticated metadata patch and its
-terminal settlement can establish that authority. Use a fresh stable operation
+The retained-binding bootstrap source candidate submits locally saved exact
+identities independently of native discovery, in batches of at most 1,000.
+The owning control returns canonical metadata only for its matching open rows;
+the runtime preserves its native binding and availability. A reference missing
+from the canonical catalog is deferred, not created. Verify the saved runtime
+authority and canonical metadata before Archive. It still requires a confirmed
+Stop and normal backend/provider release; bootstrap does not recover history.
+
+Before that coordinated package graph is installed, an older binding may lack
+runtime metadata authority because reconciliation only returns discovered
+sessions. Archive correctly rejects an unknown authority. For a retained binding
+at metadata revision zero, an ordinary authenticated metadata patch and its
+terminal settlement can establish the authority. Use a fresh stable operation
 ID and current authority/binding fences. If deleting an absent namespaced key
 as a no-op, first verify absence and preserve all existing values. Wait for the
 matching durable runtime receipt before retrying the original Archive ID;
@@ -157,9 +165,9 @@ every aggregate. A warm Gateway cannot derive that transition from the archive
 receipt alone. If the canonical row is archived but an older Gateway still
 lists it as open, refresh the Gateway's source snapshot through supported
 maintenance; never edit its observations or repeat provider release. The source
-candidate publishes the missing canonical transition automatically. Independent
-metadata bootstrap for retained bindings omitted by native inventory remains
-a separate pending prevention change.
+archive projection candidate publishes the missing canonical transition
+automatically. Source candidates and focused disposable qualification do not
+mean either correction is already installed.
 
 ## Storage stalls and an isolated authority
 
