@@ -10,6 +10,13 @@ export const IMAGE_MAX_COMMAND_IMAGES = 10;
 // record, event, and RPC framing within the unchanged 2 MiB transport cap.
 export const NATIVE_PAYLOAD_MAX_BYTES = 960 * 1_024;
 
+/** Fixed validation categories; native values, paths and Zod messages stay private. */
+export const nativePayloadValidationFailureSchema = z.enum([
+  "wireEnvelope", "imageSlotLimit", "imageSlotMetadata", "imagePointer",
+  "imageSlotShape", "jsonShape", "envelopeShape",
+]);
+export type NativePayloadValidationFailure = z.infer<typeof nativePayloadValidationFailureSchema>;
+
 export const imageIdSchema = z.uuid();
 export type ImageId = z.infer<typeof imageIdSchema>;
 export const imageMediaTypeSchema = z.enum([
@@ -77,22 +84,62 @@ export const nativePayloadSchema = z.object({
     if ((slot.representation === "path") !== (slot.originalPath !== undefined) ||
       (slot.dataUrlPrefix !== undefined && slot.representation !== "dataUrl") ||
       (slot.absent && (!slot.pointer || Array.isArray(nativeImagePointerValue(payload.json, slot.pointer.slice(0, slot.pointer.lastIndexOf("/"))))))) {
-      context.addIssue({ code: "custom", path: ["images", index], message: "image representation metadata is inconsistent" });
+      context.addIssue({ code: "custom", path: ["images", index], message: "image representation metadata is inconsistent",
+        params: { nativePayloadFailure: "imageSlotMetadata" } });
     }
     if (seen.has(slot.pointer) || nativeImagePointerValue(payload.json, slot.pointer) !== null) {
-      context.addIssue({ code: "custom", path: ["images", index, "pointer"], message: "image pointers must be unique and target null leaves" });
+      context.addIssue({ code: "custom", path: ["images", index, "pointer"], message: "image pointers must be unique and target null leaves",
+        params: { nativePayloadFailure: "imagePointer" } });
     }
     seen.add(slot.pointer);
   }
   if (jsonWireByteUpperBound(payload) > NATIVE_PAYLOAD_MAX_BYTES) {
-    context.addIssue({ code: "custom", message: "native payload exceeds the bounded wire envelope" });
+    context.addIssue({ code: "custom", message: "native payload exceeds the bounded wire envelope",
+      params: { nativePayloadFailure: "wireEnvelope" } });
   }
 });
 export type NativePayload = z.infer<typeof nativePayloadSchema>;
 
+const nativePayloadFailures = new WeakMap<z.ZodError, NativePayloadValidationFailure>();
+
+/** Preserve the original schema error while identifying this exact validation boundary. */
+export function parseNativePayload(payload: unknown): NativePayload {
+  try { return nativePayloadSchema.parse(payload); }
+  catch (error) {
+    if (error instanceof z.ZodError) {
+      const failure = classifyNativePayloadFailure(error);
+      if (failure !== undefined) nativePayloadFailures.set(error, failure);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Classify only top-level envelope schema failures. Never return issue paths,
+ * messages, rejected values or image identities. Multiple issues use the fixed
+ * priority above; this is one diagnostic category, not a complete issue list.
+ */
+export function nativePayloadValidationFailure(error: unknown): NativePayloadValidationFailure | undefined {
+  if (!(error instanceof z.ZodError)) return undefined;
+  return nativePayloadFailures.get(error);
+}
+
+function classifyNativePayloadFailure(error: z.ZodError): NativePayloadValidationFailure | undefined {
+  const failures = new Set<NativePayloadValidationFailure>();
+  for (const issue of error.issues) {
+    const marked = issue.code === "custom"
+      ? nativePayloadValidationFailureSchema.safeParse(issue.params?.nativePayloadFailure) : undefined;
+    if (marked?.success) failures.add(marked.data);
+    else if (issue.path[0] === "images") failures.add(issue.path.length === 1 && issue.code === "too_big" ? "imageSlotLimit" : "imageSlotShape");
+    else if (issue.path[0] === "json") failures.add("jsonShape");
+    else failures.add("envelopeShape");
+  }
+  return nativePayloadValidationFailureSchema.options.find((category) => failures.has(category));
+}
+
 /** Wrap an image-free native value; this is not a wire compatibility coercion. */
 export function packNativePayload(json: JsonValue): NativePayload {
-  return nativePayloadSchema.parse({ encoding: "native-json-images-v1", json, images: [] });
+  return parseNativePayload({ encoding: "native-json-images-v1", json, images: [] });
 }
 
 /** Own-property traversal prevents inherited keys from becoming image slots. */

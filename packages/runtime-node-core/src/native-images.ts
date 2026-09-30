@@ -1,4 +1,4 @@
-import { IMAGE_MAX_BYTES, jsonWireByteUpperBound, nativeImagePointerValue, nativePayloadSchema, type JsonValue, type NativeImageSlot, type NativePayload } from "@arduano/agent-multiplex-protocol";
+import { IMAGE_MAX_BYTES, jsonWireByteUpperBound, nativeImagePointerValue, parseNativePayload, type JsonValue, type NativeImageSlot, type NativePayload } from "@arduano/agent-multiplex-protocol";
 import type { NativeImageSink } from "./adapter.js";
 
 export interface NativeImageLeaf {
@@ -111,7 +111,7 @@ export async function externalizeNativeImages(payload: JsonValue, sink: NativeIm
       ...(absent ? { absent: true } : {}),
     });
   }
-  return nativePayloadSchema.parse({ encoding: "native-json-images-v1", json, images });
+  return parseNativePayload({ encoding: "native-json-images-v1", json, images });
 }
 
 function imageHeaderType(encoded: string): string | undefined {

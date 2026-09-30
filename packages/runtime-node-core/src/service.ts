@@ -12,10 +12,12 @@ import {
   type RuntimeLifecycleProjection,
   safeCommandError,
   packNativePayload,
-  nativePayloadSchema,
+  parseNativePayload,
+  nativePayloadValidationFailure,
   nativeImagePointerValue,
   type NativePayload,
   type NativeGapDiagnostic,
+  type NativePayloadValidationFailure,
   type NativeImageSlot,
   type ImageBeginUploadInput,
   type ImageWriteUploadInput,
@@ -154,6 +156,11 @@ export class RuntimeNodeProtocolError extends Error {
   }
 }
 
+/** Private hook details; additional fields never enter lifecycle storage or public projections. */
+export type NativeGapLogDiagnostic = NativeGapDiagnostic & {
+  readonly payloadFailure?: NativePayloadValidationFailure;
+};
+
 export interface RuntimeNodeServiceOptions {
   store: RuntimeNodeStore;
   runtimeNodeId: RuntimeNodeId;
@@ -183,7 +190,7 @@ export interface RuntimeNodeServiceOptions {
   /** Trusted process supervisor hook. It must stop this runtime before retrying. */
   onCopilotObservationRecoveryRequired?: (sessionId: SessionId) => void;
   /** Payload-free, best-effort operator diagnostics; lifecycle state is persisted first. */
-  onNativeGapDiagnostic?: (diagnostic: NativeGapDiagnostic) => void;
+  onNativeGapDiagnostic?: (diagnostic: NativeGapLogDiagnostic) => void;
 }
 
 interface ActiveBinding {
@@ -260,7 +267,7 @@ export class RuntimeNodeService {
   readonly #nativeEventQueueLimit: number;
   readonly #nativeEventQueueBytes: number;
   readonly #onCopilotObservationRecoveryRequired: ((sessionId: SessionId) => void) | undefined;
-  readonly #onNativeGapDiagnostic: ((diagnostic: NativeGapDiagnostic) => void) | undefined;
+  readonly #onNativeGapDiagnostic: ((diagnostic: NativeGapLogDiagnostic) => void) | undefined;
   #acceptingNativeEvents = true;
   #lastSnapshot: InventorySnapshot | undefined;
   #closed = false;
@@ -1294,7 +1301,7 @@ export class RuntimeNodeService {
         catch (error) { return unavailable(error); }
       },
     });
-    return nativePayloadSchema.parse(result);
+    return parseNativePayload(result);
   }
 
   async #reconstructImages(input: CommandEnvelope, session: RuntimeNodeSessionRecord): Promise<CommandEnvelope["request"]> {
@@ -3106,6 +3113,7 @@ export class RuntimeNodeService {
 
   #publishNativeGap(sessionId: SessionId, binding: ActiveBinding, code: NativeGapDiagnostic["code"],
     event: AdapterEvent, eventBytes?: number, error?: unknown): void {
+    const payloadFailure = code === "imageExtraction" ? nativePayloadValidationFailure(error) : undefined;
     const errorClass: NativeGapDiagnostic["errorClass"] = error instanceof TypeError ? "type"
       : error instanceof RangeError ? "range"
         : error instanceof SyntaxError ? "syntax"
@@ -3118,7 +3126,10 @@ export class RuntimeNodeService {
     };
     this.#appendLifecycle(sessionId, binding, { type: "gap", diagnostic });
     this.#events.publish({ kind: "nativeGap", sessionId, reason: `native ${code} (diagnostic ${diagnostic.diagnosticId})`, recovery: "readNativeHistory" });
-    try { this.#onNativeGapDiagnostic?.(diagnostic); } catch { /* Diagnostics never replace native behavior. */ }
+    // Extra validation detail belongs only to the private logging hook. The
+    // released strict durable schema must remain readable by rollback binaries.
+    const logged: NativeGapLogDiagnostic = payloadFailure === undefined ? diagnostic : { ...diagnostic, payloadFailure };
+    try { this.#onNativeGapDiagnostic?.(logged); } catch { /* Diagnostics never replace native behavior. */ }
   }
 
   #deferLifecycleEvent(
