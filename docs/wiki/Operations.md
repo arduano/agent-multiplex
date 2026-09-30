@@ -133,6 +133,34 @@ isolated backend.
 See [Backups, upgrades, and recovery](Backups-Upgrades-and-Recovery.md) and the
 detailed [deployment runbook](../deployment-v4.md).
 
+## Retained binding cleanup
+
+An unavailable session can retain a valid runtime binding even when the native
+harness no longer lists its saved session. Inspect the canonical row, exact
+runtime/native binding and operation receipts before cleanup. A successful
+explicit Stop establishes the runtime's stopped fence; it does not recover
+native history. Archive remains a separate backend/provider release operation.
+
+An older binding may lack the runtime's metadata authority because inventory
+reconciliation returns only sessions currently discovered by the harness.
+Archive correctly rejects an unknown authority. For a retained binding at
+metadata revision zero, an ordinary authenticated metadata patch and its
+terminal settlement can establish that authority. Use a fresh stable operation
+ID and current authority/binding fences. If deleting an absent namespaced key
+as a no-op, first verify absence and preserve all existing values. Wait for the
+matching durable runtime receipt before retrying the original Archive ID;
+queued or unknown delivery is not proof of repair. Divergent authority or
+advanced unowned metadata must be investigated rather than overwritten.
+
+Successful child archives must also publish an archived session event through
+every aggregate. A warm Gateway cannot derive that transition from the archive
+receipt alone. If the canonical row is archived but an older Gateway still
+lists it as open, refresh the Gateway's source snapshot through supported
+maintenance; never edit its observations or repeat provider release. The source
+candidate publishes the missing canonical transition automatically. Independent
+metadata bootstrap for retained bindings omitted by native inventory remains
+a separate pending prevention change.
+
 ## Storage stalls and an isolated authority
 
 The reference control supports `AGENT_MULTIPLEX_CONTROL_NODE_STORAGE_OWNER=worker`

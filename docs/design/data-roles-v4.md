@@ -392,6 +392,25 @@ An archive is published as successful only after all of these steps complete:
 4. The metadata authority records that success and atomically changes the
    canonical session to `archived` with a new catalog revision.
 
+When an aggregate imports a successful child archive and updates its canonical
+session, it must append the derived archived `session.upsert` in that same
+transaction. A later identical child session event may be suppressed, but its
+immutable imported identity and checkpoint still commit. The derived event has
+the aggregate's own event identity and current authority; the archive event
+retains its original child provenance. Gateways retire the hot row from the
+canonical session event rather than infer a transition from `archive.changed`.
+
+Native discovery and metadata authority bootstrap are separate concerns.
+Currently reconciliation returns only bindings submitted in native inventory;
+an older retained stopped binding omitted by discovery can therefore remain
+without runtime `metadataAuthority`. Archive must continue to reject that
+unknown fence. Authenticated terminal metadata settlement can establish an
+absent authority only while the retained metadata revision is zero, preserving
+all existing values and binding identity. Bootstrap coverage for omitted
+retained bindings remains a pending source prevention change; it must not
+advertise them as natively resumable or assign authority from an untrusted
+request. See [cleanup operations](../wiki/Operations.md#retained-binding-cleanup).
+
 The backend runs first because the provider may own the container, worktree, or
 other substrate required to reach it. A known cleanup failure leaves the
 canonical session stopped. An ambiguous effect becomes `outcomeUnknown`; core

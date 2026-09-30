@@ -3700,7 +3700,7 @@ export class ControlNodeCatalog {
           if (session?.catalogState === "open") {
             this.#deleteMetadataDeliveryIntentsForSession(session.sessionId);
             const { lifecycle: _lifecycle, ...withoutLifecycle } = session;
-            this.#putSession(sessionRecordSchema.parse({
+            const archived = sessionRecordSchema.parse({
               ...withoutLifecycle,
               availability: "unavailable",
               runtimeStatus: "stopped",
@@ -3709,7 +3709,12 @@ export class ControlNodeCatalog {
               catalogRevision: archive.catalogRevision,
               archivedAt: archive.releasedAt,
               updatedAt: archive.releasedAt,
-            }), source);
+            });
+            this.#putSession(archived, source);
+            // The later child session upsert can be identical and therefore
+            // suppressed. Publish this canonical transition in the same
+            // transaction so warm upstream projections retire the open row.
+            this.#appendControl({ type: "session.upsert", session: archived });
           }
         }
         return { type: "archive.changed", archive };

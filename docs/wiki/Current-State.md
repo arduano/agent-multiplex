@@ -5,7 +5,30 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-30 (isolated authority reverse-error source candidate).
+Last reconciled: 2026-09-30 (isolated authority errors and child archive projection source candidates).
+
+## Child archive projection correction candidate
+
+Importing a successful child archive now publishes the derived canonical
+archived `session.upsert` in the same Root transaction. Previously Root stored
+the archived row silently, then suppressed the identical child session event;
+warm Gateways could retain an open row until a new snapshot. Gateways continue
+to observe canonical session events rather than infer archive transitions.
+Individual and batch imports preserve replay deduplication and child event
+identity. Focused Root/child/Gateway regressions cover both Codex and Copilot
+without a resnapshot; publication and installed repair remain separate.
+The new four-case regression failed in all four cases before the correction.
+Afterward it and the related catalog, child-import and Gateway suites passed
+(70 tests). Typecheck, documentation, checkpoint, release-metadata and secret
+checks passed. Full-suite and published-consumer qualification remain pending.
+
+An older retained runtime binding can still lack `metadataAuthority` when native
+discovery omits it before canonical reconciliation. That is a distinct pending
+prevention fix: metadata bootstrap must reach retained bindings independently
+of native availability. Until implemented, use the authenticated, fenced
+metadata settlement path described in [operations](Operations.md#retained-binding-cleanup)
+and verify its durable receipt before Archive. No direct store edit or inferred
+native recovery is supported.
 
 ## Isolated authority reverse-error correction candidate
 
