@@ -126,6 +126,26 @@ protected, rotating log and must not affect the native event path if logging
 fails. The public lifecycle health issue carries only the diagnostic ID; the
 internal journal retains fixed codes and counts for later inspection.
 
+The private hook additionally classifies the native type through a fixed pinned
+Copilot event-name allowlist (otherwise `unknown`), native ephemeral flag,
+exact failing externalized-envelope wire upper bound and limit, and
+`lifecycleImpact` (`preserved` or `invalidated`). These fields never enter the
+strict durable diagnostic or catalog schema. Raw SDK payloads, event IDs,
+paths, exceptions and arbitrary type strings are excluded.
+
+A narrowly identified optional Copilot `model.messages_snapshot` envelope can
+be omitted without appending a lifecycle gap. The trusted adapter must confirm
+matching wrapper/native type, both explicit ephemeral markers,
+`data.kind=messages_snapshot` and a messages array. Only an exact `wireEnvelope`
+validation failure qualifies. This event is a diagnostic copy of model context,
+not an authoritative pending-request or lifecycle snapshot. The runtime still
+publishes the existing native stream gap and invokes the protected diagnostic
+hook: display omission remains explicit while the independent authoritative
+lifecycle state stays unchanged. Unknown events, other model/debug events,
+mislabelled or malformed events, reverse requests, serialization failure and
+queue overflow retain ordinary gap invalidation. An optional omission never
+repairs an earlier genuine gap or clears partial interaction hydration.
+
 Invalidation clears root phase/cycle/outcome certainty; advances task and queue
 revisions and marks both pending; marks children unknown; clears interactions
 and makes their completeness partial; and makes compaction unknown. It retains
@@ -448,8 +468,12 @@ bounded lifecycle window, the command receipt remains recoverable through
 
 ### Stream gap or reset
 
-An access `nativeGap`, lifecycle sequence jump, extraction overflow or invalid
-native payload invalidates continuity. A control feed/source reset also invalidates
+An access `nativeGap` requires transcript reconciliation against the native
+history and current runtime-owned lifecycle view; consumers do not invent
+lifecycle invalidation. A lifecycle sequence jump, extraction overflow or invalid
+required native payload invalidates runtime continuity. The optional diagnostic
+context-envelope omission described above preserves lifecycle certainty.
+A control feed/source reset also invalidates
 the consumer's projection. Clients must:
 
 1. retain original command receipts and drafts without replay;

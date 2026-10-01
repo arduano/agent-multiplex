@@ -120,6 +120,10 @@ export interface AgentAdapter {
   readonly harness: Harness;
   readonly adapterScopeId: AdapterScopeId;
   readonly imageCodec?: NativeImageCodec;
+  /** Trusted harness policy for one confirmed optional context snapshot only.
+   * Missing, malformed, unknown and authoritative events remain required.
+   * This never grants admission or permits truncating a native payload. */
+  optionalNativeTelemetry?(event: AdapterNativeEvent): boolean;
   describe(): Promise<HarnessCatalogEntry>;
   listModels(): Promise<NativeModel[]>;
   listSessions(): Promise<NativeInventoryItem[]>;

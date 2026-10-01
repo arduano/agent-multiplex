@@ -15,6 +15,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CopilotAgentAdapter } from "../packages/adapter-copilot/src/adapter.ts";
 import { copilotImageCodec } from "../packages/adapter-copilot/src/images.ts";
+import { copilotOptionalNativeTelemetry } from "../packages/adapter-copilot/src/native-event-policy.ts";
 import { nativeImagePointerValue, nativePayloadSchema } from "@arduano/agent-multiplex-protocol";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
@@ -166,6 +167,9 @@ async function qualify() {
     const snapshots = eventSummary.filter((event) => event.type === "model.messages_snapshot" && event.originalImagePresent);
     assert.ok(snapshots.length > 0, "native runtime did not reproduce the original snapshot leak");
     assert.ok(snapshots.every((event) => event.imagePointers.some((pointer) => /^\/data\/messages\/[0-9]+\/content\/[0-9]+\/image_url\/url$/.test(pointer))));
+    const nativeSnapshots = rawEvents.filter((event) => event.nativeType === "model.messages_snapshot");
+    assert.ok(nativeSnapshots.every(copilotOptionalNativeTelemetry), "pinned CLI snapshot does not match reviewed optional telemetry shape");
+    assert.ok(rawEvents.filter((event) => event.nativeType !== "model.messages_snapshot").every((event) => !copilotOptionalNativeTelemetry(event)), "another event was classified as optional telemetry");
     assert.ok(eventSummary.some((event) => event.type === "user.message" && event.originalImagePresent));
     stage = "native-history";
     const history = await session.readNativeHistory({ harness: "copilot", limit: 100 });
@@ -182,7 +186,7 @@ async function qualify() {
     assert.ok(resumedEnvelope.images.length > 0);
     assert.equal(completionRequests, 1, "history/resume unexpectedly dispatched a completion");
     assert.deepEqual(retained.get(descriptor.imageId), imageBytes);
-    return { reportedRuntimeVersion: description.runtimeVersion, completionRequests, providerReceivedOriginalImage: true, nativeEventCount: rawEvents.length, originalSnapshotLeakReproduced: true, snapshotEventsExternalized: snapshots.length, rawImageBytesInWireEnvelopes: 0, historyImages: historyEnvelope.images.length, resumedHistoryImages: resumedEnvelope.images.length, storedImageSha256: hash(imageBytes), eventSummary };
+    return { reportedRuntimeVersion: description.runtimeVersion, completionRequests, providerReceivedOriginalImage: true, nativeEventCount: rawEvents.length, originalSnapshotLeakReproduced: true, snapshotTelemetryClassification: true, snapshotEventsExternalized: snapshots.length, rawImageBytesInWireEnvelopes: 0, historyImages: historyEnvelope.images.length, resumedHistoryImages: resumedEnvelope.images.length, storedImageSha256: hash(imageBytes), eventSummary };
   } finally {
     try { await adapter.close(); }
     finally {
@@ -206,6 +210,11 @@ async function sourceBoundary() {
   paths.add(relative(repository, require.resolve(`@github/copilot-${process.platform}-${process.arch}`)));
   const inventory = {};
   for (const path of [...paths].sort()) inventory[path] = hash(await readFile(join(repository, path)));
+  // NixOS may supply the exact pinned CLI with its ELF loader patched. Retain
+  // the executed bytes' identity as well as the original package inventory,
+  // without recording an environment-provided path in the receipt.
+  const executedCli = process.env.COPILOT_CLI_PATH ?? require.resolve(`@github/copilot-${process.platform}-${process.arch}`);
+  inventory["executedNativeCliSha256"] = hash(await readFile(executedCli));
   return inventory;
 }
 

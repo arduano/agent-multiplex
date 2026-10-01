@@ -93,14 +93,23 @@ export const nativePayloadSchema = z.object({
     }
     seen.add(slot.pointer);
   }
-  if (jsonWireByteUpperBound(payload) > NATIVE_PAYLOAD_MAX_BYTES) {
+  const wireUpperBoundBytes = jsonWireByteUpperBound(payload);
+  if (wireUpperBoundBytes > NATIVE_PAYLOAD_MAX_BYTES) {
     context.addIssue({ code: "custom", message: "native payload exceeds the bounded wire envelope",
-      params: { nativePayloadFailure: "wireEnvelope" } });
+      params: { nativePayloadFailure: "wireEnvelope", wireUpperBoundBytes, wireLimitBytes: NATIVE_PAYLOAD_MAX_BYTES } });
   }
 });
 export type NativePayload = z.infer<typeof nativePayloadSchema>;
 
 const nativePayloadFailures = new WeakMap<z.ZodError, NativePayloadValidationFailure>();
+const nativePayloadWireBounds = new WeakMap<z.ZodError, NativePayloadWireBounds>();
+const nativePayloadOnlyWireEnvelopeFailures = new WeakSet<z.ZodError>();
+
+/** Fixed numeric evidence from the exact envelope that failed validation. */
+export interface NativePayloadWireBounds {
+  readonly wireUpperBoundBytes: number;
+  readonly wireLimitBytes: number;
+}
 
 /** Preserve the original schema error while identifying this exact validation boundary. */
 export function parseNativePayload(payload: unknown): NativePayload {
@@ -109,6 +118,17 @@ export function parseNativePayload(payload: unknown): NativePayload {
     if (error instanceof z.ZodError) {
       const failure = classifyNativePayloadFailure(error);
       if (failure !== undefined) nativePayloadFailures.set(error, failure);
+      if (error.issues.length > 0 && error.issues.every((issue) =>
+        issue.code === "custom" && issue.params?.nativePayloadFailure === "wireEnvelope")) {
+        nativePayloadOnlyWireEnvelopeFailures.add(error);
+      }
+      const issue = error.issues.find((issue) => issue.code === "custom" && issue.params?.nativePayloadFailure === "wireEnvelope");
+      if (issue?.code === "custom" && Number.isSafeInteger(issue.params?.wireUpperBoundBytes) &&
+        Number(issue.params?.wireUpperBoundBytes) > NATIVE_PAYLOAD_MAX_BYTES && issue.params?.wireLimitBytes === NATIVE_PAYLOAD_MAX_BYTES) {
+        nativePayloadWireBounds.set(error, Object.freeze({
+          wireUpperBoundBytes: Number(issue.params.wireUpperBoundBytes), wireLimitBytes: NATIVE_PAYLOAD_MAX_BYTES,
+        }));
+      }
     }
     throw error;
   }
@@ -122,6 +142,16 @@ export function parseNativePayload(payload: unknown): NativePayload {
 export function nativePayloadValidationFailure(error: unknown): NativePayloadValidationFailure | undefined {
   if (!(error instanceof z.ZodError)) return undefined;
   return nativePayloadFailures.get(error);
+}
+
+/** Never estimates the raw input: this is the validated, externalized envelope bound. */
+export function nativePayloadValidationWireBounds(error: unknown): NativePayloadWireBounds | undefined {
+  return error instanceof z.ZodError ? nativePayloadWireBounds.get(error) : undefined;
+}
+
+/** A priority category alone cannot prove that no other shape was invalid. */
+export function nativePayloadValidationIsOnlyWireEnvelope(error: unknown): boolean {
+  return error instanceof z.ZodError && nativePayloadOnlyWireEnvelopeFailures.has(error);
 }
 
 function classifyNativePayloadFailure(error: z.ZodError): NativePayloadValidationFailure | undefined {

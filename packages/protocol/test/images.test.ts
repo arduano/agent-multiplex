@@ -7,6 +7,8 @@ import {
   newRuntimeNodeId, newSessionId, packNativePayload, assertImageResponseTarget,
   imageReadResultSchema, imageUploadStateSchema, jsonWireByteUpperBound,
   NATIVE_PAYLOAD_MAX_BYTES, commandRecordSchema, feedControlItemSchema,
+  parseNativePayload, nativePayloadValidationFailure, nativePayloadValidationWireBounds,
+  nativePayloadValidationIsOnlyWireEnvelope,
 } from "../src/index.js";
 
 const target = {
@@ -18,6 +20,23 @@ const image = imageDescriptorSchema.parse({
 });
 
 describe("protocol-v5 images", () => {
+  it("reports exact externalized wire bounds privately without widening durable schemas", () => {
+    const oversized = { encoding: "native-json-images-v1", json: "x".repeat(NATIVE_PAYLOAD_MAX_BYTES), images: [] };
+    let error: unknown;
+    try { parseNativePayload(oversized); } catch (caught) { error = caught; }
+    expect(nativePayloadValidationFailure(error)).toBe("wireEnvelope");
+    expect(nativePayloadValidationIsOnlyWireEnvelope(error)).toBe(true);
+    expect(nativePayloadValidationWireBounds(error)).toEqual({
+      wireUpperBoundBytes: jsonWireByteUpperBound(oversized), wireLimitBytes: NATIVE_PAYLOAD_MAX_BYTES,
+    });
+    const bounds = nativePayloadValidationWireBounds(error)!;
+    expect(Object.isFrozen(bounds)).toBe(true);
+    expect(nativePayloadValidationWireBounds(new Error("native-private-error"))).toBeUndefined();
+    expect(nativePayloadValidationIsOnlyWireEnvelope(new Error("native-private-error"))).toBe(false);
+    const invalid = nativePayloadSchema.safeParse({ encoding: "native-json-images-v1", json: null, images: [{ private: true }] });
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) expect(nativePayloadValidationWireBounds(invalid.error)).toBeUndefined();
+  });
   it("bounds mixed JSON and float64 MessagePack encodings conservatively", () => {
     const encoder = new Packr({ useRecords: false, variableMapSize: false, mapsAsObjects: true, moreTypes: false });
     const values = [

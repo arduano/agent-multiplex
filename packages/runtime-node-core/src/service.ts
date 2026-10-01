@@ -15,6 +15,8 @@ import {
   packNativePayload,
   parseNativePayload,
   nativePayloadValidationFailure,
+  nativePayloadValidationWireBounds,
+  nativePayloadValidationIsOnlyWireEnvelope,
   nativeImagePointerValue,
   type NativePayload,
   type NativeGapDiagnostic,
@@ -134,6 +136,7 @@ import {
 import { collectCleanupErrors, waitForAll } from "./settled-work.js";
 import { RuntimeImages, RuntimeImageError, type RuntimeImageOptions } from "./images.js";
 import { RuntimeLifecycleJournal } from "./lifecycle.js";
+import { nativeDiagnosticEventType, type NativeDiagnosticEventType } from "./native-event-diagnostics.js";
 
 const now = (): string => new Date().toISOString();
 const LIFECYCLE_OBSERVATION_RETRY_BASE_MS = 250;
@@ -160,6 +163,11 @@ export class RuntimeNodeProtocolError extends Error {
 /** Private hook details; additional fields never enter lifecycle storage or public projections. */
 export type NativeGapLogDiagnostic = NativeGapDiagnostic & {
   readonly payloadFailure?: NativePayloadValidationFailure;
+  readonly nativeEventType?: NativeDiagnosticEventType;
+  readonly nativeEphemeral?: boolean;
+  readonly wireUpperBoundBytes?: number;
+  readonly wireLimitBytes?: number;
+  readonly lifecycleImpact: "preserved" | "invalidated";
 };
 
 export interface RuntimeNodeServiceOptions {
@@ -3131,6 +3139,19 @@ export class RuntimeNodeService {
   #publishNativeGap(sessionId: SessionId, binding: ActiveBinding, code: NativeGapDiagnostic["code"],
     event: AdapterEvent, eventBytes?: number, error?: unknown): void {
     const payloadFailure = code === "imageExtraction" ? nativePayloadValidationFailure(error) : undefined;
+    const wireBounds = code === "imageExtraction" ? nativePayloadValidationWireBounds(error) : undefined;
+    // Only a known optional telemetry envelope may be omitted without losing
+    // interaction knowledge. Ephemeral alone is not evidence: native requests,
+    // settlements and root idle are also ephemeral in the pinned SDK.
+    let optionalTelemetry = false;
+    if (code === "imageExtraction" && payloadFailure === "wireEnvelope" && event.kind === "native" &&
+      binding.session.harness === "copilot" && event.nativeType === "model.messages_snapshot" && event.ephemeral === true &&
+      nativePayloadValidationIsOnlyWireEnvelope(error)) {
+      const session = this.#store.getSession(sessionId);
+      try { optionalTelemetry = session !== undefined &&
+        this.#launchRegistry.backendForSession(session).adapter.optionalNativeTelemetry?.(event) === true; }
+      catch { /* Unknown policy stays fail closed. */ }
+    }
     const errorClass: NativeGapDiagnostic["errorClass"] = error instanceof TypeError ? "type"
       : error instanceof RangeError ? "range"
         : error instanceof SyntaxError ? "syntax"
@@ -3141,11 +3162,18 @@ export class RuntimeNodeService {
       ...(eventBytes === undefined ? {} : { eventBytes }),
       ...(error === undefined ? {} : { errorClass }),
     };
-    this.#appendLifecycle(sessionId, binding, { type: "gap", diagnostic });
+    if (!optionalTelemetry) this.#appendLifecycle(sessionId, binding, { type: "gap", diagnostic });
     this.#events.publish({ kind: "nativeGap", sessionId, reason: `native ${code} (diagnostic ${diagnostic.diagnosticId})`, recovery: "readNativeHistory" });
     // Extra validation detail belongs only to the private logging hook. The
     // released strict durable schema must remain readable by rollback binaries.
-    const logged: NativeGapLogDiagnostic = payloadFailure === undefined ? diagnostic : { ...diagnostic, payloadFailure };
+    const logged: NativeGapLogDiagnostic = {
+      ...diagnostic,
+      lifecycleImpact: optionalTelemetry ? "preserved" : "invalidated",
+      ...(payloadFailure === undefined ? {} : { payloadFailure }),
+      ...(wireBounds === undefined ? {} : wireBounds),
+      ...(event.kind === "native" ? { nativeEventType: nativeDiagnosticEventType(binding.session.harness, event.nativeType),
+        nativeEphemeral: event.ephemeral === true } : {}),
+    };
     try { this.#onNativeGapDiagnostic?.(logged); } catch { /* Diagnostics never replace native behavior. */ }
   }
 

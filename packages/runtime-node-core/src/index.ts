@@ -1,5 +1,6 @@
 export * from "./adapter.js";
 export * from "./native-images.js";
+export * from "./native-event-diagnostics.js";
 export * from "./event-hub.js";
 export * from "./launch-provider.js";
 export * from "./native-path-policy.js";

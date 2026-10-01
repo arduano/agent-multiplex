@@ -4,6 +4,7 @@ import {
   NATIVE_PAYLOAD_MAX_BYTES, nativePayloadSchema, nativePayloadValidationFailure,
   nativeGapDiagnosticSchema, packNativePayload, parseNativePayload,
   type NativePayloadValidationFailure,
+  nativePayloadValidationIsOnlyWireEnvelope, nativePayloadValidationWireBounds,
 } from "../src/index.js";
 
 const envelope = (json: unknown = null, images: unknown[] = []) => ({ encoding: "native-json-images-v1", json, images });
@@ -44,6 +45,8 @@ describe("payload-free native envelope validation categories", () => {
   it("uses a fixed category priority for multiple schema failures", () => {
     const error = failure(envelope("x".repeat(NATIVE_PAYLOAD_MAX_BYTES), [{ ...slot, pointer: "/missing" }]));
     expect(nativePayloadValidationFailure(error)).toBe("wireEnvelope");
+    expect(nativePayloadValidationIsOnlyWireEnvelope(error)).toBe(false);
+    expect(nativePayloadValidationWireBounds(error)?.wireUpperBoundBytes).toBeGreaterThan(NATIVE_PAYLOAD_MAX_BYTES);
   });
 
   it("identifies image-free packing while leaving unrelated schema errors unclassified", () => {

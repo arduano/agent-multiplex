@@ -5,7 +5,25 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-09-30 (published lockstep hotfix.23 prerelease; consumer staging pending).
+Last reconciled: 2026-10-02 (source-only optional Copilot telemetry candidate; consumer staging pending).
+
+## Optional Copilot telemetry admission candidate — October 2, 2026
+
+This source-only candidate starts from published `.24` source `d23d6ea`.
+It distinguishes the pinned CLI's confirmed ephemeral `model.messages_snapshot`
+diagnostic copy from authoritative lifecycle/interaction events. Only an exact
+reviewed snapshot shape rejected by the unchanged wire envelope may preserve
+lifecycle certainty; unknown and authoritative omissions still fail closed.
+Private diagnostics now provide fixed native type, ephemeral flag, actual
+externalized wire-bound/limit numbers and lifecycle impact without changing
+strict durable/public schemas. Existing partial interactions are not repaired.
+
+Three synthetic observed-size regressions fail on `.24` and pass on the
+candidate. Credential-free pinned CLI `1.0.88`/SDK `1.0.14` loopback qualification
+confirms the snapshot shape; it uses no external model. The actual previously
+rejected owner-event type remains unknown. Publication, combined gates,
+installed activation and owner-session qualification remain consumer-coordinated
+work. See the [evidence and limits](../audits/copilot-optional-telemetry-20261002.md).
 
 ## October 1 isolated message delivery projection correction
 

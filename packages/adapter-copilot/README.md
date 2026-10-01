@@ -81,6 +81,15 @@ The optional stock-TUI integration additionally pins
 `@github/copilot@1.0.88`; it does not accept an auto-updated or merely
 SDK-reported version.
 
+The CLI also broadcasts an ephemeral `model.messages_snapshot` diagnostic copy
+of its model context that SDK 1.0.14's generated event union does not declare.
+The adapter narrowly identifies this exact native shape as optional telemetry.
+If its externalized envelope exceeds the fixed wire limit, the runtime reports
+a native stream omission without discarding already authoritative interaction
+knowledge. Other model/debug events, arbitrary ephemeral events, requests and
+malformed snapshots retain fail-closed handling. See the
+[native envelope contract](../../docs/design/copilot-session-lifecycle-vnext.md#stream-gap-or-reset).
+
 GitHub's [September 22, 2026 model announcement](https://github.blog/changelog/2026-09-22-openais-gpt-6-sol-and-gpt-6-luna-now-available/)
 lists GPT-6 Sol in the Copilot CLI model picker for Pro+, Max, Business, and
 Enterprise plans. Rollout is gradual and organization policy can disable it.

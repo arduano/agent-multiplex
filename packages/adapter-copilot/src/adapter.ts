@@ -37,6 +37,7 @@ import {
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import { copilotJson } from "./json.js";
+import { copilotOptionalNativeTelemetry } from "./native-event-policy.js";
 import { CopilotReadRequests } from "./reads.js";
 import {
   CopilotAdapterSession,
@@ -89,6 +90,7 @@ export interface CopilotAdapterOptions {
 
 export class CopilotAgentAdapter implements AgentAdapter {
   public readonly imageCodec = copilotImageCodec;
+  public readonly optionalNativeTelemetry = copilotOptionalNativeTelemetry;
   public readonly harness = "copilot" as const;
   public readonly adapterScopeId: AdapterScopeId;
   readonly #client: CopilotAdapterClient;

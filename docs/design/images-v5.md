@@ -80,6 +80,17 @@ payload admission while retaining lifecycle status, settings, and settlements
 for already admitted interactions until the queue drains. Unknown/native omitted
 image states must remain visible as such.
 
+Copilot's confirmed ephemeral `model.messages_snapshot` is a diagnostic copy of
+model context. An oversized envelope for that exact reviewed shape emits an
+explicit native stream gap and protected diagnostic while preserving the separate
+authoritative lifecycle state. It is never truncated or published as an admitted
+native event. Unknown/authoritative events and every reverse request retain
+ordinary fail-closed lifecycle invalidation. The
+[lifecycle design](copilot-session-lifecycle-vnext.md#recovery-crash-and-gaps)
+owns the precise evidence and recovery boundary. Private diagnostics include the
+computed externalized wire upper bound and unchanged 960 KiB limit; the raw
+pre-extraction event size is not an equivalent measurement.
+
 Input commands keep the native `request` shape and add an optional `images`
 sidecar. Pointers are relative to `request`; image leaves are null until runtime
 dispatch reconstructs the exact native representation. The durable immutable
