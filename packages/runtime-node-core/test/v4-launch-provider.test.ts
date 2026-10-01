@@ -236,6 +236,99 @@ class FakeProvider implements RuntimeLaunchProvider {
 }
 
 describe("runtime v4 launch providers", () => {
+  it.each(["send", "steer"] as const)("keeps an uncorrelatable succeeded %s receipt without projecting it as pending", async (kind) => {
+    const fixture = createProviderFixture();
+    const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(launch);
+    await waitForLaunch(fixture.service, launch.launchId, "succeeded");
+    const command = { commandId: newCommandId(), payloadHash: `legacy-${kind}-hash`, sessionId: launch.sessionId,
+      runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "codex" as const, command: { type: kind, input: "Legacy accepted message" } } };
+    const receipt = await fixture.service.execute(command);
+    expect(receipt.state).toBe("succeeded");
+    expect(fixture.service.observeCommand(command.commandId)).toMatchObject({ receipt, delivery: "accepted", continuation: "complete" });
+    expect((await fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" })).payload.json)
+      .toEqual({ items: [], omitted: 0 });
+    // The projection must not remove or rewrite the original durable admission.
+    expect(await fixture.service.execute(command)).toEqual(receipt);
+    expect(fixture.service.getCommand(command.commandId)).toEqual(receipt);
+    await fixture.service.close(); fixture.store.close();
+  });
+
+  it("retains ambiguous legacy messages and exact-ID admissions while omitting definitive failures", async () => {
+    const fixture = createProviderFixture();
+    const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(launch);
+    await waitForLaunch(fixture.service, launch.launchId, "succeeded");
+    const session = fixture.adapter.sessions.get("native-1")!;
+    const command = (suffix: string, clientId?: string) => ({ commandId: newCommandId(), payloadHash: `same-text-${suffix}`,
+      sessionId: launch.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "codex" as const, command: { type: "steer" as const, input: "Same repeated message",
+        ...(clientId ? { native: { clientUserMessageId: clientId } } : {}) } } });
+    const failed = command("failed");
+    session.execute = () => Promise.reject(new Error("definitive admission failure"));
+    expect((await fixture.service.execute(failed)).state).toBe("failed");
+    const ambiguous = command("unknown");
+    session.execute = () => Promise.reject(new AdapterOutcomeUnknownError("uncertain native admission"));
+    expect((await fixture.service.execute(ambiguous)).state).toBe("outcomeUnknown");
+    session.execute = () => Promise.resolve({ ok: true });
+    const identified = command("identified", "first-client-id");
+    const repeated = command("repeated", "second-client-id");
+    await fixture.service.execute(identified); await fixture.service.execute(repeated);
+    session.emit({ kind: "native", nativeType: "item/started", ephemeral: false, payload: { threadId: session.vendorSessionId,
+      item: { type: "userMessage", clientId: "second-client-id" } } });
+    expect((await fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" })).payload.json)
+      .toMatchObject({ items: [{ commandId: ambiguous.commandId, state: "unknown" },
+        { commandId: identified.commandId, state: "accepted", messageId: "first-client-id" }], omitted: 0 });
+    expect(fixture.service.observeCommand(ambiguous.commandId)).toMatchObject({ delivery: "unknown", continuation: "reviewRequired" });
+    expect(fixture.service.observeCommand(identified.commandId)).toMatchObject({ delivery: "accepted", continuation: "observeDelivery" });
+    expect(fixture.service.observeCommand(failed.commandId)).toMatchObject({ delivery: "failed", continuation: "complete" });
+    await fixture.service.close(); fixture.store.close();
+  });
+
+  it("preserves legacy receipt facts and pending exact IDs across an explicit resume after runtime restart", async () => {
+    const filename = join(mkdtempSync(join(tmpdir(), "multiplex-message-restart-")), "runtime.sqlite");
+    const fixture = createProviderFixture({ filename });
+    const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(launch);
+    await waitForLaunch(fixture.service, launch.launchId, "succeeded");
+    const legacy = { commandId: newCommandId(), payloadHash: "retained-legacy-message", sessionId: launch.sessionId,
+      runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "codex" as const, command: { type: "send" as const, input: "Retain my exact receipt" } } };
+    const identified = { ...legacy, commandId: newCommandId(), payloadHash: "retained-identified-message",
+      request: { ...legacy.request, command: { ...legacy.request.command, native: { clientUserMessageId: "retained-client-id" } } } };
+    const receipt = await fixture.service.execute(legacy);
+    const identifiedReceipt = await fixture.service.execute(identified);
+    await fixture.service.close();
+    const restarted = fixture.makeService();
+    await restarted.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "resume-message-review",
+      sessionId: launch.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1 });
+    expect(restarted.observeCommand(legacy.commandId)).toMatchObject({ receipt, delivery: "accepted", continuation: "complete" });
+    expect(restarted.observeCommand(identified.commandId)).toMatchObject({ receipt: identifiedReceipt, continuation: "observeDelivery" });
+    expect((await restarted.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" })).payload.json)
+      .toMatchObject({ items: [{ commandId: identified.commandId, state: "accepted", messageId: "retained-client-id" }], omitted: 0 });
+    await restarted.close(); fixture.store.close();
+  });
+
+  it("applies the pending bound after excluding complete uncorrelatable admissions", async () => {
+    const fixture = createProviderFixture();
+    const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(launch);
+    await waitForLaunch(fixture.service, launch.launchId, "succeeded");
+    const tracked = { commandId: newCommandId(), payloadHash: "tracked-before-legacy", sessionId: launch.sessionId,
+      runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "codex" as const, command: { type: "steer" as const, input: "Tracked admission",
+        native: { clientUserMessageId: "tracked-client-id" } } } };
+    await fixture.service.execute(tracked);
+    for (let index = 0; index < 33; index++) {
+      await fixture.service.execute({ ...tracked, commandId: newCommandId(), payloadHash: `complete-legacy-${index}`,
+        request: { harness: "codex", command: { type: "steer", input: "Uncorrelatable admission" } } });
+    }
+    expect((await fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" })).payload.json)
+      .toMatchObject({ items: [{ commandId: tracked.commandId, messageId: "tracked-client-id" }], omitted: 0 });
+    await fixture.service.close(); fixture.store.close();
+  });
+
   it("owns Codex steering acceptance until the exact native user item is observed", async () => {
     const fixture = createProviderFixture();
     const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });

@@ -298,7 +298,13 @@ ID ends at Accepted because later evidence cannot be joined safely. An
 `outcomeUnknown` receipt requires manual review and never authorizes replay.
 
 The runtime's `messages.delivery` v1 read projects a bounded unresolved
-send/steer subset from this same private journal. Codex participates using
+send/steer subset from this same private journal. It excludes definitively
+succeeded admissions without a causal native message ID, consistent with their
+existing `commands.observe` continuation of `complete`. Their receipts and
+Accepted evidence remain unchanged; omission never proves consumption or
+delivery. Unknown receipts remain tracked, and identified admissions remain
+pending until exact consumption or settlement. The 32-item bound and omitted
+count apply after this exclusion. Codex participates using
 its caller-supplied `clientUserMessageId` as the correlation identity and the
 root-thread native `userMessage` item as consumption evidence. A successful
 Codex steer with no exact echo remains Accepted. The read returns a preview

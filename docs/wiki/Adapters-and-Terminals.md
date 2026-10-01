@@ -313,11 +313,15 @@ history.
 
 Codex uses the request's `clientUserMessageId` and an exact root-thread
 `userMessage` item echo to move from accepted to consumed. If the native echo
-is absent, the Host keeps Accepted rather than matching text or elapsed time.
+is absent, an identified command remains Accepted and pending rather than
+matching text or elapsed time. A succeeded command with no causal native ID
+retains its original Accepted receipt with `continuation=complete`; it is
+omitted from the pending delivery subset because no later evidence can be
+joined safely. Unknown receipts remain visible for review even without an ID.
 Copilot uses its acknowledged logical `messageId`; only a fresh native queue
 item with the same ID proves Queued, and only an exact root `user.message`
-proves display or consumption. Text-only steering entries have no causal ID
-and remain Accepted until the exact message event arrives. Command receipts
+proves display or consumption. Text-only native steering entries have no causal
+ID and cannot settle command delivery by text matching. Command receipts
 and exact message evidence survive a runtime boot or resume for the same
 binding revision; task, queue and interaction observations start fresh.
 

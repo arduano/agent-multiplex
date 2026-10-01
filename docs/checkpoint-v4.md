@@ -1,5 +1,20 @@
 # Release qualification checkpoint
 
+## Complete no-ID admission projection candidate — 2026-10-01
+
+The isolated runtime pending subset now omits only matching succeeded/accepted
+send/steer receipts with no causal message identity and an existing complete
+command observation. Receipts stay Accepted; omission is no delivery claim.
+Unknown outcomes and identified admissions remain tracked across explicit
+resume. The 32-item bound and omitted count exclude complete legacy admissions.
+No schema, reducer, migration, native pin or published `.24` byte changed.
+
+Three before-fix regressions fail. **27 focused tests / three files** pass with
+one worker, and the nearest runtime project TypeScript build passes. The
+[owning audit](audits/message-delivery-complete-projection-20261001.md) records
+cause, receipt hashes and publication/installed boundaries. No live session,
+service or model action occurred; broader release gates remain separate.
+
 ## Certified Copilot cold-resume candidate — 2026-10-01
 
 Based on hotfix.24 preparation `512cf4874968ef9b7620673d53aef0c4710ddbe9`,

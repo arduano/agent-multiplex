@@ -7,6 +7,18 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-30 (published lockstep hotfix.23 prerelease; consumer staging pending).
 
+## October 1 isolated message delivery projection correction
+
+A read-only live Codex capture found four succeeded legacy commands with no
+native message identity still shown pending although `commands.observe`
+already said `continuation=complete`. The isolated correction based on `.24`
+source `d23d6ea` aligns only that pending subset, preserving Accepted receipts,
+unknown outcomes and exact-ID delivery tracking. No schemas, reducers, package
+pins or live state changed. Three regressions fail before the correction;
+27 focused tests and the nearest runtime project build pass afterward.
+Publication needs a new version and separate installed acceptance. See the
+[owning audit](../audits/message-delivery-complete-projection-20261001.md).
+
 ## October 1 certified Copilot cold-resume candidate
 
 An isolated candidate based on hotfix.24 preparation `512cf487` fixes idle

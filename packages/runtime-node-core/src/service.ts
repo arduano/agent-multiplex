@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  commandObservationView,
   lifecycleActionAvailability,
   lifecycleProjection,
   lifecycleNativeObservationDegraded,
@@ -1045,8 +1046,19 @@ export class RuntimeNodeService {
       const fence = this.#messageDeliveryFence(sessionId, active);
       if (!fence) throw new RuntimeNodeProtocolError("FENCED", "message delivery binding is unavailable");
       const state = this.#lifecycle.read(fence);
-      const unresolved = state.commands.filter(command => (command.kind === "send" || command.kind === "steer") &&
-        !command.consumed && !command.settled && command.admission !== "failed");
+      const unresolved = state.commands.filter(command => {
+        if ((command.kind !== "send" && command.kind !== "steer") || command.consumed || command.settled || command.admission === "failed") return false;
+        // A succeeded admission without a causal native identity has no further
+        // delivery observation. Preserve its Accepted receipt, but align this
+        // pending subset with commands.observe's existing complete contract.
+        // Unknown receipts and identified admissions remain tracked.
+        if (command.admission === "accepted" && command.messageId === undefined) {
+          const receipt = this.#store.getCommand(command.commandId);
+          if (receipt?.sessionId === sessionId && receipt.payloadHash === command.payloadHash && receipt.state === "succeeded" &&
+            commandObservationView(receipt, state).continuation === "complete") return false;
+        }
+        return true;
+      });
       const items = unresolved.slice(-32).map(command => {
         const receipt = this.#store.getCommand(command.commandId);
         if (!receipt || receipt.sessionId !== sessionId || receipt.payloadHash !== command.payloadHash) return undefined;
