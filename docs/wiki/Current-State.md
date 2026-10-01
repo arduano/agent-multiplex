@@ -17,7 +17,7 @@ callback races fenced. The reducer establishes idle with no cycle or outcome;
 fresh independent task/queue observations can then project Ready. Gaps, partial
 hydration, positive work and existing outcomes retain their safety boundaries.
 Public/persisted schemas, migrations and SDK/transport pins are unchanged.
-Eight new regressions fail on the old bridge; 105 focused tests pass on the
+Eight new regressions fail on the old bridge; 184 focused tests pass on the
 correction. Broad release gates, published consumer bytes and installed Windows/
 WSL acceptance remain coordinator-owned. No live/model action occurred. See
 the [source audit](../audits/copilot-cold-resume-ready-20261001.md).

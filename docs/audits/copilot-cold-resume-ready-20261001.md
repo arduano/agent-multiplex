@@ -31,6 +31,10 @@ racing before that boundary blocks certification. Duplicate, ambiguous,
 child-owned and retired-bridge boundaries do not establish quiescence or reset
 the adapter's running status.
 
+Existing fresh/live handles retain native positive active-resume status when
+another client joins live work; this status does not grant another empty
+hydration baseline. False or ambiguous replay cannot reset existing work.
+
 The reducer consumes the certificate only under continuous evidence, an untouched
 unknown root with no cycle/outcome, complete empty child/interaction hydration,
 and no observed task/queue/compaction activity or degraded native admission.
@@ -63,22 +67,29 @@ The old bridge restored from exact base fails **eight regressions**: interactive
 plan and autopilot Ready projection plus root-start, failure, message, activity
 and command races. Corrected source was restored after the baseline run.
 
-Corrected Copilot qualification passed **105 tests / five files**, one worker:
-protocol lifecycle, bridge races, adapter startup buffering, runtime startup
-reattachment and durable lifecycle journal. Coverage includes explicit/missing/
+Corrected Copilot qualification passed **184 tests / six files**, one worker:
+protocol lifecycle, bridge races, adapter startup buffering, native session-state
+contracts, runtime startup reattachment and durable lifecycle journal. Coverage includes explicit/missing/
 active flags, duplicate/child/retired/replacement boundaries, independent pending
 reads, existing outcomes, positive work, partial hydration, gap/sequence/fence
 rejection, durable reopen and fresh-epoch uncertainty. The existing reducer's
 4,096 deterministic schedules also pass. These tests use synthetic SDK sessions
 and disposable state; no real model, live Host or owner session is involved.
 
+An intermediate broader session-state run found two existing active-resume
+status regressions on fresh handles, before deployment/publication. The final
+correction preserves that positive native status separately from cold-resume
+certification. The 77 passing/2 failed diagnostic is retained; the final expanded
+six-file run passes all 184 tests.
+
 Local receipt namespace: `receipts/copilot-cold-ready-20261001`.
 
 | Receipt | SHA-256 |
 | --- | --- |
 | Old-bridge regression log | `11a537ba3afb58de59ed543ac5a6e6f8e9e834d18e735321040937cff12b1df7` |
-| Corrected Copilot focused log | `42b5eaac47a4e2999a2ba892d07f3d46987f22ce8ccf5b4fd7ccc578b6a040ea` |
-| Six source/test file inventory | `4f09cdf5b2270b6aabf7e31ddf0a27bb83f788160c1853ef66bb254500d78f7f` |
+| Final corrected Copilot focused log | `146d816d76774dd4763de6ca2b9ea4a5e17dadc811b7340a8a5964f5a220a292` |
+| Final seven-file source/test inventory | `f833a753160249bda063fa9072858b6c2be29b20a500c0bd84614bd0c0a74403` |
+| Intermediate active-resume diagnostic | `f18cbf3297a5150fcc8ca8001a4a68081f88eac0a3d7797e7d17a73cd35dd16b` |
 | Unchanged state/view/store boundary | `e0fec623dad3fc4c0efcf8edf5d2451f3dab96c0a3d2e5a6245296b6f16d9f23` |
 
 Full source/package gates, coordinated publication, Leo wrapper/UI integration

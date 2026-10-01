@@ -459,7 +459,14 @@ export class CopilotSessionBridge {
   }
 
   private certifyColdResume(event: SessionEvent): SessionRuntimeStatus | undefined {
-    if (!this.#awaitingResumeBoundary || event.type !== "session.resume" || eventOwner(event) !== undefined) return;
+    if (event.type !== "session.resume" || eventOwner(event) !== undefined) return;
+    if (!this.#awaitingResumeBoundary) {
+      // A live/fresh handle can also observe another client's active resume.
+      // Preserve that positive native status without granting another empty
+      // baseline or allowing a false/ambiguous replay to reset existing work.
+      return !this.#resumePositiveEvidenceObserved &&
+        (event.data.continuePendingWork === true || event.data.sessionWasActive === true) ? "running" : undefined;
+    }
     // Consume exactly the first resume boundary for this bridge. A replayed or
     // duplicated event must never upgrade an earlier ambiguous boundary.
     this.#awaitingResumeBoundary = false;

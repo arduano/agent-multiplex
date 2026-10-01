@@ -11,7 +11,7 @@ remain independent. Persisted/public schemas and runtime store/migrations are
 byte-identical to the base. No native/transport dependency or released pin changed.
 
 Eight targeted regressions fail with the old bridge restored, and corrected
-source passes **105 tests / five files**, one worker. Nearest adapter project
+source passes **184 tests / six files**, one worker. Nearest adapter project
 TypeScript build passes. Tests cover interactive/plan/autopilot, explicit/missing/
 active flags, races, duplicate/child/retired/replacement boundaries, partial/gap
 and stale-fence rejection, persisted reopen, new-epoch uncertainty and the
@@ -22,10 +22,14 @@ publication/installed limitations. No live/model/session/service action occurred
 Local namespace: `receipts/copilot-cold-ready-20261001`.
 Old-bridge regression log SHA-256:
 `11a537ba3afb58de59ed543ac5a6e6f8e9e834d18e735321040937cff12b1df7`.
-Corrected focused log SHA-256:
-`42b5eaac47a4e2999a2ba892d07f3d46987f22ce8ccf5b4fd7ccc578b6a040ea`.
-Six source/test inventory SHA-256:
-`4f09cdf5b2270b6aabf7e31ddf0a27bb83f788160c1853ef66bb254500d78f7f`.
+Final corrected focused log SHA-256:
+`146d816d76774dd4763de6ca2b9ea4a5e17dadc811b7340a8a5964f5a220a292`.
+Final seven-file source/test inventory SHA-256:
+`f833a753160249bda063fa9072858b6c2be29b20a500c0bd84614bd0c0a74403`.
+Intermediate active-resume contract diagnostic (77 pass/2 fail) SHA-256:
+`f18cbf3297a5150fcc8ca8001a4a68081f88eac0a3d7797e7d17a73cd35dd16b`.
+The final correction retains native active-resume status for fresh/live handles
+without granting another cold-resume certificate; all six focused files pass.
 Unchanged state/view/store boundary SHA-256:
 `e0fec623dad3fc4c0efcf8edf5d2451f3dab96c0a3d2e5a6245296b6f16d9f23`.
 Broad source/package gates, independent review, publication and installed
