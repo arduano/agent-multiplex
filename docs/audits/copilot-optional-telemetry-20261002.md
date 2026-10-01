@@ -79,11 +79,11 @@ Local receipts remain ignored and protected. The baseline-state failure log is
 The candidate focused log is `receipts/b17-qualification-20261002/focused-final.log`,
 SHA-256 `94ac9893ed8c4a8a8187b96ab65cb13f9f812541d7cfc0265a49e99611786df7`.
 The final native receipt is
-`receipts/copilot-offline-images/2026-10-01T14-32-17-570Z-0ed2c36c/`.
+`receipts/copilot-offline-images/2026-10-01T14-36-41-650Z-ad012c35/`.
 Its scrubbed manifest SHA-256 is
-`4448d9d195f9b8dc951b1b2c9bb92b54fd968fb0059e8fdec6659f7f093cdae2`;
+`1d26d9f2ae90a665dd89367bf021797708181d7ac1994b68d77c6929a95b40f2`;
 the exact source/dependency inventory SHA-256 is
-`931027481b6615d3e5815a97730f8c670619d947b37b6d5de7d27ffc09d90a2e`.
+`28528e841fcd3580740c6f3fca9b89cd952382addd99a2a9f215e0a5e916cc99`.
 The executed Nix-patched CLI hash is
 `00521e695c0bfc8b1bc7ba9b76bb4315b3da37ae43b1738335388d4e4ebf0743`.
 It contains verified checksums. An initial
