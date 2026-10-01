@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import {
   type HarnessSpawnOptions,
   type JsonValue,
   type LaunchRecord,
+  type RuntimeNodeEventItem,
 } from "@arduano/agent-multiplex-protocol";
 import {
   AdapterOutcomeUnknownError,
@@ -474,6 +475,7 @@ describe("CodexAdapter", () => {
       adapters: [adapter],
     });
     const sessionId = newSessionId();
+    const observers: Array<AsyncIterator<RuntimeNodeEventItem>> = [];
     try {
       await expect(launchSession(service, {
         launchId: newLaunchId(),
@@ -483,6 +485,13 @@ describe("CodexAdapter", () => {
         request: { harness: "codex", cwd: root },
       })).resolves.toMatchObject({ state: "succeeded" });
       await eventually(() => service.listInteractions(sessionId).length === 1 || undefined);
+      const originalEpoch = store.getSession(sessionId)?.runtimeEpoch;
+      expect(originalEpoch).toEqual(expect.any(String));
+      const interaction = service.listInteractions(sessionId)[0]!;
+      // Subscribe before the process exits: terminal diagnostics stay in an
+      // existing live queue even though the stopped epoch's ring is retired.
+      const live = service.events({ native: {} })[Symbol.asyncIterator]();
+      observers.push(live);
 
       await expect(service.execute({
         commandId: newCommandId(),
@@ -498,37 +507,87 @@ describe("CodexAdapter", () => {
       expect(store.getSession(sessionId)?.runtimeStatus).toBe("stopped");
       expect(service.listInteractions(sessionId)).toEqual([]);
 
-      const replay = service.events({ native: {} })[Symbol.asyncIterator]();
-      const replayed = await Promise.all([
-        replay.next(),
-        replay.next(),
-        replay.next(),
-        replay.next(),
-      ]);
-      expect(replayed[0]).toMatchObject({
+      const liveItems: RuntimeNodeEventItem[] = [];
+      while (true) {
+        const item = await live.next();
+        if (item.done) throw new Error("live Codex observer closed before stale interaction");
+        liveItems.push(item.value);
+        if (item.value.kind === "control" &&
+            item.value.change.type === "interaction.changed" &&
+            item.value.change.interaction.interactionId === interaction.interactionId &&
+            item.value.change.interaction.state === "stale") break;
+      }
+      const diagnosticIndex = liveItems.findIndex((item) =>
+        item.kind === "native" && item.nativeType === "agent-multiplex/runtime-exited");
+      const stoppedIndex = liveItems.findIndex((item) =>
+        item.kind === "control" && item.change.type === "session.upsert" &&
+        item.change.session.runtimeStatus === "stopped");
+      expect(diagnosticIndex).toBeGreaterThanOrEqual(0);
+      expect(stoppedIndex).toBeGreaterThan(diagnosticIndex);
+      expect(liveItems.length - 1).toBeGreaterThan(stoppedIndex);
+      expect(liveItems[diagnosticIndex]).toMatchObject({
+        kind: "native",
+        sessionId,
+        runtimeEpoch: originalEpoch,
+        nativeType: "agent-multiplex/runtime-exited",
+      });
+      expect(liveItems[stoppedIndex]).toMatchObject({
+        kind: "control",
+        change: {
+          type: "session.upsert",
+          session: { sessionId, availability: "resumable", runtimeEpoch: null },
+        },
+      });
+      expect(liveItems.at(-1)).toMatchObject({
+        kind: "control",
+        change: {
+          type: "interaction.changed",
+          interaction: {
+            interactionId: interaction.interactionId,
+            sessionId,
+            runtimeEpoch: originalEpoch,
+            state: "stale",
+          },
+        },
+      });
+
+      const cold = service.events({ native: {} })[Symbol.asyncIterator]();
+      observers.push(cold);
+      await expect(cold.next()).resolves.toMatchObject({
         value: {
           kind: "control",
           change: {
             type: "session.upsert",
-            session: { sessionId, vendorSessionId: "thread-1" },
+            session: {
+              sessionId,
+              vendorSessionId: "thread-1",
+              bindingRevision: 1,
+              availability: "resumable",
+              runtimeStatus: "stopped",
+              runtimeEpoch: null,
+            },
           },
         },
         done: false,
       });
-      expect(replayed.map((item) => item.value)).toEqual(expect.arrayContaining([
-        expect.objectContaining({
-          kind: "native",
-          nativeType: "agent-multiplex/runtime-exited",
-        }),
-        expect.objectContaining({
+      await expect(cold.next()).resolves.toMatchObject({
+        value: {
           kind: "control",
           change: {
             type: "interaction.changed",
-            interaction: expect.objectContaining({ sessionId, state: "stale" }),
+            interaction: {
+              interactionId: interaction.interactionId,
+              sessionId,
+              runtimeEpoch: originalEpoch,
+              state: "stale",
+            },
           },
-        }),
-      ]));
-      await replay.return?.();
+        },
+        done: false,
+      });
+      // Resume supplies the next live control item. Any retired native replay
+      // would arrive before it and fail this assertion without a timed wait.
+      const afterColdReplay = cold.next();
 
       await expect(service.resume({
         operation: "resume",
@@ -538,9 +597,57 @@ describe("CodexAdapter", () => {
         runtimeNodeId,
         bindingRevision: 1,
       })).resolves.toMatchObject({ state: "succeeded" });
+      const resumedEpoch = store.getSession(sessionId)?.runtimeEpoch;
+      expect(resumedEpoch).toEqual(expect.any(String));
+      expect(resumedEpoch).not.toBe(originalEpoch);
+      await expect(afterColdReplay).resolves.toMatchObject({
+        value: {
+          kind: "control",
+          change: {
+            type: "session.upsert",
+            session: {
+              sessionId,
+              vendorSessionId: "thread-1",
+              bindingRevision: 1,
+              availability: "active",
+              runtimeStatus: "idle",
+              runtimeEpoch: resumedEpoch,
+            },
+          },
+        },
+        done: false,
+      });
+      await expect(service.execute({
+        commandId: newCommandId(),
+        payloadHash: "codex-exit-resumed-send",
+        sessionId,
+        runtimeNodeId,
+        bindingRevision: 1,
+        request: {
+          harness: "codex",
+          command: { type: "send", input: "new process epoch" },
+        },
+      })).resolves.toMatchObject({ state: "succeeded" });
+      while (true) {
+        const item = await cold.next();
+        if (item.done) throw new Error("resumed Codex observer closed before native delivery");
+        if (item.value.kind !== "native") continue;
+        expect(item.value).toMatchObject({
+          sessionId,
+          runtimeEpoch: resumedEpoch,
+          sequence: 0,
+          nativeType: "turn/started",
+        });
+        break;
+      }
     } finally {
-      await service.close();
-      store.close();
+      await Promise.all(observers.map((observer) => observer.return?.()));
+      try {
+        await service.close();
+      } finally {
+        store.close();
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 });
