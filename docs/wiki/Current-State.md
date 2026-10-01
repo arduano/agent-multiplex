@@ -7,6 +7,18 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
 
+## Copilot incident tracing candidate — October 2, 2026
+
+The owner approved causal tracing to diagnose recurring Recovery unverified
+incidents. The new candidate is lockstep `.26`: a bounded asynchronous private
+hook correlates SDK attachments, adapter ingress, reducer before/after state,
+exact gap policy, observation fences and recovery. A 16-entry metadata ring
+keeps immediate event context; logs cannot alter native session outcomes.
+Protocol, durable schemas, migrations, SDK/transport pins and lifecycle policy
+remain unchanged. Source/package qualification, immutable publication and Leo
+Windows/WSL staging are coordinator-owned work. No installed activation or real
+model call is included. See [the lifecycle trace contract](../design/copilot-session-lifecycle-vnext.md#private-incident-trace).
+
 ## Published aggregate reliability hotfix.25
 
 Signed `hotfix-2026-10-02.1` publishes exact source

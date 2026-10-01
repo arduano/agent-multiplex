@@ -194,6 +194,37 @@ recovery remains on the access feed's committed cursor and runtime epoch;
 bounded native history repairs transcript content. No client receives or must
 interpret the lifecycle reducer's sequence, task revision, or queue revision.
 
+## Private incident trace
+
+The optional runtime embedding hook `onCopilotIncidentTrace` is diagnostic
+contract version 1. It adds no wire fields, persisted rows, migrations or
+lifecycle policy. Records correlate ingress, applied state changes, gap policy
+decisions, revision-fenced task/queue observations and binding recovery.
+
+`traceSequence` orders this runtime's emitted records. `sessionTraceId` is a
+run-local logical-session alias; `bindingTraceId` changes on attachment. An
+embedding SDK wrapper may supply `incidentTraceAttachmentId`, exposed in the
+trace as `sdkAttachmentId`, to join native-read timing. These aliases are not
+domain identities, native cursors or authority fences. `nativeEventOrdinal`
+joins the adapter's raw event and its derived lifecycle facts without entering
+the serialized native envelope.
+
+Every record carries a frozen ring of the latest 16 metadata-only ingress
+entries. Meaningful transitions include compact before/after continuity, root,
+interaction, child, task, queue, native admission and Send availability. Gap
+records retain the existing diagnostic UUID and an exact fixed-code policy
+decision. Observation and recovery records explain stale revision/generation,
+retired binding, retry/stall and deadline decisions. The trace is best effort;
+suppression is explicit and missing records cannot prove event absence.
+
+Dispatch is asynchronous and never awaited by native or reducer work. The core
+queue is bounded to 128 records and at most one pending hook Promise; a slow,
+throwing or rejected hook cannot add retries or change session outcomes. Hosts
+write these records into their existing protected rotating worker diagnostics.
+Prompt text is ordinary private diagnostic data; causal tracing needs only the
+metadata above, so this hook captures no payload or provider configuration.
+Original incidents cannot acquire this missing evidence retroactively.
+
 ## Exhaustive fact transition table
 
 ### Root, children and native observations
