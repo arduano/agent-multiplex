@@ -1,142 +1,9 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
-  adapterScopeIdSchema, newArchiveOperationId, newCommandId, newLaunchId,
-  newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId, newSessionId, packNativePayload,
-  type HarnessCommand, type HarnessResumeOptions, type HarnessSpawnOptions,
-  type NativeHistoryRequest, type RuntimeNodeEventCursor, type RuntimeNodeEventItem,
-  type RuntimeNodeSessionRecord,
+  newArchiveOperationId, newCommandId, newRuntimeEpoch, newRuntimeNodeBootId,
+  newRuntimeNodeId, newSessionId, packNativePayload,
 } from "@arduano/agent-multiplex-protocol";
-import { ControlNodeCatalog, ControlNodeService } from "../../control-node-core/src/index.js";
-import {
-  RuntimeNodeService, RuntimeNodeStore, type AdapterEvent, type AdapterSession, type AgentAdapter,
-} from "../../runtime-node-core/src/index.js";
-import { P2PRuntimeNodeConnection, RuntimeNodeEventPump } from "../src/runtime-node-bridge.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-class SyntheticSession implements AdapterSession {
-  readonly harness = "codex" as const;
-  readonly adapterScopeId = adapterScopeIdSchema.parse("replay-starvation");
-  readonly runtimeEpoch = newRuntimeEpoch();
-  readonly listeners = new Set<(event: AdapterEvent) => void>();
-  readonly history: Array<{ text: string }> = [];
-  stopped = false;
-  constructor(readonly vendorSessionId: string, readonly cwd: string) {}
-  status() { return this.stopped ? "stopped" as const : "idle" as const; }
-  subscribe(listener: (event: AdapterEvent) => void) {
-    this.listeners.add(listener);
-    return () => { this.listeners.delete(listener); };
-  }
-  reply(text: string) {
-    this.history.push({ text });
-    for (const listener of this.listeners) listener({ kind: "native", nativeType: "item/completed", payload: { text }, ephemeral: false });
-  }
-  execute(_command: HarnessCommand) { return Promise.resolve(undefined); }
-  readNativeHistory(_request: NativeHistoryRequest) {
-    return Promise.resolve({ harness: this.harness, vendorSessionId: this.vendorSessionId, payload: [...this.history], complete: true });
-  }
-  stop() {
-    this.stopped = true;
-    for (const listener of this.listeners) listener({ kind: "status", status: "stopped" });
-    return Promise.resolve();
-  }
-}
-
-class SyntheticAdapter implements AgentAdapter {
-  readonly harness = "codex" as const;
-  readonly adapterScopeId = adapterScopeIdSchema.parse("replay-starvation");
-  readonly sessions = new Map<string, SyntheticSession>();
-  private nextSession = 1;
-  describe() { return Promise.resolve({ harness: this.harness, adapterScopeId: this.adapterScopeId, available: true, capabilities: [] }); }
-  listModels() { return Promise.resolve([]); }
-  listSessions() {
-    return Promise.resolve([...this.sessions.values()].map(session => ({ harness: this.harness,
-      adapterScopeId: this.adapterScopeId, vendorSessionId: session.vendorSessionId, cwd: session.cwd,
-      availability: session.stopped ? "resumable" as const : "active" as const,
-      runtimeStatus: session.status(), runtimeEpoch: session.stopped ? null : session.runtimeEpoch })));
-  }
-  spawn(options: HarnessSpawnOptions) {
-    const session = new SyntheticSession(`synthetic-${this.nextSession++}`, options.cwd);
-    this.sessions.set(session.vendorSessionId, session);
-    return Promise.resolve(session);
-  }
-  resume(options: HarnessResumeOptions) {
-    const session = new SyntheticSession(options.vendorSessionId, options.cwd!);
-    this.sessions.set(session.vendorSessionId, session);
-    return Promise.resolve(session);
-  }
-  releaseSession(session: RuntimeNodeSessionRecord) { this.sessions.delete(session.vendorSessionId); return Promise.resolve(); }
-  close() { return Promise.resolve(); }
-}
-
-const cleanups: Array<() => Promise<void>> = [];
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
-
-async function fixture() {
-  const cwd = mkdtempSync(join(tmpdir(), "multiplex-replay-starvation-"));
-  const store = new RuntimeNodeStore(":memory:");
-  const runtimeNodeId = newRuntimeNodeId();
-  const runtimeNodeBootId = newRuntimeNodeBootId();
-  const adapter = new SyntheticAdapter();
-  const runtime = new RuntimeNodeService({ store, runtimeNodeId, runtimeNodeBootId, name: "synthetic", allowedRoots: [cwd], adapters: [adapter] });
-  const catalog = new ControlNodeCatalog({ filename: join(cwd, "control.sqlite") });
-  const control = new ControlNodeService({ catalog });
-  const context = { endpointId: "synthetic-runtime-endpoint", authenticatedRuntimeNodeId: runtimeNodeId };
-  control.registerRuntimeNode(await runtime.describe(), context);
-  const fence = { runtimeNodeId, runtimeNodeBootId };
-  const subscriptions: Array<{ cursor: RuntimeNodeEventCursor; controller: AbortController }> = [];
-  const attempted: RuntimeNodeEventItem[] = [];
-  const delivered: RuntimeNodeEventItem[] = [];
-  const rejected: RuntimeNodeEventItem[] = [];
-  const errors: unknown[] = [];
-  const connection = new P2PRuntimeNodeConnection(runtimeNodeId, runtimeNodeBootId, context.endpointId, {
-    identity: { id: context.endpointId }, principal: { id: context.endpointId },
-    rpc: { events: { subscribe: { subscribe: (input: { cursor: RuntimeNodeEventCursor }, callbacks: {
-      onStarted?(): void; onData(item: RuntimeNodeEventItem): void; onError(error: unknown): void;
-    }) => {
-      const controller = new AbortController();
-      subscriptions.push({ cursor: structuredClone(input.cursor), controller });
-      callbacks.onStarted?.();
-      void (async () => {
-        try {
-          for await (const item of runtime.events(input.cursor, controller.signal)) {
-            if (controller.signal.aborted) break;
-            callbacks.onData(item);
-          }
-        } catch (error) { if (!controller.signal.aborted) callbacks.onError(error); }
-      })();
-      return { unsubscribe() { controller.abort(); } };
-    } } } },
-  } as never, context.endpointId);
-  const pump = new RuntimeNodeEventPump({ connection, retryDelayMs: () => 1, onError: error => { errors.push(error); },
-    onItem: item => {
-      attempted.push(item);
-      const result = control.publishRuntimeEvent({ ...fence, event: item }, context);
-      if (result.accepted) delivered.push(item);
-      else rejected.push(item);
-      return result.accepted;
-    } });
-  cleanups.push(async () => {
-    pump.stop();
-    for (const subscription of subscriptions) subscription.controller.abort();
-    await runtime.close(); control.close(); catalog.close(); store.close();
-    rmSync(cwd, { recursive: true, force: true });
-  });
-  async function launch() {
-    const profile = runtime.launchProfiles()[0]!;
-    const sessionId = newSessionId();
-    const launchId = newLaunchId();
-    runtime.createLaunch({ launchId, sessionId, runtimeNodeId, payloadHash: "synthetic-replay-launch", harness: "codex",
-      profile: { providerId: profile.providerId, profileId: profile.profileId, contractVersion: profile.contractVersion, requestSchemaHash: profile.requestSchemaHash }, input: { cwd } });
-    await vi.waitFor(() => expect(runtime.getLaunch(launchId)?.state).toBe("succeeded"));
-    const record = store.getSession(sessionId)!;
-    control.publishRuntimeEvent({ ...fence, event: { kind: "control", change: { type: "session.upsert", session: record } } }, context);
-    runtime.applyCanonicalSessions([catalog.getSession(sessionId)!]);
-    return { sessionId, session: adapter.sessions.get(record.vendorSessionId)! };
-  }
-  return { runtime, store, adapter, control, catalog, context, fence, pump, subscriptions, attempted, delivered, rejected, errors, launch };
-}
+import { describe, expect, it, vi } from "vitest";
+import { replayFixture as fixture } from "./runtime-replay-fixture.js";
 
 describe("runtime replay preserves unrelated native delivery after lifecycle retirement", () => {
   it.each(["stopped", "archived", "resumed", "nativeStopped"] as const)("does not let a %s session's old ring block another active session", async retirement => {
@@ -205,10 +72,56 @@ describe("runtime replay preserves unrelated native delivery after lifecycle ret
     expect(f.catalog.getSession(retired.sessionId)?.catalogState).toBe("archived");
     expect(f.store.getSession(retired.sessionId)).toBeUndefined();
     expect(() => f.control.publishRuntimeEvent({ ...f.fence, event: { ...event, harness: "copilot" } }, f.context)).toThrowError(expect.objectContaining({ code: "FENCED" }));
+    expect(() => f.control.publishRuntimeEvent({ ...f.fence, runtimeNodeBootId: newRuntimeNodeBootId(), event }, f.context)).toThrowError(expect.objectContaining({ code: "FENCED" }));
+    expect(() => f.control.publishRuntimeEvent({ ...f.fence, event }, { ...f.context, endpointId: "unregistered-endpoint" })).toThrowError(expect.objectContaining({ code: "UNAUTHORIZED" }));
     const foreignFence = { runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId() };
     const foreignContext = { endpointId: "foreign-runtime-endpoint", authenticatedRuntimeNodeId: foreignFence.runtimeNodeId };
     f.control.registerRuntimeNode({ ...await f.runtime.describe(), ...foreignFence }, foreignContext);
     expect(() => f.control.publishRuntimeEvent({ ...foreignFence, event }, foreignContext)).toThrowError(expect.objectContaining({ code: "FENCED" }));
+    expect(() => f.control.publishRuntimeEvent({ ...foreignFence, event: { kind: "nativeGap", sessionId: retired.sessionId, reason: "foreign ring", recovery: "readNativeHistory" } }, foreignContext)).toThrowError(expect.objectContaining({ code: "FENCED" }));
+  });
+
+  it.each(["stopped", "archived"] as const)("recovers unrelated delivery when %s retirement races an already captured native item", async retirement => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let paused = false;
+    const f = await fixture({ beforeForward: item => {
+      if (item.kind !== "native" || paused) return Promise.resolve();
+      paused = true;
+      return gate;
+    } });
+    const retired = await f.launch();
+    retired.session.reply("captured old reply");
+    f.pump.start();
+    await vi.waitFor(() => expect(paused).toBe(true));
+    await f.runtime.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "synthetic-inflight-stop", sessionId: retired.sessionId,
+      runtimeNodeId: f.fence.runtimeNodeId, bindingRevision: 1 });
+    f.control.publishRuntimeEvent({ ...f.fence, event: { kind: "control", change: { type: "session.upsert", session: f.store.getSession(retired.sessionId)! } } }, f.context);
+    if (retirement === "archived") {
+      const archiveOperationId = newArchiveOperationId();
+      f.runtime.archive({ archiveOperationId, payloadHash: "synthetic-inflight-archive", sessionId: retired.sessionId,
+        runtimeNodeId: f.fence.runtimeNodeId, bindingRevision: 1, expectedAuthority: f.catalog.authority() });
+      await vi.waitFor(() => expect(f.runtime.getArchive(archiveOperationId)?.state).toBe("succeeded"));
+      f.catalog.recordArchive(f.runtime.getArchive(archiveOperationId)!);
+    }
+    const healthy = await f.launch();
+    healthy.session.reply("unrelated reply during in-flight retirement");
+    const publication = vi.spyOn(f.control.events, "publishRuntimeItem");
+    release();
+    await vi.waitFor(() => expect(f.delivered.filter(item => item.kind === "native" && item.sessionId === healthy.sessionId)).toHaveLength(1));
+    expect(publication.mock.calls.some(([item]) => item.kind === "native" && item.sessionId === retired.sessionId)).toBe(false);
+    if (retirement === "archived") {
+      // The terminal native item is consumed. An older queued nonterminal
+      // archive receipt still correctly conflicts with the externally settled
+      // terminal receipt, causes one reconnect, then disappears from replay.
+      expect(f.subscriptions).toHaveLength(2);
+      expect(f.errors).toEqual([expect.objectContaining({ code: "CONFLICT", message: "archive operation already has a different terminal outcome" })]);
+      expect(f.rejected).toEqual([]);
+      expect(f.delivered.filter(item => item.kind === "native" && item.sessionId === retired.sessionId)).toHaveLength(1);
+    } else {
+      expect(f.subscriptions).toHaveLength(2);
+      expect(f.errors).toEqual([expect.objectContaining({ code: "FENCED" })]);
+    }
   });
 
   it("keeps unknown-session delivery transient and stale open-epoch delivery fenced", async () => {
