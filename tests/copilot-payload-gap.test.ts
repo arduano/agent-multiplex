@@ -10,7 +10,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 import { copilotImageCodec } from "../packages/adapter-copilot/src/images.js";
 import { copilotOptionalNativeTelemetry } from "../packages/adapter-copilot/src/native-event-policy.js";
-import { RuntimeNodeService, RuntimeNodeStore, type AdapterEvent, type AdapterSession, type AgentAdapter, type NativeGapLogDiagnostic, type NativeImageCodec } from "../packages/runtime-node-core/src/index.js";
+import { RuntimeNodeService, RuntimeNodeStore, type AdapterEvent, type AdapterSession, type AgentAdapter, type NativeGapLogDiagnostic, type NativeImageCodec, type CopilotIncidentTraceRecord } from "../packages/runtime-node-core/src/index.js";
 
 type NativeEvent = Extract<AdapterEvent, { kind: "native" }>;
 const releases: Array<() => Promise<void>> = [];
@@ -66,6 +66,7 @@ function fixture(options: { imageCodec?: NativeImageCodec; nativeEventQueueBytes
   const timestamp = new Date().toISOString();
   let emit!: (event: AdapterEvent) => void;
   const gaps: NativeGapLogDiagnostic[] = [];
+  const traces: CopilotIncidentTraceRecord[] = [];
   const execute = vi.fn(async () => null);
   const session: AdapterSession = {
     harness: "copilot", adapterScopeId: scope, vendorSessionId: "synthetic-native-session",
@@ -86,9 +87,10 @@ function fixture(options: { imageCodec?: NativeImageCodec; nativeEventQueueBytes
     metadata: emptyMetadataSnapshot(), createdAt: timestamp, updatedAt: timestamp, lastSeenAt: timestamp, lastActivityAt: timestamp });
   const service = new RuntimeNodeService({ store, runtimeNodeId: target.runtimeNodeId, runtimeNodeBootId: target.runtimeNodeBootId,
     adapters: [adapter], allowedRoots: [directory], name: "synthetic payload diagnosis", onNativeGapDiagnostic: (diagnostic) => gaps.push(diagnostic),
+    onCopilotIncidentTrace: trace => { traces.push(trace); },
     ...(options.nativeEventQueueBytes === undefined ? {} : { nativeEventQueueBytes: options.nativeEventQueueBytes }) });
   releases.push(async () => { await service.close(); store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, service, target, session, adapter, execute, gaps, emit: (event: AdapterEvent) => emit(event) };
+  return { store, service, target, session, adapter, execute, gaps, traces, emit: (event: AdapterEvent) => emit(event) };
 }
 
 describe("synthetic Copilot imageExtraction/schema gap diagnosis", () => {
@@ -175,6 +177,9 @@ describe("optional Copilot telemetry and authoritative admission", () => {
     const expectedBound = jsonWireByteUpperBound({ encoding: "native-json-images-v1", json: event.payload, images: [] });
     f.emit(event);
     await vi.waitFor(() => expect(f.gaps).toHaveLength(1));
+    await vi.waitFor(() => expect(f.traces.some(trace => trace.kind === "gap" && trace.decisionReason === "optionalTelemetryOmitted")).toBe(true));
+    expect(f.traces.find(trace => trace.kind === "gap")).toMatchObject({ lifecycleImpact: "preserved", pendingEvents: 1, pendingEventBytes: size,
+      state: { interactionCompleteness: "complete", sendAvailable: true } });
     // These authoritative-state assertions fail on the deployed .24 baseline,
     // independently of the new diagnostic metadata assertions below.
     expect(f.store.getLifecycle(f.target.sessionId)).toEqual(before);
@@ -202,12 +207,17 @@ describe("optional Copilot telemetry and authoritative admission", () => {
     { label: "malformed snapshot kind", change: (event: NativeEvent) => { ((event.payload as Record<string, JsonValue>).data as Record<string, JsonValue>).kind = "pending_requests"; }, expectedType: "model.messages_snapshot", ephemeral: true },
     { label: "missing adapter policy", change: (_event: NativeEvent, f: ReturnType<typeof fixture>) => { delete f.adapter.optionalNativeTelemetry; }, expectedType: "model.messages_snapshot", ephemeral: true },
     { label: "failed adapter policy", change: (_event: NativeEvent, f: ReturnType<typeof fixture>) => { f.adapter.optionalNativeTelemetry = () => { throw new Error(privatePath); }; }, expectedType: "model.messages_snapshot", ephemeral: true },
-  ])("keeps $label fail closed, including after a later idle", async ({ change, expectedType, ephemeral }) => {
+  ])("keeps $label fail closed, including after a later idle", async ({ label, change, expectedType, ephemeral }) => {
     const f = await idleFixture();
     const event = optionalSnapshot(recurrenceSizes[1]!);
     change(event, f);
     f.emit(event);
     await vi.waitFor(() => expect(f.gaps).toHaveLength(1));
+    const expectedReason = ({ "unknown ephemeral native type": "unknownNativeEvent", "authoritative ephemeral request": "requiredNativeEvent",
+      "native/payload type disagreement": "adapterPolicyRejected", "non-ephemeral metadata": "notExplicitlyEphemeral",
+      "missing native ephemeral marker": "adapterPolicyRejected", "malformed snapshot kind": "adapterPolicyRejected",
+      "missing adapter policy": "adapterPolicyUnavailable", "failed adapter policy": "adapterPolicyFailed" } as Record<string, string>)[label];
+    await vi.waitFor(() => expect(f.traces.find(trace => trace.kind === "gap")).toMatchObject({ decisionReason: expectedReason, lifecycleImpact: "invalidated" }));
     expect(f.gaps[0]).toMatchObject({ payloadFailure: "wireEnvelope", lifecycleImpact: "invalidated",
       nativeEventType: expectedType, nativeEphemeral: ephemeral, wireLimitBytes: NATIVE_PAYLOAD_MAX_BYTES });
     expect(f.store.getLifecycle(f.target.sessionId)?.interactions.completeness).toBe("partial");
@@ -279,13 +289,15 @@ describe("optional Copilot telemetry and authoritative admission", () => {
     } }, mutate: (_event: NativeEvent) => undefined },
     { label: "queue overflow", code: "queueOverflow", options: { nativeEventQueueBytes: NATIVE_PAYLOAD_MAX_BYTES },
       mutate: (_event: NativeEvent) => undefined },
-  ])("does not exempt a confirmed optional snapshot on $label failure", async ({ options, mutate, code }) => {
+  ])("does not exempt a confirmed optional snapshot on $label failure", async ({ label, options, mutate, code }) => {
     const f = await idleFixture(options);
     const event = optionalSnapshot(recurrenceSizes[0]!);
     expect(copilotOptionalNativeTelemetry(event)).toBe(true);
     mutate(event);
     f.emit(event);
     await vi.waitFor(() => expect(f.gaps).toHaveLength(1));
+    await vi.waitFor(() => expect(f.traces.find(trace => trace.kind === "gap")).toMatchObject({
+      decisionReason: label === "wire and pointer validation together" ? "mixedValidationFailure" : "notWireEnvelope", lifecycleImpact: "invalidated" }));
     expect(f.gaps[0]).toMatchObject({ code, nativeEventType: "model.messages_snapshot", lifecycleImpact: "invalidated" });
     expect(f.store.getLifecycle(f.target.sessionId)?.interactions.completeness).toBe("partial");
     f.emit({ kind: "lifecycle", fact: { type: "rootIdle", aborted: false } });

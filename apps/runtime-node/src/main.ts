@@ -46,6 +46,7 @@ import {
 import {
   RuntimeNodeService,
   RuntimeNodeStore,
+  COPILOT_INCIDENT_TRACE_VERSION,
   AllowedPathPolicy,
   type RuntimePathPolicy,
   createRuntimeNodeRouter,
@@ -54,6 +55,7 @@ import {
   type RuntimeNodeRouter,
   type RuntimeAgentBackend,
   type RuntimeLaunchProvider,
+  type CopilotIncidentTraceHook,
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import {
@@ -62,6 +64,8 @@ import {
 } from "./control-node-locator.js";
 
 const IDENTITY_FILENAME = "identity.json";
+/** Capability fence for embedders selecting the private trace hook. */
+export const copilotIncidentTraceVersion = COPILOT_INCIDENT_TRACE_VERSION;
 const IDENTITY_VERSION = 4 as const;
 const LEGACY_IDENTITY_VERSION = 3 as const;
 const DATABASE_FILENAME = "runtime-node.sqlite";
@@ -193,6 +197,7 @@ export async function runRuntimeNode(
       recovery.abort();
     },
     ...(options.onNativeGapDiagnostic ? { onNativeGapDiagnostic: options.onNativeGapDiagnostic } : {}),
+    ...(options.onCopilotIncidentTrace ? { onCopilotIncidentTrace: options.onCopilotIncidentTrace } : {}),
     });
   } catch (error) {
     // Registration can reject a conflicting static provider/backend. The service
@@ -592,6 +597,8 @@ export interface RuntimeNodeAppOptions {
   onReady?: () => void;
   /** Fixed-code native-gap diagnostics after durable lifecycle persistence. */
   onNativeGapDiagnostic?: (diagnostic: NativeGapDiagnostic) => void;
+  /** Runtime-private incident correlation; failures never block native work. */
+  onCopilotIncidentTrace?: CopilotIncidentTraceHook;
 }
 
 export async function createRuntimeComponents(

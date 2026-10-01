@@ -137,6 +137,9 @@ import { collectCleanupErrors, waitForAll } from "./settled-work.js";
 import { RuntimeImages, RuntimeImageError, type RuntimeImageOptions } from "./images.js";
 import { RuntimeLifecycleJournal } from "./lifecycle.js";
 import { nativeDiagnosticEventType, type NativeDiagnosticEventType } from "./native-event-diagnostics.js";
+import { CopilotIncidentTracer, copilotIncidentStateSummary, copilotIncidentRoutineEvent, type CopilotIncidentTraceBinding,
+  type CopilotIncidentTraceDetail, type CopilotIncidentTraceHook, type CopilotIncidentIngress,
+  type CopilotIncidentDecisionReason } from "./copilot-incident-trace.js";
 
 const now = (): string => new Date().toISOString();
 const LIFECYCLE_OBSERVATION_RETRY_BASE_MS = 250;
@@ -200,6 +203,8 @@ export interface RuntimeNodeServiceOptions {
   onCopilotObservationRecoveryRequired?: (sessionId: SessionId) => void;
   /** Payload-free, best-effort operator diagnostics; lifecycle state is persisted first. */
   onNativeGapDiagnostic?: (diagnostic: NativeGapLogDiagnostic) => void;
+  /** Bounded async private metadata hook. Never enters wire or durable schemas. */
+  onCopilotIncidentTrace?: CopilotIncidentTraceHook;
 }
 
 interface ActiveBinding {
@@ -215,6 +220,10 @@ interface ActiveBinding {
   queuedInteractions: Set<AdapterInteractionEvent>;
   deferredLifecycle: Map<string, Exclude<AdapterEvent, { kind: "native" | "interaction" }>>;
   lifecycleObservations: LifecycleObservationCoordinator;
+  incidentTrace?: CopilotIncidentTraceBinding;
+  eventIngress: WeakMap<AdapterEvent, CopilotIncidentIngress>;
+  eventRecent: WeakMap<CopilotIncidentIngress, CopilotIncidentIngress[]>;
+  currentIngress: CopilotIncidentIngress | undefined;
 }
 
 type LifecycleRefreshView = "tasks" | "pendingMessages";
@@ -277,6 +286,7 @@ export class RuntimeNodeService {
   readonly #nativeEventQueueBytes: number;
   readonly #onCopilotObservationRecoveryRequired: ((sessionId: SessionId) => void) | undefined;
   readonly #onNativeGapDiagnostic: ((diagnostic: NativeGapLogDiagnostic) => void) | undefined;
+  readonly #incidentTracer: CopilotIncidentTracer | undefined;
   #acceptingNativeEvents = true;
   #lastSnapshot: InventorySnapshot | undefined;
   #closed = false;
@@ -294,6 +304,7 @@ export class RuntimeNodeService {
     this.#endpointId = options.endpointId;
     this.#onCopilotObservationRecoveryRequired = options.onCopilotObservationRecoveryRequired;
     this.#onNativeGapDiagnostic = options.onNativeGapDiagnostic;
+    this.#incidentTracer = options.onCopilotIncidentTrace ? new CopilotIncidentTracer(options.onCopilotIncidentTrace) : undefined;
     this.#resolvedInteractionCacheSize = options.resolvedInteractionCacheSize ?? 1_024;
     if (
       !Number.isSafeInteger(this.#resolvedInteractionCacheSize) ||
@@ -2563,23 +2574,48 @@ export class RuntimeNodeService {
     }
     const coordinator = binding.lifecycleObservations;
     if (coordinator.recoveryTimer || coordinator.recoveryRequested || !this.#onCopilotObservationRecoveryRequired) return;
+    this.#trace(binding, { kind: "recovery", outcome: "scheduled", generation: coordinator.generation, diagnosticId });
     coordinator.recoveryTimer = setTimeout(() => {
       coordinator.recoveryTimer = undefined;
-      if (coordinator.retired || this.#closed || this.#active.get(sessionId) !== binding) return;
+      if (coordinator.retired || this.#closed || this.#active.get(sessionId) !== binding) {
+        this.#trace(binding, { kind: "recovery", outcome: "retiredBinding", generation: coordinator.generation, diagnosticId });
+        return;
+      }
       const currentFence = this.#lifecycleFence(sessionId, binding);
       if (currentFence && this.#lifecycle.read(currentFence).nativeAdmission.state === "degraded") {
         coordinator.recoveryRequested = true;
+        this.#trace(binding, { kind: "recovery", outcome: "requested", generation: coordinator.generation, diagnosticId });
         this.#onCopilotObservationRecoveryRequired?.(sessionId);
-      }
+      } else this.#trace(binding, { kind: "recovery", outcome: currentFence ? "alreadyRecovered" : "fenceUnavailable", generation: coordinator.generation, diagnosticId });
     }, 120_000);
     coordinator.recoveryTimer.unref?.();
   }
 
   #appendLifecycle(sessionId: SessionId, binding: ActiveBinding, fact: LifecycleFact): void {
-    if (this.#active.get(sessionId) !== binding) return;
+    if (this.#active.get(sessionId) !== binding) {
+      this.#trace(binding, { kind: "transition", factType: fact.type, outcome: "retiredBinding" });
+      return;
+    }
     const fence = this.#lifecycleFence(sessionId, binding);
-    if (!fence) return;
-    this.#lifecycle.append(fence, fact);
+    if (!fence) {
+      this.#trace(binding, { kind: "transition", factType: fact.type, outcome: "fenceUnavailable" });
+      return;
+    }
+    const before = binding.incidentTrace ? this.#lifecycle.read(fence) : undefined;
+    const next = this.#lifecycle.append(fence, fact);
+    if (before) {
+      const previous = copilotIncidentStateSummary(before);
+      const after = copilotIncidentStateSummary(next);
+      // Sequence-only/no-op facts do not inflate the incident stream.
+      if (JSON.stringify(previous) !== JSON.stringify(after)) {
+        const ingress = binding.currentIngress;
+        this.#trace(binding, { kind: "transition", factType: fact.type, outcome: "applied",
+          lifecycleSequenceBefore: before.nextSequence, lifecycleSequenceAfter: next.nextSequence, before: previous, after,
+          ...("diagnostic" in fact && fact.diagnostic ? { diagnosticId: fact.diagnostic.diagnosticId } : {}),
+          ...("diagnosticId" in fact ? { diagnosticId: fact.diagnosticId } : {}),
+          ...(ingress ? { ingressOrdinal: ingress.ingressOrdinal, ...(ingress.nativeEventOrdinal === undefined ? {} : { nativeEventOrdinal: ingress.nativeEventOrdinal }) } : {}) });
+      }
+    }
     if (fact.type === "tasksInvalidated") {
       this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
     } else if (fact.type === "queueInvalidated") {
@@ -2638,6 +2674,8 @@ export class RuntimeNodeService {
         const revision = lane.deadlineRevision ??
           (view === "tasks" ? state.tasks.revision : state.queue.revision);
         const diagnosticId = newOperationId();
+        this.#trace(binding, { kind: "observation", view, outcome: "stalled", generation: coordinator.generation,
+          revision, failures: Math.max(1, lane.failures + 1), deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt), diagnosticId });
         this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
         this.#appendLifecycle(sessionId, binding, {
           type: "observationFailed",
@@ -2686,6 +2724,8 @@ export class RuntimeNodeService {
       return;
     }
     lane.deadlineRevision = revision;
+    this.#trace(binding, { kind: "observation", view, outcome: "started", generation, revision,
+      failures: lane.failures, deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt) });
 
     // This read deliberately runs outside the per-session mutation lock and is
     // not admitted shutdown work. The SDK has no cancellation signal; fencing
@@ -2706,13 +2746,23 @@ export class RuntimeNodeService {
     failed = false,
   ): void {
     const coordinator = binding.lifecycleObservations;
-    if (coordinator.retired || coordinator.generation !== generation || this.#active.get(sessionId) !== binding) return;
+    const lane = coordinator.lanes[view];
+    const deadlineAgeMs = lane.requestedAt === 0 ? 0 : Math.max(0, Date.now() - lane.requestedAt);
+    if (coordinator.retired || this.#active.get(sessionId) !== binding || coordinator.generation !== generation) {
+      this.#trace(binding, { kind: "observation", view, outcome: coordinator.retired || this.#active.get(sessionId) !== binding ? "retiredBinding" : "staleGeneration",
+        generation, revision, failures: lane.failures, deadlineAgeMs });
+      return;
+    }
     coordinator.running = false;
     const fence = this.#lifecycleFence(sessionId, binding);
-    if (!fence) return;
+    if (!fence) {
+      this.#trace(binding, { kind: "observation", view, outcome: "fenceUnavailable", generation, revision, failures: lane.failures, deadlineAgeMs });
+      return;
+    }
     const state = this.#lifecycle.read(fence);
     const currentRevision = view === "tasks" ? state.tasks.revision : state.queue.revision;
-    const lane = coordinator.lanes[view];
+    this.#trace(binding, { kind: "observation", view, outcome: currentRevision !== revision ? "staleRevision" : failed ? "failed" : "accepted",
+      generation, revision, currentRevision, failures: lane.failures + (failed ? 1 : 0), deadlineAgeMs });
     if (currentRevision !== revision) {
       // The invalidation callback already requested the newer revision. Ensure
       // it cannot be lost even when a malformed adapter omitted that callback.
@@ -2750,6 +2800,7 @@ export class RuntimeNodeService {
       if (recovered.nativeAdmission.state === "degraded" &&
         recovered.tasks.observation.state === "observed" && recovered.queue.observation.state === "observed") {
         this.#appendLifecycle(sessionId, binding, { type: "nativeObservationRecovered" });
+        this.#trace(binding, { kind: "recovery", outcome: "recovered", generation: coordinator.generation });
         if (coordinator.recoveryTimer) clearTimeout(coordinator.recoveryTimer);
         coordinator.recoveryTimer = undefined;
         coordinator.recoveryRequested = false;
@@ -2762,6 +2813,7 @@ export class RuntimeNodeService {
     const coordinator = binding.lifecycleObservations;
     if (coordinator.retired) return;
     coordinator.retired = true;
+    this.#trace(binding, { kind: "binding", outcome: "retired" });
     coordinator.generation += 1;
     if (coordinator.timer) clearTimeout(coordinator.timer);
     if (coordinator.refreshTimer) clearInterval(coordinator.refreshTimer);
@@ -3038,6 +3090,11 @@ export class RuntimeNodeService {
       eventOverflowed: false,
       queuedInteractions: new Set(),
       deferredLifecycle: new Map(),
+      eventIngress: new WeakMap(),
+      eventRecent: new WeakMap(),
+      currentIngress: undefined,
+      ...(session.harness === "copilot" && this.#incidentTracer
+        ? { incidentTrace: this.#incidentTracer.binding(sessionId, session.incidentTraceAttachmentId) } : {}),
       lifecycleObservations: {
         retired: false,
         running: false,
@@ -3054,6 +3111,7 @@ export class RuntimeNodeService {
       unsubscribe: () => undefined,
     };
     this.#active.set(sessionId, binding);
+    this.#trace(binding, { kind: "binding", outcome: "activated" });
     try {
       const unsubscribe = session.subscribe((event) =>
         this.#queueAdapterEvent(sessionId, binding, event),
@@ -3077,6 +3135,17 @@ export class RuntimeNodeService {
   }
 
   #queueAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent): void {
+    let ingress: CopilotIncidentIngress | undefined;
+    if (binding.incidentTrace && this.#incidentTracer) {
+      ingress = this.#incidentTracer.ingress(binding.incidentTrace, event);
+      binding.eventIngress.set(event, ingress);
+      // Retain the source's preceding context even when extraction completes
+      // after later callbacks or a reused AdapterEvent object has arrived.
+      binding.eventRecent.set(ingress, [...binding.incidentTrace.recent]);
+      const outcome = !this.#acceptingNativeEvents ? "runtimeClosing" : this.#active.get(sessionId) !== binding ? "retiredBinding"
+        : binding.eventOverflowed ? "overflowSuppressed" : "received";
+      if (outcome !== "received" || !copilotIncidentRoutineEvent(event)) this.#trace(binding, { kind: "ingress", event: ingress, outcome }, ingress);
+    }
     if (!this.#acceptingNativeEvents || this.#active.get(sessionId) !== binding) return;
     const hasPayload = event.kind === "native" || event.kind === "interaction";
     if (binding.eventOverflowed) {
@@ -3089,17 +3158,17 @@ export class RuntimeNodeService {
     // its session row. Queue payloads until that synchronous commit completes;
     // terminal statuses still need to retire a stopped binding immediately.
     if (binding.pendingEvents === 0 && (event.kind === "lifecycle" ? Boolean(session) : (!hasPayload || (session && !codec)))) {
-      try { this.#onAdapterEvent(sessionId, binding, event); }
-      catch (error) { this.#publishNativeGap(sessionId, binding, "eventHandling", event, undefined, error); }
+      try { this.#handleTracedAdapterEvent(sessionId, binding, event, undefined, ingress); }
+      catch (error) { this.#publishNativeGap(sessionId, binding, "eventHandling", event, undefined, error, ingress); }
       return;
     }
     let bytes: number;
     try { bytes = Buffer.byteLength(JSON.stringify(event)); }
-    catch (error) { this.#publishNativeGap(sessionId, binding, "eventSerialization", event, undefined, error); return; }
+    catch (error) { this.#publishNativeGap(sessionId, binding, "eventSerialization", event, undefined, error, ingress); return; }
     if (binding.pendingEvents >= this.#nativeEventQueueLimit || binding.pendingEventBytes + bytes > this.#nativeEventQueueBytes) {
       binding.eventOverflowed = binding.pendingEvents > 0;
       if (!hasPayload) this.#deferLifecycleEvent(sessionId, binding, event);
-      this.#publishNativeGap(sessionId, binding, "queueOverflow", event, bytes);
+      this.#publishNativeGap(sessionId, binding, "queueOverflow", event, bytes, undefined, ingress);
       return;
     }
     binding.pendingEvents += 1;
@@ -3111,9 +3180,9 @@ export class RuntimeNodeService {
       if (!current || this.#active.get(sessionId) !== binding) return;
       const payload = hasPayload ? await this.#externalize(current, event.payload) : undefined;
       stage = "eventHandling";
-      this.#onAdapterEvent(sessionId, binding, event, payload);
+      this.#handleTracedAdapterEvent(sessionId, binding, event, payload, ingress);
     }).catch((error: unknown) => {
-      this.#publishNativeGap(sessionId, binding, stage, event, bytes, error);
+      this.#publishNativeGap(sessionId, binding, stage, event, bytes, error, ingress);
     });
     binding.events = task;
     this.#nativeEventTasks.set(task, sessionId);
@@ -3127,7 +3196,7 @@ export class RuntimeNodeService {
         // Payload admission resumes only after all earlier lifecycle updates
         // have drained. A stopped binding then rejects every later callback.
         for (const update of deferred) {
-          try { this.#onAdapterEvent(sessionId, binding, update); }
+          try { this.#handleTracedAdapterEvent(sessionId, binding, update); }
           catch (error) { this.#publishNativeGap(sessionId, binding, "deferredLifecycle", update, undefined, error); }
         }
         binding.eventOverflowed = false;
@@ -3137,20 +3206,29 @@ export class RuntimeNodeService {
   }
 
   #publishNativeGap(sessionId: SessionId, binding: ActiveBinding, code: NativeGapDiagnostic["code"],
-    event: AdapterEvent, eventBytes?: number, error?: unknown): void {
+    event: AdapterEvent, eventBytes?: number, error?: unknown, eventIngress = binding.eventIngress.get(event)): void {
     const payloadFailure = code === "imageExtraction" ? nativePayloadValidationFailure(error) : undefined;
     const wireBounds = code === "imageExtraction" ? nativePayloadValidationWireBounds(error) : undefined;
     // Only a known optional telemetry envelope may be omitted without losing
     // interaction knowledge. Ephemeral alone is not evidence: native requests,
     // settlements and root idle are also ephemeral in the pinned SDK.
     let optionalTelemetry = false;
+    let decisionReason: CopilotIncidentDecisionReason = code !== "imageExtraction" || payloadFailure !== "wireEnvelope"
+      ? "notWireEnvelope" : !nativePayloadValidationIsOnlyWireEnvelope(error) ? "mixedValidationFailure"
+        : event.kind !== "native" ? "notNativeEvent"
+          : nativeDiagnosticEventType(binding.session.harness, event.nativeType) === "unknown" ? "unknownNativeEvent"
+            : event.nativeType !== "model.messages_snapshot" || binding.session.harness !== "copilot" ? "requiredNativeEvent"
+              : event.ephemeral !== true ? "notExplicitlyEphemeral" : "adapterPolicyUnavailable";
     if (code === "imageExtraction" && payloadFailure === "wireEnvelope" && event.kind === "native" &&
       binding.session.harness === "copilot" && event.nativeType === "model.messages_snapshot" && event.ephemeral === true &&
       nativePayloadValidationIsOnlyWireEnvelope(error)) {
       const session = this.#store.getSession(sessionId);
-      try { optionalTelemetry = session !== undefined &&
-        this.#launchRegistry.backendForSession(session).adapter.optionalNativeTelemetry?.(event) === true; }
-      catch { /* Unknown policy stays fail closed. */ }
+      try {
+        const adapter = session && this.#launchRegistry.backendForSession(session).adapter;
+        const policy = adapter?.optionalNativeTelemetry;
+        optionalTelemetry = policy?.call(adapter, event) === true;
+        decisionReason = optionalTelemetry ? "optionalTelemetryOmitted" : policy ? "adapterPolicyRejected" : "adapterPolicyUnavailable";
+      } catch { decisionReason = "adapterPolicyFailed"; /* Unknown policy stays fail closed. */ }
     }
     const errorClass: NativeGapDiagnostic["errorClass"] = error instanceof TypeError ? "type"
       : error instanceof RangeError ? "range"
@@ -3162,7 +3240,16 @@ export class RuntimeNodeService {
       ...(eventBytes === undefined ? {} : { eventBytes }),
       ...(error === undefined ? {} : { errorClass }),
     };
-    if (!optionalTelemetry) this.#appendLifecycle(sessionId, binding, { type: "gap", diagnostic });
+    const ingress = eventIngress;
+    const previousIngress = binding.currentIngress;
+    binding.currentIngress = ingress;
+    try { if (!optionalTelemetry) this.#appendLifecycle(sessionId, binding, { type: "gap", diagnostic }); }
+    finally { binding.currentIngress = previousIngress; }
+    const fence = binding.incidentTrace && this.#lifecycleFence(sessionId, binding);
+    this.#trace(binding, { kind: "gap", diagnosticId: diagnostic.diagnosticId, code,
+      decisionReason, lifecycleImpact: optionalTelemetry ? "preserved" : "invalidated",
+      ...(ingress ? { ingressOrdinal: ingress.ingressOrdinal, ...(ingress.nativeEventOrdinal === undefined ? {} : { nativeEventOrdinal: ingress.nativeEventOrdinal }) } : {}),
+      ...(fence ? { state: copilotIncidentStateSummary(this.#lifecycle.read(fence)) } : {}) }, ingress);
     this.#events.publish({ kind: "nativeGap", sessionId, reason: `native ${code} (diagnostic ${diagnostic.diagnosticId})`, recovery: "readNativeHistory" });
     // Extra validation detail belongs only to the private logging hook. The
     // released strict durable schema must remain readable by rollback binaries.
@@ -3201,6 +3288,20 @@ export class RuntimeNodeService {
     // the relative order of the retained lifecycle updates after payload drain.
     binding.deferredLifecycle.delete(key);
     binding.deferredLifecycle.set(key, event);
+  }
+
+  #trace(binding: ActiveBinding, detail: CopilotIncidentTraceDetail, ingress = binding.currentIngress): void {
+    if (binding.incidentTrace) this.#incidentTracer?.record(binding.incidentTrace, detail,
+      { pendingEvents: binding.pendingEvents, pendingEventBytes: binding.pendingEventBytes },
+      ingress ? binding.eventRecent.get(ingress) ?? binding.incidentTrace.recent : binding.incidentTrace.recent);
+  }
+
+  #handleTracedAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent, payload?: NativePayload,
+    ingress = binding.eventIngress.get(event)): void {
+    const previous = binding.currentIngress;
+    binding.currentIngress = ingress;
+    try { this.#onAdapterEvent(sessionId, binding, event, payload); }
+    finally { binding.currentIngress = previous; }
   }
 
   #onAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent, payload?: NativePayload): void {

@@ -91,13 +91,16 @@ export interface AdapterSettingsEvent {
   settings: HarnessSessionSettings;
 }
 
-export type AdapterEvent =
+export type AdapterEvent = (
   | { kind: "lifecycle"; fact: LifecycleFact }
   | AdapterNativeEvent
   | AdapterInteractionEvent
   | AdapterInteractionSettledEvent
   | AdapterStatusEvent
-  | AdapterSettingsEvent;
+  | AdapterSettingsEvent) & {
+    /** Private, nonenumerable adapter correlation; never serialized or persisted. */
+    readonly diagnosticNativeEventOrdinal?: number;
+  };
 
 export interface AdapterSession {
   readonly harness: Harness;
@@ -105,6 +108,8 @@ export interface AdapterSession {
   readonly vendorSessionId: string;
   readonly cwd: string | null;
   readonly runtimeEpoch: RuntimeEpoch;
+  /** Process-local SDK attachment ordinal shared with an embedding Host's read log. */
+  readonly incidentTraceAttachmentId?: number;
   status(): SessionRuntimeStatus;
   /** Last settings acknowledged by the native harness, when observable. */
   settings?(): HarnessSessionSettings | undefined;

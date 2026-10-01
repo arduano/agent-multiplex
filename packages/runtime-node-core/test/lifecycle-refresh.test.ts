@@ -32,6 +32,7 @@ import {
   type AdapterNativeStateResult,
   type AdapterSession,
   type AgentAdapter,
+  type CopilotIncidentTraceRecord,
 } from "../src/index.js";
 
 type NativeRead = (request: NativeStateRequest) => Promise<AdapterNativeStateResult>;
@@ -119,6 +120,7 @@ async function fixture(
   let session!: RefreshSession;
   session = new RefreshSession(cwd, request => read(session, request));
   const adapter = new RefreshAdapter(session);
+  const traces: CopilotIncidentTraceRecord[] = [];
   const service = new RuntimeNodeService({
     store,
     runtimeNodeId,
@@ -126,6 +128,7 @@ async function fixture(
     name: "lifecycle refresh test",
     allowedRoots: [cwd],
     adapters: [adapter],
+    onCopilotIncidentTrace: trace => { traces.push(trace); },
     ...(onRecoveryRequired ? { onCopilotObservationRecoveryRequired: onRecoveryRequired } : {}),
   });
   cleanup.push(async () => {
@@ -151,7 +154,7 @@ async function fixture(
   };
   service.createLaunch(launch);
   await vi.waitFor(() => expect(service.getLaunch(launch.launchId)?.state).toBe("succeeded"));
-  return { service, store, session, adapter, launch };
+  return { service, store, session, adapter, launch, traces };
 }
 
 async function lifecycleState(
@@ -685,6 +688,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
       expect(recovery).toHaveBeenCalledExactlyOnceWith(f.launch.sessionId);
       await vi.advanceTimersByTimeAsync(120_000);
       expect(recovery).toHaveBeenCalledTimes(1);
+      expect(f.traces.filter(trace => trace.kind === "recovery" && trace.outcome === "requested")).toHaveLength(1);
+      expect(f.traces.some(trace => trace.kind === "observation" && trace.outcome === "stalled" && trace.deadlineAgeMs >= 45_000)).toBe(true);
+      expect(f.traces.some(trace => trace.kind === "recovery" && trace.outcome === "scheduled")).toBe(true);
       blocked.resolve(tasksResult);
     } finally { vi.useRealTimers(); }
   });
@@ -745,6 +751,8 @@ describe("server-owned Copilot lifecycle refresh", () => {
       await vi.waitFor(async () => expect((await lifecycleState(f)).nativeAdmission.state).toBe("open"));
       await vi.advanceTimersByTimeAsync(120_000);
       expect(recovery).not.toHaveBeenCalled();
+      expect(f.traces.some(trace => trace.kind === "recovery" && trace.outcome === "recovered")).toBe(true);
+      expect(f.traces.some(trace => trace.kind === "recovery" && trace.outcome === "requested")).toBe(false);
 
       blocked = deferred<AdapterNativeStateResult>();
       f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });

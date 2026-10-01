@@ -87,6 +87,8 @@ type CopilotUserInputResponse = Awaited<
 /** The SDK subset used by a live adapter session. Exported for test hosts. */
 export interface CopilotNativeSession {
   readonly sessionId: string;
+  /** Optional process-local correlation supplied by an embedding SDK wrapper. */
+  readonly incidentTraceAttachmentId?: number;
   readonly rpc: CopilotSessionRpc;
   send(options: MessageOptions): Promise<string>;
   abort(): Promise<void>;
@@ -143,6 +145,8 @@ export class CopilotSessionBridge {
   #queueRevision = 0;
   #awaitingResumeBoundary = false;
   #resumePositiveEvidenceObserved = false;
+  #nativeEventOrdinal = 0;
+  #currentNativeEventOrdinal: number | undefined;
 
   /** Adapter observation fences; native snapshots do not carry a log cursor. */
   public nativeStateRevision(view: NativeStateRequest["view"]): number {
@@ -178,6 +182,13 @@ export class CopilotSessionBridge {
 
   public nativeEvent(event: SessionEvent): void {
     if (this.#closed) return;
+    const previous = this.#currentNativeEventOrdinal;
+    this.#currentNativeEventOrdinal = ++this.#nativeEventOrdinal;
+    try { this.dispatchNativeEvent(event); }
+    finally { this.#currentNativeEventOrdinal = previous; }
+  }
+
+  private dispatchNativeEvent(event: SessionEvent): void {
     if (event.type === "session.background_tasks_changed") this.#taskRevision += 1;
     if (event.type === "pending_messages.modified") this.#queueRevision += 1;
     if (this.#awaitingResumeBoundary && (
@@ -565,6 +576,10 @@ export class CopilotSessionBridge {
 
   private emit(event: AdapterEvent): void {
     if (this.#closed) return;
+    if (this.#currentNativeEventOrdinal !== undefined) {
+      // Queue byte admission continues measuring the exact preexisting envelope.
+      Object.defineProperty(event, "diagnosticNativeEventOrdinal", { value: this.#currentNativeEventOrdinal });
+    }
     if (this.#listeners.size === 0) {
       this.#buffer.push(event);
       return;
@@ -601,6 +616,8 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#onStopped = options.onStopped;
     this.#reads = options.reads ?? new CopilotReadRequests();
     this.vendorSessionId = options.native.sessionId;
+    const ordinal = options.native.incidentTraceAttachmentId;
+    if (typeof ordinal === "number" && Number.isSafeInteger(ordinal) && ordinal > 0) this.incidentTraceAttachmentId = ordinal;
     this.#bridge.attachModel(options.settings.model, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachEffort(options.settings.effort ?? undefined, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachMode(options.settings.mode, () => this.#bridge.settings(this.settings()));
@@ -611,6 +628,7 @@ export class CopilotAdapterSession implements AdapterSession {
   public readonly vendorSessionId: string;
   public readonly cwd: string | null;
   public readonly runtimeEpoch: RuntimeEpoch;
+  public readonly incidentTraceAttachmentId?: number;
 
   public status(): SessionRuntimeStatus {
     return this.#bridge.status();
