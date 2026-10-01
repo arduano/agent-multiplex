@@ -25,6 +25,23 @@ rejected owner-event type remains unknown. Publication, combined gates,
 installed activation and owner-session qualification remain consumer-coordinated
 work. See the [evidence and limits](../audits/copilot-optional-telemetry-20261002.md).
 
+## October 2 aggregate reliability release preparation
+
+The owner authorized an unattended source, regression and payload preparation
+pass, with live deployment discussed afterward. The coordinated candidate is
+`0.2.4-hotfix.25`, from published `.24` source plus B17 narrow optional telemetry
+admission/private diagnostics, B18 completed legacy queue projection and B16
+shared-stream stress fixtures. Native CLI/SDK, transport, protocol, profile and
+migration identities remain unchanged. See [the admission record](../audits/copilot-optional-telemetry-20261002.md),
+[queue correction](../audits/message-delivery-complete-projection-20261001.md) and
+[stream stress](../audits/runtime-replay-stress-20261002.md).
+
+Combined exact-source/package/Docker qualification and immutable prerelease
+publication are the next gates. No installed activation or real model claim
+is implied. Unknown original owner-event types and genuine interaction omissions
+remain fail closed. Hosted consumer CI stays billing-blocked; use retained local
+and native evidence. Consumer Windows/WSL staging belongs to Leo's handoff.
+
 ## October 1 isolated message delivery projection correction
 
 A read-only live Codex capture found four succeeded legacy commands with no
