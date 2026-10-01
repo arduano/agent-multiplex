@@ -407,6 +407,7 @@ describe("CopilotAgentAdapter", () => {
         { type: "interactionsHydrated", items: [], complete: false },
         { type: "childrenHydrated", items: [], complete: true },
         { type: "interactionsHydrated", items: [], complete: true },
+        { type: "coldResumeQuiescent" },
       ]);
     expect(client.resumed[0]?.config.continuePendingWork).toBe(false);
     await adapter.close();

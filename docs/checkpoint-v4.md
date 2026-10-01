@@ -1,5 +1,36 @@
 # Release qualification checkpoint
 
+## Certified Copilot cold-resume candidate — 2026-10-01
+
+Based on hotfix.24 preparation `512cf4874968ef9b7620673d53aef0c4710ddbe9`,
+the first native cold/non-continuing resume certificate can establish root idle
+with no cycle/outcome after complete empty child/interaction hydration. Root,
+activity, command and callback races block certification. The reducer preserves
+gaps, partial hydration, positive work and observed outcomes; task/queue reads
+remain independent. Persisted/public schemas and runtime store/migrations are
+byte-identical to the base. No native/transport dependency or released pin changed.
+
+Eight targeted regressions fail with the old bridge restored, and corrected
+source passes **105 tests / five files**, one worker. Nearest adapter project
+TypeScript build passes. Tests cover interactive/plan/autopilot, explicit/missing/
+active flags, races, duplicate/child/retired/replacement boundaries, partial/gap
+and stale-fence rejection, persisted reopen, new-epoch uncertainty and the
+existing 4,096 reducer schedules. The
+[owning audit](audits/copilot-cold-resume-ready-20261001.md) records cause and
+publication/installed limitations. No live/model/session/service action occurred.
+
+Local namespace: `receipts/copilot-cold-ready-20261001`.
+Old-bridge regression log SHA-256:
+`11a537ba3afb58de59ed543ac5a6e6f8e9e834d18e735321040937cff12b1df7`.
+Corrected focused log SHA-256:
+`42b5eaac47a4e2999a2ba892d07f3d46987f22ce8ccf5b4fd7ccc578b6a040ea`.
+Six source/test inventory SHA-256:
+`4f09cdf5b2270b6aabf7e31ddf0a27bb83f788160c1853ef66bb254500d78f7f`.
+Unchanged state/view/store boundary SHA-256:
+`e0fec623dad3fc4c0efcf8edf5d2451f3dab96c0a3d2e5a6245296b6f16d9f23`.
+Broad source/package gates, independent review, publication and installed
+Windows/WSL acceptance remain separate coordinator-owned steps.
+
 ## Isolated runtime replay starvation candidate — 2026-10-01
 
 Based on published `.23` checkpoint `5b8cb1530e4b3fd6040ae611d28b7c5e9cd8ad12`,

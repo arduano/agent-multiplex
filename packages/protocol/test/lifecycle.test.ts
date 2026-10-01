@@ -17,6 +17,13 @@ function ready() {
   s = step(s, { type: "childrenHydrated", items: [], complete: true });
   return step(s, { type: "interactionsHydrated", items: [], complete: true });
 }
+function hydratedUnknown() {
+  let s = initialLifecycle(fence());
+  s = step(s, { type: "tasksObserved", revision: 0, items: [] });
+  s = step(s, { type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 0, inFlightSteering: 0 });
+  s = step(s, { type: "childrenHydrated", items: [], complete: true });
+  return step(s, { type: "interactionsHydrated", items: [], complete: true });
+}
 function command(s = ready()) {
   const commandId = newCommandId();
   s = step(s, { type: "commandPrepared", commandId, payloadHash: "same-payload", kind: "steer" });
@@ -213,6 +220,75 @@ describe("runtime-owned lifecycle dimensions", () => {
         changeSettings: { available: true, reason: "available" },
       },
     });
+  });
+  it("certifies a cold-resumed root as Ready without claiming a finished cycle", () => {
+    const before = hydratedUnknown();
+    expect(lifecycleProjection(before).view.status).toBe("unknown");
+    const after = step(before, { type: "coldResumeQuiescent" });
+    expect(after).toEqual({ ...before, nextSequence: before.nextSequence + 1,
+      aggregateActivity: "inactive", root: { phase: "idle", cycle: null, outcome: "none" } });
+    expect(lifecycleProjection(after).view).toMatchObject({
+      status: "ready", health: { state: "healthy", issues: [] }, actions: { send: { available: true } },
+    });
+    // State/view contracts stay rollback-readable. Only a private evidence fact
+    // is new; no resume event, native transcript or completion is invented.
+    expect(lifecycleStateSchema.parse(JSON.parse(JSON.stringify(after)))).toEqual(after);
+    expect(Object.keys(lifecycleProjection(after).view).sort()).toEqual(["actions", "health", "observationId", "status", "version"]);
+    const duplicate = step(after, { type: "coldResumeQuiescent" });
+    expect(duplicate).toEqual({ ...after, nextSequence: after.nextSequence + 1 });
+  });
+  it.each<[string, LifecycleFact[]]>([
+    ["working root", [{ type: "rootStarted", cycleId: "already-started" }]],
+    ["paused root", [{ type: "rootModelIdle" }]],
+    ["failed root", [{ type: "rootFailed" }]],
+    ["interrupted root", [{ type: "rootIdle", aborted: true }]],
+    ["finished root", [{ type: "rootStarted", cycleId: "completed-cycle" }, { type: "rootIdle", aborted: false }]],
+    ["active aggregate", [{ type: "sessionActivityObserved", active: true }]],
+    ["partial children", [{ type: "childrenHydrated", items: [], complete: false }]],
+    ["partial interactions", [{ type: "interactionsHydrated", items: [], complete: false }]],
+    ["positive child", [{ type: "child", id: "tool:child", state: "running" }]],
+    ["pending interaction", [{ type: "interactionOpened", interaction: { id: "pending", owner: "root", kind: "permission" } }]],
+    ["active task", [{ type: "tasksObserved", revision: 0, items: [{ id: "task", kind: "shell", status: "running" }] }]],
+    ["queued message", [{ type: "queueObserved", revision: 0, items: [{ id: "pending", kind: "queued" }], unidentifiedSteering: 0, inFlightSteering: 0 }]],
+    ["unidentified steering", [{ type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 1, inFlightSteering: 0 }]],
+    ["in-flight steering", [{ type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 0, inFlightSteering: 1 }]],
+    ["native admission degraded", [{ type: "nativeObservationDegraded", diagnosticId: "00000000-0000-4000-8000-000000000001" }]],
+    ["compaction", [{ type: "compaction", phase: "running" }]],
+  ])("does not replace %s with a cold-resume certificate", (_label, facts) => {
+    const before = facts.reduce((s, fact) => step(s, fact), hydratedUnknown());
+    const after = step(before, { type: "coldResumeQuiescent" });
+    expect(after).toEqual({ ...before, nextSequence: before.nextSequence + 1 });
+  });
+  it("keeps gaps and invalidated dimensions closed across a cold-resume certificate", () => {
+    const baseline = hydratedUnknown();
+    for (const before of [step(baseline, { type: "gap" }),
+      step(baseline, { type: "coldResumeQuiescent" }, baseline.nextSequence + 1)]) {
+      const after = step(before, { type: "coldResumeQuiescent" });
+      expect(after).toEqual({ ...before, nextSequence: before.nextSequence + 1 });
+      expect(after.continuity).toBe("gap");
+      expect(after.children.completeness).toBe("partial");
+      expect(after.interactions.completeness).toBe("partial");
+      expect(lifecycleProjection(after).view).toMatchObject({ status: "unknown", actions: { send: { available: false } } });
+      // Even fresh independent snapshots cannot make the certificate clear the
+      // existing gap. A supported root boundary/new epoch is still required.
+      let hydrated = step(after, { type: "childrenHydrated", items: [], complete: true });
+      hydrated = step(hydrated, { type: "interactionsHydrated", items: [], complete: true });
+      hydrated = step(hydrated, { type: "coldResumeQuiescent" });
+      expect(hydrated.continuity).toBe("gap");
+      expect(hydrated.root.phase).toBe("unknown");
+    }
+  });
+  it("rejects old or replacement-epoch cold-resume certificates", () => {
+    const current = hydratedUnknown();
+    expect(step(current, { type: "coldResumeQuiescent" }, current.nextSequence - 1)).toBe(current);
+    for (const otherFence of [
+      { ...current.fence, runtimeEpoch: newRuntimeEpoch() },
+      { ...current.fence, runtimeNodeBootId: newRuntimeNodeBootId() },
+      { ...current.fence, bindingRevision: current.fence.bindingRevision + 1 },
+    ]) {
+      expect(reduceLifecycle(current, { version: LIFECYCLE_VERSION, fence: otherFence,
+        sequence: current.nextSequence, fact: { type: "coldResumeQuiescent" } })).toBe(current);
+    }
   });
   it("publishes an opaque compact view and applies host reachability centrally", () => {
     const state = ready();

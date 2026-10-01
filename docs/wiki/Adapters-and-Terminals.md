@@ -213,6 +213,16 @@ interactions fence delayed activity reads. Sending another prompt cannot hide an
 unresolved question or permission, and a duplicate completion for a retired
 permission cannot restart the displayed working state.
 
+A first cold resume can establish Ready without inventing a completed turn.
+Both native `continuePendingWork` and `sessionWasActive` must be explicitly false,
+and no work, active activity read, command or callback may have raced ahead.
+The private certificate requires continuous evidence and complete empty child
+and interaction hydration; task and queue observations remain independent.
+It establishes idle with no cycle/outcome, preserves existing gaps and positive
+work, and never rewrites the native transcript. Missing/true flags or partial
+hydration retain uncertainty. See the
+[cold-resume diagnosis and qualification](../audits/copilot-cold-resume-ready-20261001.md).
+
 ### Stalled Copilot reads
 
 Native history, queue, activity, model, mode, permissions and adapter discovery reads

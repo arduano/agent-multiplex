@@ -7,6 +7,21 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-30 (published lockstep hotfix.23 prerelease; consumer staging pending).
 
+## October 1 certified Copilot cold-resume candidate
+
+An isolated candidate based on hotfix.24 preparation `512cf487` fixes idle
+Copilot resumes remaining healthy/unknown after complete empty hydration.
+Only the first native resume boundary with both work flags explicitly false
+can emit a private quiescence certificate, with native work/activity/command and
+callback races fenced. The reducer establishes idle with no cycle or outcome;
+fresh independent task/queue observations can then project Ready. Gaps, partial
+hydration, positive work and existing outcomes retain their safety boundaries.
+Public/persisted schemas, migrations and SDK/transport pins are unchanged.
+Eight new regressions fail on the old bridge; 105 focused tests pass on the
+correction. Broad release gates, published consumer bytes and installed Windows/
+WSL acceptance remain coordinator-owned. No live/model action occurred. See
+the [source audit](../audits/copilot-cold-resume-ready-20261001.md).
+
 ## October 1 isolated runtime replay correction
 
 An isolated candidate based on published `.23` checkpoint `5b8cb15` reproduces

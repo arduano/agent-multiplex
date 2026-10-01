@@ -56,7 +56,7 @@ version `6` so a later lifecycle revision can be negotiated deliberately.
 | `lastGap` | Optional bounded diagnostic | The latest gap's ID, time, fixed failure stage and event kind, queue counts, and optional error class. It contains no SDK payload, message text or exception text and remains available after an idle event for incident correlation. It is evidence about runtime admission, not a certificate of recovered interaction state. |
 | `aggregateActivity` | `unknown \| active \| inactive` | The SDK's `metadata.activity()` bit covers root turns **or** tasks. It may block a Ready/Finished projection while active, but cannot start, finish, or identify a root cycle. A gap resets it to unknown. |
 | `nativeAdmission` | `{state: open \| degraded, diagnosticId?}` | Runtime-owned native-read health for this binding. Degraded blocks further Copilot mutations and starts a bounded recovery deadline. Only fresh task and queue observations can reopen it. It persists across restart until a new binding is established. |
-| `root` | `{phase, cycle, outcome}` | Root model/session dimension. `phase` is `unknown`, `paused`, `idle`, or `working`; `paused` means the model loop paused or an aggregate inactive read paused a working root, while `idle` requires a whole-session idle or explicit root failure. `cycle` is the unique observed root-start event ID or `null`; `outcome` is `none`, `finished`, `interrupted`, or `failed`. A new explicit root start clears the prior outcome. |
+| `root` | `{phase, cycle, outcome}` | Root model/session dimension. `phase` is `unknown`, `paused`, `idle`, or `working`; `paused` means the model loop paused or an aggregate inactive read paused a working root, while `idle` requires a whole-session idle, explicit root failure or certified cold resume. `cycle` is the unique observed root-start event ID or `null`; `outcome` is `none`, `finished`, `interrupted`, or `failed`. A new explicit root start clears the prior outcome. |
 | `tasks` | `{revision, observation, items}` | Complete bounded task observation for one invalidation revision. `observation` is `pending`, `retrying`, or `observed`, with a failure count, optional safe diagnostic ID, and monotonic `stalled` marker for that revision. Retained items before `observed` are diagnostic only and cannot prove current presence or absence. |
 | `children` | `{completeness, items}` | Bounded native subagent/child observations, independently keyed and in `running`, `completed`, `failed`, `settled`, or `unknown`. `partial` means absence is unproved. `settled` means a newer whole-session idle proved no child remained in flight without claiming that child's outcome. These are members of the owning Copilot session, never catalog sessions. |
 | `queue` | `{revision, observation, items, unidentifiedSteering, inFlightSteering}` | Complete bounded pending-message observation for one invalidation revision. Observation health has the same revision-fenced shape as tasks. Identified items retain native queue ID and optional logical message ID. Text-only steering is represented only by a count. `null` in-flight count means the native version did not establish it. |
@@ -189,6 +189,7 @@ interpret the lifecycle reducer's sequence, task revision, or queue revision.
 | `rootFailed` | Root-owned native failure | Set phase `idle` and outcome `failed`; failure is the dominant terminal observation until a new root cycle | Background task cancellation |
 | `rootIdle(aborted=true)` | Root-owned whole-session idle | Set continuity `continuous` and phase `idle`; preserve any prior terminal outcome, otherwise set `interrupted`; mark child completeness `complete` and running or unknown children `settled` | Successful completion or a child-specific outcome |
 | `rootIdle(aborted=false)` | Root-owned whole-session idle | Set continuity `continuous` and phase `idle`; preserve any prior terminal outcome, otherwise set `finished` when a cycle exists or `none` when it does not; mark child completeness `complete` and running or unknown children `settled` | User-objective success, child-specific success or per-command settlement |
+| `coldResumeQuiescent` | First session-scoped cold-resume certificate; continuous evidence; untouched `unknown/null/none` root; complete empty child/interaction hydration; no observed activity, queued work, live tasks, compaction or degraded admission | Set aggregate activity `inactive` and root `{idle,null,none}`; task/queue observations remain independent | Finished, a completed cycle, gap recovery, partial-hydration repair, command settlement or a native transcript event |
 | `child(id,running)` | Exact namespaced child identity | Upsert running child while retaining the current completeness | Task-record identity, root work or absence of another child |
 | `child(id,completed\|failed)` | Exact same identity domain | Upsert terminal child observation while retaining the current completeness | Another task/tool/agent alias or complete child absence |
 | `childrenHydrated(items,complete=true)` | Producer observed the binding from its beginning or has an authoritative complete snapshot | Replace the bounded set and mark complete | A mapping to task records |
@@ -227,10 +228,18 @@ the pinned SDK's session-scoped `session.resume` event jointly reports
 `continuePendingWork:false` and `sessionWasActive:false`. The former says old
 pending work was interrupted and the latter says this resume did not join live
 work. Only when both fields are explicitly false, the event is the first resume
-boundary for this fresh bridge, and no child or interaction callback raced
-ahead of it may the adapter promote both empty child and interaction baselines
-to complete. Missing or true flags remain partial. A callback after that ordered
-boundary is positive new evidence and extends the complete baseline. Each
+boundary for this fresh bridge, and no native work, active aggregate observation,
+command start, child or interaction callback raced ahead may the adapter promote
+both empty child and interaction baselines to complete and emit its private
+`coldResumeQuiescent` certificate. Missing or true flags remain partial. The
+reducer accepts quiescence only for continuous evidence and an untouched unknown
+root with complete empty hydration and no positive work. It sets root phase
+`idle`, cycle `null` and outcome `none`; a fresh empty task/queue snapshot can
+then project Ready. It never emits a synthetic `session.idle` or infers Finished.
+An existing gap, partial hydration or observed root cycle/outcome cannot be
+replaced by the certificate. Duplicate boundaries cannot reset running adapter
+status. A callback after that ordered boundary is positive new evidence and
+extends the complete baseline. Each
 bridge is scoped to one native handle/runtime epoch; replacement and retired
 bridges cannot contribute the certificate. A reconnect snapshot may otherwise
 claim `complete` only when a native source enumerates every pending kind and

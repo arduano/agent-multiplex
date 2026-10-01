@@ -89,3 +89,40 @@ it("retains a payload-free native gap diagnostic after idle and store reopen", (
     expect(() => recovered.append(fence, { type: "gap", diagnostic: { ...diagnostic, payload: "not allowed" } } as never)).toThrow();
   } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
 });
+
+it("persists only certified cold-resume state and starts a replacement epoch uncertified", () => {
+  const root = mkdtempSync(join(tmpdir(), "lifecycle-cold-resume-"));
+  const filename = join(root, "runtime.sqlite");
+  const fence = { sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeId(), runtimeNodeBootId: newRuntimeNodeBootId(),
+    bindingRevision: 1, runtimeEpoch: newRuntimeEpoch() };
+  const commandId = newCommandId();
+  let store = new RuntimeNodeStore(filename);
+  try {
+    const journal = new RuntimeLifecycleJournal(store);
+    journal.append(fence, { type: "commandPrepared", commandId, payloadHash: "old-admission", kind: "send" });
+    journal.append(fence, { type: "commandReceipt", commandId, payloadHash: "old-admission", admission: "outcomeUnknown" });
+    journal.append(fence, { type: "childrenHydrated", items: [], complete: true });
+    journal.append(fence, { type: "interactionsHydrated", items: [], complete: true });
+    journal.append(fence, { type: "coldResumeQuiescent" });
+    expect(journal.projection(fence).view.status).toBe("unknown");
+    journal.append(fence, { type: "tasksObserved", revision: 0, items: [] });
+    journal.append(fence, { type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 0, inFlightSteering: 0 });
+    expect(journal.projection(fence).view.status).toBe("ready");
+    const certified = journal.read(fence);
+    expect(certified.root).toEqual({ phase: "idle", cycle: null, outcome: "none" });
+    expect(certified.commands[0]).toMatchObject({ admission: "outcomeUnknown", displayed: false, consumed: false, settled: false });
+    store.close();
+    store = new RuntimeNodeStore(filename);
+    const reopened = new RuntimeLifecycleJournal(store);
+    expect(reopened.read(fence)).toEqual(certified);
+    const replacementFence = { ...fence, runtimeEpoch: newRuntimeEpoch() };
+    const replacement = reopened.read(replacementFence);
+    expect(replacement).toMatchObject({
+      root: { phase: "unknown", cycle: null, outcome: "none" },
+      children: { completeness: "partial" }, interactions: { completeness: "partial" },
+    });
+    reopened.append(replacementFence, { type: "coldResumeQuiescent" });
+    expect(reopened.read(replacementFence).root.phase).toBe("unknown");
+    expect(reopened.read(replacementFence).commands).toEqual(certified.commands);
+  } finally { store.close(); rmSync(root, { recursive: true, force: true }); }
+});

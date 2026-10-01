@@ -83,6 +83,8 @@ export const lifecycleFactSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("rootStarted"), cycleId: opaqueId }).strict(),
   z.object({ type: z.literal("rootModelIdle") }).strict(),
   z.object({ type: z.literal("rootIdle"), aborted: z.boolean() }).strict(),
+  // Private adapter certificate, not a native idle event or completed cycle.
+  z.object({ type: z.literal("coldResumeQuiescent") }).strict(),
   z.object({ type: z.literal("rootFailed") }).strict(),
   z.object({ type: z.literal("sessionActivityObserved"), active: z.boolean() }).strict(),
   z.object({ type: z.literal("nativeObservationDegraded"), diagnosticId }).strict(),
@@ -162,6 +164,21 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
   switch (f.type) {
     case "gap": return { ...invalidate(s), ...(f.diagnostic ? { lastGap: f.diagnostic } : {}) };
     case "rootStarted": return startRootCycle(s, f.cycleId);
+    case "coldResumeQuiescent":
+      // A first cold-resume boundary can certify a never-observed root only.
+      // It cannot repair a delivery gap, replace partial hydration, erase
+      // positive work, or change an observed cycle/outcome. Task/queue reads
+      // remain independent and must become fresh before Ready can project.
+      if (s.continuity !== "continuous" || s.root.phase !== "unknown" ||
+          s.root.cycle !== null || s.root.outcome !== "none" ||
+          s.aggregateActivity === "active" || s.nativeAdmission.state !== "open" ||
+          s.children.completeness !== "complete" || s.children.items.length > 0 ||
+          s.interactions.completeness !== "complete" || s.interactions.items.length > 0 ||
+          s.tasks.observation.stalled || s.queue.observation.stalled ||
+          s.tasks.items.some((task) => task.status === "running" || task.status === "idle" || task.status === "orphaned") ||
+          s.queue.items.length > 0 || s.queue.unidentifiedSteering > 0 || (s.queue.inFlightSteering ?? 0) > 0 ||
+          s.compaction === "running") return s;
+      return { ...s, aggregateActivity: "inactive", root: { phase: "idle", cycle: null, outcome: "none" } };
     // Model-loop idle is weaker than whole-session idle. Keep it distinct so a
     // complete task/queue snapshot cannot accidentally project Ready while an
     // attached shell or background agent may still be winding down.

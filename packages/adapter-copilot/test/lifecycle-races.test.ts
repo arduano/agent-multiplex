@@ -1,5 +1,10 @@
 import type { SessionEvent } from "@github/copilot-sdk";
 import { AdapterOutcomeUnknownError, type AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
+import {
+  initialLifecycle, lifecycleProjection, LIFECYCLE_VERSION,
+  newRuntimeEpoch, newRuntimeNodeBootId, newRuntimeNodeId, newSessionId, reduceLifecycle,
+  type LifecycleFact,
+} from "@arduano/agent-multiplex-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { CopilotAdapterSession, CopilotSessionBridge } from "../src/session.js";
 
@@ -65,6 +70,63 @@ describe("Copilot command and event ordering", () => {
         { type: "childrenHydrated", items: [], complete: false },
         { type: "interactionsHydrated", items: [], complete: false },
       ]);
+    expect(events.filter(event => event.kind === "lifecycle" && event.fact.type === "coldResumeQuiescent"))
+      .toHaveLength(certified ? 1 : 0);
+    bridge.close();
+  });
+
+  it.each(["interactive", "plan", "autopilot"])("projects certified %s resume as Ready without a completed turn", mode => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    let state = initialLifecycle({ sessionId: newSessionId(), runtimeNodeId: newRuntimeNodeId(),
+      runtimeNodeBootId: newRuntimeNodeBootId(), runtimeEpoch: newRuntimeEpoch(), bindingRevision: 1 });
+    const apply = (fact: LifecycleFact) => {
+      state = reduceLifecycle(state, { version: LIFECYCLE_VERSION, fence: state.fence, sequence: state.nextSequence, fact });
+    };
+    bridge.subscribe(event => { if (event.kind === "lifecycle") apply(event.fact); });
+    // Native discovery remains independent of the resume event. The certificate
+    // must not fabricate a task or queue observation while these reads are pending.
+    bridge.nativeEvent({ id: "resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false, mode },
+      timestamp: "2026-10-01T00:00:00.000Z", parentId: null } as SessionEvent);
+    expect(state.root).toEqual({ phase: "idle", cycle: null, outcome: "none" });
+    expect(lifecycleProjection(state).view).toMatchObject({ status: "unknown", health: { state: "recovering" } });
+    apply({ type: "tasksObserved", revision: 0, items: [] });
+    apply({ type: "queueObserved", revision: 0, items: [], unidentifiedSteering: 0, inFlightSteering: 0 });
+    expect(lifecycleProjection(state).view).toMatchObject({ status: "ready", health: { state: "healthy" },
+      actions: { send: { available: true }, steer: { available: false } } });
+    bridge.nativeEvent({ id: "new-cycle", type: "assistant.turn_start", data: { turnId: "0" },
+      timestamp: "2026-10-01T00:00:01.000Z", parentId: "resume" } as SessionEvent);
+    expect(lifecycleProjection(state).view.status).toBe("working");
+    bridge.nativeEvent({ id: "duplicate-resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-10-01T00:00:02.000Z", parentId: "new-cycle" } as SessionEvent);
+    expect(lifecycleProjection(state).view.status).toBe("working");
+    expect(bridge.status()).toBe("running");
+    bridge.close();
+  });
+
+  it.each([
+    ["root start", (bridge: CopilotSessionBridge) => bridge.nativeEvent({ id: "started", type: "assistant.turn_start",
+      data: { turnId: "0" }, timestamp: "2026-10-01T00:00:00.000Z", parentId: null } as SessionEvent), "running"],
+    ["root failure", (bridge: CopilotSessionBridge) => bridge.nativeEvent({ id: "failed", type: "session.error",
+      data: {}, timestamp: "2026-10-01T00:00:00.000Z", parentId: null } as SessionEvent), "error"],
+    ["native root message", (bridge: CopilotSessionBridge) => bridge.nativeEvent({ id: "message", type: "user.message",
+      data: { messageId: "current-message" }, timestamp: "2026-10-01T00:00:00.000Z", parentId: null } as SessionEvent), "running"],
+    ["active read", (bridge: CopilotSessionBridge) => bridge.observeActivity({ hasActiveWork: true }, bridge.activityRevision), "running"],
+    ["command start", (bridge: CopilotSessionBridge) => bridge.beginMessage(), "running"],
+  ] as const)("preserves %s racing before a cold resume boundary", (_label, race, status) => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    race(bridge);
+    bridge.nativeEvent({ id: "late-resume", type: "session.resume",
+      data: { continuePendingWork: false, sessionWasActive: false },
+      timestamp: "2026-10-01T00:00:01.000Z", parentId: null } as SessionEvent);
+    expect(events.some(event => event.kind === "lifecycle" && event.fact.type === "coldResumeQuiescent")).toBe(false);
+    expect(events.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    expect(bridge.status()).toBe(status);
     bridge.close();
   });
 
@@ -129,7 +191,7 @@ describe("Copilot command and event ordering", () => {
     });
     expect(events.map(event => event.kind === "lifecycle" ? `${event.fact.type}:${"complete" in event.fact ? event.fact.complete : ""}` : event.kind)).toEqual([
       "childrenHydrated:false", "interactionsHydrated:false", "native",
-      "childrenHydrated:true", "interactionsHydrated:true", "status", "interaction",
+      "childrenHydrated:true", "interactionsHydrated:true", "coldResumeQuiescent:", "status", "interaction",
     ]);
     bridge.close();
     await expect(pending).resolves.toEqual({ action: "cancel" });
@@ -148,6 +210,7 @@ describe("Copilot command and event ordering", () => {
       data: { continuePendingWork: false, sessionWasActive: false },
       timestamp: "2026-09-26T00:00:01.000Z", parentId: "ambiguous" } as SessionEvent);
     expect(staleEvents.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    expect(staleEvents.some(event => event.kind === "lifecycle" && event.fact.type === "coldResumeQuiescent")).toBe(false);
     stale.close();
     stale.nativeEvent({ id: "late", type: "session.resume",
       data: { continuePendingWork: false, sessionWasActive: false },
@@ -158,6 +221,7 @@ describe("Copilot command and event ordering", () => {
       data: { continuePendingWork: false, sessionWasActive: false },
       timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
     expect(childEvents.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    expect(childEvents.some(event => event.kind === "lifecycle" && event.fact.type === "coldResumeQuiescent")).toBe(false);
     childOwned.close();
 
     // A runtime restart creates a fresh bridge/epoch. Only its own first exact
@@ -167,6 +231,7 @@ describe("Copilot command and event ordering", () => {
       data: { continuePendingWork: false, sessionWasActive: false },
       timestamp: "2026-09-26T00:00:00.000Z", parentId: null } as SessionEvent);
     expect(replacementEvents.filter(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toHaveLength(2);
+    expect(replacementEvents.filter(event => event.kind === "lifecycle" && event.fact.type === "coldResumeQuiescent")).toHaveLength(1);
     replacement.close();
   });
 
