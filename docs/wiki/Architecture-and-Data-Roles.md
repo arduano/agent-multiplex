@@ -104,6 +104,14 @@ generation. Native streams use per-session runtime epochs and sequences;
 control streams use feed IDs and cursors. Expired replay produces an explicit
 reset or native gap rather than fabricated continuity.
 
+Stopped, archived and replaced native epochs retire their runtime replay rings.
+A control consumes only authenticated, correctly owned archived-session replay
+as a terminal no-op; unknown bindings retain transient retry and open-session
+identity/epoch mismatches remain fenced. This prevents a retired ring from
+blocking every other session on the runtime's single reverse feed without
+inventing native history. See the
+[source reproduction](../audits/runtime-replay-starvation-20261001.md).
+
 ## Read and write paths
 
 A normal read uses the gateway's selected projection. A cold archived search may

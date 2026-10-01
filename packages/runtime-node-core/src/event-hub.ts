@@ -99,6 +99,13 @@ export class RuntimeNodeEventHub {
     for (const listener of this.#listeners) listener(item);
   }
 
+  /** A stopped, replaced or archived binding has no replayable native epoch.
+   * Existing subscribers retain their causal live queue; future attachments
+   * must not replay its retired bytes ahead of another session's live feed. */
+  public retireNativeSession(sessionId: SessionId): void {
+    this.#rings.delete(sessionId);
+  }
+
   public subscribe(
     cursor: RuntimeNodeEventCursor,
     signal?: AbortSignal,

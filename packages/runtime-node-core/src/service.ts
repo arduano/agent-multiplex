@@ -2173,6 +2173,7 @@ export class RuntimeNodeService {
       },
     };
     this.#store.commitArchiveSuccess(succeeded, session);
+    this.#events.retireNativeSession(session.sessionId);
     this.#terminals.invalidateSession(session.sessionId, "session was archived");
     this.#retireInteractions(session.sessionId, session.runtimeEpoch ?? "", true);
     this.#publishArchive(succeeded.record);
@@ -2450,6 +2451,7 @@ export class RuntimeNodeService {
       lastSeenAt: timestamp,
     };
     this.#store.putSession(stopped);
+    this.#events.retireNativeSession(record.sessionId);
     this.#publishSession(stopped);
     return stopped;
   }
@@ -3002,6 +3004,9 @@ export class RuntimeNodeService {
       );
       this.#retireInteractions(sessionId, existing.session.runtimeEpoch);
     }
+    // Native sequence zero belongs to this installed handle. A prior handle's
+    // ring cannot certify continuity underneath the replacement's epoch.
+    this.#events.retireNativeSession(sessionId);
     const binding: ActiveBinding = {
       sessionId,
       session,
@@ -3222,6 +3227,7 @@ export class RuntimeNodeService {
               lastActivityAt: timestamp,
             };
         this.#store.putSession(updated);
+        if (event.status === "stopped") this.#events.retireNativeSession(sessionId);
         this.#publishSession(updated);
       }
       if (event.status === "stopped" && this.#active.get(sessionId) === binding) {

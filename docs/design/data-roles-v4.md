@@ -48,6 +48,23 @@ remain resumable until installed in the runtime's active binding map. This
 prevents an old durable row or concurrent history read from undoing the control
 node's restart fence.
 
+Native reverse-feed replay belongs to an installed session epoch. Explicit Stop,
+native stopped status, successful Archive and handle replacement retire that
+session's in-memory native ring before advertising the retired/replacement
+binding. Already queued live items keep their causal order; a later connection
+cannot replay retired epochs ahead of unrelated sessions. Retirement changes
+neither harness-owned history nor durable session/operation records.
+
+The control receiver distinguishes unknown bindings from canonical tombstones.
+An unknown session returns a transient negative acknowledgement, preserving the
+runtime pump's cursor for a later bind. A known archived session's native replay
+is terminal: after authenticating its runtime/boot, checking the session owner
+and checking a native event's harness, the control acknowledges it without
+publishing bytes or restoring the row. Open-session epoch/harness mismatches
+remain fenced. A generic negative acknowledgement or arbitrary ingestion error
+never grants permission to skip an unproven event. See the
+[replay-starvation diagnosis](../audits/runtime-replay-starvation-20261001.md).
+
 Runtime presence heartbeats are independent of native inventory and metadata
 maintenance. Each maintenance lane retains one pending job across connection
 epochs, with a 30-second result acceptance deadline. Connection retirement and

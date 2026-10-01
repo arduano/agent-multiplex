@@ -1,5 +1,38 @@
 # Release qualification checkpoint
 
+## Isolated runtime replay starvation candidate — 2026-10-01
+
+Based on published `.23` checkpoint `5b8cb1530e4b3fd6040ae611d28b7c5e9cd8ad12`,
+real runtime/control services, native event hub and reverse-feed pump reproduce
+four retirement cases that block another session's native feed while heartbeat
+and synthetic native history work. The pre-fix regression fails five assertions
+and passes the unknown/stale-fence safeguard. After the narrow correction,
+**71 focused tests / five files** pass with one worker, including all six new
+regressions, bridge retry/cursor tests, control hardening, launch/archive and
+startup reattachment. Targeted TypeScript project build, docs, release metadata,
+secret scan and diff whitespace checks pass. The
+[audit](audits/runtime-replay-starvation-20261001.md) owns source design and limits.
+
+Local receipt namespace is `receipts/runtime-replay-starvation-20261001`.
+Final corrected baseline failure `red-final.json` SHA-256:
+`d1fd4883e8dc7ba6c952d66524cd27f1240b5af35f53ff9708a1bee616e35b6c`.
+Passing focused `green-final.json` SHA-256:
+`729651ca85bf12aad3e6e830b30ec12745b5cf2a3e9adc2f1ecac89faf5703d6`.
+Exact four-file source/test inventory SHA-256:
+`28a2b1c4f8ed84e50f004753e39cf22214c59af98ff01d172ccbe23f5cd4bfbb`.
+Initial fixture-native-ID reuse failure is preserved separately and excluded
+from defect evidence.
+
+`node scripts/check-checkpoint.mjs` failed because the new worktree deliberately
+built only targeted projects: `@arduano/agent-multiplex-gateway-core package
+target dist/index.js does not exist`. Diagnostic receipt SHA-256:
+`8b19b14db11df730444b93187578cc12889be6ccfa285dec3f34d500f844bd5f`.
+The broad project build/full gates await coordinator scheduling; no admission
+or gate was weakened. Independent review, full source/package qualification,
+new coordinated publication and installed acceptance remain pending. No live
+service/model/vendor SDK action occurred, and the actual Windows trigger remains
+unproven. Published `.22`/`.23` bytes, pins and all durable schemas are unchanged.
+
 ## Hotfix.23 prerelease publication — 2026-09-30
 
 Signed tag `hotfix-2026-09-30.1` peels to exact once-packed artifact source

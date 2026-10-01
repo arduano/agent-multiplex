@@ -943,8 +943,17 @@ export class ControlNodeService {
       // transient negative acknowledgement, not successful ingestion. In
       // particular, the reverse-feed pump must leave its native cursor
       // untouched so sequence zero remains replayable.
-      if (!session || session.catalogState === "archived") return { accepted: false };
+      if (!session) return { accepted: false };
       this.#assertRuntimeEventOwner(input.runtimeNodeId, session.runtimeNodeId);
+      if (session.catalogState === "archived") {
+        // The canonical tombstone is terminal, unlike a not-yet-bound session.
+        // Consume this authenticated owner's replay without publishing bytes
+        // or resurrecting the row; retrying it would starve the whole runtime.
+        if (event.kind === "native" && event.harness !== session.harness) {
+          throw new ControlNodeCoreError("FENCED", "native event targets a different archived session harness");
+        }
+        return { accepted: true };
+      }
       if (event.kind === "native" && (
         event.harness !== session.harness ||
         event.runtimeEpoch !== session.runtimeEpoch

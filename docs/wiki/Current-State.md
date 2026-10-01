@@ -7,6 +7,19 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-09-30 (published lockstep hotfix.23 prerelease; consumer staging pending).
 
+## October 1 isolated runtime replay correction
+
+An isolated candidate based on published `.23` checkpoint `5b8cb15` reproduces
+Host-wide native-stream starvation when a reverse connection replays a stopped,
+archived or replaced session ring before another active session. Presence and
+fresh native history still work. The source correction retires only proved
+retired runtime rings and consumes only authenticated/owned canonical archive
+replay as a terminal no-op. Unknown bindings retain negative acknowledgement;
+open epoch/harness and all owner/boot fences remain unchanged. See the
+[diagnosis and qualification boundary](../audits/runtime-replay-starvation-20261001.md).
+The actual Windows incident remains unproven, and no installed role, vendor SDK
+or model was changed. Publication and deployment are separate gates.
+
 ## Published lockstep hotfix.23 prerelease
 
 Clean artifact source `a36c000814c344fce1d5ad3d45ed344c6d0a79cc`
