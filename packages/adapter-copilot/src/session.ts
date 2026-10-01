@@ -464,8 +464,9 @@ export class CopilotSessionBridge {
       // A live/fresh handle can also observe another client's active resume.
       // Preserve that positive native status without granting another empty
       // baseline or allowing a false/ambiguous replay to reset existing work.
-      return !this.#resumePositiveEvidenceObserved &&
-        (event.data.continuePendingWork === true || event.data.sessionWasActive === true) ? "running" : undefined;
+      // Earlier races prohibit only the consumed cold-resume certificate; they
+      // cannot suppress newer positive activity for the lifetime of the handle.
+      return event.data.continuePendingWork === true || event.data.sessionWasActive === true ? "running" : undefined;
     }
     // Consume exactly the first resume boundary for this bridge. A replayed or
     // duplicated event must never upgrade an earlier ambiguous boundary.

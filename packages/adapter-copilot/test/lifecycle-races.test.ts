@@ -75,6 +75,38 @@ describe("Copilot command and event ordering", () => {
     bridge.close();
   });
 
+  it.each([
+    { sessionWasActive: true },
+    { continuePendingWork: true },
+  ])("observes a later active resume after a preboundary race without recertifying hydration: %j", data => {
+    const bridge = new CopilotSessionBridge();
+    bridge.interactionHydration(false);
+    const events: AdapterEvent[] = [];
+    bridge.subscribe(event => events.push(event));
+    const emit = (id: string, type: string, data: object = {}) => bridge.nativeEvent({
+      id, type, data, timestamp: "2026-10-01T00:00:00.000Z", parentId: null,
+    } as SessionEvent);
+    emit("race-start", "assistant.turn_start", { turnId: "0" });
+    emit("race-idle", "session.idle");
+    emit("first-cold-resume", "session.resume", { continuePendingWork: false, sessionWasActive: false });
+    expect(bridge.status()).toBe("idle");
+    expect(events.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    emit("child-active-resume", "session.resume", { ...data, parentToolCallId: "child" });
+    expect(bridge.status()).toBe("idle");
+    emit("later-active-resume", "session.resume", data);
+    expect(bridge.status()).toBe("running");
+    expect(events.some(event => event.kind === "lifecycle" && event.fact.type === "coldResumeQuiescent")).toBe(false);
+    expect(events.some(event => event.kind === "lifecycle" && "complete" in event.fact && event.fact.complete)).toBe(false);
+    for (const replay of [{ continuePendingWork: false, sessionWasActive: false }, {}]) {
+      emit("later-cold-or-ambiguous", "session.resume", replay);
+      expect(bridge.status()).toBe("running");
+    }
+    bridge.close();
+    const countAfterClose = events.length;
+    emit("retired-active-resume", "session.resume", data);
+    expect(events).toHaveLength(countAfterClose);
+  });
+
   it.each(["interactive", "plan", "autopilot"])("projects certified %s resume as Ready without a completed turn", mode => {
     const bridge = new CopilotSessionBridge();
     bridge.interactionHydration(false);

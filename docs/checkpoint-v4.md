@@ -35,6 +35,19 @@ Unchanged state/view/store boundary SHA-256:
 Broad source/package gates, independent review, publication and installed
 Windows/WSL acceptance remain separate coordinator-owned steps.
 
+Independent review then found a sticky preboundary race marker suppressing
+later positive native active-resume status on `212769a`. Both explicit active
+flags reproduce it. The follow-up removes that marker only from the consumed
+boundary path, preserving first-boundary/false/ambiguous/child/closed fences
+without promoting hydration or root outcomes. Nearest Copilot project build and
+**151 tests / three files** pass, one worker; the final combined broad gate remains
+coordinator-owned. Baseline diagnostic SHA-256:
+`cc0345620acea6dd4ba8f7dcd8df299539ed54fac8bc67e7c5ceaac78dc6f769`.
+Passing focused SHA-256:
+`da3c97ab29faf132fb96653ca2f0f743688d83f2965a117266a26cf06430b5d5`.
+Follow-up two-file inventory SHA-256:
+`8ae226bfc352e5cbd7ec4edd2b33f92fe5c22d7ee0e488cd45db044a082131de`.
+
 ## Isolated runtime replay starvation candidate — 2026-10-01
 
 Based on published `.23` checkpoint `5b8cb1530e4b3fd6040ae611d28b7c5e9cd8ad12`,

@@ -34,6 +34,10 @@ the adapter's running status.
 Existing fresh/live handles retain native positive active-resume status when
 another client joins live work; this status does not grant another empty
 hydration baseline. False or ambiguous replay cannot reset existing work.
+An earlier preboundary race prevents that first cold-resume certificate only.
+After its consumption, a later root-owned active resume is new positive native
+status evidence even if the original race flag is still retained. It cannot
+promote child/interaction hydration or manufacture a root cycle/outcome.
 
 The reducer consumes the certificate only under continuous evidence, an untouched
 unknown root with no cycle/outcome, complete empty child/interaction hydration,
@@ -96,3 +100,26 @@ Full source/package gates, coordinated publication, Leo wrapper/UI integration
 and installed Windows/WSL acceptance remain separate coordinator-owned steps.
 No deployed role, private configuration/state, credential, task, V5 service or
 pre-existing session/worktree was changed.
+
+## Independent active-resume review correction
+
+Review of `212769a` found the preboundary race marker also gated every later
+positive active-resume status. A legal synthetic sequence (partial attachment,
+root start, root idle, first cold resume, later active resume) stayed idle. Both
+`sessionWasActive:true` and `continuePendingWork:true` regressions fail on that
+source. The narrow correction removes the sticky marker only from the already
+consumed-boundary path. The first-boundary race guard is unchanged. False/
+ambiguous replay, child ownership, closed bridges, partial hydration and existing
+working-state fences remain intact. SDK active flags affect adapter activity;
+they do not establish root cycle, completion or full lifecycle certainty.
+
+The nearest Copilot project build passes. **151 tests / three files** pass with
+one worker: bridge races, native session-state contracts and pure lifecycle,
+including the 4,096 schedules. This is a follow-up focused gate; it does not
+replace the coordinator's final combined broad source/package gate.
+
+| Follow-up receipt | SHA-256 |
+| --- | --- |
+| Two failing reviewer regressions | `cc0345620acea6dd4ba8f7dcd8df299539ed54fac8bc67e7c5ceaac78dc6f769` |
+| Passing focused log | `da3c97ab29faf132fb96653ca2f0f743688d83f2965a117266a26cf06430b5d5` |
+| Two-file source/test inventory | `8ae226bfc352e5cbd7ec4edd2b33f92fe5c22d7ee0e488cd45db044a082131de` |
