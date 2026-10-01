@@ -5,7 +5,19 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-02 (source-only optional Copilot telemetry candidate; consumer staging pending).
+Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
+
+## Published aggregate reliability hotfix.25
+
+Signed `hotfix-2026-10-02.1` publishes exact source
+`0057b8ac0241d38bfea45522bec7bf95ba168459`. All 16 role-isolated consumers,
+54 packed regressions, 1,247 source tests, source/audit/native-loopback gates,
+SBOM, control tree and 100-session mock scale passed; 19 downloaded release
+assets match. No external model or installed activation is claimed.
+[The release record](../audits/hotfix25-release-qualification-20261002.md)
+owns hashes, failures, remaining advisories and acceptance limits. The source-only
+candidate entries below retain their historical context; their publication gates
+are now superseded by this checkpoint. Leo owns Windows/WSL staging/deployment.
 
 ## Optional Copilot telemetry admission candidate — October 2, 2026
 

@@ -1385,3 +1385,13 @@ pins are unchanged. Older controls require a stopped-state backup for rollback.
 No model prompts, native qualification claim, registry `latest` promotion or
 production session mutation were used for qualification. Installed source and
 NAS/laptop rollout facts belong to the personal repository.
+
+## Aggregate reliability hotfix.25 — 2026-10-02
+
+Exact artifact source `0057b8ac0241d38bfea45522bec7bf95ba168459`, signed
+`hotfix-2026-10-02.1`; 1,247 source tests, 16 isolated consumers, 54 packed
+regressions, SBOM, native loopback, Docker tree and 100-session scale passed.
+Nineteen public assets match; checksum inventory
+`c546f5963c229476898e3db2134bb20f52342b1dc319c230f11da8a17fbcfda0`.
+[Release evidence and limits](audits/hotfix25-release-qualification-20261002.md).
+No deployed role or real model action.
