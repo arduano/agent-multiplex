@@ -53,7 +53,8 @@ class SyntheticAdapter implements AgentAdapter {
     return Promise.resolve([...this.sessions.values()].map(session => ({ harness: this.harness,
       adapterScopeId: this.adapterScopeId, vendorSessionId: session.vendorSessionId, cwd: session.cwd,
       availability: session.stopped ? "resumable" as const : "active" as const,
-      runtimeStatus: session.status(), runtimeEpoch: session.stopped ? null : session.runtimeEpoch })));
+      runtimeStatus: session.status(), runtimeEpoch: session.stopped ? null : session.runtimeEpoch,
+      lastActivityAt: "2026-10-02T00:00:00.000Z" })));
   }
   spawn(options: HarnessSpawnOptions) {
     const session = new SyntheticSession(`synthetic-${this.nextSession++}`, options.cwd, this.harness);
