@@ -5,19 +5,21 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
+Last reconciled: 2026-10-02 (hotfix.26 published and source/package/Docker qualified; consumer staging is separately recorded).
 
-## Copilot incident tracing candidate — October 2, 2026
+## Published Copilot incident tracing hotfix.26
 
-The owner approved causal tracing to diagnose recurring Recovery unverified
-incidents. The new candidate is lockstep `.26`: a bounded asynchronous private
-hook correlates SDK attachments, adapter ingress, reducer before/after state,
-exact gap policy, observation fences and recovery. A 16-entry metadata ring
-keeps immediate event context; logs cannot alter native session outcomes.
-Protocol, durable schemas, migrations, SDK/transport pins and lifecycle policy
-remain unchanged. Source/package qualification, immutable publication and Leo
-Windows/WSL staging are coordinator-owned work. No installed activation or real
-model call is included. See [the lifecycle trace contract](../design/copilot-session-lifecycle-vnext.md#private-incident-trace).
+Signed `hotfix-2026-10-02.2` publishes exact source
+`be1732f213f4e44be35b870592c2e3eaea6dab36`. Bounded asynchronous private
+tracing correlates SDK attachments, ingress, reducer summaries, gap policy and
+observation/recovery fences. Critical failure evidence survives ordinary state
+bursts.1,262 source tests,16 isolated consumers,69 packed regressions, SBOM,
+native credential-free loopback, Docker tree/100-session scale and independent
+19-asset download pass. See [the release record](../audits/hotfix26-incident-tracing-20261002.md)
+and [trace contract](../design/copilot-session-lifecycle-vnext.md#private-incident-trace).
+No installed activation or real model qualification is claimed. Native/transport
+pins, lifecycle policy and public/durable schemas are unchanged. Leo owns
+compact Windows/independent WSL staging and the later maintenance discussion.
 
 ## Published aggregate reliability hotfix.25
 
