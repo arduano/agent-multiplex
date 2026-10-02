@@ -13,7 +13,7 @@ Signed `hotfix-2026-10-02.2` publishes exact source
 `be1732f213f4e44be35b870592c2e3eaea6dab36`. Bounded asynchronous private
 tracing correlates SDK attachments, ingress, reducer summaries, gap policy and
 observation/recovery fences. Critical failure evidence survives ordinary state
-bursts.1,262 source tests,16 isolated consumers,69 packed regressions, SBOM,
+bursts. 1,262 source tests, 16 isolated consumers, 69 packed regressions, SBOM,
 native credential-free loopback, Docker tree/100-session scale and independent
 19-asset download pass. See [the release record](../audits/hotfix26-incident-tracing-20261002.md)
 and [trace contract](../design/copilot-session-lifecycle-vnext.md#private-incident-trace).
