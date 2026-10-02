@@ -135,10 +135,13 @@ export class CopilotIncidentTracer {
       ...(binding.sdkAttachmentId === undefined ? {} : { sdkAttachmentId: binding.sdkAttachmentId }),
       recent: Object.freeze([...recent]), suppressedRecords: 0 });
     if (this.#queue.length >= 128) {
-      // Preserve incident/state records ahead of routine native traffic.
+      // Ordinary state bursts must not erase a failure before its sink sees it.
       if (detail.kind === "ingress") { this.#suppressed += 1; return; }
       const routine = this.#queue.findIndex(item => item.kind === "ingress");
-      this.#queue.splice(routine < 0 ? 0 : routine, 1);
+      const ordinary = routine < 0 ? this.#queue.findIndex(item => !criticalIncident(item)) : routine;
+      if (ordinary < 0 && !criticalIncident(detail)) { this.#suppressed += 1; return; }
+      // At the hard bound an all-critical queue retains the newest incident.
+      this.#queue.splice(ordinary < 0 ? 0 : ordinary, 1);
       this.#suppressed += 1;
     }
     this.#queue.push(record);
@@ -171,6 +174,11 @@ export class CopilotIncidentTracer {
     } catch { this.#inFlight = false; this.#suppressed += 1; }
   }
   private settled(): void { this.#inFlight = false; this.schedule(); }
+}
+
+function criticalIncident(record: CopilotIncidentTraceDetail): boolean {
+  return record.kind === "gap" || record.kind === "recovery" ||
+    record.kind === "observation" && (record.outcome === "failed" || record.outcome === "stalled");
 }
 
 const routineNativeEvents: ReadonlySet<string> = new Set([

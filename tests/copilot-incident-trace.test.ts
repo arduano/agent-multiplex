@@ -188,6 +188,32 @@ describe("private Copilot incident tracing", () => {
     expect(received.at(-1)!.recent).toHaveLength(16);
   });
 
+  it("preserves critical gap evidence through a burst of ordinary transitions", async () => {
+    const received: CopilotIncidentTraceRecord[] = [];
+    const tracer = new CopilotIncidentTracer(record => { received.push(record); });
+    const binding = tracer.binding("synthetic-priority-session");
+    tracer.record(binding, { kind: "gap", diagnosticId: "synthetic-priority-gap", code: "queueOverflow",
+      decisionReason: "notWireEnvelope", lifecycleImpact: "invalidated" });
+    for (let i = 0; i < 1_000; i++) tracer.record(binding, { kind: "transition", factType: "rootStarted", outcome: "applied" });
+    await vi.waitFor(() => expect(received).toHaveLength(128));
+    expect(received[0]).toMatchObject({ kind: "gap", diagnosticId: "synthetic-priority-gap", suppressedRecords: 873 });
+  });
+
+  it("refuses ordinary records when the bounded queue contains only critical evidence", async () => {
+    const received: CopilotIncidentTraceRecord[] = [];
+    const tracer = new CopilotIncidentTracer(record => { received.push(record); });
+    const binding = tracer.binding("synthetic-critical-session");
+    for (let i = 0; i < 128; i++) tracer.record(binding, { kind: "observation", view: "tasks", outcome: "failed",
+      generation: 1, failures: i + 1, deadlineAgeMs: i });
+    tracer.record(binding, { kind: "transition", factType: "rootStarted", outcome: "applied" });
+    tracer.record(binding, { kind: "recovery", outcome: "scheduled", generation: 1 });
+    await vi.waitFor(() => expect(received).toHaveLength(128));
+    expect(received.some(record => record.kind === "transition")).toBe(false);
+    expect(received.filter(record => record.kind === "observation")).toHaveLength(127);
+    expect(received.at(-1)).toMatchObject({ kind: "recovery", outcome: "scheduled" });
+    expect(received[0]!.suppressedRecords).toBe(2);
+  });
+
   it("isolates a throwing then getter and continues dispatching the next record", async () => {
     const received: CopilotIncidentTraceRecord[] = [];
     const tracer = new CopilotIncidentTracer(record => {
