@@ -349,6 +349,12 @@ also requires the exact event's nonempty `turnId`, and Codex item consumption
 requires its nonempty containing turn. The runtime MUST validate native-session
 identity and the complete execution fence across awaited reads and payload
 extraction, then append only these delivery facts through its single writer.
+The private fact list MUST be an array bounded to twice the requested page
+limit, validated completely before any evidence write. Deduplicate each fact
+kind, prove any tracked command still lacking its exact fact, then retain only
+the latest 512 identities per kind for acknowledgement races. An already proved
+matching command MUST NOT be replayed solely because its auxiliary ID was
+evicted; repeated larger pages must stabilize instead of churning those rings.
 Historical root activity, tasks, interactions and recovery MUST NOT be replayed.
 Temporary history handles, expired cursors, omitted items and absent message IDs
 cannot establish consumption or repair a lifecycle gap. Duplicate retained facts

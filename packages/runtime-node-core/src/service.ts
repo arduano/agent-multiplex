@@ -1153,13 +1153,12 @@ export class RuntimeNodeService {
         if (this.#active.get(sessionId) !== active || !observedFence || !sameLifecycleFence(fence, observedFence)) {
           throw new RuntimeNodeProtocolError("FENCED", "history binding changed");
         }
-        const payload = await this.#externalize(record, result.payload);
-        const currentFence = this.#messageDeliveryFence(sessionId, active);
-        if (this.#active.get(sessionId) !== active || !currentFence || !sameLifecycleFence(fence, currentFence)) {
-          throw new RuntimeNodeProtocolError("FENCED", "history binding changed");
+        // At most display plus consumption per returned native item. Validate
+        // the entire private sidecar before any image or delivery write.
+        if (messageDeliveryFacts !== undefined && (!Array.isArray(messageDeliveryFacts) ||
+          messageDeliveryFacts.length > 2 * (request.limit ?? 100))) {
+          throw new TypeError("history returned an invalid delivery evidence list");
         }
-        // Validate all facts before writing any. This private adapter contract
-        // cannot introduce historical work, tasks, interactions or recovery.
         const facts = messageDeliveryFacts?.map(fact => {
           const parsed = lifecycleFactSchema.parse(fact);
           if ((parsed.type !== "messageDisplayed" && parsed.type !== "messageConsumed") || parsed.owner !== "root") {
@@ -1167,10 +1166,36 @@ export class RuntimeNodeService {
           }
           return parsed;
         }) ?? [];
-        for (const fact of facts) {
+        const payload = await this.#externalize(record, result.payload);
+        const currentFence = this.#messageDeliveryFence(sessionId, active);
+        if (this.#active.get(sessionId) !== active || !currentFence || !sameLifecycleFence(fence, currentFence)) {
+          throw new RuntimeNodeProtocolError("FENCED", "history binding changed");
+        }
+        // Prefer exact tracked commands, then retain only the latest bounded
+        // identities for acknowledgement races. Repeated larger pages must not
+        // churn both 512-ID rings by replaying every historical identity.
+        const chronological = result.sortDirection === "desc" ? [...facts].reverse() : facts;
+        for (const type of ["messageDisplayed", "messageConsumed"] as const) {
+          const unique = new Map<string, Extract<LifecycleFact, { type: typeof type }>>();
+          for (const fact of chronological) if (fact.type === type) {
+            unique.delete(fact.messageId); unique.set(fact.messageId, fact);
+          }
+          const pageFacts = [...unique.values()];
+          const tail = pageFacts.slice(-512);
+          const tailIds = new Set(tail.map(fact => fact.messageId));
           const state = this.#lifecycle.read(fence);
-          const known = fact.type === "messageConsumed" ? state.consumedMessageIds : state.displayedMessageIds;
-          if (!known.includes(fact.messageId)) this.#appendMessageDelivery(sessionId, active, fact);
+          const bit = type === "messageConsumed" ? "consumed" : "displayed";
+          const tracked = new Set(state.commands.filter(command => command.messageId && !command[bit]).map(command => command.messageId));
+          const candidates = [...pageFacts.filter(fact => tracked.has(fact.messageId) && !tailIds.has(fact.messageId)), ...tail];
+          for (const fact of candidates) {
+            const current = this.#lifecycle.read(fence);
+            const commands = current.commands.filter(command => command.messageId === fact.messageId);
+            // A previously proved command remains proved even if its ID aged
+            // out of the auxiliary ring. Never replay it solely to refill that.
+            if (commands.length ? commands.every(command => command[bit])
+              : (type === "messageConsumed" ? current.consumedMessageIds : current.displayedMessageIds).includes(fact.messageId)) continue;
+            this.#appendMessageDelivery(sessionId, active, fact);
+          }
         }
         return { ...history, payload };
       }

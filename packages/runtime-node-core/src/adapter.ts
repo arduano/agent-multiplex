@@ -30,7 +30,8 @@ export interface AdapterNativeHistoryResult {
   nextCursor?: string;
   sortDirection?: "asc" | "desc";
   unavailableItem?: { reason: "exceedsWireLimit"; nativeItemId?: string; nativeType?: string };
-  /** Private exact root-message evidence from the returned native page only.
+  /** Private exact root-message evidence from the returned native page only,
+   * bounded to at most two facts per requested native item.
    * Never replay historical work, interactions or recovery as live events. */
   messageDeliveryFacts?: Array<Extract<LifecycleFact, { type: "messageDisplayed" | "messageConsumed" }>>;
 }

@@ -69,15 +69,15 @@ async function fixture(harness: Harness) {
   }
   const journal = new RuntimeLifecycleJournal(store);
   const state = () => store.getLifecycle(launch.sessionId)!;
-  const history = () => service.readNativeHistory(launch.sessionId, { harness, includeTurns: true, limit: 100,
-    ...(harness === "copilot" ? { native: { view: "primary" } } : {}) });
+  const history = (limit = 100, sortDirection: "asc" | "desc" = "asc") => service.readNativeHistory(launch.sessionId, { harness, includeTurns: true, limit,
+    ...(harness === "copilot" ? { native: { view: "primary", sortDirection } } : { native: { sortDirection } }) });
   const deliveries = async () => (await service.readNativeState(launch.sessionId, { harness, view: "messageDeliveries" })).payload.json;
   const send = (id = "exact-message", identified = true) => service.execute({ commandId: newCommandId(), payloadHash: `history-message-${id}`,
     sessionId: launch.sessionId, runtimeNodeId, bindingRevision: 1,
     request: harness === "copilot" ? { harness, command: { type: "send", prompt: "fixture prompt", mode: "enqueue" } }
       : { harness, command: { type: "send", input: "fixture prompt", ...(identified ? { native: { clientUserMessageId: id } } : {}) } } });
-  const setPage = (events: JsonValue, complete = true) => {
-    session.read = async () => ({ harness, vendorSessionId: session.vendorSessionId, payload: events, complete,
+  const setPage = (events: JsonValue, complete = true, sortDirection: "asc" | "desc" = "asc") => {
+    session.read = async () => ({ harness, vendorSessionId: session.vendorSessionId, payload: events, complete, sortDirection,
       messageDeliveryFacts: harness === "copilot" ? copilotHistoryDeliveryFacts(events as JsonValue[])
         : codexHistoryDeliveryFacts(events, session.vendorSessionId) });
   };
@@ -235,5 +235,60 @@ describe("exact delivery repair from native history", () => {
         { type: "rootIdle", aborted: false }] as AdapterNativeHistoryResult["messageDeliveryFacts"] });
     await expect(f.history()).rejects.toThrow("unsupported delivery evidence");
     expect(f.service.observeCommand(receipt.commandId)).toMatchObject({ delivery: "accepted" });
+  });
+
+  it.each([null, {}, "not an array", Array(201).fill({ type: "messageConsumed", messageId: "exact-message", owner: "root" })])(
+    "rejects malformed or over-count private fact lists before any evidence write (%#)", async value => {
+      const f = await fixture("copilot");
+      const receipt = await f.send();
+      const before = f.state();
+      f.session.read = async () => ({ harness: "copilot", vendorSessionId: f.session.vendorSessionId, payload: [],
+        messageDeliveryFacts: value as AdapterNativeHistoryResult["messageDeliveryFacts"] });
+      await expect(f.history()).rejects.toThrow("invalid delivery evidence list");
+      expect(f.state().nextSequence).toBe(before.nextSequence);
+      expect(f.state().consumedMessageIds).toEqual(before.consumedMessageIds);
+      expect(f.service.observeCommand(receipt.commandId)).toMatchObject({ delivery: "accepted" });
+      expect(f.service.getCommand(receipt.commandId)).toEqual(receipt);
+    },
+  );
+
+  it.each(["asc", "desc"] as const)("repeated 600-ID %s pages stabilize both rings while proving an oldest tracked ID", async direction => {
+    const f = await fixture("copilot");
+    f.session.execute.mockImplementation(async () => ({ messageId: "history-0" }));
+    const oldest = await f.send();
+    const events = Array.from({ length: 600 }, (_, index) => userEvent(`history-${index}`));
+    const page = direction === "asc" ? events : [...events].reverse();
+    f.setPage(page, false, direction);
+    await f.history(1_000, direction);
+    expect(f.service.observeCommand(oldest.commandId)).toMatchObject({ delivery: "consumed", continuation: "complete" });
+    const expected = Array.from({ length: 512 }, (_, index) => `history-${index + 88}`);
+    expect(f.state().displayedMessageIds).toEqual(expected);
+    expect(f.state().consumedMessageIds).toEqual(expected);
+    expect(f.state().consumedMessageIds).not.toContain("history-0");
+    const after = f.state().nextSequence;
+    await f.history(1_000, direction);
+    expect(f.state().nextSequence).toBe(after);
+    expect(f.state().consumedMessageIds).toEqual(expected);
+    expect(f.service.getCommand(oldest.commandId)).toEqual(oldest);
+    // A native ID can be appended to its receipt after a retained exact fact.
+    f.session.execute.mockImplementation(async () => ({ messageId: "history-599" }));
+    const later = await f.send("later-identity");
+    expect(f.service.observeCommand(later.commandId)).toMatchObject({ delivery: "consumed", continuation: "complete" });
+    const beforeThird = f.state().nextSequence;
+    await f.history(1_000, direction);
+    expect(f.state().nextSequence).toBe(beforeThird);
+    expect(f.service.getCommand(later.commandId)).toEqual(later);
+  });
+
+  it("deduplicates both delivery kinds within a page before writing them", async () => {
+    const f = await fixture("copilot");
+    const receipt = await f.send();
+    f.setPage(Array.from({ length: 600 }, () => userEvent()));
+    const sequence = f.state().nextSequence;
+    await f.history(1_000);
+    expect(f.state().nextSequence).toBe(sequence + 2);
+    expect(f.service.observeCommand(receipt.commandId)).toMatchObject({ delivery: "consumed" });
+    await f.history(1_000);
+    expect(f.state().nextSequence).toBe(sequence + 2);
   });
 });

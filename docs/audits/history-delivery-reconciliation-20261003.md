@@ -24,8 +24,14 @@ Full and primary Copilot pages both use supported native APIs.
 The active runtime drains admitted events, validates the response's harness and
 native-session identity, and rechecks the complete runtime/boot/binding/native
 epoch fence before and after awaited image extraction. It validates every
-private fact before writing any, admits only root display/consumption through
-the existing lifecycle writer, and suppresses already retained exact facts.
+private fact before writing any, bounds the sidecar to twice the requested
+native-item limit, and admits only root display/consumption through the existing
+lifecycle writer. It deduplicates each fact kind, proves unmatched tracked
+commands even when their IDs precede the retained page tail, then retains only
+the latest 512 native identities per kind for acknowledgement races. A matching
+command's already proved delivery stays proved after its auxiliary ID is
+evicted. Repeated 600-ID pages therefore stabilize instead of churning both
+bounded rings, including descending native pages.
 The private field never reaches the wire result. Temporary stopped-session
 history handles have no active delivery-writer fence and cannot reconcile this
 ledger. A fresh read after explicit resume can do so.
@@ -48,11 +54,15 @@ store migration, vendor dependency or transport dependency is required.
   immutable receipts, duplicate reads, genuine gaps, delayed-response fences,
   exact correlation across a boot/native epoch change, temporary attachments,
   omissions/expired reads, and atomic rejection of historical work facts.
-- The final focused set passed **191 tests in 11 files**, with one worker and a
+- The initial focused set passed **191 tests in 11 files**, with one worker and a
   60-second test bound. `npm run typecheck`, `npm run check:docs` and
   `git diff --check` also passed. An earlier parallel test run retained two
   unrelated file-backed fixture timeouts and two corrected temporary-history
   fixture expectations; the final one-worker set passed all four cases.
+- Independent review added array/count admission, atomic validation and repeated
+  600-ID page regressions in both directions. The expanded focused set passed
+  **198 tests in 11 files** with one worker and the same 60-second bound.
+  Typecheck, documentation and diff checks passed after the correction.
 - No model calls, deployed services, owner sessions or native vendor files were
   used or changed.
 
