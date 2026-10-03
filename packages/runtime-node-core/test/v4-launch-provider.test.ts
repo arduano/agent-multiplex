@@ -248,7 +248,7 @@ describe("runtime v4 launch providers", () => {
     expect(receipt.state).toBe("succeeded");
     expect(fixture.service.observeCommand(command.commandId)).toMatchObject({ receipt, delivery: "accepted", continuation: "complete" });
     expect((await fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" })).payload.json)
-      .toEqual({ items: [], omitted: 0 });
+      .toEqual({ items: [], omitted: 0, warnings: [], warningsOmitted: 0 });
     // The projection must not remove or rewrite the original durable admission.
     expect(await fixture.service.execute(command)).toEqual(receipt);
     expect(fixture.service.getCommand(command.commandId)).toEqual(receipt);
@@ -329,6 +329,34 @@ describe("runtime v4 launch providers", () => {
     await fixture.service.close(); fixture.store.close();
   });
 
+  it("projects old identified Codex admissions as warnings while retaining exact original observations", async () => {
+    const fixture = createProviderFixture();
+    const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
+    fixture.service.createLaunch(launch);
+    await waitForLaunch(fixture.service, launch.launchId, "succeeded");
+    const command = { commandId: newCommandId(), payloadHash: "old-codex-warning-hash", sessionId: launch.sessionId,
+      runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "codex" as const, command: { type: "steer" as const, input: "Fixture old admission",
+        native: { clientUserMessageId: "old-client-message-id" } } } };
+    const receipt = await fixture.service.execute(command);
+    const oldAt = new Date(Date.now() - 180_000).toISOString(), original = { ...receipt, createdAt: oldAt, updatedAt: oldAt };
+    fixture.store.putCommand(original);
+    const observation = fixture.service.observeCommand(command.commandId);
+    const read = () => fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" });
+    const first = await read();
+    expect(first.payload.json).toMatchObject({ items: [], omitted: 0, warningsOmitted: 0,
+      warnings: [{ commandId: command.commandId, state: "accepted", messageId: "old-client-message-id", reason: "deliveryUnconfirmed" }] });
+    expect((await read()).payload.json).toEqual(first.payload.json);
+    expect(fixture.service.observeCommand(command.commandId)).toEqual(observation);
+    expect(observation).toMatchObject({ receipt: original, delivery: "accepted", continuation: "observeDelivery" });
+    const session = fixture.adapter.sessions.get("native-1")!;
+    session.emit({ kind: "native", nativeType: "item/started", ephemeral: false, payload: { threadId: session.vendorSessionId,
+      item: { type: "userMessage", clientId: "old-client-message-id" } } });
+    expect((await read()).payload.json).toMatchObject({ items: [], warnings: [] });
+    expect(fixture.service.getCommand(command.commandId)).toEqual(original);
+    await fixture.service.close(); fixture.store.close();
+  });
+
   it("owns Codex steering acceptance until the exact native user item is observed", async () => {
     const fixture = createProviderFixture();
     const launch = launchRequest(fixture.runtimeNodeId, fixture.provider.descriptor, { cwd: fixture.root });
@@ -340,6 +368,7 @@ describe("runtime v4 launch providers", () => {
       request: { harness: "codex" as const, command: { type: "steer" as const, input: "A queued steer",
         native: { clientUserMessageId: "client-message-1" } } } };
     expect((await fixture.service.catalog())[0]?.capabilities).toContainEqual({ name: "messages.delivery", version: "v1", experimental: false });
+    expect((await fixture.service.catalog())[0]?.capabilities).toContainEqual({ name: "messages.deliveryWarnings", version: "v1", experimental: false });
     expect((await fixture.service.execute(command)).state).toBe("succeeded");
     const read = () => fixture.service.readNativeState(launch.sessionId, { harness: "codex", view: "messageDeliveries" });
     expect((await read()).payload.json).toMatchObject({ items: [{ commandId: command.commandId, state: "accepted", text: "A queued steer", messageId: "client-message-1" }] });

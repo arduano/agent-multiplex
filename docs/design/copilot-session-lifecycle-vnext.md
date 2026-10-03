@@ -353,9 +353,10 @@ send/steer subset from this same private journal. It excludes definitively
 succeeded admissions without a causal native message ID, consistent with their
 existing `commands.observe` continuation of `complete`. Their receipts and
 Accepted evidence remain unchanged; omission never proves consumption or
-delivery. Unknown receipts remain tracked, and identified admissions remain
-pending until exact consumption or settlement. The 32-item bound and omitted
-count apply after this exclusion. Codex participates using
+delivery. Unknown receipts and identified admissions retain their evidence
+until exact consumption or settlement; their pending presentation follows the
+warning policy below. The 32-item bound and omitted count apply after exclusion
+and classification. Codex participates using
 its caller-supplied `clientUserMessageId` as the correlation identity and the
 root-thread native `userMessage` item as consumption evidence. A successful
 Codex steer with no exact echo remains Accepted. The read returns a preview
@@ -365,6 +366,38 @@ the same session/runtime/binding revision carry forward; queue freshness,
 tasks, root activity and interactions reset under the new lifecycle fence.
 An accepted receipt can gain its exact native ID after the receipt write,
 including during crash repair, without changing its terminal admission.
+
+### Unconfirmed delivery warnings
+
+The Host advertises `messages.deliveryWarnings` v1 for both Codex and Copilot.
+The same `messageDeliveries` read returns separate `items`/`omitted` and
+`warnings`/`warningsOmitted` lists, each bounded to the latest 32 entries after
+classification. Warning entries retain the original command ID, native message
+ID when known, preview, image count, creation time and delivery state. They add
+one fixed reason: `deliveryUnconfirmed` for Accepted, `consumptionUnconfirmed`
+for Displayed, or `admissionUncertain` for an ambiguous admission.
+
+Only an unresolved send/steer whose receipt is `succeeded` or `outcomeUnknown`
+and whose admission is Accepted or outcomeUnknown can become a warning. It
+moves from pending presentation after 120 seconds measured from the original
+terminal receipt's `updatedAt`. A malformed/future timestamp is retained
+pending. Prepared and Dispatched work remain pending. An exact logical
+message ID present in the currently observed native queue always remains
+pending regardless of age, including when display evidence is stronger than
+the queue label. Stale queue records and anonymous steering counts cannot
+establish that exact membership. Completed identity-less B18 admissions remain
+omitted as before.
+
+This deadline changes presentation only. It never proves failed delivery,
+consumption, cancellation, settlement or permission to resend; delayed
+legitimate work may still be admitted or consumed later. Original receipts,
+`commands.observe` continuations and the lifecycle journal are unchanged.
+Later exact root consumption or command settlement removes either a pending
+entry or a warning. Repeated reads and runtime restart reproject from retained
+facts without adding a new command or historical event. The client may
+acknowledge a warning as a browser display preference scoped to its original
+session and command identity. That action changes no Host state and cannot
+cancel an actual queue member or conceal its subsequent pending projection.
 
 ## UI projections
 

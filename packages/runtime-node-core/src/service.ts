@@ -1,11 +1,9 @@
 import {
   canonicalJson,
-  commandObservationView,
   lifecycleActionAvailability,
   lifecycleProjection,
   lifecycleNativeObservationDegraded,
   lifecycleFactSchema,
-  projectDelivery,
   sameLifecycleFence,
   type LifecycleFact,
   type LifecycleFence,
@@ -136,6 +134,7 @@ import {
 import { collectCleanupErrors, waitForAll } from "./settled-work.js";
 import { RuntimeImages, RuntimeImageError, type RuntimeImageOptions } from "./images.js";
 import { RuntimeLifecycleJournal } from "./lifecycle.js";
+import { projectMessageDeliveries } from "./message-deliveries.js";
 import { nativeDiagnosticEventType, type NativeDiagnosticEventType } from "./native-event-diagnostics.js";
 import { CopilotIncidentTracer, copilotIncidentStateSummary, copilotIncidentRoutineEvent, type CopilotIncidentTraceBinding,
   type CopilotIncidentTraceDetail, type CopilotIncidentTraceHook, type CopilotIncidentIngress,
@@ -453,7 +452,8 @@ export class RuntimeNodeService {
     return entries.map((entry) => {
       const backend = this.#terminals.providerBackend(entry.harness, entry.adapterScopeId);
       const capabilities = entry.harness === "codex" || entry.harness === "copilot"
-        ? [...entry.capabilities, { name: "messages.delivery", version: "v1", experimental: false }]
+        ? [...entry.capabilities, { name: "messages.delivery", version: "v1", experimental: false },
+          { name: "messages.deliveryWarnings", version: "v1", experimental: false }]
         : entry.capabilities;
       if (!backend || !entry.available) return { ...entry, capabilities };
       return {
@@ -1065,30 +1065,15 @@ export class RuntimeNodeService {
       const fence = this.#messageDeliveryFence(sessionId, active);
       if (!fence) throw new RuntimeNodeProtocolError("FENCED", "message delivery binding is unavailable");
       const state = this.#lifecycle.read(fence);
-      const unresolved = state.commands.filter(command => {
-        if ((command.kind !== "send" && command.kind !== "steer") || command.consumed || command.settled || command.admission === "failed") return false;
-        // A succeeded admission without a causal native identity has no further
-        // delivery observation. Preserve its Accepted receipt, but align this
-        // pending subset with commands.observe's existing complete contract.
-        // Unknown receipts and identified admissions remain tracked.
-        if (command.admission === "accepted" && command.messageId === undefined) {
-          const receipt = this.#store.getCommand(command.commandId);
-          if (receipt?.sessionId === sessionId && receipt.payloadHash === command.payloadHash && receipt.state === "succeeded" &&
-            commandObservationView(receipt, state).continuation === "complete") return false;
-        }
-        return true;
-      });
-      const items = unresolved.slice(-32).map(command => {
+      const candidates = state.commands.flatMap(command => {
         const receipt = this.#store.getCommand(command.commandId);
-        if (!receipt || receipt.sessionId !== sessionId || receipt.payloadHash !== command.payloadHash) return undefined;
+        if (!receipt || receipt.sessionId !== sessionId || receipt.payloadHash !== command.payloadHash) return [];
         const source = messageRequest(receipt);
-        if (!source || source.harness !== record.harness || source.command.type !== command.kind) return undefined;
-        return { commandId: command.commandId, kind: command.kind, state: projectDelivery(command, state).toLowerCase(),
-          text: messagePreview(source), imageCount: messageImageCount(receipt), createdAt: receipt.createdAt,
-          ...(command.messageId ? { messageId: command.messageId } : {}) };
-      }).filter(item => item !== undefined);
+        if (!source || source.harness !== record.harness || source.command.type !== command.kind) return [];
+        return [{ command, receipt, text: messagePreview(source), imageCount: messageImageCount(receipt) }];
+      });
       return { harness: record.harness, vendorSessionId: record.vendorSessionId,
-        payload: packNativePayload({ items, omitted: Math.max(0, unresolved.length - 32),
+        payload: packNativePayload({ ...projectMessageDeliveries(state, candidates, Date.now()),
           ...(record.harness === "copilot" ? { queueObservation: state.queue.observation.state } : {}) }) };
     }
     if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");

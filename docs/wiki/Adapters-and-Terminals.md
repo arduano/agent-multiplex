@@ -303,7 +303,7 @@ remain separate UAT.
 
 The runtime advertises `messages.delivery` v1 for Codex and Copilot and serves
 `{ harness, view: "messageDeliveries" }` through `sessions.readNativeState`.
-This is a bounded Host-owned view of at most 32 unresolved send/steer commands,
+This is a bounded Host-owned view of at most 32 pending send/steer commands,
 each with its original command ID, admission or exact native delivery state,
 a 2,048-character preview and image count. The original durable command
 receipt and runtime's private correlation journal own this state; a browser
@@ -313,11 +313,23 @@ history.
 
 Codex uses the request's `clientUserMessageId` and an exact root-thread
 `userMessage` item echo to move from accepted to consumed. If the native echo
-is absent, an identified command remains Accepted and pending rather than
+is absent, an identified command retains Accepted evidence rather than
 matching text or elapsed time. A succeeded command with no causal native ID
 retains its original Accepted receipt with `continuation=complete`; it is
 omitted from the pending delivery subset because no later evidence can be
 joined safely. Unknown receipts remain visible for review even without an ID.
+
+Hosts also advertise `messages.deliveryWarnings` v1. Their same read returns
+at most 32 unconfirmed warning entries separately from pending `items`, with
+independent `warningsOmitted`. After 120 seconds from a terminal receipt's
+`updatedAt`, an unresolved admission becomes a warning unless its exact
+native message ID is still in a fresh observed queue. Prepared/Dispatched work
+and invalid/future clocks remain pending. A warning's reason distinguishes
+unconfirmed delivery, unconfirmed consumption after display, and uncertain
+admission; it does not establish failure or authorize resend. The receipt and
+`commands.observe` remain unchanged. Clients may acknowledge a warning as a
+local display preference, never as native cancellation. See the
+[warning contract](../design/copilot-session-lifecycle-vnext.md#unconfirmed-delivery-warnings).
 Copilot uses its acknowledged logical `messageId`; only a fresh native queue
 item with the same ID proves Queued, and only an exact root `user.message`
 proves display or consumption. Text-only native steering entries have no causal

@@ -176,6 +176,32 @@ const queueResult = {
 };
 
 describe("server-owned Copilot lifecycle refresh", () => {
+  it("turns old unconfirmed Copilot admissions into warnings without clearing their delivery evidence", async () => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
+    await vi.waitFor(async () => expect((await lifecycleState(f)).queue.observation.state).toBe("observed"));
+    f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    f.session.execute = async () => ({ messageId: "not-in-native-queue" });
+    const commandId = newCommandId();
+    const receipt = await f.service.execute({ commandId, payloadHash: "copilot-old-admission", sessionId: f.launch.sessionId,
+      runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1,
+      request: { harness: "copilot", command: { type: "send", prompt: "Fixture old admission", mode: "enqueue" } } });
+    expect(receipt.state).toBe("succeeded");
+    expect((await f.service.catalog())[0]?.capabilities).toContainEqual({ name: "messages.deliveryWarnings", version: "v1", experimental: false });
+    const oldAt = new Date(Date.now() - 180_000).toISOString(), original = { ...receipt, createdAt: oldAt, updatedAt: oldAt };
+    f.store.putCommand(original);
+    const read = () => f.service.readNativeState(f.launch.sessionId, { harness: "copilot", view: "messageDeliveries" });
+    const observation = f.service.observeCommand(commandId), first = await read();
+    expect(first.payload.json).toMatchObject({ items: [], warnings: [{ commandId, state: "accepted", reason: "deliveryUnconfirmed", messageId: "not-in-native-queue" }] });
+    expect((await read()).payload.json).toEqual(first.payload.json);
+    expect(f.service.observeCommand(commandId)).toEqual(observation);
+    expect(observation).toMatchObject({ receipt: original, continuation: "observeDelivery" });
+    f.session.emit({ kind: "lifecycle", fact: { type: "messageDisplayed", messageId: "not-in-native-queue", owner: "root" } });
+    expect((await read()).payload.json).toMatchObject({ items: [], warnings: [{ state: "displayed", reason: "consumptionUnconfirmed" }] });
+    f.session.emit({ kind: "lifecycle", fact: { type: "messageConsumed", messageId: "not-in-native-queue", owner: "root" } });
+    expect((await read()).payload.json).toMatchObject({ items: [], warnings: [] });
+    expect(f.service.getCommand(commandId)).toEqual(original);
+  });
+
   it("shows exact queued messages from the Host and never attributes anonymous steering text", async () => {
     const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
     await vi.waitFor(async () => expect((await lifecycleState(f)).queue.observation.state).toBe("observed"));
