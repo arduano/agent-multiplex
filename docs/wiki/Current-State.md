@@ -7,6 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
 
+## Historical message delivery correction — October 3, 2026
+
+The `.27` candidate separates old unconfirmed send/steer admissions into a
+bounded Host-owned warning view after 120 seconds from a terminal receipt.
+Exact observed native queue membership keeps a message pending. Original
+receipts and `commands.observe` uncertainty are retained; age never proves
+consumption, cancellation or failure. The optional `messages.deliveryWarnings`
+v1 capability changes presentation only, with no protocol or durable migration.
+
+Returned native root history can now reconcile exact display/consumption
+evidence through the existing fenced Host writer. Child history, summaries,
+omitted items and transcript similarity cannot establish delivery or repair
+interaction certainty. See [the history audit](../audits/history-delivery-reconciliation-20261003.md)
+and [adapter guidance](Adapters-and-Terminals.md#host-message-delivery).
+Combined gates, immutable prerelease publication and consumer staging are in
+progress; no installed activation or model call is included.
+
 ## Copilot incident tracing candidate — October 2, 2026
 
 The owner approved causal tracing to diagnose recurring Recovery unverified
