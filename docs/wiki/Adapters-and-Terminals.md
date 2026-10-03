@@ -49,6 +49,15 @@ requested ascending/descending order. These cursors are opaque and incompatible
 with the full-history index cursors. The omitted view keeps the existing full
 history behavior. Unsupported native methods fail explicitly.
 
+An active history read may also repair exact message delivery through the
+runtime's existing fenced writer. Copilot root `user.message` facts use the
+exact logical message ID, with a nonempty native turn ID required for
+consumption. Codex root item pages require the exact client message ID and
+containing turn. This does not replay historical work or repair interaction
+uncertainty. Child pages, omitted items and temporary stopped-session history
+handles cannot certify active root delivery; absence from history proves no
+delivery outcome. See the [reconciliation audit](../audits/history-delivery-reconciliation-20261003.md).
+
 Adapters advertising `history.native.child` v1 offer a separate selected-child
 item view. Copilot accepts `native: { view: "subagent", agentId, sortDirection:
 "desc" }` and delegates the filter to native `eventLog.read({ agentIds:

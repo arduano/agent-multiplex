@@ -35,7 +35,7 @@ import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, readSubagentHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
-import { copilotLifecycleFacts } from "./lifecycle.js";
+import { copilotHistoryDeliveryFacts, copilotLifecycleFacts } from "./lifecycle.js";
 
 export const COPILOT_SESSION_DISCONNECT_TIMEOUT_MS = 10_000;
 
@@ -921,12 +921,14 @@ export class CopilotAdapterSession implements AdapterSession {
       position += descending ? -1 : 1;
     }
     const complete = descending ? position === 0 : position >= events.length;
+    const messageDeliveryFacts = copilotHistoryDeliveryFacts(payload);
     return {
       harness: "copilot",
       vendorSessionId: this.vendorSessionId,
       payload, sortDirection,
       ...(complete ? {} : { nextCursor: `${descending ? REVERSE_HISTORY_CURSOR_PREFIX : HISTORY_CURSOR_PREFIX}${position}` }),
       complete,
+      ...(messageDeliveryFacts.length ? { messageDeliveryFacts } : {}),
     };
   }
 

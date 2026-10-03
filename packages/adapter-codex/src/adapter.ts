@@ -47,6 +47,7 @@ import type { ThreadResumeResponse } from "./generated/v2/ThreadResumeResponse.j
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
+import { codexHistoryDeliveryFacts } from "./history-delivery.js";
 import type { UserInput } from "./generated/v2/UserInput.js";
 import {
   CodexRpcClient,
@@ -847,6 +848,7 @@ class CodexSession implements AdapterSession {
   }
 
   public async readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> {
+    this.#assertActive();
     if (request.harness !== "codex") throw new Error("history request harness mismatch");
     if (request.native?.view !== undefined && request.native.view !== "turns" && request.native.view !== "child") throw new TypeError("Unsupported Codex native history view");
     if (request.native?.view === "turns") {
@@ -870,6 +872,7 @@ class CodexSession implements AdapterSession {
           cursor: request.cursor ?? null,
           turnId: null,
         });
+        this.#assertActive();
         const page = json(response);
         if (codexHistoryPageBytes(page) <= NATIVE_PAYLOAD_MAX_BYTES && codexImageLeaves(page).length <= 256) break;
         if (limit === 1) {
@@ -892,11 +895,13 @@ class CodexSession implements AdapterSession {
         // cursor or silently discard native items after the server advanced it.
         limit = Math.max(1, Math.floor(limit / 2));
       }
+      const messageDeliveryFacts = !childThreadId ? codexHistoryDeliveryFacts(response, this.vendorSessionId) : [];
       return {
         harness: "codex", vendorSessionId: this.vendorSessionId,
         payload: json({ ...response, ...(childThreadId ? { threadId: childThreadId } : {}) }), sortDirection,
         complete: response.nextCursor === null,
         ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
+        ...(messageDeliveryFacts.length ? { messageDeliveryFacts } : {}),
       };
     }
     const response = await this.#rpc.request<ThreadReadResponse>("thread/read", {
@@ -904,6 +909,7 @@ class CodexSession implements AdapterSession {
       threadId: this.vendorSessionId,
       includeTurns: request.includeTurns,
     });
+    this.#assertActive();
     return {
       harness: "codex",
       vendorSessionId: this.vendorSessionId,

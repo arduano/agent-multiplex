@@ -7,6 +7,7 @@ import {
 import type { AdapterNativeHistoryResult } from "@arduano/agent-multiplex-runtime-node-core";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { copilotJson } from "./json.js";
+import { copilotHistoryDeliveryFacts } from "./lifecycle.js";
 
 export interface CopilotEventLogReadRequest {
   cursor?: string;
@@ -95,8 +96,10 @@ async function readScopedHistory(
       payload.push(event);
     }
     if (oversized === undefined) {
+      const messageDeliveryFacts = scope.view === "primary" ? copilotHistoryDeliveryFacts(payload) : [];
       return { harness: "copilot", vendorSessionId, payload, sortDirection,
-        complete: !value.hasMore, ...(value.hasMore ? { nextCursor } : {}) };
+        complete: !value.hasMore, ...(value.hasMore ? { nextCursor } : {}),
+        ...(messageDeliveryFacts.length ? { messageDeliveryFacts } : {}) };
     }
     // A native cursor covers the entire native batch. Truncating that batch
     // would skip unseen events, so retry the same input cursor with fewer items.

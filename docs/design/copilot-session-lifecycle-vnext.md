@@ -342,6 +342,19 @@ and Stop remain available recovery paths when their own admission permits them.
 They never arise from elapsed time, an empty queue, root idle or a successful
 generic receipt.
 
+Supported native history pages MAY repair only exact root display/consumption
+evidence for an active binding. The adapter MUST exclude child ownership and
+require the same causal message identity as live delivery; Copilot consumption
+also requires the exact event's nonempty `turnId`, and Codex item consumption
+requires its nonempty containing turn. The runtime MUST validate native-session
+identity and the complete execution fence across awaited reads and payload
+extraction, then append only these delivery facts through its single writer.
+Historical root activity, tasks, interactions and recovery MUST NOT be replayed.
+Temporary history handles, expired cursors, omitted items and absent message IDs
+cannot establish consumption or repair a lifecycle gap. Duplicate retained facts
+are no-ops, receipts remain immutable, and correlation retains its existing
+bounded storage semantics.
+
 `commands.observe` always retains the original control-journal receipt. If the
 runtime or child route is unavailable, it returns that receipt with no native
 delivery refinement. A successful send or steer with no exact native message

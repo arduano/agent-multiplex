@@ -10,6 +10,26 @@ const event = (id: string, type = "assistant.message", data: JsonValue = { conte
 const page = (events: unknown[], cursor = "native-older", hasMore = true) => ({ events, cursor, hasMore, cursorStatus: "ok" });
 
 describe("Copilot primary native history", () => {
+  it("extracts only exact root delivery from transferred events, with no historical lifecycle replay", async () => {
+    const events = [
+      event("root", "user.message", { messageId: "exact-message", turnId: "exact-turn" }),
+      event("display-only", "user.message", { messageId: "display-message" }),
+      { ...event("child", "user.message", { messageId: "child-message", turnId: "child-turn" }), agentId: "child-agent" },
+      event("legacy-child", "user.message", { messageId: "tool-message", turnId: "child-turn", parentToolCallId: "child-tool" }),
+      event("no-id", "user.message", { content: "same text", turnId: "exact-turn" }),
+      event("start", "assistant.turn_start", {}), event("idle", "session.idle", { aborted: false }),
+    ];
+    const result = await readPrimaryHistory("native-session", request, async () => page(events, "done", false));
+    expect(result.messageDeliveryFacts).toEqual([
+      { type: "messageDisplayed", messageId: "display-message", owner: "root" },
+      { type: "messageDisplayed", messageId: "exact-message", owner: "root" },
+      { type: "messageConsumed", messageId: "exact-message", owner: "root" },
+    ]);
+    const child = await readSubagentHistory("native-session", { ...request, native: { view: "subagent", agentId: "child-agent" } },
+      async () => page([events[2]], "done", false));
+    expect(child.messageDeliveryFacts).toBeUndefined();
+  });
+
   it("delegates ownership filtering and keeps native messages and child lifecycle unchanged", async () => {
     const events = [event("user", "user.message", { content: "Question" }),
       { ...event("child-start", "subagent.started", { agentName: "explore" }), agentId: "child-agent" },
@@ -66,6 +86,7 @@ describe("Copilot primary native history", () => {
     expect(first.payload).toEqual([newest]);
     expect(second).toMatchObject({ payload: [], complete: false, nextCursor: "copilot:primary:v1:desc:before-oversized",
       unavailableItem: { reason: "exceedsWireLimit", nativeItemId: "oversized", nativeType: "assistant.message" } });
+    expect(second.messageDeliveryFacts).toBeUndefined();
     expect(third).toMatchObject({ payload: [oldest], complete: true });
     await expect(readPrimaryHistory("native-session", { ...request, limit: 1, cursor: first.nextCursor! }, read)).rejects.toThrow("exceeds the bounded wire envelope");
   });

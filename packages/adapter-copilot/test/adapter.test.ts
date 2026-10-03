@@ -526,6 +526,23 @@ describe("CopilotAgentAdapter", () => {
     await adapter.close();
   });
 
+  it("extracts only exact root delivery from supported full-history pages", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const session = await adapter.spawn({ harness: "copilot", cwd: "/workspace" });
+    const native = client.sessions.get(session.vendorSessionId)!;
+    const root = { type: "user.message", id: "root", parentId: null, timestamp: "2026-10-03T00:00:00Z",
+      data: { content: "fixture", messageId: "exact-message", turnId: "exact-turn" } } as SessionEvent;
+    const child = { ...root, id: "child", agentId: "child-agent" } as SessionEvent;
+    native.events.push(root, child);
+    const result = await session.readNativeHistory({ harness: "copilot", limit: 100 });
+    expect(result.payload).toEqual([root, child]);
+    expect(result.messageDeliveryFacts).toEqual([
+      { type: "messageDisplayed", messageId: "exact-message", owner: "root" },
+      { type: "messageConsumed", messageId: "exact-message", owner: "root" },
+    ]);
+    await adapter.close();
+  });
+
   it.each(["text", "numbers"] as const)("bounds %s history pages by wire bytes and preserves the exact next event index", async (kind) => {
     const client = new Client();
     const adapter = adapterFor(client);

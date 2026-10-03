@@ -49,5 +49,18 @@ export function copilotLifecycleFacts(nativeType: string, payload: unknown): Lif
   }
 }
 
+/** A history page can repair only exact root delivery, never live lifecycle. */
+export function copilotHistoryDeliveryFacts(events: unknown[]): Array<Extract<LifecycleFact, { type: "messageDisplayed" | "messageConsumed" }>> {
+  return events.flatMap(event => {
+    if (!record(event) || event.type !== "user.message" || event.ephemeral === true) return [];
+    if (!record(event.data) || [event.agentId, event.data.agentId, event.data.parentToolCallId].some(owner => owner !== undefined)) return [];
+    if (!nonempty(event.data.messageId) || event.data.messageId.length > 4_096) return [];
+    return copilotLifecycleFacts("user.message", event).filter(
+      (fact): fact is Extract<LifecycleFact, { type: "messageDisplayed" | "messageConsumed" }> =>
+        (fact.type === "messageDisplayed" || fact.type === "messageConsumed") && fact.owner === "root",
+    );
+  });
+}
+
 function nonempty(value: unknown): value is string { return typeof value === "string" && value.length > 0; }
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === "object" && !Array.isArray(value); }

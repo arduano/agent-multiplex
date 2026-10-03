@@ -1138,8 +1138,41 @@ export class RuntimeNodeService {
       }
       const active = this.#active.get(sessionId);
       if (active) {
+        const fence = this.#messageDeliveryFence(sessionId, active);
+        if (!fence) throw new RuntimeNodeProtocolError("FENCED", "history binding is unavailable");
         const result = await active.session.readNativeHistory(request);
-        return { ...result, payload: await this.#externalize(record, result.payload) };
+        // Native history repairs transcript and exact root-message delivery
+        // only. Drain admitted live events first, then fence every awaited read
+        // (including image extraction) against the exact installed binding.
+        await active.events;
+        const { messageDeliveryFacts, ...history } = result;
+        if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
+          throw new RuntimeNodeProtocolError("FENCED", "history response does not match binding");
+        }
+        const observedFence = this.#messageDeliveryFence(sessionId, active);
+        if (this.#active.get(sessionId) !== active || !observedFence || !sameLifecycleFence(fence, observedFence)) {
+          throw new RuntimeNodeProtocolError("FENCED", "history binding changed");
+        }
+        const payload = await this.#externalize(record, result.payload);
+        const currentFence = this.#messageDeliveryFence(sessionId, active);
+        if (this.#active.get(sessionId) !== active || !currentFence || !sameLifecycleFence(fence, currentFence)) {
+          throw new RuntimeNodeProtocolError("FENCED", "history binding changed");
+        }
+        // Validate all facts before writing any. This private adapter contract
+        // cannot introduce historical work, tasks, interactions or recovery.
+        const facts = messageDeliveryFacts?.map(fact => {
+          const parsed = lifecycleFactSchema.parse(fact);
+          if ((parsed.type !== "messageDisplayed" && parsed.type !== "messageConsumed") || parsed.owner !== "root") {
+            throw new TypeError("history returned unsupported delivery evidence");
+          }
+          return parsed;
+        }) ?? [];
+        for (const fact of facts) {
+          const state = this.#lifecycle.read(fence);
+          const known = fact.type === "messageConsumed" ? state.consumedMessageIds : state.displayedMessageIds;
+          if (!known.includes(fact.messageId)) this.#appendMessageDelivery(sessionId, active, fact);
+        }
+        return { ...history, payload };
       }
 
       const plan = await this.#resumePlan(record, "history");
@@ -1148,7 +1181,12 @@ export class RuntimeNodeService {
       await this.#validateResumedHandle(record, options, plan.backend, temporary);
       try {
         const result = await temporary.readNativeHistory(request);
-        return { ...result, payload: await this.#externalize(record, result.payload) };
+        if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
+          throw new RuntimeNodeProtocolError("FENCED", "history response does not match binding");
+        }
+        // A temporary history attachment has no active delivery writer fence.
+        const { messageDeliveryFacts: _delivery, ...history } = result;
+        return { ...history, payload: await this.#externalize(record, result.payload) };
       } finally {
         // Temporary history handles are never installed in #active, and the
         // lock stays held until stop completes so a live resume cannot race it.
