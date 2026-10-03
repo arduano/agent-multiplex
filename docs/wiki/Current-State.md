@@ -5,11 +5,11 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
+Last reconciled: 2026-10-03 (hotfix.27 published; consumer staging and deployment are separately recorded).
 
 ## Historical message delivery correction — October 3, 2026
 
-The `.27` candidate separates old unconfirmed send/steer admissions into a
+Published `.27` separates old unconfirmed send/steer admissions into a
 bounded Host-owned warning view after 120 seconds from a terminal receipt.
 Exact observed native queue membership keeps a message pending. Original
 receipts and `commands.observe` uncertainty are retained; age never proves
@@ -21,8 +21,12 @@ evidence through the existing fenced Host writer. Child history, summaries,
 omitted items and transcript similarity cannot establish delivery or repair
 interaction certainty. See [the history audit](../audits/history-delivery-reconciliation-20261003.md)
 and [adapter guidance](Adapters-and-Terminals.md#host-message-delivery).
-Combined gates, immutable prerelease publication and consumer staging are in
-progress; no installed activation or model call is included.
+Signed `hotfix-2026-10-03.1` binds artifact source
+`1d5b980c653f8ec870a16dec9162cca9491c03c9`. Exact source typecheck/build,
+1,317 tests, all 16 role-isolated consumers and 69 packed regressions passed;
+all 19 downloaded assets match. See [the release record](../audits/hotfix27-delivery-release-20261003.md).
+Leo owns compact Windows/independent Linux preparation and a later maintenance
+window. No installed activation or model call is included.
 
 ## Copilot incident tracing candidate — October 2, 2026
 
