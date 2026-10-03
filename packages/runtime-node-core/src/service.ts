@@ -1159,13 +1159,13 @@ export class RuntimeNodeService {
           messageDeliveryFacts.length > 2 * (request.limit ?? 100))) {
           throw new TypeError("history returned an invalid delivery evidence list");
         }
-        const facts = messageDeliveryFacts?.map(fact => {
+        const facts = Array.from(messageDeliveryFacts ?? [], fact => {
           const parsed = lifecycleFactSchema.parse(fact);
           if ((parsed.type !== "messageDisplayed" && parsed.type !== "messageConsumed") || parsed.owner !== "root") {
             throw new TypeError("history returned unsupported delivery evidence");
           }
           return parsed;
-        }) ?? [];
+        });
         const payload = await this.#externalize(record, result.payload);
         const currentFence = this.#messageDeliveryFence(sessionId, active);
         if (this.#active.get(sessionId) !== active || !currentFence || !sameLifecycleFence(fence, currentFence)) {
