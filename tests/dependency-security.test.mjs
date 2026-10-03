@@ -16,6 +16,8 @@ test('IPv4 and IPv6 subnet checks reject different address families', () => {
   // GHSA-j6r3-76f7-8jcv: numeric overlap is not address-family equivalence.
   assert.equal(new Address4('0.0.0.1').isInSubnet(new Address6('::/32')), false);
   assert.equal(new Address6('::1').isInSubnet(new Address4('0.0.0.0/0')), false);
+  assert.equal(new Address4('0.0.0.1').isHostInSubnet(new Address6('::/32')), false);
+  assert.equal(new Address6('::1').isHostInSubnet(new Address4('0.0.0.0/0')), false);
   assert.equal(new Address4('10.0.0.1').isInSubnet(new Address4('10.0.0.0/8')), true);
   assert.equal(new Address6('2001:db8::1').isInSubnet(new Address6('2001:db8::/32')), true);
 });
