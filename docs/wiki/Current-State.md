@@ -5,7 +5,19 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-04 (immutable signed hotfix.29 published; task-read diagnostic hotfix.30 candidate is unpublished).
+Last reconciled: 2026-10-04 (immutable signed hotfix.30 published; native task-read cause/acceptance remains unproved).
+
+## Published Copilot task observation diagnostics hotfix.30
+
+Signed `hotfix-2026-10-04.3` publishes lockstep `.30` from exact artifact source
+`b5fd14da32fb74ebe2a828429e6975047f4b7d71`. Bounded failure reasons and validation
+path/code/type metadata improve private current-revision failed-read capture;
+strict admission, uncertainty, fences, persisted schemas and native/transport
+pins remain unchanged. Typecheck/build, 1,412 tests, repository gates, all16
+isolated packed consumers and19 public byte matches passed. No native model or
+installed acceptance is claimed. Embedding logs must explicitly retain the new
+optional fields. [Release proof and limits](../audits/hotfix30-release-qualification-20261004.md).
+Published `.29` remains immutable; the lost native response/cause is unproved.
 
 ## Published aggregate ownership hotfix.29
 
@@ -29,12 +41,12 @@ own this release; consumer maintenance uses its separately staged exact payload.
 
 Two installed disposable child runs reached root idle but retained task-read
 retrying; corrected WSL traces confirm current-revision rejection. The exact
-rejected response was lost after Runtime recovery. An unpublished source
-hotfix.30 source correction preserves bounded known field paths,
+rejected response was lost after Runtime recovery. The published `.30`
+source correction preserves bounded known field paths,
 validation codes and value types in the private failed-observation trace. Strict
 schemas, genuine uncertainty and revision/binding fences are unchanged. Controlled
 source regressions do not establish the original malformed shape. Published `.29`
-remains immutable; qualification/publication requires another version.
+remains immutable; `.30` publication proof is linked above.
 See [the investigation and causal limits](../audits/copilot-child-task-observation-20261004.md).
 
 ## October 4 read-only Copilot agents source candidate
