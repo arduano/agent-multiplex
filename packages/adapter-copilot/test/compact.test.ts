@@ -57,8 +57,13 @@ describe("Copilot native compaction", () => {
   it("fences late native acknowledgement after binding retirement", async () => {
     const f = fixture(); let release!: (value: unknown) => void;
     f.compact.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
-    const pending = f.session.execute(command); await f.session.stop(); release(success);
-    await expect(pending).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    const pending = f.session.execute(command);
+    const unknown = expect(pending).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    const stopping = f.session.stop();
+    expect(f.session.status()).toBe("stopped");
+    release(success);
+    await stopping;
+    await unknown;
     expect(f.compact).toHaveBeenCalledOnce();
   });
 

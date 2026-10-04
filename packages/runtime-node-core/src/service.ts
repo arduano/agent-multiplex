@@ -453,7 +453,8 @@ export class RuntimeNodeService {
       const backend = this.#terminals.providerBackend(entry.harness, entry.adapterScopeId);
       const capabilities = entry.harness === "codex" || entry.harness === "copilot"
         ? [...entry.capabilities, { name: "messages.delivery", version: "v1", experimental: false },
-          { name: "messages.deliveryWarnings", version: "v1", experimental: false }]
+          { name: "messages.deliveryWarnings", version: "v1", experimental: false },
+          { name: "history.active-binding", version: "v1", experimental: false }]
         : entry.capabilities;
       if (!backend || !entry.available) return { ...entry, capabilities };
       return {
@@ -894,37 +895,35 @@ export class RuntimeNodeService {
   }
 
   async #resume(input: ResumeCommand): Promise<CommandRecord> {
-    return this.#serialize(input.sessionId, () =>
-      this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
-        const existing = this.#boundSessionForCommand(input, "resume");
-        const active = this.#active.get(input.sessionId);
-        if (active) {
-          throw new RuntimeNodeProtocolError(
-            "CONFLICT",
-            `logical session ${input.sessionId} is already active`,
-          );
-        }
-        const plan = await this.#resumePlan(existing, "interactive");
-        const request = await this.#validateResumeOptions(existing, plan.resumeOptions);
-        const session = await plan.backend.adapter.resume(request);
-        await this.#validateResumedHandle(existing, request, plan.backend, session);
-        if (
-          existing.runtimeEpoch &&
-          existing.runtimeEpoch !== session.runtimeEpoch
-        ) {
-          this.#retireInteractions(input.sessionId, existing.runtimeEpoch);
-        }
-        const record = this.#recordForHandle(
-          input.sessionId,
-          session,
-          { existing },
+    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
+      const existing = this.#boundSessionForCommand(input, "resume");
+      const active = this.#active.get(input.sessionId);
+      if (active) {
+        throw new RuntimeNodeProtocolError(
+          "CONFLICT",
+          `logical session ${input.sessionId} is already active`,
         );
-        this.#store.putSession(record);
-        this.#activate(input.sessionId, session);
-        this.#publishSession(record);
-        return { sessionId: input.sessionId, vendorSessionId: session.vendorSessionId };
-      }),
-    );
+      }
+      const plan = await this.#resumePlan(existing, "interactive");
+      const request = await this.#validateResumeOptions(existing, plan.resumeOptions);
+      const session = await plan.backend.adapter.resume(request);
+      await this.#validateResumedHandle(existing, request, plan.backend, session);
+      if (
+        existing.runtimeEpoch &&
+        existing.runtimeEpoch !== session.runtimeEpoch
+      ) {
+        this.#retireInteractions(input.sessionId, existing.runtimeEpoch);
+      }
+      const record = this.#recordForHandle(
+        input.sessionId,
+        session,
+        { existing },
+      );
+      this.#store.putSession(record);
+      this.#activate(input.sessionId, session);
+      this.#publishSession(record);
+      return { sessionId: input.sessionId, vendorSessionId: session.vendorSessionId };
+    });
   }
 
   public stop(input: StopCommand): Promise<CommandRecord> {
@@ -932,37 +931,35 @@ export class RuntimeNodeService {
   }
 
   async #stop(input: StopCommand): Promise<CommandRecord> {
-    return this.#serialize(input.sessionId, () =>
-      this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
-        const record = this.#boundSessionForCommand(input, "stop");
-        const active = this.#active.get(input.sessionId);
-        let stopError: unknown;
-        try {
-          if (active) this.#retireLifecycleObservations(active);
-          await active?.session.stop();
-        } catch (error) {
-          stopError = error;
-        } finally {
-          if (active) {
-            this.#terminals.invalidateSession(
-              input.sessionId,
-              `structured ${record.harness} session was stopped`,
-            );
-            active.unsubscribe();
-            this.#retireInteractions(input.sessionId, active.session.runtimeEpoch, true);
-            if (this.#active.get(input.sessionId) === active) {
-              this.#active.delete(input.sessionId);
-            }
+    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
+      const record = this.#boundSessionForCommand(input, "stop");
+      const active = this.#active.get(input.sessionId);
+      let stopError: unknown;
+      try {
+        if (active) this.#retireLifecycleObservations(active);
+        await active?.session.stop();
+      } catch (error) {
+        stopError = error;
+      } finally {
+        if (active) {
+          this.#terminals.invalidateSession(
+            input.sessionId,
+            `structured ${record.harness} session was stopped`,
+          );
+          active.unsubscribe();
+          this.#retireInteractions(input.sessionId, active.session.runtimeEpoch, true);
+          if (this.#active.get(input.sessionId) === active) {
+            this.#active.delete(input.sessionId);
           }
-          this.#persistStopped(record);
         }
-        if (stopError !== undefined) throw stopError;
-        const stopped = this.#store.getSession(record.sessionId) ?? record;
-        const providerContext = this.#sessionProviderContext(stopped);
-        await providerContext?.provider.stop?.(providerContext.context);
-        return { sessionId: input.sessionId };
-      }),
-    );
+        this.#persistStopped(record);
+      }
+      if (stopError !== undefined) throw stopError;
+      const stopped = this.#store.getSession(record.sessionId) ?? record;
+      const providerContext = this.#sessionProviderContext(stopped);
+      await providerContext?.provider.stop?.(providerContext.context);
+      return { sessionId: input.sessionId };
+    });
   }
 
   public execute(input: CommandEnvelope): Promise<CommandRecord> {
@@ -970,43 +967,41 @@ export class RuntimeNodeService {
   }
 
   async #execute(input: CommandEnvelope): Promise<CommandRecord> {
-    return this.#serialize(input.sessionId, async () => {
-      return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
-        if (input.runtimeNodeId !== this.#runtimeNodeId) {
-          throw new RuntimeNodeProtocolError(
-            "FENCED",
-            "command was addressed to another runtime node",
-          );
-        }
-        const record = this.#store.getSession(input.sessionId);
-        if (!record) throw new RuntimeNodeProtocolError("NOT_FOUND", "session binding not found");
-        if (record.bindingRevision !== input.bindingRevision) {
-          throw new RuntimeNodeProtocolError(
-            "FENCED",
-            `binding revision ${input.bindingRevision} is stale; current is ${record.bindingRevision}`,
-          );
-        }
-        if (record.harness !== input.request.harness) {
-          throw new RuntimeNodeProtocolError("FENCED", "command harness does not match binding");
-        }
-        const active = this.#active.get(input.sessionId);
-        if (!active) {
-          throw new RuntimeNodeProtocolError("NOT_FOUND", "session is resumable but not active");
-        }
-        harnessCommandSchema.parse(input.request);
-        this.#assertLifecycleCommandAvailable(active, input.request);
-        this.#launchRegistry.backendForSession(record).adapter.imageCodec?.validateCommand?.(input.request);
-        const reconstructed = await this.#reconstructImages(input, record);
-        const request = await this.#nativePathPolicy.command(reconstructed);
-        if (request.harness === "copilot" || request.harness === "codex" && (request.command.type === "send" || request.command.type === "steer")) {
-          const kind = request.command.type === "send" || request.command.type === "steer" || request.command.type === "compact" ? request.command.type : "other";
-          this.#appendMessageDelivery(input.sessionId, active, { type: "commandPrepared", commandId: input.commandId, payloadHash: input.payloadHash, kind });
-          this.#appendMessageDelivery(input.sessionId, active, { type: "commandReceipt", commandId: input.commandId, payloadHash: input.payloadHash, admission: "dispatched" });
-        }
-        const result = await active.session.execute(request);
-        this.#syncHarnessSettings(input.sessionId, active);
-        return result;
-      });
+    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
+      if (input.runtimeNodeId !== this.#runtimeNodeId) {
+        throw new RuntimeNodeProtocolError(
+          "FENCED",
+          "command was addressed to another runtime node",
+        );
+      }
+      const record = this.#store.getSession(input.sessionId);
+      if (!record) throw new RuntimeNodeProtocolError("NOT_FOUND", "session binding not found");
+      if (record.bindingRevision !== input.bindingRevision) {
+        throw new RuntimeNodeProtocolError(
+          "FENCED",
+          `binding revision ${input.bindingRevision} is stale; current is ${record.bindingRevision}`,
+        );
+      }
+      if (record.harness !== input.request.harness) {
+        throw new RuntimeNodeProtocolError("FENCED", "command harness does not match binding");
+      }
+      const active = this.#active.get(input.sessionId);
+      if (!active) {
+        throw new RuntimeNodeProtocolError("NOT_FOUND", "session is resumable but not active");
+      }
+      harnessCommandSchema.parse(input.request);
+      this.#assertLifecycleCommandAvailable(active, input.request);
+      this.#launchRegistry.backendForSession(record).adapter.imageCodec?.validateCommand?.(input.request);
+      const reconstructed = await this.#reconstructImages(input, record);
+      const request = await this.#nativePathPolicy.command(reconstructed);
+      if (request.harness === "copilot" || request.harness === "codex" && (request.command.type === "send" || request.command.type === "steer")) {
+        const kind = request.command.type === "send" || request.command.type === "steer" || request.command.type === "compact" ? request.command.type : "other";
+        this.#appendMessageDelivery(input.sessionId, active, { type: "commandPrepared", commandId: input.commandId, payloadHash: input.payloadHash, kind });
+        this.#appendMessageDelivery(input.sessionId, active, { type: "commandReceipt", commandId: input.commandId, payloadHash: input.payloadHash, admission: "dispatched" });
+      }
+      const result = await active.session.execute(request);
+      this.#syncHarnessSettings(input.sessionId, active);
+      return result;
     });
   }
 
@@ -1128,6 +1123,15 @@ export class RuntimeNodeService {
     sessionId: SessionId,
     request: NativeHistoryRequest,
   ): Promise<NativeHistoryResult> {
+    const activeOnly = request.native?.activeBindingOnly === true;
+    if (activeOnly && this.#sessionLocks.has(sessionId)) {
+      throw new RuntimeNodeProtocolError("CONFLICT", "active history is busy with another binding operation; retry after it settles");
+    }
+    if (request.native && "activeBindingOnly" in request.native) {
+      if (typeof request.native.activeBindingOnly !== "boolean") throw new RuntimeNodeProtocolError("FENCED", "active history guard must be boolean");
+      const { activeBindingOnly: _activeOnly, ...native } = request.native;
+      request = { ...request, native };
+    }
     return this.#serialize(sessionId, async () => {
       // Binding and liveness must be checked after acquiring the session lock:
       // a queued resume may have installed a live handle while history waited.
@@ -1137,6 +1141,9 @@ export class RuntimeNodeService {
         throw new RuntimeNodeProtocolError("FENCED", "history request harness does not match binding");
       }
       const active = this.#active.get(sessionId);
+      if (activeOnly && !active) {
+        throw new RuntimeNodeProtocolError("CONFLICT", "active history cannot attach a stopped session; refresh its current binding");
+      }
       if (active) {
         const fence = this.#messageDeliveryFence(sessionId, active);
         if (!fence) throw new RuntimeNodeProtocolError("FENCED", "history binding is unavailable");
@@ -3580,18 +3587,27 @@ export class RuntimeNodeService {
       return existing;
     }
     const timestamp = now();
-    let record: CommandRecord = {
+    const record: CommandRecord = {
       commandId,
       payloadHash,
       sessionId,
       runtimeNodeId: this.#runtimeNodeId,
-      // The first durable record is already in-flight. There is no crash gap
-      // where an inert `received` command can be returned forever on retry.
-      state: "started",
+      // Persist queued admission before waiting for the binding lock. A
+      // duplicate observes this original operation, never another dispatch.
+      // Startup conservatively settles both received/started as unknown.
+      state: "received",
       request: encodedRequest,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
+    this.#store.putCommand(record);
+    const run = () => this.#runJournal(record, execute);
+    return sessionId === null ? run() : this.#serialize(sessionId, run);
+  }
+
+  async #runJournal(admitted: CommandRecord, execute: () => Promise<unknown>): Promise<CommandRecord> {
+    const { commandId, payloadHash, sessionId, request: encodedRequest } = admitted;
+    let record: CommandRecord = { ...admitted, state: "started", updatedAt: now() };
     this.#store.putCommand(record);
     let failureStage: "native" | "recording" = "native";
     try {

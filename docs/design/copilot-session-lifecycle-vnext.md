@@ -621,10 +621,46 @@ future attachment without rewriting the original unknown receipt. Inventory
 does not advertise these retired local bridges as executable active sessions.
 
 Before draining admitted work during shutdown, the adapter retires pending
-read/attachment caller waits. Underlying native requests remain owned until
+read/attachment/startup/mutation caller waits. Underlying native requests remain owned until
 the backend's existing graceful/verified-force termination completes. This
 prevents a stalled temporary history attachment from postponing owner shutdown
 indefinitely without unlocking the session merely on a client timeout.
+
+Initial SDK startup and native mutation caller waits are bounded to 15 seconds
+in the source candidate. Native requests retain their lanes until settlement;
+timeouts and shutdown retire only caller waits. Mutations in an occupied lane
+fail before native dispatch. Late mutation acknowledgements cannot publish
+settings, settle the original receipt or resolve an uncertain interaction.
+Native permission completion retains its independent authoritative meaning.
+Disconnect acknowledgement alone cannot release a native-ID fence while an
+admitted mutation remains pending. Exact late settlement may release that fence
+without changing the earlier unknown Stop or mutation receipt. Whole-backend
+termination must retain the existing actual child-exit proof.
+
+An adapter never retries SDK startup internally. Pending startup cannot establish
+safe owner cleanup even if a currently visible child exited, since the SDK
+request could later acquire another process. A late startup after close waits
+for the original cleanup attempt, then cleans the late owner; the original
+cleanup result is immutable. Failed pinned SDK startup may force-stop and clear
+its child getter before acknowledging exit. The adapter keeps the exact initial
+child reference and requires its exit acknowledgement; absent proof stays unsafe.
+
+Runtime Resume, Stop and native commands now persist their existing `received`
+receipt before waiting for the per-session lock. After acquiring the lock they
+persist `started` and recheck their binding before native work. Identical retries
+observe the original queued/in-flight/terminal receipt and never enqueue another
+dispatch. Payload changes under that ID fail. Existing startup recovery converts
+both nonterminal states to `outcomeUnknown`, conservatively preserving uncertainty
+without replay or a new durable schema. `started` denotes processing under the
+lock; private adapter traces identify the exact native-dispatch boundary.
+
+The optional `history.active-binding` v1 capability controls a narrower history
+request via `native.activeBindingOnly: true`. An occupied session lock fails
+promptly, and a stopped binding fails after the runtime lock recheck without
+temporary attachment. The runtime strips the flag before SDK invocation. This
+allows current active history reads under existing read/boot/binding fences
+without granting lifecycle replay or rewriting historical unknown receipts.
+Older runtimes lack the capability and retain their existing client guards.
 
 ## Invariants
 

@@ -7,6 +7,19 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-04 (hotfix.28 published and source/package qualified; consumer activation is recorded separately).
 
+## October 4 bounded native lifecycle source candidate
+
+Isolated source based on published `.28` bounds initial SDK startup and native
+mutation caller waits, retains noncancellable request lanes and native ownership,
+and preserves permission uncertainty. Runtime command `received` admission now
+precedes the per-session lock; `started` follows it, with original-ID dedupe and
+conservative restart recovery unchanged. New optional `history.active-binding`
+v1 accepts an active-only request that cannot attach a stopped handle. Public
+schemas, migrations and SDK/transport pins are unchanged; `.27`/`.28` omit this
+capability. Focused source regressions passed; full combined release qualification,
+publication and consumer activation remain coordinator-owned. No model or live
+operation is claimed. See [the lifecycle contract](../design/copilot-session-lifecycle-vnext.md#binding-replacement-and-late-work).
+
 ## October 4 Copilot recovery correction — published hotfix.28
 
 The lockstep `.28` release bounds native attachment and read caller waits,

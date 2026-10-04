@@ -15,6 +15,23 @@ unknown operation receipt into success. An optional process-local `beginClose`
 adapter hook retires read/attachment caller waits before Runtime drains them;
 backend `close` still owns and proves native cleanup.
 
+The source candidate also bounds initial SDK startup and native mutation caller
+waits to 15 seconds. An expired send, setting, interrupt, task control or
+permission decision retains its native request lane; it is never cancelled or
+replayed. Another mutation in that lane fails before native dispatch. Stop
+retires the local bridge immediately but releases its native-ID fence only after
+disconnect and all admitted native mutations settle, or after the backend proves
+whole-CLI termination. Late acknowledgements cannot apply obsolete settings or
+rewrite an unknown receipt. An uncertain permission decision remains protected
+until authoritative native completion or owner recovery.
+
+SDK startup has one request per adapter lifetime, including after a failure.
+Shutdown retires its caller wait, and a late startup is cleaned up separately.
+An unresolved startup cannot certify cleanup: it could acquire a late process.
+If failed SDK startup clears its child getter, only exit acknowledgement from the
+exact child captured before that failure can establish native termination.
+No package publication or installed acceptance is implied by this candidate.
+
 An SDK handle must match the requested native ID before publication. A wrong,
 otherwise unowned ID is privately detached while both requested and returned
 IDs remain fenced. A collision with another owned ID waits for backend
@@ -44,6 +61,17 @@ and binding revision. Resume, history, stop, and archive use that provenance
 instead of guessing from `harness`.
 
 ### Bounded native history
+
+New runtime source advertises `history.active-binding` v1. Clients selecting
+`request.native.activeBindingOnly: true` receive history only from an installed
+active handle. An occupied binding-operation lock returns a prompt conflict;
+the runtime rechecks the active binding after taking the lock and never attaches
+a temporary stopped handle for this request. It strips this runtime-only flag
+before invoking the native adapter. The existing runtime boot and returned
+binding fences still apply, and original uncertain lifecycle receipts are
+unchanged. Clients may use this capability to display current active history
+despite an older uncertain lifecycle receipt, while retaining current dispatch,
+archive and stopped-session guards. Older runtimes omit this capability.
 
 Codex and Copilot history reads default to ascending order. Clients can select
 `request.native.sortDirection: "desc"` to open at the latest native items and

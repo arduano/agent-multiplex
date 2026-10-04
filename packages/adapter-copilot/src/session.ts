@@ -35,6 +35,7 @@ import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, readSubagentHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
+import { CopilotNativeOperations } from "./operations.js";
 import { copilotHistoryDeliveryFacts, copilotLifecycleFacts } from "./lifecycle.js";
 
 export const COPILOT_SESSION_DISCONNECT_TIMEOUT_MS = 10_000;
@@ -109,6 +110,7 @@ interface PendingPermission {
   readonly child: boolean;
   resolving: boolean;
   completed: boolean;
+  uncertain: boolean;
 }
 
 /**
@@ -147,6 +149,11 @@ export class CopilotSessionBridge {
   #resumePositiveEvidenceObserved = false;
   #nativeEventOrdinal = 0;
   #currentNativeEventOrdinal: number | undefined;
+  #permissionMutation: ((lane: string, action: () => Promise<unknown>) => Promise<unknown>) | undefined;
+
+  public attachPermissionMutation(run: (lane: string, action: () => Promise<unknown>) => Promise<unknown>): void {
+    this.#permissionMutation = run;
+  }
 
   /** Adapter observation fences; native snapshots do not carry a log cursor. */
   public nativeStateRevision(view: NativeStateRequest["view"]): number {
@@ -509,7 +516,7 @@ export class CopilotSessionBridge {
   private registerPermission(requestId: string, permissionRequest: object, child: boolean, owner?: string, unattributed = false): void {
     const nativeRequestId = permissionIdentity(requestId, owner);
     if (this.#permissions.has(nativeRequestId) || this.#completedPermissions.has(nativeRequestId)) return;
-    const pending: PendingPermission = { requestId, nativeRequestId, child, resolving: false, completed: false };
+    const pending: PendingPermission = { requestId, nativeRequestId, child, resolving: false, completed: false, uncertain: false };
     this.#permissions.set(nativeRequestId, pending);
     if (!pending.child) this.setStatus("waitingForInput");
     this.emit({ kind: "interaction", requestType: "permission", nativeRequestId, ephemeral: false,
@@ -517,6 +524,7 @@ export class CopilotSessionBridge {
       payload: copilotJson({ permissionRequest, requestId, ...(owner === undefined ? {} : { agentId: owner }) }),
       resolve: async (response) => {
         if (this.#closed || pending.completed || this.#permissions.get(nativeRequestId) !== pending) throw new Error("Copilot permission request is no longer pending");
+        if (pending.uncertain) throw new AdapterOutcomeUnknownError("Copilot permission decision remains unacknowledged; wait for native completion or recover the Host before review");
         if (pending.resolving) throw new Error("Copilot permission request is already resolving");
         const rpc = this.#permissionRpc;
         if (typeof rpc?.handlePendingPermissionRequest !== "function") throw new Error("Copilot does not support native permission decisions");
@@ -526,14 +534,18 @@ export class CopilotSessionBridge {
         const activityRevision = this.#activityRevision;
         let result: unknown;
         try {
-          result = await rpc.handlePendingPermissionRequest({ requestId, result: decision });
+          const action = () => rpc.handlePendingPermissionRequest({ requestId, result: decision });
+          result = await (this.#permissionMutation ? this.#permissionMutation(nativeRequestId, action) : action());
         } catch (cause) {
           pending.resolving = false;
+          pending.uncertain = this.#permissionMutation ? cause instanceof AdapterOutcomeUnknownError : true;
           if (pending.completed) this.retirePermission(pending);
+          if (!(cause instanceof AdapterOutcomeUnknownError) && this.#permissionMutation) throw cause;
           throw new AdapterOutcomeUnknownError("Copilot permission decision was dispatched but not acknowledged", { cause });
         }
         pending.resolving = false;
         if (!isObject(result) || typeof result.success !== "boolean") {
+          pending.uncertain = true;
           if (pending.completed) this.retirePermission(pending);
           throw new AdapterOutcomeUnknownError("Copilot permission decision returned an unrecognized result");
         }
@@ -595,10 +607,11 @@ export class CopilotAdapterSession implements AdapterSession {
   readonly #bridge: CopilotSessionBridge;
   readonly #onStopped: () => void;
   readonly #reads: CopilotReadRequests;
+  readonly #operations: CopilotNativeOperations;
   readonly #ownershipDiagnostic: ((record: CopilotOwnershipDiagnostic) => void) | undefined;
   #settings: HarnessSessionSettings;
   #stopped = false;
-  #disconnected = false;
+  #released = false;
   #stopPromise: Promise<void> | undefined;
 
   public constructor(options: {
@@ -609,6 +622,7 @@ export class CopilotAdapterSession implements AdapterSession {
     bridge: CopilotSessionBridge;
     settings: HarnessSessionSettings;
     reads?: CopilotReadRequests;
+    operations?: CopilotNativeOperations;
     onOwnershipDiagnostic?(record: CopilotOwnershipDiagnostic): void;
     onStopped(): void;
   }) {
@@ -620,6 +634,7 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#settings = options.settings;
     this.#onStopped = options.onStopped;
     this.#reads = options.reads ?? new CopilotReadRequests();
+    this.#operations = options.operations ?? new CopilotNativeOperations();
     this.#ownershipDiagnostic = options.onOwnershipDiagnostic;
     this.vendorSessionId = options.native.sessionId;
     const ordinal = options.native.incidentTraceAttachmentId;
@@ -628,6 +643,8 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#bridge.attachEffort(options.settings.effort ?? undefined, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachMode(options.settings.mode, () => this.#bridge.settings(this.settings()));
     this.#bridge.attachPermissions(this.#native.rpc.permissions, () => this.#bridge.settings(this.settings()));
+    this.#bridge.attachPermissionMutation((lane, action) => this.#operations.run(this.operationGroup(), `permission:${lane}`, action,
+      outcome => this.ownershipDiagnostic(outcome, "mutation")));
   }
 
   public readonly adapterScopeId: AdapterScopeId;
@@ -744,18 +761,16 @@ export class CopilotAdapterSession implements AdapterSession {
     switch (command.type) {
       case "send": {
         const options = messageOptions(command.prompt, command.native, "enqueue");
+        this.#operations.assertAvailable(this.operationGroup(), "command");
         this.#bridge.beginMessage();
-        const messageId = await this.mutation("enqueue Copilot prompt", async () =>
-          acknowledgedMessageId(await this.#native.send(options)),
-        );
+        const messageId = await this.mutation("enqueue Copilot prompt", async () => acknowledgedMessageId(await this.#native.send(options)));
         return { messageId };
       }
       case "steer": {
         const options = messageOptions(command.prompt, command.native, "immediate");
+        this.#operations.assertAvailable(this.operationGroup(), "command");
         this.#bridge.beginMessage();
-        const messageId = await this.mutation("steer Copilot session", async () =>
-          acknowledgedMessageId(await this.#native.send(options)),
-        );
+        const messageId = await this.mutation("steer Copilot session", async () => acknowledgedMessageId(await this.#native.send(options)));
         return { messageId };
       }
       case "interrupt":
@@ -805,6 +820,7 @@ export class CopilotAdapterSession implements AdapterSession {
         try {
           await this.mutation("change Copilot model", () => this.#native.setModel(command.model));
         } catch (error) {
+          if (!(error instanceof AdapterOutcomeUnknownError)) throw error;
           // A failed RPC can leave the native result uncertain. Neither the
           // previous model nor its effort is a confirmed current selection.
           this.#bridge.observeModelSelection(undefined, undefined, generation, effortGeneration);
@@ -823,6 +839,7 @@ export class CopilotAdapterSession implements AdapterSession {
         try {
           applied = await this.mutation("change Copilot reasoning effort", () => set.call(this.#native.rpc.model, { reasoningEffort: command.effort }));
         } catch (error) {
+          if (!(error instanceof AdapterOutcomeUnknownError)) throw error;
           this.#bridge.observeEffort(undefined, generation);
           throw error;
         }
@@ -840,6 +857,7 @@ export class CopilotAdapterSession implements AdapterSession {
             this.#native.rpc.mode.set({ mode: command.mode }),
           );
         } catch (error) {
+          if (!(error instanceof AdapterOutcomeUnknownError)) throw error;
           this.#bridge.observeMode(undefined, revision);
           throw error;
         }
@@ -859,6 +877,7 @@ export class CopilotAdapterSession implements AdapterSession {
             return { success: value.success, ...state };
           });
         } catch (error) {
+          if (!(error instanceof AdapterOutcomeUnknownError)) throw error;
           this.#bridge.observePermissions(undefined, generation);
           throw error;
         }
@@ -1006,7 +1025,7 @@ export class CopilotAdapterSession implements AdapterSession {
   }
 
   public stop(): Promise<void> {
-    if (this.#disconnected) return Promise.resolve();
+    if (this.#released) return Promise.resolve();
     if (this.#stopPromise) return this.#stopPromise;
     this.#stopped = true;
     this.#bridge.setStatus("stopped");
@@ -1028,8 +1047,12 @@ export class CopilotAdapterSession implements AdapterSession {
       // Caller deadlines do not cancel disconnect or release native ownership.
       // A late acknowledgement releases the fence without rewriting the first
       // unknown receipt. Repeated Stop cannot create another disconnect request.
-      void Promise.resolve().then(() => this.#native.disconnect()).then(() => {
-        this.#disconnected = true;
+      void Promise.resolve().then(() => this.#native.disconnect()).then(async () => {
+        // Disconnect does not cancel an admitted SDK mutation. Retain this
+        // exact native-ID owner until both requests have settled; shutdown
+        // can instead prove whole-CLI termination before retrying.
+        await this.#operations.drain(this.operationGroup());
+        this.#released = true;
         this.#onStopped();
         this.ownershipDiagnostic(settled ? "lateAcknowledged" : "acknowledged");
         if (settled) return;
@@ -1041,9 +1064,9 @@ export class CopilotAdapterSession implements AdapterSession {
     return this.#stopPromise;
   }
 
-  private ownershipDiagnostic(outcome: CopilotOwnershipDiagnostic["outcome"]): void {
+  private ownershipDiagnostic(outcome: CopilotOwnershipDiagnostic["outcome"], stage: "detach" | "mutation" = "detach"): void {
     try { this.#ownershipDiagnostic?.({ vendorSessionId: this.vendorSessionId, runtimeEpoch: this.runtimeEpoch,
-      ...(this.incidentTraceAttachmentId === undefined ? {} : { attachmentId: this.incidentTraceAttachmentId }), stage: "detach", outcome }); }
+      ...(this.incidentTraceAttachmentId === undefined ? {} : { attachmentId: this.incidentTraceAttachmentId }), stage, outcome }); }
     catch { /* A private diagnostic sink cannot alter native ownership. */ }
   }
 
@@ -1054,8 +1077,9 @@ export class CopilotAdapterSession implements AdapterSession {
   private async mutation<T>(description: string, operation: () => Promise<T>): Promise<T> {
     const activityRevision = this.#bridge.activityRevision;
     try {
-      return await operation();
+      return await this.#operations.run(this.operationGroup(), "command", operation, outcome => this.ownershipDiagnostic(outcome, "mutation"));
     } catch (cause) {
+      if (!(cause instanceof AdapterOutcomeUnknownError)) throw cause;
       // A lost acknowledgement makes this command uncertain; it cannot undo
       // newer native evidence that the session is working, waiting, or idle.
       this.#bridge.uncertainMutation(activityRevision);
@@ -1065,6 +1089,8 @@ export class CopilotAdapterSession implements AdapterSession {
       );
     }
   }
+
+  private operationGroup(): string { return JSON.stringify([this.vendorSessionId, this.runtimeEpoch]); }
 }
 
 /** Private process-local ownership stage trace. Never native payload or config. */
@@ -1072,7 +1098,7 @@ export interface CopilotOwnershipDiagnostic {
   vendorSessionId?: string;
   runtimeEpoch?: RuntimeEpoch;
   attachmentId?: number;
-  stage: "attachment" | "attachmentMode" | "detach" | "shutdown";
+  stage: "startup" | "attachment" | "attachmentMode" | "mutation" | "detach" | "shutdown";
   outcome: "dispatched" | "acknowledged" | "lateAcknowledged" | "timedOut" | "unacknowledged" | "retired" | "closed";
 }
 

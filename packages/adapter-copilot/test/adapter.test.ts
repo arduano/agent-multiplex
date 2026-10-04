@@ -16,6 +16,7 @@ import {
   COPILOT_ATTACHMENT_TIMEOUT_MS,
   type CopilotAdapterClient,
 } from "../src/adapter.js";
+import { COPILOT_NATIVE_OPERATION_TIMEOUT_MS } from "../src/operations.js";
 import type {
   CopilotNativeSession,
   CopilotSessionRpc,
@@ -88,6 +89,170 @@ class Client implements CopilotAdapterClient {
 }
 
 describe("CopilotAgentAdapter", () => {
+
+  it("accepts failed startup cleanup only when the exact captured SDK child has exited", async () => {
+    const client = new Client();
+    const child = Object.assign(new EventEmitter(), { pid: 44, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null });
+    Object.assign(client, { isExternalServer: false, cliProcess: child });
+    const start = vi.spyOn(client, "start").mockImplementation(async () => {
+      await Promise.resolve();
+      // The pinned SDK can clear this reference before rejecting start.
+      Object.assign(client, { cliProcess: null });
+      child.signalCode = "SIGKILL"; child.emit("exit");
+      throw new Error("mock native startup failure");
+    });
+    const adapter = adapterFor(client);
+    expect(await adapter.describe()).toMatchObject({ available: false });
+    expect(await adapter.describe()).toMatchObject({ available: false });
+    expect(start).toHaveBeenCalledOnce();
+    await expect(adapter.close()).resolves.toBeUndefined();
+  });
+
+  it("does not replay a timed-out permission decision even after its late SDK result", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      let release!: (value: unknown) => void;
+      const decision = vi.fn(() => new Promise(resolve => { release = resolve; }));
+      client.permissionRpc = { getMode: async () => ({ mode: "manual" }), setMode: async () => ({ mode: "manual", success: true }),
+        handlePendingPermissionRequest: decision };
+      const adapter = adapterFor(client);
+      const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "pending-permission" } });
+      const received: AdapterEvent[] = []; session.subscribe(event => received.push(event));
+      client.created[0]?.onEvent?.({ ...event("session.start"), type: "permission.requested",
+        data: { requestId: "permission-fixture", permissionRequest: { kind: "read", path: "/repo/fixture.txt" } } } as SessionEvent);
+      const interaction = received.find(event => event.kind === "interaction");
+      if (interaction?.kind !== "interaction") throw new Error("missing fixture interaction");
+      const response = { kind: "approve-once", approvedInteractively: true };
+      const resolving = interaction.resolve(response); const unknown = expect(resolving).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS); await unknown;
+      await expect(interaction.resolve(response)).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      expect(decision).toHaveBeenCalledOnce(); expect(session.status()).toBe("waitingForInput");
+      release({ success: true }); await vi.advanceTimersByTimeAsync(0);
+      await expect(interaction.resolve(response)).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      expect(decision).toHaveBeenCalledOnce(); expect(session.status()).toBe("waitingForInput");
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+
+  it("bounds one SDK startup and retains its ownership after timeout until cleanup", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      let release!: () => void;
+      const nativeStart = new Promise<void>(resolve => { release = resolve; });
+      const start = vi.spyOn(client, "start").mockImplementation(() => nativeStart);
+      const stop = vi.spyOn(client, "stop");
+      const stages: Array<{ stage: string; outcome: string }> = [];
+      const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onOwnershipDiagnostic: record => stages.push(record) });
+      const describing = adapter.describe();
+      await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS);
+      expect(await describing).toMatchObject({ available: false });
+      expect(await adapter.describe()).toMatchObject({ available: false });
+      expect(start).toHaveBeenCalledOnce();
+      expect(client.forceStops).toBe(0);
+      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      expect(stop).toHaveBeenCalledOnce();
+      release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(stop).toHaveBeenCalledTimes(2);
+      expect(stages).toEqual(expect.arrayContaining([
+        expect.objectContaining({ stage: "startup", outcome: "timedOut" }),
+        expect.objectContaining({ stage: "startup", outcome: "lateAcknowledged" }),
+      ]));
+      // Late cleanup does not turn the failed original close into proof it had
+      // completed safely at that earlier time.
+      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      expect(start).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("retires SDK startup callers on close before their deadline without dispatching a second start", async () => {
+    const client = new Client();
+    const start = vi.spyOn(client, "start").mockImplementation(() => new Promise(() => {}));
+    const adapter = adapterFor(client);
+    const describing = adapter.describe();
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+    expect(await describing).toMatchObject({ available: false });
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("retains a timed-out mutation and native ID through detach until its late settlement", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client(); const adapter = adapterFor(client);
+      const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "pending-mutation" } });
+      const native = client.sessions.get(session.vendorSessionId)!;
+      let release!: (messageId: string) => void;
+      const send = vi.spyOn(native, "send").mockImplementation(() => new Promise(resolve => { release = resolve; }));
+      const request = { harness: "copilot" as const, command: { type: "send" as const, prompt: "mock-only fixture", mode: "enqueue" as const } };
+      const result = session.execute(request);
+      const unknown = expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS);
+      await unknown;
+      await expect(session.execute(request)).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(send).toHaveBeenCalledOnce();
+      const stopping = session.stop();
+      const uncertainStop = expect(stopping).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await uncertainStop;
+      expect(native.disconnected).toBe(true);
+      await expect(adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: session.vendorSessionId, continuePendingWork: false }))
+        .rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      release("late-message-id");
+      await vi.advanceTimersByTimeAsync(0);
+      await expect(session.stop()).resolves.toBeUndefined();
+      await expect(adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: session.vendorSessionId, continuePendingWork: false }))
+        .resolves.toMatchObject({ vendorSessionId: session.vendorSessionId });
+      await unknown;
+      expect(send).toHaveBeenCalledOnce();
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not apply a late timed-out mode acknowledgement over newer native settings", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client(); const adapter = adapterFor(client);
+      const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "late-setting" } });
+      const native = client.sessions.get(session.vendorSessionId)!;
+      let release!: () => void;
+      vi.spyOn(native.rpc.mode, "set").mockImplementation(() => new Promise(resolve => { release = resolve; }));
+      const result = session.execute({ harness: "copilot", command: { type: "setMode", mode: "plan" } });
+      const unknown = expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS);
+      await unknown;
+      client.created[0]?.onEvent?.({ ...event("session.start"), type: "session.mode_changed", data: { newMode: "autopilot" } } as SessionEvent);
+      release(); await vi.advanceTimersByTimeAsync(0);
+      expect(session.settings?.()).toMatchObject({ mode: "autopilot" });
+      await unknown;
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("retires mutation callers before shutdown and requires owned CLI exit for unresolved native work", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const child = Object.assign(new EventEmitter(), { pid: 43, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null });
+      Object.assign(client, { isExternalServer: false, cliProcess: child });
+      client.forceStop = async () => { client.forceStops++; child.signalCode = "SIGKILL"; child.emit("exit"); };
+      const adapter = adapterFor(client);
+      const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "shutdown-mutation" } });
+      vi.spyOn(client.sessions.get(session.vendorSessionId)!, "send").mockImplementation(() => new Promise(() => {}));
+      const result = session.execute({ harness: "copilot", command: { type: "send", prompt: "mock-only fixture", mode: "enqueue" } });
+      const unknown = expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await vi.advanceTimersByTimeAsync(0);
+      const closing = adapter.close();
+      await unknown;
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(closing).resolves.toBeUndefined();
+      expect(client.forceStops).toBe(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(["spawn", "resume"] as const)("rejects a mismatched %s ID without replacing or detaching a different correct owner", async operation => {
     const client = new Client(); const adapter = adapterFor(client);
     const correct = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "already-owned" } });

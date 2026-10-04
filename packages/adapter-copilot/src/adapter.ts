@@ -41,6 +41,7 @@ import {
 import { copilotJson } from "./json.js";
 import { copilotOptionalNativeTelemetry } from "./native-event-policy.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadRequests } from "./reads.js";
+import { CopilotNativeOperations } from "./operations.js";
 import {
   CopilotAdapterSession,
   CopilotSessionBridge,
@@ -116,6 +117,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #nativeOwners = new WeakSet<CopilotNativeSession>();
   readonly #attachments = new Map<string, PendingAttachment>();
   readonly #reads = new CopilotReadRequests();
+  readonly #operations = new CopilotNativeOperations();
+  #startupPending = false;
+  #startupFailedUnproved = false;
   #startPromise: Promise<void> | undefined;
   #closePromise: Promise<void> | undefined;
   #started = false;
@@ -297,7 +301,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     );
     if (options.mode) {
       try {
-        await this.attachmentMode(native, options.mode);
+        await this.attachmentMode(native, session.runtimeEpoch, options.mode);
       } catch (cause) {
         await session.stop().catch(() => undefined);
         throw new AdapterOutcomeUnknownError(
@@ -386,7 +390,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     );
     if (options.mode) {
       try {
-        await this.attachmentMode(native, options.mode);
+        await this.attachmentMode(native, session.runtimeEpoch, options.mode);
       } catch (cause) {
         await session.stop().catch(() => undefined);
         throw new AdapterOutcomeUnknownError(
@@ -418,6 +422,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     if (!this.#closed) this.ownershipDiagnostic({ stage: "shutdown", outcome: "retired" });
     this.#closed = true;
     this.#reads.close();
+    this.#operations.close();
     for (const pending of this.#attachments.values()) pending.cancel();
   }
 
@@ -499,6 +504,10 @@ export class CopilotAgentAdapter implements AgentAdapter {
         errors.push(new Error("Copilot CLI process termination could not be proved"));
       }
     }
+    // A pending SDK start can still acquire a process after a stop/forceStop.
+    // Terminating the currently visible child does not certify that this
+    // unacknowledged startup request cannot create another one later.
+    if (this.#startupPending || this.#startupFailedUnproved) errors.push(new Error("Copilot SDK startup ownership remains unproved; native owner termination could not be proved"));
     this.ownershipDiagnostic({ stage: "shutdown", outcome: errors.length > 0 ? "unacknowledged" : "closed" });
     if (errors.length > 0) throw new AggregateError(errors, "Failed to close Copilot adapter cleanly");
   }
@@ -524,6 +533,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       bridge,
       settings,
       reads: this.#reads,
+      operations: this.#operations,
       onOwnershipDiagnostic: record => this.ownershipDiagnostic(record),
       onStopped: () => {
         this.#nativeOwners.delete(native);
@@ -635,18 +645,11 @@ export class CopilotAgentAdapter implements AgentAdapter {
     }
   }
 
-  private async attachmentMode(native: CopilotNativeSession, mode: NonNullable<Extract<HarnessResumeOptions, { harness: "copilot" }>["mode"]>): Promise<void> {
-    this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "attachmentMode", outcome: "dispatched" });
-    const result = await settleWithin(Promise.resolve().then(() => {
+  private async attachmentMode(native: CopilotNativeSession, epoch: RuntimeEpoch, mode: NonNullable<Extract<HarnessResumeOptions, { harness: "copilot" }>["mode"]>): Promise<void> {
+    await this.#operations.run(JSON.stringify([native.sessionId, epoch]), "command", () => {
       this.assertOpen();
       return native.rpc.mode.set({ mode });
-    }), COPILOT_ATTACHMENT_TIMEOUT_MS);
-    if (result.status !== "fulfilled") {
-      this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "attachmentMode", outcome: result.status === "timedOut" ? "timedOut" : "unacknowledged" });
-      throw new AdapterOutcomeUnknownError("Copilot attachment mode change was not acknowledged",
-        { cause: result.status === "rejected" ? result.reason : new Error("native mode change timed out") });
-    }
-    this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "attachmentMode", outcome: "acknowledged" });
+    }, outcome => this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "attachmentMode", outcome }));
   }
 
   private ownershipDiagnostic(record: CopilotOwnershipDiagnostic): void {
@@ -711,19 +714,42 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.assertOpen();
     if (this.#started) return;
     if (this.#startPromise) return this.#startPromise;
-    const pending = this.#client.start().then(() => {
+    const pending = this.#operations.run("adapter:startup", "start", async () => {
+      this.#startupPending = true;
+      let startupChild: unknown;
+      try {
+        const starting = this.#client.start();
+        // Configured stdio startup spawns synchronously in the pinned SDK.
+        // Keep the exact child object even if SDK failure clears its getter.
+        startupChild = Reflect.get(this.#client, "cliProcess");
+        await starting;
+      }
+      catch (error) {
+        // Pinned SDK startup failure internally forceStops and may clear its
+        // child reference without exit acknowledgement. A later empty stop
+        // result cannot retroactively prove that lost child's termination.
+        const exitProof = captureOwnedCliExit(this.#client, startupChild);
+        this.#startupFailedUnproved = exitProof === undefined || !await exitProof.wait;
+        throw error;
+      }
+      finally {
+        this.#startupPending = false;
+        if (this.#closed) {
+          // Do not race the original close attempt. It may already have
+          // reported uncertain cleanup; that result remains unchanged.
+          await this.#closePromise?.catch(() => undefined);
+          await this.closeNativeRuntime();
+        }
+      }
+    }, outcome => this.ownershipDiagnostic({ stage: "startup", outcome })).then(() => {
+      this.assertOpen();
       this.#started = true;
     });
+    // Retain a failed/timed-out start for this adapter's lifetime. SDK startup
+    // has no cancellation contract, and an eager forceStop cannot prove that
+    // the original request will not create a late native owner.
     this.#startPromise = pending;
-    try {
-      await pending;
-    } catch (error) {
-      this.#started = false;
-      await this.#client.forceStop().catch(() => undefined);
-      throw error;
-    } finally {
-      if (this.#startPromise === pending) this.#startPromise = undefined;
-    }
+    await pending;
   }
 
   private async runtimeStatus(): Promise<CopilotRuntimeStatus> {
@@ -984,9 +1010,9 @@ interface OwnedCliExitProof {
 }
 
 /** Only the pinned SDK's locally spawned CLI can establish process ownership. */
-function captureOwnedCliExit(client: CopilotAdapterClient): OwnedCliExitProof | undefined {
+function captureOwnedCliExit(client: CopilotAdapterClient, capturedChild?: unknown): OwnedCliExitProof | undefined {
   if (Reflect.get(client, "isExternalServer") !== false) return undefined;
-  const child: unknown = Reflect.get(client, "cliProcess");
+  const child: unknown = capturedChild ?? Reflect.get(client, "cliProcess");
   if (!child || typeof child !== "object") return undefined;
   const process = child as {
     pid?: unknown;

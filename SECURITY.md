@@ -80,6 +80,10 @@ disclosure.
   queue text in the catalog. Moving a queued message into a running turn requires
   `agent-control` and the durable command fence; unknown results must not be
   replaced by remove/resend.
+- Capability-gated active-binding history uses the existing `read` access and
+  runtime boot/binding fences. `native.activeBindingOnly` refuses a stopped
+  attachment after the lock recheck; it never grants lifecycle recovery or
+  mutation replay from a historical uncertain receipt.
 - Native Copilot task lists/progress use the active-binding `read` boundary
   and can include commands, paths, prompt text and recent output. They never
   resume stopped sessions or grant arbitrary shell/process access. Exact-ID

@@ -61,7 +61,7 @@ describe("Copilot native pending queue", () => {
     { id: "model-change", kind: "command", displayText: "/model native-model", agentMode: "plan" }],
     steeringMessages: ["already consumed", "waiting steer"], inFlightSteeringCount: 1 };
 
-  it("bounds stalled native history/queue reads without retrying them or changing a pending send", async () => {
+  it("bounds independent stalled reads and send callers without cancelling or retrying their native requests", async () => {
     vi.useFakeTimers();
     const f = await fixture();
     const stalled = deferred<unknown>();
@@ -74,23 +74,26 @@ describe("Copilot native pending queue", () => {
     const queue = f.session.readNativeState(request).catch(error => error);
     const sent = deferred<string>();
     f.send.mockImplementationOnce(() => sent.promise);
-    const send = f.session.execute({ harness: "copilot", command: { type: "send", prompt: "one message", mode: "enqueue" } });
+    const send = f.session.execute({ harness: "copilot", command: { type: "send", prompt: "one message", mode: "enqueue" } }).catch(error => error);
     let sendSettled = false;
     void send.then(() => { sendSettled = true; });
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(sendSettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     expect(await history).toMatchObject({ message: expect.stringContaining("timed out") });
     expect(await queue).toMatchObject({ message: expect.stringContaining("timed out") });
     await expect(f.session.readNativeHistory(historyRequest)).rejects.toThrow("timed out");
     await expect(f.session.readNativeState(request)).rejects.toThrow("timed out");
     expect(read).toHaveBeenCalledOnce();
     expect(pendingItems).toHaveBeenCalledOnce();
-    expect(sendSettled).toBe(false);
+    expect(sendSettled).toBe(true);
+    expect(await send).toBeInstanceOf(AdapterOutcomeUnknownError);
     expect(f.send).toHaveBeenCalledOnce();
     sent.resolve("native-message-id");
     await send;
     stalled.resolve(snapshot);
     await vi.advanceTimersByTimeAsync(0);
-    expect(f.session.status()).toBe("running");
+    expect(f.session.status()).toBe("unknown");
   });
 
   it("advertises native observations and atomic queue steering with strict request shapes", async () => {
@@ -627,8 +630,12 @@ describe("Copilot whole-session working status", () => {
     const f = await fixture(); const response = deferred<string>();
     f.send.mockImplementationOnce(async () => { await response.promise; throw new Error("late reply lost"); });
     const sending = f.session.execute({ harness: "copilot", command: { type: "send", prompt: "test", mode: "enqueue" } });
-    await f.session.stop(); response.resolve("release");
-    await expect(sending).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    const rejected = expect(sending).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    const stopping = f.session.stop();
+    expect(f.session.status()).toBe("stopped");
+    response.resolve("release");
+    await stopping;
+    await rejected;
     expect(f.session.status()).toBe("stopped");
   });
 
