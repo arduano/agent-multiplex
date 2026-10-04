@@ -15,6 +15,12 @@ unknown operation receipt into success. An optional process-local `beginClose`
 adapter hook retires read/attachment caller waits before Runtime drains them;
 backend `close` still owns and proves native cleanup.
 
+An SDK handle must match the requested native ID before publication. A wrong,
+otherwise unowned ID is privately detached while both requested and returned
+IDs remain fenced. A collision with another owned ID waits for backend
+shutdown: the pinned SDK detaches by native ID, so disconnecting that wrong
+handle could detach the existing correct controller.
+
 An adapter owns one `harness` and `adapterScopeId` and implements:
 
 - harness catalog, model, and native-session discovery;

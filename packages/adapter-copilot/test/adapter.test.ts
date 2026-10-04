@@ -88,6 +88,80 @@ class Client implements CopilotAdapterClient {
 }
 
 describe("CopilotAgentAdapter", () => {
+  it.each(["spawn", "resume"] as const)("rejects a mismatched %s ID without replacing or detaching a different correct owner", async operation => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const correct = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "already-owned" } });
+    const correctNative = client.sessions.get(correct.vendorSessionId)!;
+    const correctDisconnect = vi.spyOn(correctNative, "disconnect");
+    const wrong = new NativeSession(correct.vendorSessionId);
+    const wrongDisconnect = vi.spyOn(wrong, "disconnect");
+    if (operation === "spawn") vi.spyOn(client, "createSession").mockResolvedValueOnce(wrong);
+    else vi.spyOn(client, "resumeSession").mockResolvedValueOnce(wrong);
+    const failed = operation === "spawn"
+      ? adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "requested-other" } })
+      : adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: "requested-other", continuePendingWork: false });
+    await expect(failed).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    await expect(adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: "requested-other", continuePendingWork: false }))
+      .rejects.toMatchObject({ code: "CONFLICT" });
+    // SDK disconnect is session-ID based. Cleanup must not detach either
+    // object while that ID belongs to the existing correct controller.
+    expect(wrongDisconnect).not.toHaveBeenCalled();
+    expect(correctDisconnect).not.toHaveBeenCalled();
+    await expect(correct.execute({ harness: "copilot", command: { type: "send", prompt: "mock-only fixture", mode: "enqueue" } }))
+      .resolves.toEqual({ messageId: "message-1" });
+    expect(wrong.sent).toHaveLength(0);
+    expect(await adapter.listSessions()).toMatchObject([{ vendorSessionId: "already-owned", availability: "active", runtimeEpoch: correct.runtimeEpoch }]);
+    await adapter.close();
+    expect(correctDisconnect).toHaveBeenCalledOnce();
+    expect(wrongDisconnect).not.toHaveBeenCalled();
+  });
+
+  it("never disconnects an exact existing native object returned under a different request ID", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const correct = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "same-native-object" } });
+    const native = client.sessions.get(correct.vendorSessionId)!;
+    const disconnect = vi.spyOn(native, "disconnect");
+    vi.spyOn(client, "resumeSession").mockResolvedValueOnce(native);
+    await expect(adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: "other-native-request", continuePendingWork: false }))
+      .rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    expect(disconnect).not.toHaveBeenCalled();
+    expect(await adapter.listSessions()).toMatchObject([{ vendorSessionId: correct.vendorSessionId, runtimeEpoch: correct.runtimeEpoch }]);
+    await adapter.close();
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("retains the requested and unowned returned-ID fences until a late wrong handle actually disconnects", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client(); const adapter = adapterFor(client);
+      let acknowledgeResume!: () => void; let acknowledgeDetach!: () => void;
+      const resumeGate = new Promise<void>(resolve => { acknowledgeResume = resolve; });
+      const detachGate = new Promise<void>(resolve => { acknowledgeDetach = resolve; });
+      const wrong = new NativeSession("unowned-wrong-native-id");
+      const disconnect = vi.spyOn(wrong, "disconnect").mockReturnValue(detachGate);
+      const request = vi.spyOn(client, "resumeSession").mockImplementationOnce(async () => { await resumeGate; return wrong; });
+      const options = { harness: "copilot" as const, cwd: "/repo", vendorSessionId: "requested-native-id", continuePendingWork: false };
+      const original = adapter.resume(options);
+      const failure = original.catch(error => error);
+      await vi.advanceTimersByTimeAsync(COPILOT_ATTACHMENT_TIMEOUT_MS);
+      expect(await failure).toBeInstanceOf(AdapterOutcomeUnknownError);
+      acknowledgeResume(); await vi.advanceTimersByTimeAsync(0);
+      expect(disconnect).toHaveBeenCalledOnce();
+      await expect(adapter.resume(options)).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(adapter.resume({ ...options, vendorSessionId: wrong.sessionId })).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(request).toHaveBeenCalledOnce();
+      expect(await adapter.listSessions()).toEqual([]);
+      // A detach deadline does not authorize releasing either reservation.
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(adapter.resume(options)).rejects.toMatchObject({ code: "CONFLICT" });
+      acknowledgeDetach(); await vi.advanceTimersByTimeAsync(0);
+      await expect(adapter.resume(options)).resolves.toMatchObject({ vendorSessionId: options.vendorSessionId });
+      expect(request).toHaveBeenCalledTimes(2);
+      await expect(original).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("traces native owner stages without allowing a diagnostic sink to affect their results", async () => {
     const client = new Client();
     const stages: Array<{ stage: string; outcome: string }> = [];

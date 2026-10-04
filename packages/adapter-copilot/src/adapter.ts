@@ -58,6 +58,7 @@ export const COPILOT_ATTACHMENT_TIMEOUT_MS = COPILOT_READ_TIMEOUT_MS;
 
 interface PendingAttachment {
   bridge: CopilotSessionBridge;
+  native?: CopilotNativeSession;
   cancel(): void;
 }
 
@@ -112,6 +113,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #providerModels: readonly string[];
   readonly #providerModelCapabilities: Readonly<Record<string, ModelCapabilities>>;
   readonly #active = new Map<string, CopilotAdapterSession>();
+  readonly #nativeOwners = new WeakSet<CopilotNativeSession>();
   readonly #attachments = new Map<string, PendingAttachment>();
   readonly #reads = new CopilotReadRequests();
   #startPromise: Promise<void> | undefined;
@@ -287,6 +289,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     }
     if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
+      vendorSessionId,
       native,
       options.cwd,
       bridge,
@@ -375,6 +378,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     }
     if (this.#closed) return this.rejectLateAttachment(native, bridge);
     const session = this.attach(
+      options.vendorSessionId,
       native,
       cwd,
       bridge,
@@ -500,11 +504,18 @@ export class CopilotAgentAdapter implements AgentAdapter {
   }
 
   private attach(
+    expectedSessionId: string,
     native: CopilotNativeSession,
     cwd: string | null,
     bridge: CopilotSessionBridge,
     settings: HarnessSessionSettings,
   ): CopilotAdapterSession {
+    // Validate before replacing any existing map entry or releasing a request
+    // reservation. SDK identity mistakes cannot become a second logical owner.
+    if (native.sessionId !== expectedSessionId || this.#attachments.get(expectedSessionId)?.bridge !== bridge ||
+      this.#active.has(expectedSessionId)) {
+      throw new AdapterOutcomeUnknownError("Copilot native attachment does not match its reserved ownership fence");
+    }
     const session = new CopilotAdapterSession({
       adapterScopeId: this.adapterScopeId,
       cwd,
@@ -515,11 +526,13 @@ export class CopilotAgentAdapter implements AgentAdapter {
       reads: this.#reads,
       onOwnershipDiagnostic: record => this.ownershipDiagnostic(record),
       onStopped: () => {
+        this.#nativeOwners.delete(native);
         if (this.#active.get(native.sessionId) === session) {
           this.#active.delete(native.sessionId);
         }
       },
     });
+    this.#nativeOwners.add(native);
     this.#active.set(native.sessionId, session);
     if (this.#attachments.get(native.sessionId)?.bridge === bridge) this.#attachments.delete(native.sessionId);
     return session;
@@ -542,7 +555,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     let settled = false;
     let dispatched = false;
     const result = new Promise<CopilotNativeSession>((resolve, reject) => { finish = resolve; fail = reject; });
-    const abandon = (cause: unknown, outcome: "retired" | "timedOut"): void => {
+    const abandon = (cause: unknown, outcome: "retired" | "timedOut" | "unacknowledged"): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -560,12 +573,23 @@ export class CopilotAgentAdapter implements AgentAdapter {
       this.ownershipDiagnostic({ vendorSessionId: sessionId, stage: "attachment", outcome: "dispatched" });
       return action();
     }).then(native => {
+      if (native.sessionId !== sessionId) {
+        entry.native = native;
+        abandon(new Error("Copilot SDK returned a different native session identity"), "unacknowledged");
+        // Keep the requested-key reservation through cleanup. Also fence an
+        // otherwise unowned actual ID; never overwrite an existing owner/fence.
+        if (!this.#active.has(native.sessionId) && !this.#attachments.has(native.sessionId)) {
+          this.#attachments.set(native.sessionId, entry);
+        }
+        void this.detachLateAttachment(native, bridge, sessionId).catch(() => undefined);
+        return;
+      }
       this.ownershipDiagnostic({ vendorSessionId: sessionId, stage: "attachment", outcome: settled ? "lateAcknowledged" : "acknowledged",
         ...(native.incidentTraceAttachmentId === undefined ? {} : { attachmentId: native.incidentTraceAttachmentId }) });
       if (settled || this.#closed) {
         // This handle was never handed to Runtime. Do not publish late events
         // or admit another SDK owner until its exact disconnect acknowledges.
-        void this.detachLateAttachment(native, bridge).catch(() => undefined);
+        void this.detachLateAttachment(native, bridge, sessionId).catch(() => undefined);
         return;
       }
       settled = true;
@@ -585,12 +609,23 @@ export class CopilotAgentAdapter implements AgentAdapter {
     return result;
   }
 
-  private async detachLateAttachment(native: CopilotNativeSession, bridge: CopilotSessionBridge): Promise<void> {
+  private async detachLateAttachment(native: CopilotNativeSession, bridge: CopilotSessionBridge, expectedSessionId = native.sessionId): Promise<void> {
     bridge.close();
+    const actualFence = this.#attachments.get(native.sessionId);
+    if (this.#nativeOwners.has(native) || this.#active.has(native.sessionId) || actualFence && actualFence.bridge !== bridge) {
+      // A malformed response can even reuse the correct owner's exact object.
+      // SDK disconnect detaches by native ID, so even a DISTINCT returned
+      // object colliding with an existing owner cannot be safely disconnected.
+      // Retain it for whole-owner shutdown without disrupting the correct one.
+      this.ownershipDiagnostic({ vendorSessionId: expectedSessionId, stage: "detach", outcome: "unacknowledged" });
+      throw new AdapterOutcomeUnknownError("Copilot mismatched attachment references an already owned native handle; Host recovery is required");
+    }
     this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "detach", outcome: "dispatched" });
     const released = Promise.resolve().then(() => native.disconnect()).then(() => {
       this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "detach", outcome: "acknowledged" });
-      if (this.#attachments.get(native.sessionId)?.bridge === bridge) this.#attachments.delete(native.sessionId);
+      for (const key of [expectedSessionId, native.sessionId]) {
+        if (this.#attachments.get(key)?.bridge === bridge) this.#attachments.delete(key);
+      }
     });
     const result = await settleWithin(released, COPILOT_SESSION_DISCONNECT_TIMEOUT_MS);
     if (result.status !== "fulfilled") {
