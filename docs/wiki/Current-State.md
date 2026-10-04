@@ -5,11 +5,11 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
+Last reconciled: 2026-10-04 (hotfix.28 published and source/package qualified; consumer activation is recorded separately).
 
-## October 4 Copilot recovery correction candidate
+## October 4 Copilot recovery correction — published hotfix.28
 
-The lockstep `.28` candidate bounds native attachment and read caller waits,
+The lockstep `.28` release bounds native attachment and read caller waits,
 retains uncertain native ownership until acknowledgement, and retires those
 caller waits before Runtime shutdown drains. Exact native identity validation
 protects other attached sessions. Failed current activity observation withdraws
@@ -19,9 +19,13 @@ metadata. Public/persisted schemas, migrations and SDK/transport pins are unchan
 
 Published `.27` can reopen the unchanged reduced lifecycle state; private facts
 are not persisted as a separate journal. Initial SDK startup and native mutation
-waits remain a broader shutdown limitation. Source/package qualification and
-immutable publication are coordinator-owned; no installed activation or model
-call is claimed here. Consumer Windows/Gateway updates belong to Leo's handoff.
+waits remain a broader shutdown limitation. Source typecheck/build, **1,343 tests
+(eight skipped)**, checkpoint/docs/release/secrets gates and all **16 isolated
+packed consumers** passed. Signed tag `hotfix-2026-10-04.1` publishes exact source
+`b00fd3a43981a79f28d377f0e984410dda942e23`; all **19** independently downloaded
+release assets match. No npm stable promotion or native model acceptance is
+claimed. Consumer Windows/Gateway activation and original-incident causal limits
+belong to Leo's handoff; the signed source/tag bytes remain unchanged.
 See [the recovery contract](../design/copilot-session-lifecycle-vnext.md).
 
 ## Historical message delivery correction — October 3, 2026
