@@ -89,7 +89,7 @@
     "publint": "0.3.24",
     "tsx": "4.20.5",
     "typescript": "5.9.2",
-    "vitest": "3.2.7",
+    "vitest": "4.1.11",
     "ws": "8.21.3"
   },
   "overrides": {
@@ -97,7 +97,10 @@
     "@momics/iroh-http-node": "$@momics/iroh-http-node",
     "@momics/iroh-http-shared": "$@momics/iroh-http-shared",
     "@trpc/client": "11.18.0",
-    "@trpc/server": "11.18.0"
+    "@trpc/server": "11.18.0",
+    "fast-uri": "3.1.8",
+    "ip-address": "10.7.3",
+    "http-cache-semantics": "4.3.0"
   },
   "allowScripts": {
     "esbuild@0.25.12": true,

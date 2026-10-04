@@ -19,6 +19,16 @@ schemas, migrations and SDK/transport pins are unchanged; `.27`/`.28` omit this
 capability. Focused source regressions passed; full combined release qualification,
 publication and consumer activation remain coordinator-owned. No model or live
 operation is claimed. See [the lifecycle contract](../design/copilot-session-lifecycle-vnext.md#binding-replacement-and-late-work).
+## October 4 development dependency candidate
+
+An isolated development-only candidate upgrades Vitest to patched **4.1.11**,
+retains reviewed fast-uri 3.1.8/ip-address 10.7.3, and selects newly published
+http-cache-semantics 4.3.0 within its consumer's supported range. Fresh full and
+production audits are zero. Strict script policy and runtime dependency identities
+are unchanged; no release/version/deployment mutation is included.
+[Source scope, security negative control and limits](../audits/b20-development-stack-20261004.md)
+own this candidate. Typecheck/build, 1,343 tests, checkpoint/docs/release/secrets
+and four security regressions pass; consumer integration owns native activation.
 
 ## October 4 Copilot recovery correction — published hotfix.28
 
