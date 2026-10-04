@@ -98,6 +98,8 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 import {
+  ADAPTER_NATIVE_STATE_VALIDATION_REASONS,
+  AdapterNativeStateValidationError,
   AdapterOutcomeUnknownError,
   type AdapterEvent,
   type AdapterInteractionEvent,
@@ -1086,16 +1088,19 @@ export class RuntimeNodeService {
     }
     if (request.harness === "copilot" && observation) {
       if (!result.payload || typeof result.payload !== "object" || Array.isArray(result.payload)) {
-        throw new TypeError("Copilot lifecycle observation returned a malformed payload");
+        throw new AdapterNativeStateValidationError("projectionMalformed");
       }
       const data = result.payload;
       if (request.view === "tasks") {
-        if (!Array.isArray(data.tasks)) throw new TypeError("Copilot task observation omitted its complete task list");
-        const fact = lifecycleFactSchema.parse({ type: "tasksObserved", revision: observation.tasks.revision,
-          items: data.tasks.map((task) => {
-            const value = task as Record<string, JsonValue>;
-            return { id: value.id, kind: value.type, status: value.status };
-          }) });
+        if (!Array.isArray(data.tasks)) throw new AdapterNativeStateValidationError("projectionMalformed");
+        let fact: LifecycleFact;
+        try {
+          fact = lifecycleFactSchema.parse({ type: "tasksObserved", revision: observation.tasks.revision,
+            items: data.tasks.map((task) => {
+              const value = task as Record<string, JsonValue>;
+              return { id: value.id, kind: value.type, status: value.status };
+            }) });
+        } catch { throw new AdapterNativeStateValidationError("projectionMalformed"); }
         this.#appendLifecycle(sessionId, active, fact);
       }
       if (request.view === "pendingMessages") {
@@ -2796,7 +2801,7 @@ export class RuntimeNodeService {
     const task = this.#readNativeState(sessionId, { harness: "copilot", view }, binding, true);
     void task.then(
       () => this.#settleLifecycleObservation(sessionId, binding, view, revision, generation),
-      () => this.#settleLifecycleObservation(sessionId, binding, view, revision, generation, true),
+      error => this.#settleLifecycleObservation(sessionId, binding, view, revision, generation, { error }),
     );
   }
 
@@ -2806,8 +2811,9 @@ export class RuntimeNodeService {
     view: LifecycleRefreshView,
     revision: number,
     generation: number,
-    failed = false,
+    failure?: { readonly error: unknown },
   ): void {
+    const failed = failure !== undefined;
     const coordinator = binding.lifecycleObservations;
     const lane = coordinator.lanes[view];
     const deadlineAgeMs = lane.requestedAt === 0 ? 0 : Math.max(0, Date.now() - lane.requestedAt);
@@ -2825,7 +2831,12 @@ export class RuntimeNodeService {
     const state = this.#lifecycle.read(fence);
     const currentRevision = view === "tasks" ? state.tasks.revision : state.queue.revision;
     this.#trace(binding, { kind: "observation", view, outcome: currentRevision !== revision ? "staleRevision" : failed ? "failed" : "accepted",
-      generation, revision, currentRevision, failures: lane.failures + (failed ? 1 : 0), deadlineAgeMs });
+      generation, revision, currentRevision, failures: lane.failures + (failed ? 1 : 0), deadlineAgeMs,
+      ...(failed && currentRevision === revision ? {
+        failureReason: failure.error instanceof AdapterNativeStateValidationError && ADAPTER_NATIVE_STATE_VALIDATION_REASONS.includes(failure.error.reason)
+          ? failure.error.reason : "nativeReadFailed",
+        ...(failure.error instanceof AdapterNativeStateValidationError && failure.error.issues.length > 0 ? { validationIssues: failure.error.issues } : {}),
+      } : {}) });
     if (currentRevision !== revision) {
       // The invalidation callback already requested the newer revision. Ensure
       // it cannot be lost even when a malformed adapter omitted that callback.

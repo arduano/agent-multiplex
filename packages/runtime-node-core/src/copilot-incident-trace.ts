@@ -1,5 +1,5 @@
 import { lifecycleActionAvailability, type LifecycleFact, type LifecycleState, type NativeGapDiagnostic } from "@arduano/agent-multiplex-protocol";
-import type { AdapterEvent } from "./adapter.js";
+import type { AdapterEvent, AdapterNativeStateValidationIssue, AdapterNativeStateValidationReason } from "./adapter.js";
 import { nativeDiagnosticEventType, type NativeDiagnosticEventType } from "./native-event-diagnostics.js";
 
 /** Embedding capability only; no wire, persisted-state or lifecycle version change. */
@@ -61,7 +61,9 @@ export type CopilotIncidentTraceDetail =
       readonly ingressOrdinal?: number; readonly nativeEventOrdinal?: number; readonly state?: CopilotIncidentStateSummary }
   | { readonly kind: "observation"; readonly view: "tasks" | "pendingMessages"; readonly outcome: "started" | "accepted" | "failed" | "stalled" | "staleRevision" | "retiredBinding" | "staleGeneration" | "fenceUnavailable";
       readonly generation: number; readonly revision?: number; readonly currentRevision?: number; readonly failures: number;
-      readonly deadlineAgeMs: number; readonly diagnosticId?: string }
+      readonly deadlineAgeMs: number; readonly diagnosticId?: string;
+      readonly failureReason?: AdapterNativeStateValidationReason | "nativeReadFailed";
+      readonly validationIssues?: readonly AdapterNativeStateValidationIssue[] }
   | { readonly kind: "recovery"; readonly outcome: "scheduled" | "requested" | "recovered" | "retiredBinding" | "fenceUnavailable" | "alreadyRecovered";
       readonly generation: number; readonly diagnosticId?: string };
 

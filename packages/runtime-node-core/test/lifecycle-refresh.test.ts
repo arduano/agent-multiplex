@@ -28,6 +28,7 @@ import {
   RuntimeNodeStore,
   RuntimeLifecycleJournal,
   AdapterOutcomeUnknownError,
+  AdapterNativeStateValidationError,
   type AdapterEvent,
   type AdapterNativeStateResult,
   type AdapterSession,
@@ -365,6 +366,8 @@ describe("server-owned Copilot lifecycle refresh", () => {
       });
     }, { timeout: 3_000 });
     expect(taskReads).toBe(3);
+    expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "failed", failureReason: "nativeReadFailed" }));
+    expect(JSON.stringify(f.traces)).not.toContain("transient task read");
   });
 
   it("treats malformed successful observations as failures and retries them", async () => {
@@ -383,6 +386,20 @@ describe("server-owned Copilot lifecycle refresh", () => {
       expect((await lifecycleState(f)).tasks.observation.state).toBe("observed");
     }, { timeout: 2_000 });
     expect(taskReads).toBe(2);
+    expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "failed", failureReason: "projectionMalformed" }));
+  });
+
+  it("allowlists a validation error reason again at the emitted trace boundary", async () => {
+    const error = new AdapterNativeStateValidationError("snapshotMalformed");
+    Object.assign(error, { reason: "private-reason-sentinel" });
+    const f = await fixture(async (_session, request) => {
+      if (request.harness === "copilot" && request.view === "tasks") throw error;
+      return queueResult;
+    });
+    await vi.waitFor(() => expect(f.traces).toContainEqual(expect.objectContaining({
+      kind: "observation", view: "tasks", outcome: "failed", failureReason: "nativeReadFailed",
+    })));
+    expect(JSON.stringify(f.traces)).not.toContain("private-reason-sentinel");
   });
 
   it("runs at most one task or queue observation for a binding", async () => {
@@ -539,6 +556,10 @@ describe("server-owned Copilot lifecycle refresh", () => {
       expect(state.tasks).toMatchObject({ revision: 2, observation: { state: "observed" } });
     });
     expect(reads.filter(request => request.harness === "copilot" && request.view === "tasks")).toHaveLength(taskReadsBefore + 2);
+    const stale = f.traces.find(trace => trace.kind === "observation" && trace.view === "tasks" && trace.outcome === "staleRevision" && trace.revision === 1);
+    expect(stale).toBeDefined();
+    expect(stale).not.toHaveProperty("failureReason");
+    expect(stale).not.toHaveProperty("validationIssues");
   });
 
   it("keeps caller-initiated native reads observationally pure", async () => {

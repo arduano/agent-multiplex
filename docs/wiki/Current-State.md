@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-04 (immutable signed hotfix.29 published; native consumer activation remains separate).
+Last reconciled: 2026-10-04 (immutable signed hotfix.29 published; task-read diagnostic correction is unpublished).
 
 ## Published aggregate ownership hotfix.29
 
@@ -24,6 +24,18 @@ model or deployed acceptance is implied. Earlier `.28` publication remains
 immutable. [Evidence and limits](../audits/hotfix29-release-qualification-20261004.md)
 own this release; consumer maintenance uses its separately staged exact payload.
 
+
+## October 4 Copilot task-read diagnostic source correction
+
+Two installed disposable child runs reached root idle but retained task-read
+retrying; corrected WSL traces confirm current-revision rejection. The exact
+rejected response was lost after Runtime recovery. An unpublished source
+correction preserves bounded known field paths,
+validation codes and value types in the private failed-observation trace. Strict
+schemas, genuine uncertainty and revision/binding fences are unchanged. Controlled
+source regressions do not establish the original malformed shape. Published `.29`
+remains immutable; qualification/publication requires another version.
+See [the investigation and causal limits](../audits/copilot-child-task-observation-20261004.md).
 
 ## October 4 read-only Copilot agents source candidate
 

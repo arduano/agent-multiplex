@@ -354,6 +354,10 @@ All views require an active binding and preserve native absence (`{}` or
 `{ progress: null }`). No view resumes sessions or scans native history. Lists
 are bounded to 1,000 entries and the native wire envelope; progress has the same
 wire bound. Oversized, malformed or unsupported snapshots fail explicitly.
+The private incident hook can retain a fixed failed-read reason plus bounded
+known field paths, validation codes and value types. It captures no rejected
+task contents and leaves lifecycle uncertainty intact; see the
+[trace contract](../design/copilot-session-lifecycle-vnext.md#private-incident-trace).
 Refresh and list share one 15-second caller deadline and one coalesced read lane.
 A timed-out native request retains that lane until settlement, and an expired
 refresh cannot dispatch a later list. Progress reads similarly share a lane and

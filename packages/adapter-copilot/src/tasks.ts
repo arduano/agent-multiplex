@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { NATIVE_PAYLOAD_MAX_BYTES, jsonWireByteUpperBound, type JsonValue } from "@arduano/agent-multiplex-protocol";
+import { AdapterNativeStateValidationError, ADAPTER_NATIVE_STATE_DIAGNOSTIC_FIELDS,
+  ADAPTER_NATIVE_STATE_VALIDATION_CODES, type AdapterNativeStateValidationIssue } from "@arduano/agent-multiplex-runtime-node-core";
 import { copilotJson } from "./json.js";
 
 /** Native task fields remain native-owned; validate control-relevant fields and
@@ -40,10 +42,40 @@ const schemas = {
 
 export type CopilotTaskView = "tasks" | "taskProgress" | "currentPromotableTask";
 export function taskId(value: unknown): string { return id.parse(value); }
-export function taskSnapshot(view: CopilotTaskView, value: unknown): JsonValue {
-  if (jsonWireByteUpperBound(value) + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
-    throw new Error("Copilot tasks exceed the bounded native state envelope");
+function validationIssue(value: unknown, issue: z.core.$ZodIssue): AdapterNativeStateValidationIssue {
+  let actual = value;
+  for (const segment of issue.path) {
+    // Native JSON fields are own data properties. Never invoke an accessor just
+    // to describe a malformed snapshot, or serialize any rejected value.
+    if (actual === null || (typeof actual !== "object" && typeof actual !== "function")) { actual = undefined; break; }
+    actual = Object.getOwnPropertyDescriptor(actual, segment)?.value;
   }
-  if (!schemas[view].safeParse(value).success) throw new TypeError(`Unrecognized Copilot ${view} snapshot`);
+  return {
+    path: issue.path.slice(0, 8).map(segment => typeof segment === "number" && Number.isSafeInteger(segment) && segment >= 0
+      ? Math.min(segment, 1_000) : ADAPTER_NATIVE_STATE_DIAGNOSTIC_FIELDS.includes(segment as never) ? segment as AdapterNativeStateValidationIssue["path"][number] : "unknownField"),
+    code: ADAPTER_NATIVE_STATE_VALIDATION_CODES.includes(issue.code) ? issue.code : "unknownIssue",
+    valueType: actual === null ? "null" : actual instanceof Date ? "date" : Array.isArray(actual) ? "array"
+      : typeof actual === "undefined" ? "undefined" : typeof actual === "string" ? "string" : typeof actual === "number" ? "number"
+      : typeof actual === "boolean" ? "boolean" : typeof actual === "object" ? "object" : "other",
+  };
+}
+export function taskSnapshot(view: CopilotTaskView, value: unknown): JsonValue {
+  let wireBytes: number;
+  try { wireBytes = jsonWireByteUpperBound(value); }
+  catch {
+    // The wire check still precedes schema admission. A Date in a known field
+    // can have a useful schema diagnostic, without admitting or converting it.
+    let issues: AdapterNativeStateValidationIssue[] = [];
+    try {
+      const result = schemas[view].safeParse(value);
+      if (!result.success) issues = result.error.issues.slice(0, 8).map(issue => validationIssue(value, issue));
+    } catch { /* Uninspectable/cyclic data retains only the fixed wire reason. */ }
+    throw new AdapterNativeStateValidationError("snapshotWireInvalid", issues);
+  }
+  if (wireBytes + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
+    throw new AdapterNativeStateValidationError("snapshotTooLarge");
+  }
+  const result = schemas[view].safeParse(value);
+  if (!result.success) throw new AdapterNativeStateValidationError("snapshotMalformed", result.error.issues.slice(0, 8).map(issue => validationIssue(value, issue)));
   return copilotJson(value);
 }

@@ -231,6 +231,16 @@ decision. Observation and recovery records explain stale revision/generation,
 retired binding, retry/stall and deadline decisions. The trace is best effort;
 suppression is explicit and missing records cannot prove event absence.
 
+A current-revision failed observation may include a fixed `failureReason` and
+up to eight `validationIssues`. Each issue contains only an allowlisted field
+path (at most eight segments, numeric indices saturated at 1,000), fixed issue
+code and actual value type. Unknown path names become `unknownField`. Snapshot
+schema, wire-size, invalid-wire-data, lifecycle-projection and generic native
+read failures are distinct reasons. No rejected value, enum contents, unknown
+key, nested vendor error or exception message is retained. These fields do not
+change retry/fence precedence or turn a failed snapshot into task certainty.
+Embedding loggers must copy only the bounded allowlisted structure.
+
 Dispatch is asynchronous and never awaited by native or reducer work. The core
 queue is bounded to 128 records and at most one pending hook Promise; a slow,
 throwing or rejected hook cannot add retries or change session outcomes. Hosts
