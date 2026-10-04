@@ -5,9 +5,9 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-04 (hotfix.29 combined source candidate; publication and consumer activation remain pending).
+Last reconciled: 2026-10-04 (immutable signed hotfix.29 published; native consumer activation remains separate).
 
-## Combined hotfix.29 release candidate
+## Published aggregate ownership hotfix.29
 
 Lockstep `.29` combines bounded recursive archive queries, retained native startup,
 mutation/permission ownership, command admission before the binding lock, active-
@@ -17,11 +17,12 @@ migration or vendor SDK/transport pin changes. New `agents` read request require
 coordinated protocol/control/runtime/Gateway packages. Child registration is
 configuration evidence; actual execution model must be verified independently.
 
-Patched Vitest4 and optional tooling dependencies are development-only. Exact
-merged source/package/Docker gates and immutable signed prerelease publication
-are being performed by the release coordinator. No native model or deployed
-acceptance is implied by this candidate. The earlier `.28` publication remains
-immutable. Consumer maintenance uses its exact independently staged payload.
+Patched Vitest4 and optional tooling dependencies are development-only. Exact merged source gates passed 1,401 tests, all 16 isolated packed consumers
+and SBOM generation; all 19 public assets match. Signed `hotfix-2026-10-04.2`
+binds artifact source `b9d537d2d31088e5a41d20af8b8c3de4c393e0ec`. No native
+model or deployed acceptance is implied. Earlier `.28` publication remains
+immutable. [Evidence and limits](../audits/hotfix29-release-qualification-20261004.md)
+own this release; consumer maintenance uses its separately staged exact payload.
 
 
 ## October 4 read-only Copilot agents source candidate
