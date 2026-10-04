@@ -4,11 +4,14 @@ const MAX_PENDING_READS = 256;
 interface PendingRead {
   identity: string;
   result: Promise<unknown>;
+  deadlineAt: number;
   close(): void;
 }
 
 /** No new native observation was made; preserve newer observed settings. */
-export class CopilotReadBusyError extends Error {}
+export class CopilotReadBusyError extends Error {
+  public constructor(message: string, public readonly stalled = false) { super(message); }
+}
 
 /** Bound caller wait without pretending the SDK cancelled its native request.
  * A timed-out lane remains occupied until the native call settles. In particular,
@@ -31,7 +34,7 @@ export class CopilotReadRequests {
     const pending = this.#pending.get(lane);
     if (pending) {
       if (pending.identity !== identity) {
-        return Promise.reject(new CopilotReadBusyError("Copilot native read is already in progress; retry after it settles"));
+        return Promise.reject(new CopilotReadBusyError("Copilot native read is already in progress; retry after it settles", Date.now() >= pending.deadlineAt));
       }
       return pending.result as Promise<T>;
     }
@@ -43,7 +46,7 @@ export class CopilotReadRequests {
     let reject!: (reason: unknown) => void;
     let finished = false;
     const result = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    const entry: PendingRead = { identity, result, close: () => {
+    const entry: PendingRead = { identity, result, deadlineAt: Date.now() + timeoutMs, close: () => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);

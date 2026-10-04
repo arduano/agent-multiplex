@@ -212,7 +212,7 @@ describe("runtime-owned lifecycle dimensions", () => {
     expect(projectLifecycle(s)).toBe("Unknown");
     expect(lifecycleProjection(s).view).toMatchObject({
       status: "unknown",
-      health: { state: "healthy", issues: [] },
+      health: { state: "recovering", issues: [{ scope: "lifecycle", code: "observationPending" }] },
       actions: {
         send: { available: true, reason: "available" },
         steer: { available: false, reason: "notWorking" },
@@ -422,7 +422,7 @@ describe("runtime-owned lifecycle dimensions", () => {
     expect(projectLifecycle(migrated)).toBe("Unknown");
     expect(lifecycleProjection(migrated).view).toMatchObject({
       status: "unknown",
-      health: { state: "healthy", issues: [] },
+      health: { state: "recovering", issues: [{ scope: "lifecycle", code: "observationPending" }] },
     });
 
     migrated = step(migrated, { type: "rootStarted", cycleId: "migrated-cycle" });

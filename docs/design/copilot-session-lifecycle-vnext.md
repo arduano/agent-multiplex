@@ -54,7 +54,7 @@ version `6` so a later lifecycle revision can be negotiated deliberately.
 | `nextSequence` | Nonnegative integer | Next runtime lifecycle-evidence sequence for this exact fence. Duplicate/old evidence is ignored. A jump invalidates certainty. |
 | `continuity` | `continuous \| gap` | Whether projection has an unbroken baseline for the current foreground cycle. An authoritative replacement snapshot or new fence can clear a gap. A uniquely identified later root start establishes continuity for its new foreground cycle; a later root whole-session idle establishes a quiescent root boundary. Other invalidated dimensions retain their own unknown markers. |
 | `lastGap` | Optional bounded diagnostic | The latest gap's ID, time, fixed failure stage and event kind, queue counts, and optional error class. It contains no SDK payload, message text or exception text and remains available after an idle event for incident correlation. It is evidence about runtime admission, not a certificate of recovered interaction state. |
-| `aggregateActivity` | `unknown \| active \| inactive` | The SDK's `metadata.activity()` bit covers root turns **or** tasks. It may block a Ready/Finished projection while active, but cannot start, finish, or identify a root cycle. A gap resets it to unknown. |
+| `aggregateActivity` | `unknown \| active \| inactive` | The SDK's `metadata.activity()` bit covers root turns **or** tasks. It may block a Ready/Finished projection while active, but cannot start, finish, or identify a root cycle. A gap or current-revision failed activity observation resets it to unknown. |
 | `nativeAdmission` | `{state: open \| degraded, diagnosticId?}` | Runtime-owned native-read health for this binding. Degraded blocks further Copilot mutations and starts a bounded recovery deadline. Only fresh task and queue observations can reopen it. It persists across restart until a new binding is established. |
 | `root` | `{phase, cycle, outcome}` | Root model/session dimension. `phase` is `unknown`, `paused`, `idle`, or `working`; `paused` means the model loop paused or an aggregate inactive read paused a working root, while `idle` requires a whole-session idle, explicit root failure or certified cold resume. `cycle` is the unique observed root-start event ID or `null`; `outcome` is `none`, `finished`, `interrupted`, or `failed`. A new explicit root start clears the prior outcome. |
 | `tasks` | `{revision, observation, items}` | Complete bounded task observation for one invalidation revision. `observation` is `pending`, `retrying`, or `observed`, with a failure count, optional safe diagnostic ID, and monotonic `stalled` marker for that revision. Retained items before `observed` are diagnostic only and cannot prove current presence or absence. |
@@ -166,6 +166,20 @@ never an empty snapshot. The SDK call has no `AbortSignal`; after the caller's
 15-second bound the adapter retains that exact native request until it settles,
 so retries cannot pile onto the same native lane.
 
+Aggregate activity uses the adapter's native-transition revision fence. A
+current-revision failure emits the private `sessionActivityUnavailable` fact:
+aggregate activity becomes unknown and a previously working root becomes
+unknown, while its cycle/outcome and all independent task, queue, child and
+interaction facts remain intact. Public health uses the existing lifecycle
+`observationPending` issue until activity is known. This ordinary observation
+uncertainty does not degrade native admission or disable Send/settings.
+A busy activity lane preserves newer native evidence during its original
+15-second budget; after that deadline a new poll reports current-revision
+uncertainty without issuing another native request. The unresolved lane remains
+owned until settlement, and a late reply cannot update the expired observation.
+Native root starts and whole-session idle remain independent recovery evidence;
+an inactive snapshot alone cannot invent completion.
+
 At 45 seconds without a successful requested observation, the runtime marks the
 binding degraded with a safe diagnostic ID. It rejects further Copilot
 mutations for that binding while retaining Stop and shutdown recovery. A later
@@ -235,6 +249,7 @@ Original incidents cannot acquire this missing evidence retroactively.
 | `rootModelIdle` | Exact envelope | Set root phase to `paused`; retain cycle and outcome | Whole-session drain, Ready or Finished |
 | `sessionActivityObserved(active=true)` | Fresh SDK aggregate activity read | Set aggregate activity `active`; retain root cycle, phase, and outcome | Root work, a new cycle identity, task identity or command cause |
 | `sessionActivityObserved(active=false)` | Fresh SDK aggregate activity read | Set aggregate activity `inactive`; if root was working, mark it only `paused` | Whole-session idle, Ready, Finished or a changed root outcome |
+| `sessionActivityUnavailable` | Current adapter activity revision; read rejected, malformed, expired or blocked by an expired native lane | Set aggregate activity `unknown`; change only a working root phase to `unknown`; retain cycle/outcome and independent work/input dimensions | Completion, an interaction gap, closed native admission or cancellation of the unresolved SDK call |
 | `nativeObservationDegraded(diagnosticId)` | Runtime's 45-second task/queue read watchdog or failed read | Set binding admission `degraded`; block new Copilot mutations and start the 120-second recovery deadline | Native process failure or command outcome |
 | `nativeObservationRecovered` | Both exact-revision task and queue observations are fresh | Reopen binding admission; cancel recovery deadline | Root completion or interaction completeness |
 | `rootFailed` | Root-owned native failure | Set phase `idle` and outcome `failed`; failure is the dominant terminal observation until a new root cycle | Background task cancellation |

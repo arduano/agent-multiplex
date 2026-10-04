@@ -406,8 +406,9 @@ export class CopilotSessionBridge {
   }
 
   public activityUnavailable(expectedRevision: number): void {
-    if (this.#closed || expectedRevision !== this.#activityRevision || this.waitingForInput()) return;
-    if (this.#status === "running" || this.#status === "idle") this.setStatus("unknown");
+    if (this.#closed || expectedRevision !== this.#activityRevision) return;
+    this.emit({ kind: "lifecycle", fact: { type: "sessionActivityUnavailable" } });
+    if (!this.waitingForInput() && (this.#status === "running" || this.#status === "idle")) this.setStatus("unknown");
   }
 
   public settings(settings: HarnessSessionSettings): void {
@@ -694,7 +695,11 @@ export class CopilotAdapterSession implements AdapterSession {
     } catch (error) {
       // Lack of a response proves neither progress nor completion. A newer
       // native event or pending interaction still wins this observation fence.
-      if (!(error instanceof CopilotReadBusyError)) this.#bridge.activityUnavailable(revision);
+      // A younger busy lane has not made an observation about this revision.
+      // Once its original deadline expires, repeated polling cannot silently
+      // preserve healthy Working forever. Retain the lane until native
+      // settlement, but expose bounded uncertainty for the current revision.
+      if (!(error instanceof CopilotReadBusyError) || error.stalled) this.#bridge.activityUnavailable(revision);
     }
   }
 

@@ -7,6 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-02 (hotfix.25 published and source/package/Docker qualified; consumer staging is separately recorded).
 
+## October 4 Copilot recovery correction candidate
+
+The lockstep `.28` candidate bounds native attachment and read caller waits,
+retains uncertain native ownership until acknowledgement, and retires those
+caller waits before Runtime shutdown drains. Exact native identity validation
+protects other attached sessions. Failed current activity observation withdraws
+healthy Working without inventing Finished or clearing interactions, children,
+tasks or queued inputs. Private ownership tracing records bounded stage/outcome
+metadata. Public/persisted schemas, migrations and SDK/transport pins are unchanged.
+
+Published `.27` can reopen the unchanged reduced lifecycle state; private facts
+are not persisted as a separate journal. Initial SDK startup and native mutation
+waits remain a broader shutdown limitation. Source/package qualification and
+immutable publication are coordinator-owned; no installed activation or model
+call is claimed here. Consumer Windows/Gateway updates belong to Leo's handoff.
+See [the recovery contract](../design/copilot-session-lifecycle-vnext.md).
+
 ## Historical message delivery correction — October 3, 2026
 
 The `.27` candidate separates old unconfirmed send/steer admissions into a

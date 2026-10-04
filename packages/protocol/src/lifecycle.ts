@@ -87,6 +87,9 @@ export const lifecycleFactSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("coldResumeQuiescent") }).strict(),
   z.object({ type: z.literal("rootFailed") }).strict(),
   z.object({ type: z.literal("sessionActivityObserved"), active: z.boolean() }).strict(),
+  // Adapter-private observation failure; public/persisted state shapes remain
+  // unchanged. Missing activity proves neither continued work nor quiescence.
+  z.object({ type: z.literal("sessionActivityUnavailable") }).strict(),
   z.object({ type: z.literal("nativeObservationDegraded"), diagnosticId }).strict(),
   z.object({ type: z.literal("nativeObservationRecovered") }).strict(),
   z.object({ type: z.literal("child"), id: childIdentitySchema, state: z.enum(["running", "settled", "completed", "failed"]) }).strict(),
@@ -188,6 +191,12 @@ export function reduceLifecycle(state: LifecycleState, evidence: LifecycleEviden
       // Inactivity can pause a known root but cannot settle its outcome.
       return { ...s, aggregateActivity: f.active ? "active" : "inactive",
         root: !f.active && s.root.phase === "working" ? { ...s.root, phase: "paused" } : s.root };
+    case "sessionActivityUnavailable":
+      // Preserve every independent work/interaction dimension and the known
+      // root cycle/outcome. An expired observation cannot keep that root
+      // advertised as presently Working, or certify it Finished instead.
+      return { ...s, aggregateActivity: "unknown",
+        root: s.root.phase === "working" ? { ...s.root, phase: "unknown" } : s.root };
     case "nativeObservationDegraded":
       return { ...s, nativeAdmission: { state: "degraded", diagnosticId: f.diagnosticId } };
     case "nativeObservationRecovered":
@@ -467,6 +476,9 @@ export function lifecycleProjection(state: LifecycleState): RuntimeLifecycleProj
     ...(state.nativeAdmission.diagnosticId === undefined ? {} : { diagnosticId: state.nativeAdmission.diagnosticId }) });
   if (state.continuity === "gap") issues.push({ scope: "lifecycle", code: "continuityGap",
     ...(state.lastGap ? { diagnosticId: state.lastGap.diagnosticId } : {}) });
+  if (state.continuity === "continuous" && state.aggregateActivity === "unknown") {
+    issues.push({ scope: "lifecycle", code: "observationPending" });
+  }
   for (const [scope, observation] of [["tasks", state.tasks.observation], ["queue", state.queue.observation]] as const) {
     if (observation.state === "pending") issues.push({ scope, code: "observationPending" });
     if (observation.state === "retrying") issues.push({
