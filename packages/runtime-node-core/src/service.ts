@@ -1734,6 +1734,14 @@ export class RuntimeNodeService {
   }
 
   async #close(): Promise<void> {
+    const errors: unknown[] = [];
+    // Copilot SDK caller deadlines cannot cancel upstream attachment/reads.
+    // Retire those caller waits before draining, preserving ownership inside
+    // the backend until its later close proves CLI termination. Other adapters
+    // retain their existing complete-operation drain semantics.
+    for (const { adapter } of this.#launchRegistry.backends()) {
+      try { adapter.beginClose?.(); } catch (error) { errors.push(error); }
+    }
     // Closing fences admission synchronously. Already admitted work retains its
     // adapter/provider access until its complete operation (including cleanup)
     // settles; failures remain visible through its original result or journal.
@@ -1744,7 +1752,7 @@ export class RuntimeNodeService {
     ]);
     this.#acceptingNativeEvents = false;
     await Promise.allSettled(this.#nativeEventTasks.keys());
-    const errors = await collectCleanupErrors([() => this.#terminals.close()]);
+    errors.push(...await collectCleanupErrors([() => this.#terminals.close()]));
     const sessionCleanup = await Promise.all([...this.#active.values()].map(async ({ session, unsubscribe }) => ({
       harness: session.harness,
       unsubscribeErrors: await collectCleanupErrors([unsubscribe]),

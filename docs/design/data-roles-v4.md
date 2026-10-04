@@ -733,11 +733,17 @@ no change to released migrations or role ownership.
 
 Runtime shutdown closes admission before draining all previously admitted
 native/provider operations, including commands, history, inventory, and
-interaction responses. Dependencies stay open until that work settles. It
+interaction responses. An adapter may synchronously retire its pending
+read/attachment caller waits through `beginClose`; this never certifies native
+cancellation or ownership release. Copilot uses that fence so an unresolved
+SDK resume cannot indefinitely hold the history/lifecycle lock during shutdown.
+Dependencies and uncertain native owners stay retained until that work settles. It
 then attempts terminal, session-handle, backend, and provider cleanup, waits
 for every attempt, and reports aggregate failures. Repeated close calls share
 the same completion; the embedding process closes SQLite afterward in
-`finally`. No new shutdown timeout or forced-cancellation policy is implied.
+`finally`. No general operation cancellation or generic provider shutdown
+timeout is implied. Copilot backend closure separately proves native owner
+termination before supervisor retry.
 
 The Codex RPC client separately gates ordinary requests on its complete
 initialization handshake. Closure fences unfinished preparation, retires the

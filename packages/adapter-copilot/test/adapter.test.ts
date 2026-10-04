@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   CopilotAgentAdapter,
+  COPILOT_ATTACHMENT_TIMEOUT_MS,
   type CopilotAdapterClient,
 } from "../src/adapter.js";
 import type {
@@ -87,6 +88,103 @@ class Client implements CopilotAdapterClient {
 }
 
 describe("CopilotAgentAdapter", () => {
+  it("traces native owner stages without allowing a diagnostic sink to affect their results", async () => {
+    const client = new Client();
+    const stages: Array<{ stage: string; outcome: string }> = [];
+    const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onOwnershipDiagnostic: record => {
+      stages.push(record);
+      throw new Error("diagnostic sink unavailable");
+    } });
+    const session = await adapter.resume({ harness: "copilot", vendorSessionId: "diagnostic-owner", cwd: "/repo", continuePendingWork: false });
+    await session.stop();
+    await adapter.close();
+    expect(stages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stage: "attachment", outcome: "dispatched" }),
+      expect.objectContaining({ stage: "attachment", outcome: "acknowledged" }),
+      expect.objectContaining({ stage: "detach", outcome: "dispatched" }),
+      expect.objectContaining({ stage: "detach", outcome: "acknowledged" }),
+      expect.objectContaining({ stage: "shutdown", outcome: "retired" }),
+      expect.objectContaining({ stage: "shutdown", outcome: "closed" }),
+    ]));
+  });
+  it("retains native ownership after uncertain detach and releases only on its exact acknowledgement", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client(); const adapter = adapterFor(client);
+      const session = await adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "uncertain-detach" } });
+      let acknowledge!: () => void;
+      const disconnected = new Promise<void>(resolve => { acknowledge = resolve; });
+      const disconnect = vi.spyOn(client.sessions.get(session.vendorSessionId)!, "disconnect").mockReturnValue(disconnected);
+      const originalStop = session.stop();
+      const originalFailure = originalStop.catch(error => error);
+      expect(session.stop()).toBe(originalStop);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await originalFailure).toBeInstanceOf(AdapterOutcomeUnknownError);
+      await expect(adapter.resume({ harness: "copilot", vendorSessionId: session.vendorSessionId, cwd: "/repo", continuePendingWork: false }))
+        .rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      expect(client.resumed).toHaveLength(0);
+      expect(disconnect).toHaveBeenCalledOnce();
+      expect(await adapter.listSessions()).toEqual([]);
+      acknowledge(); await vi.advanceTimersByTimeAsync(0);
+      await expect(session.stop()).resolves.toBeUndefined();
+      const resumed = await adapter.resume({ harness: "copilot", vendorSessionId: session.vendorSessionId, cwd: "/repo", continuePendingWork: false });
+      expect(resumed).not.toBe(session);
+      expect(client.resumed).toHaveLength(1);
+      await expect(originalStop).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("bounds unresolved resume, fences later attachments, and cleans a late handle before releasing ownership", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client(); const adapter = adapterFor(client);
+      let acknowledgeResume!: () => void; let acknowledgeDetach!: () => void;
+      const resumeGate = new Promise<void>(resolve => { acknowledgeResume = resolve; });
+      const detachGate = new Promise<void>(resolve => { acknowledgeDetach = resolve; });
+      const native = new NativeSession("late-resume-owner");
+      vi.spyOn(native, "disconnect").mockReturnValue(detachGate);
+      const request = vi.spyOn(client, "resumeSession").mockImplementationOnce(async () => { await resumeGate; return native; });
+      const options = { harness: "copilot" as const, vendorSessionId: native.sessionId, cwd: "/repo", continuePendingWork: false };
+      const originalResume = adapter.resume(options);
+      const originalFailure = originalResume.catch(error => error);
+      await vi.advanceTimersByTimeAsync(COPILOT_ATTACHMENT_TIMEOUT_MS);
+      expect(await originalFailure).toBeInstanceOf(AdapterOutcomeUnknownError);
+      await expect(adapter.resume(options)).rejects.toMatchObject({ code: "CONFLICT" });
+      acknowledgeResume(); await vi.advanceTimersByTimeAsync(0);
+      await expect(adapter.resume(options)).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(request).toHaveBeenCalledOnce();
+      expect(native.disconnect).toHaveBeenCalledOnce();
+      acknowledgeDetach(); await vi.advanceTimersByTimeAsync(0);
+      await expect(adapter.resume(options)).resolves.toMatchObject({ vendorSessionId: native.sessionId });
+      expect(request).toHaveBeenCalledTimes(2);
+      await expect(originalResume).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not retry an SDK attachment after an ambiguous native refusal", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    const resume = vi.spyOn(client, "resumeSession").mockRejectedValue(new Error("transport ended after dispatch"));
+    const options = { harness: "copilot" as const, vendorSessionId: "ambiguous-resume", cwd: "/repo", continuePendingWork: false };
+    await expect(adapter.resume(options)).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    await expect(adapter.resume(options)).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(resume).toHaveBeenCalledOnce();
+    await adapter.close();
+  });
+
+  it("serializes concurrent resumes of the same native session before SDK dispatch", async () => {
+    const client = new Client(); const adapter = adapterFor(client);
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    const request = vi.spyOn(client, "resumeSession").mockImplementationOnce(async id => { await gate; return new NativeSession(id); });
+    const options = { harness: "copilot" as const, vendorSessionId: "concurrent-resume", cwd: "/repo", continuePendingWork: false };
+    const first = adapter.resume(options);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+    await expect(adapter.resume(options)).rejects.toMatchObject({ code: "CONFLICT" });
+    release(); await first;
+    expect(request).toHaveBeenCalledOnce();
+    await adapter.close();
+  });
   it("reports a confirmed missing saved session as a recoverable failure without recreating it", async () => {
     const client = new Client(); const adapter = adapterFor(client);
     const nativeError = Object.assign(new Error(
@@ -131,10 +229,11 @@ describe("CopilotAgentAdapter", () => {
     const result = operation === "spawn"
       ? adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "late-attachment" } })
       : adapter.resume({ harness: "copilot", cwd: "/repo", vendorSessionId: "late-attachment", continuePendingWork: false });
+    const rejected = expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
     await vi.waitFor(() => expect(client.sessions.has("late-attachment")).toBe(true));
     await adapter.close(); release();
-    await expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
-    expect(client.sessions.get("late-attachment")?.disconnected).toBe(true);
+    await rejected;
+    await vi.waitFor(() => expect(client.sessions.get("late-attachment")?.disconnected).toBe(true));
   });
 
   it("does not return a session closed while attachment observations were pending", async () => {
@@ -147,9 +246,10 @@ describe("CopilotAgentAdapter", () => {
       return native;
     };
     const result = adapter.spawn({ harness: "copilot", cwd: "/repo", native: { sessionId: "late-observation" } });
+    const rejected = expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
     await vi.waitFor(() => expect(client.sessions.has("late-observation")).toBe(true));
     await adapter.close(); release();
-    await expect(result).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    await rejected;
     expect(client.sessions.get("late-observation")?.disconnected).toBe(true);
   });
 

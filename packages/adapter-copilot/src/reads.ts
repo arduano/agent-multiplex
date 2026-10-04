@@ -4,6 +4,7 @@ const MAX_PENDING_READS = 256;
 interface PendingRead {
   identity: string;
   result: Promise<unknown>;
+  close(): void;
 }
 
 /** No new native observation was made; preserve newer observed settings. */
@@ -15,8 +16,16 @@ export class CopilotReadBusyError extends Error {}
  * Only read-only calls belong here; mutations retain their outcome fences. */
 export class CopilotReadRequests {
   readonly #pending = new Map<string, PendingRead>();
+  #closed = false;
+
+  /** Retire caller waits during owner shutdown, without claiming cancellation. */
+  public close(): void {
+    this.#closed = true;
+    for (const pending of this.#pending.values()) pending.close();
+  }
 
   public read<T>(lane: string, identity: string, action: () => Promise<T>, deadlineAt?: number): Promise<T> {
+    if (this.#closed) return Promise.reject(new Error("Copilot native reads are closing"));
     const timeoutMs = Math.min(COPILOT_READ_TIMEOUT_MS, deadlineAt === undefined ? COPILOT_READ_TIMEOUT_MS : deadlineAt - Date.now());
     if (timeoutMs <= 0) return Promise.reject(new Error("Copilot native read timed out before its next page request"));
     const pending = this.#pending.get(lane);
@@ -34,7 +43,12 @@ export class CopilotReadRequests {
     let reject!: (reason: unknown) => void;
     let finished = false;
     const result = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-    const entry = { identity, result };
+    const entry: PendingRead = { identity, result, close: () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      reject(new Error("Copilot owner is closing; the native read remains pending until owner termination"));
+    } };
     this.#pending.set(lane, entry);
     const timer = setTimeout(() => {
       finished = true;
@@ -48,7 +62,10 @@ export class CopilotReadRequests {
       finished = true;
       return accept;
     };
-    void Promise.resolve().then(action).then(
+    void Promise.resolve().then(() => {
+      if (this.#closed) throw new Error("Copilot native reads are closing");
+      return action();
+    }).then(
       value => { if (settled()) resolve(value); },
       error => { if (settled()) reject(error); },
     );

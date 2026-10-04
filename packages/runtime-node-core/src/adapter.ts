@@ -141,6 +141,9 @@ export interface AgentAdapter {
   resume(options: HarnessResumeOptions): Promise<AdapterSession>;
   /** Optional idempotent release of backend-owned state during archive. */
   releaseSession?(session: RuntimeNodeSessionRecord): Promise<void>;
+  /** Optional synchronous shutdown fence for pending read/attachment waits.
+   * It does not release native ownership; close() must still prove cleanup. */
+  beginClose?(): void;
   close(): Promise<void>;
 }
 

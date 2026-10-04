@@ -6,6 +6,15 @@ payloads into one invented schema.
 
 ## Common adapter contract
 
+Copilot native-ID ownership survives a caller timeout. SDK attachment waits
+are bounded to 15 seconds, and native disconnect waits to 10 seconds. A timed
+out attachment or detach prevents another SDK owner until exact release
+acknowledgement or verified backend termination. Late SDK handles are cleaned
+up without publishing their events. Recovering the Host never changes an old
+unknown operation receipt into success. An optional process-local `beginClose`
+adapter hook retires read/attachment caller waits before Runtime drains them;
+backend `close` still owns and proves native cleanup.
+
 An adapter owns one `harness` and `adapterScopeId` and implements:
 
 - harness catalog, model, and native-session discovery;

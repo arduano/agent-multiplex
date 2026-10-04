@@ -11,6 +11,20 @@ function deferred<T>() {
 }
 
 describe("Copilot bounded read-only requests", () => {
+  it("retires caller waits on owner shutdown without accepting late results or admitting another request", async () => {
+    const reads = new CopilotReadRequests();
+    const native = deferred<string>();
+    const result = reads.read("history", "cursor", () => native.promise);
+    const rejected = expect(result).rejects.toThrow("owner is closing");
+    reads.close();
+    await rejected;
+    const action = vi.fn(async () => "replacement");
+    await expect(reads.read("history", "cursor", action)).rejects.toThrow("reads are closing");
+    native.resolve("late reply");
+    await Promise.resolve();
+    await expect(result).rejects.toThrow("owner is closing");
+    expect(action).not.toHaveBeenCalled();
+  });
   it("shares a single request budget across native page-size reductions", async () => {
     vi.useFakeTimers();
     const reads = new CopilotReadRequests();
@@ -56,9 +70,11 @@ describe("Copilot bounded read-only requests", () => {
     const first = reads.read("history", "cursor-1", () => native.promise).catch(error => error);
     const replacement = vi.fn(async () => "incorrect page");
     await expect(reads.read("history", "cursor-2", replacement)).rejects.toBeInstanceOf(CopilotReadBusyError);
+    await expect(reads.read("history", "cursor-2", replacement)).rejects.toMatchObject({ stalled: false });
     await vi.advanceTimersByTimeAsync(15_000);
     await first;
     await expect(reads.read("history", "cursor-2", replacement)).rejects.toBeInstanceOf(CopilotReadBusyError);
+    await expect(reads.read("history", "cursor-2", replacement)).rejects.toMatchObject({ stalled: true });
     expect(replacement).not.toHaveBeenCalled();
     native.reject(new Error("late rejection"));
     await vi.advanceTimersByTimeAsync(0);

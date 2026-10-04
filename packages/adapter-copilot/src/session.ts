@@ -594,8 +594,11 @@ export class CopilotAdapterSession implements AdapterSession {
   readonly #bridge: CopilotSessionBridge;
   readonly #onStopped: () => void;
   readonly #reads: CopilotReadRequests;
+  readonly #ownershipDiagnostic: ((record: CopilotOwnershipDiagnostic) => void) | undefined;
   #settings: HarnessSessionSettings;
   #stopped = false;
+  #disconnected = false;
+  #stopPromise: Promise<void> | undefined;
 
   public constructor(options: {
     adapterScopeId: AdapterScopeId;
@@ -605,6 +608,7 @@ export class CopilotAdapterSession implements AdapterSession {
     bridge: CopilotSessionBridge;
     settings: HarnessSessionSettings;
     reads?: CopilotReadRequests;
+    onOwnershipDiagnostic?(record: CopilotOwnershipDiagnostic): void;
     onStopped(): void;
   }) {
     this.adapterScopeId = options.adapterScopeId;
@@ -615,6 +619,7 @@ export class CopilotAdapterSession implements AdapterSession {
     this.#settings = options.settings;
     this.#onStopped = options.onStopped;
     this.#reads = options.reads ?? new CopilotReadRequests();
+    this.#ownershipDiagnostic = options.onOwnershipDiagnostic;
     this.vendorSessionId = options.native.sessionId;
     const ordinal = options.native.incidentTraceAttachmentId;
     if (typeof ordinal === "number" && Number.isSafeInteger(ordinal) && ordinal > 0) this.incidentTraceAttachmentId = ordinal;
@@ -995,26 +1000,46 @@ export class CopilotAdapterSession implements AdapterSession {
     return this.#reads.read(`${this.vendorSessionId}:${this.runtimeEpoch}:${method}`, identity, action, deadlineAt);
   }
 
-  public async stop(): Promise<void> {
-    if (this.#stopped) return;
+  public stop(): Promise<void> {
+    if (this.#disconnected) return Promise.resolve();
+    if (this.#stopPromise) return this.#stopPromise;
     this.#stopped = true;
     this.#bridge.setStatus("stopped");
     this.#bridge.close();
-    this.#onStopped();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        this.#native.disconnect(),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new Error("Copilot native disconnect timed out")), COPILOT_SESSION_DISCONNECT_TIMEOUT_MS);
-        }),
-      ]);
-    } catch (cause) {
-      throw new AdapterOutcomeUnknownError(
-        `Copilot session ${this.vendorSessionId} may not have disconnected cleanly`,
-        { cause },
-      );
-    } finally { clearTimeout(timer); }
+    this.ownershipDiagnostic("dispatched");
+    this.#stopPromise = new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const fail = (cause: unknown): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.ownershipDiagnostic(cause instanceof Error && cause.message.startsWith("Copilot native disconnect timed out") ? "timedOut" : "unacknowledged");
+        reject(new AdapterOutcomeUnknownError(
+          `Copilot session ${this.vendorSessionId} may not have disconnected cleanly`, { cause },
+        ));
+      };
+      const timer = setTimeout(() => fail(new Error("Copilot native disconnect timed out; native ownership remains pending")), COPILOT_SESSION_DISCONNECT_TIMEOUT_MS);
+      timer.unref?.();
+      // Caller deadlines do not cancel disconnect or release native ownership.
+      // A late acknowledgement releases the fence without rewriting the first
+      // unknown receipt. Repeated Stop cannot create another disconnect request.
+      void Promise.resolve().then(() => this.#native.disconnect()).then(() => {
+        this.#disconnected = true;
+        this.#onStopped();
+        this.ownershipDiagnostic(settled ? "lateAcknowledged" : "acknowledged");
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      }, fail);
+    });
+    return this.#stopPromise;
+  }
+
+  private ownershipDiagnostic(outcome: CopilotOwnershipDiagnostic["outcome"]): void {
+    try { this.#ownershipDiagnostic?.({ vendorSessionId: this.vendorSessionId, runtimeEpoch: this.runtimeEpoch,
+      ...(this.incidentTraceAttachmentId === undefined ? {} : { attachmentId: this.incidentTraceAttachmentId }), stage: "detach", outcome }); }
+    catch { /* A private diagnostic sink cannot alter native ownership. */ }
   }
 
   private assertActive(): void {
@@ -1035,6 +1060,15 @@ export class CopilotAdapterSession implements AdapterSession {
       );
     }
   }
+}
+
+/** Private process-local ownership stage trace. Never native payload or config. */
+export interface CopilotOwnershipDiagnostic {
+  vendorSessionId?: string;
+  runtimeEpoch?: RuntimeEpoch;
+  attachmentId?: number;
+  stage: "attachment" | "attachmentMode" | "detach" | "shutdown";
+  outcome: "dispatched" | "acknowledged" | "lateAcknowledged" | "timedOut" | "unacknowledged" | "retired" | "closed";
 }
 
 export function permissionResponse(value: JsonValue): PermissionRequestResult {

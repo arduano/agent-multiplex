@@ -23,7 +23,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runtimeBackendForAdapter, type AdapterEvent, type AdapterNativeHistoryResult } from "../packages/runtime-node-core/src/adapter.js";
+import { AdapterOutcomeUnknownError, runtimeBackendForAdapter, type AdapterEvent, type AdapterNativeHistoryResult } from "../packages/runtime-node-core/src/adapter.js";
 import { DirectWorkspaceLaunchProvider } from "../packages/runtime-node-core/src/launch-provider.js";
 import { RuntimeNodeService } from "../packages/runtime-node-core/src/service.js";
 import { RuntimeNodeStore } from "../packages/runtime-node-core/src/store.js";
@@ -35,6 +35,42 @@ afterEach(async () => {
 });
 
 describe("runtime node shutdown", () => {
+  it.each(["attachment", "history"] as const)("retires a pending %s caller wait before draining, while retaining owner cleanup", async stage => {
+    const { service, adapter, session, resume } = createFixture();
+    const started = deferred();
+    let reject!: (reason: unknown) => void;
+    const pending = new Promise<never>((_resolve, fail) => { reject = fail; });
+    let closingOwner = false;
+    const beginClose = vi.fn(() => {
+      closingOwner = true;
+      reject(new AdapterOutcomeUnknownError("native caller wait retired; owner release remains pending"));
+    });
+    Object.assign(adapter, { beginClose });
+    if (stage === "attachment") {
+      adapter.resume.mockImplementation(async () => { started.resolve(); return pending; });
+    } else {
+      session.readNativeHistory.mockImplementation(async () => { started.resolve(); return pending; });
+      adapter.resume.mockImplementation(async () => {
+        if (closingOwner) throw new AdapterOutcomeUnknownError("adapter is closing");
+        return session;
+      });
+    }
+    const history = service.readNativeHistory(resume.sessionId, { harness: "codex", request: {} });
+    const historyFailure = expect(history).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+    await started.promise;
+    // A lifecycle mutation behind the history lock must also settle, without
+    // treating the read's caller deadline as proof of native owner release.
+    const queued = service.resume(resume);
+    const closing = service.close();
+    await historyFailure;
+    await queued;
+    await closing;
+    expect(beginClose).toHaveBeenCalledOnce();
+    expect(adapter.close).toHaveBeenCalledOnce();
+    expect(beginClose.mock.invocationCallOrder[0]).toBeLessThan(adapter.close.mock.invocationCallOrder[0]!);
+    if (stage === "history") expect(session.stop).toHaveBeenCalledOnce();
+  });
+
   it("drains an admitted resume before closing its newly installed handle and fences new work", async () => {
     const fixture = createFixture();
     const { service, adapter, session, resume, launch } = fixture;

@@ -592,6 +592,25 @@ retired binding may finish their durable original receipts, but they must not
 advance the replacement lifecycle. Disconnect never moves authority or starts a
 second native agent.
 
+Copilot SDK create/resume caller waits are bounded to 15 seconds. A deadline or
+ambiguous refusal retains the exact native-ID attachment fence. A second
+attachment fails before SDK dispatch. A returned late handle is never published
+to Runtime; it is disconnected, and only acknowledgement releases the fence.
+The original unknown command receipt remains unknown after late cleanup.
+
+Stop retires the local bridge immediately but retains SDK ownership until its
+exact disconnect acknowledges. The 10-second caller deadline does not cancel
+disconnect. Repeated Stop shares that pending outcome; a following history or
+resume cannot create another native owner. A late acknowledgement may permit
+future attachment without rewriting the original unknown receipt. Inventory
+does not advertise these retired local bridges as executable active sessions.
+
+Before draining admitted work during shutdown, the adapter retires pending
+read/attachment caller waits. Underlying native requests remain owned until
+the backend's existing graceful/verified-force termination completes. This
+prevents a stalled temporary history attachment from postponing owner shutdown
+indefinitely without unlocking the session merely on a client timeout.
+
 ## Invariants
 
 Every implementation and projection must preserve these properties:
