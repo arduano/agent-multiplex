@@ -662,6 +662,20 @@ allows current active history reads under existing read/boot/binding fences
 without granting lifecycle replay or rewriting historical unknown receipts.
 Older runtimes lack the capability and retain their existing client guards.
 
+The optional experimental `agents.list` v1 capability adds a live
+`{ harness: "copilot", view: "agents" }` observation through the existing managed
+session. The adapter invokes `rpc.agent.list` with built-ins and prompts disabled,
+projects only bounded registration fields, and rejects malformed, built-in or
+oversized results. It uses the same 15-second retained read lane and Runtime
+native-identity/binding checks; it never attaches another owner or starts a child.
+Root `session.custom_agents_updated` events invalidate an in-flight snapshot on
+an independent adapter revision. Child events and task/queue revisions cannot
+invalidate or certify the root registry. No registry read emits lifecycle facts.
+Authored model preference or required policy is registration evidence only;
+native child execution must independently establish actual model selection.
+This additive request variant changes no persisted state, launch/profile hash,
+native command surface, or authority. Older Hosts omit its capability.
+
 ## Invariants
 
 Every implementation and projection must preserve these properties:

@@ -126,6 +126,7 @@ export const nativeStateRequestSchema = z.discriminatedUnion("harness", [
   z.discriminatedUnion("view", [
     z.object({ harness: z.literal("copilot"), view: z.literal("pendingMessages") }).strict(),
     z.object({ harness: z.literal("copilot"), view: z.literal("messageDeliveries") }).strict(),
+    z.object({ harness: z.literal("copilot"), view: z.literal("agents") }).strict(),
     z.object({ harness: z.literal("copilot"), view: z.literal("tasks") }).strict(),
     z.object({ harness: z.literal("copilot"), view: z.literal("taskProgress"), id: z.string().min(1).max(4_096) }).strict(),
     z.object({ harness: z.literal("copilot"), view: z.literal("currentPromotableTask") }).strict(),

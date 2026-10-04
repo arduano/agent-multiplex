@@ -7,6 +7,19 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-04 (hotfix.28 published and source/package qualified; consumer activation is recorded separately).
 
+## October 4 read-only Copilot agents source candidate
+
+New optional experimental `agents.list` v1 adds a bounded live registry view on
+the existing managed SDK session, with built-ins and prompts disabled. Only fixed
+registration fields are returned; a root registry update invalidates an older
+snapshot independently of lifecycle/task/queue state. Existing read deadlines,
+retained lanes and exact Runtime binding checks apply. Authored required model
+registration is not a claim of actual child dispatch. This additive request
+variant changes no persisted state, migration or launch/profile hash; `.28`
+Hosts omit its capability. Combined qualification, publication and installed
+acceptance remain coordinator-owned. No live or model call is included.
+See [adapter guidance](Adapters-and-Terminals.md#copilot-registered-agents).
+
 ## October 4 bounded native lifecycle source candidate
 
 Isolated source based on published `.28` bounds initial SDK startup and native

@@ -1068,6 +1068,7 @@ function capabilities(protocolVersion?: number): HarnessCatalogEntry["capabiliti
     { name: "context.compact", version: "v1", experimental: true },
     { name: "queue.pending", version: "v1", experimental: true },
     { name: "queue.sendNow", version: "v1", experimental: true },
+    { name: "agents.list", version: "v1", experimental: true },
     { name: "tasks.list", version: "v1", experimental: true },
     { name: "tasks.progress", version: "v1", experimental: true },
     { name: "tasks.promoteToBackground", version: "v1", experimental: true },

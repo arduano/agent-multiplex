@@ -31,6 +31,7 @@ import {
 
 import { copilotJson, jsonRecord, requiredString } from "./json.js";
 import { taskId, taskSnapshot } from "./tasks.js";
+import { agentsSnapshot } from "./agents.js";
 import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, readSubagentHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
@@ -66,6 +67,9 @@ export interface CopilotSessionRpc {
     getCurrentPromotable(): Promise<unknown>;
     promoteToBackground(input: { id: string }): Promise<unknown>;
     cancel(input: { id: string }): Promise<unknown>;
+  };
+  agent?: {
+    list(input: { includeBuiltInAgents: false; includePrompt: false }): Promise<unknown>;
   };
   metadata?: {
     activity(): Promise<unknown>;
@@ -145,6 +149,7 @@ export class CopilotSessionBridge {
   #activityRevision = 0;
   #taskRevision = 0;
   #queueRevision = 0;
+  #agentsRevision = 0;
   #awaitingResumeBoundary = false;
   #resumePositiveEvidenceObserved = false;
   #nativeEventOrdinal = 0;
@@ -157,7 +162,7 @@ export class CopilotSessionBridge {
 
   /** Adapter observation fences; native snapshots do not carry a log cursor. */
   public nativeStateRevision(view: NativeStateRequest["view"]): number {
-    return view === "pendingMessages" ? this.#queueRevision : this.#taskRevision;
+    return view === "agents" ? this.#agentsRevision : view === "pendingMessages" ? this.#queueRevision : this.#taskRevision;
   }
 
   /** Fresh creation observes every interaction callback from the beginning.
@@ -196,6 +201,7 @@ export class CopilotSessionBridge {
   }
 
   private dispatchNativeEvent(event: SessionEvent): void {
+    if (event.type === "session.custom_agents_updated" && eventOwner(event) === undefined) this.#agentsRevision += 1;
     if (event.type === "session.background_tasks_changed") this.#taskRevision += 1;
     if (event.type === "pending_messages.modified") this.#queueRevision += 1;
     if (this.#awaitingResumeBoundary && (
@@ -964,6 +970,17 @@ export class CopilotAdapterSession implements AdapterSession {
   public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
     this.assertActive();
     if (request.harness !== "copilot") throw new TypeError("Unsupported Copilot native state view");
+    if (request.view === "agents") {
+      const agent = this.#native.rpc.agent;
+      if (typeof agent?.list !== "function") throw new Error("Copilot agent registry observation is unavailable");
+      const revision = this.#bridge.nativeStateRevision("agents");
+      const value = await this.read("agents", String(revision), () => agent.list({ includeBuiltInAgents: false, includePrompt: false }));
+      this.assertActive();
+      if (revision !== this.#bridge.nativeStateRevision("agents")) {
+        throw new Error("Copilot agents snapshot was invalidated during the native read");
+      }
+      return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: agentsSnapshot(value) };
+    }
     if (request.view !== "pendingMessages") {
       const tasks = this.#native.rpc.tasks;
       let value: unknown;

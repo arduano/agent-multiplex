@@ -90,6 +90,11 @@ disclosure.
   task promotion and cancellation require `agent-control` and the durable
   command fence. False acknowledgements remain no-ops; an unknown result cannot
   authorize another mutation, alternate task or process-termination fallback.
+- Optional Copilot agent registry reads use that same active-binding `read`
+  boundary and exact native identity fence. Built-ins and prompts are disabled
+  in the native request; the adapter strips paths, prompts, skills, MCP definitions
+  and all non-allowlisted metadata. Registration does not authorize child execution,
+  grant tools, attach another SDK owner or establish a resolved model.
 - Native context compaction requires `agent-control` and the existing durable
   command/binding fence. It can make provider/model requests and changes native
   context. It does not resume stopped sessions, grant tool permissions or add

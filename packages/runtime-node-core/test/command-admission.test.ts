@@ -5,11 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   adapterScopeIdSchema, newCommandId, newLaunchId, newRuntimeEpoch,
   newRuntimeNodeBootId, newRuntimeNodeId, newSessionId,
-  type Harness, type HarnessCommand, type JsonValue, type NativeHistoryRequest,
+  type Harness, type HarnessCommand, type JsonValue, type NativeHistoryRequest, type NativeStateRequest,
 } from "@arduano/agent-multiplex-protocol";
 import {
   RuntimeNodeService, RuntimeNodeStore,
-  type AdapterNativeHistoryResult, type AdapterSession, type AgentAdapter,
+  type AdapterNativeHistoryResult, type AdapterNativeStateResult, type AdapterSession, type AgentAdapter,
 } from "../src/index.js";
 
 class Session implements AdapterSession {
@@ -21,11 +21,16 @@ class Session implements AdapterSession {
   read = vi.fn(async (_request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> => ({
     harness: this.harness, vendorSessionId: this.vendorSessionId, payload: [], complete: true,
   }));
+  state = vi.fn(async (request: NativeStateRequest): Promise<AdapterNativeStateResult> => ({
+    harness: this.harness, vendorSessionId: this.vendorSessionId,
+    payload: request.view === "tasks" ? { tasks: [] } : request.view === "pendingMessages" ? { items: [], steeringMessages: [], inFlightSteeringCount: 0 } : { agents: [] },
+  }));
   stop = vi.fn(async () => undefined);
   constructor(readonly harness: Harness, readonly cwd: string) {}
   status() { return "idle" as const; }
   subscribe() { return () => undefined; }
   readNativeHistory(request: NativeHistoryRequest) { return this.read(request); }
+  readNativeState(request: NativeStateRequest) { return this.state(request); }
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -166,5 +171,23 @@ describe("active-binding-only history capability", () => {
     stopGate.release(); await stopping;
     await expect(f.history(true)).rejects.toMatchObject({ code: "CONFLICT" });
     expect(f.adapter.resume).not.toHaveBeenCalled();
+  });
+});
+
+describe("native agent registry binding fence", () => {
+  it("keeps the read on an active managed binding and rejects a different native identity", async () => {
+    const f = await fixture("copilot"); const session = f.sessions[0]!;
+    session.state.mockImplementation(async () => ({ harness: "copilot", vendorSessionId: "another-native-session", payload: { agents: [] } }));
+    await expect(f.service.readNativeState(f.launch.sessionId, { harness: "copilot", view: "agents" })).rejects.toMatchObject({ code: "FENCED" });
+    expect(f.adapter.resume).not.toHaveBeenCalled();
+  });
+
+  it("rejects a different harness reply and never temporarily attaches a stopped binding", async () => {
+    const f = await fixture("copilot"); const session = f.sessions[0]!;
+    session.state.mockImplementation(async () => ({ harness: "codex", vendorSessionId: session.vendorSessionId, payload: { agents: [] } }));
+    await expect(f.service.readNativeState(f.launch.sessionId, { harness: "copilot", view: "agents" })).rejects.toMatchObject({ code: "FENCED" });
+    await f.service.stop(f.lifecycle("stop")); session.state.mockClear();
+    await expect(f.service.readNativeState(f.launch.sessionId, { harness: "copilot", view: "agents" })).rejects.toMatchObject({ code: "CONFLICT" });
+    expect(session.state).not.toHaveBeenCalled(); expect(f.adapter.resume).not.toHaveBeenCalled();
   });
 });

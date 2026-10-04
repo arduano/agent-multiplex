@@ -303,6 +303,31 @@ The runtime daemon's presence heartbeat remains independent of inventory and
 metadata maintenance; see [process supervision](Operations.md#process-supervision).
 
 
+### Copilot registered agents
+
+Experimental `agents.list` v1 advertises `sessions.readNativeState` with
+`{ harness: "copilot", view: "agents" }` on the existing active managed binding.
+The adapter calls that session's `rpc.agent.list` with both
+`includeBuiltInAgents: false` and `includePrompt: false`. It never creates an
+additional SDK owner, starts an agent, reads history or resumes a stopped binding.
+Older Hosts omit the capability; clients must check it before this optional view.
+
+The result contains `agents` with bounded IDs, names, display names, descriptions,
+source, invocability flags, tools and authored `model`/`models`/`modelPolicy`.
+Omitted model settings remain absent. Authored registration is not evidence of
+the model actually dispatched to a child or of transient model availability;
+qualification must obtain those facts independently from native execution.
+Prompts, paths, skills, MCP definitions and arbitrary native extensions are
+stripped. Built-in, malformed and oversized replies fail explicitly. The registry
+is bounded to 1,000 entries and the native wire envelope.
+
+Identical reads coalesce under the existing 15-second caller deadline. A timeout
+retains the occupied native read lane until acknowledgement; it neither cancels
+nor repeats the request. A root `session.custom_agents_updated` event invalidates
+an in-flight registry read; child registration, task and queue revisions remain
+independent. The Runtime checks the exact native identity and binding fence
+before returning the snapshot. This view does not establish lifecycle certainty.
+
 ### Copilot tracked tasks
 
 Experimental `tasks.list` v1 advertises `sessions.readNativeState` with
