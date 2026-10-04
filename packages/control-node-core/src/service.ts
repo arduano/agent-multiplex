@@ -131,6 +131,7 @@ import {
 import { ControlNodeCatalog, type RuntimeNodeRoute, type SessionFilter } from "./catalog.js";
 import { ControlNodeCoreError, readValidatedTRPCClientErrorCode } from "./errors.js";
 import { ControlNodeEventHub } from "./event-hub.js";
+import { ColdSearchReads } from "./cold-search-reads.js";
 import type {
   AccessContext,
   ChildControlNodeConnection,
@@ -278,6 +279,7 @@ export class ControlNodeService {
     { readonly response: string; readonly promise: Promise<InteractionRecord> }
   >();
   readonly #snapshotTraversals = new Map<string, SnapshotTraversal>();
+  readonly #coldSearchReads = new ColdSearchReads();
   #closed = false;
   #metadataUpstreamFlush: Promise<number> | null = null;
   #metadataDeliveryFlush: Promise<number> | null = null;
@@ -309,6 +311,7 @@ export class ControlNodeService {
   public close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.#coldSearchReads.close();
     for (const controlNodeId of this.#childSynchronizations.keys()) {
       this.#invalidateChildSynchronization(controlNodeId);
     }
@@ -337,13 +340,17 @@ export class ControlNodeService {
   public listRuntimeNodes() { return this.catalog.listRuntimeNodes(); }
   public watchRuntimeNodes(cursor: StreamCursor, signal?: AbortSignal) { return this.events.watchRuntimeNodes(cursor, signal); }
   public listSessions(filter: SessionFilter = {}) { return this.catalog.listSessions(filter); }
-  public async searchSessions(inputValue: SessionSearchInput): Promise<SessionSearchPage> {
+  public async searchSessions(inputValue: SessionSearchInput, signal?: AbortSignal): Promise<SessionSearchPage> {
+    this.#assertColdSearchCaller(signal);
     const input = sessionSearchInputSchema.parse(inputValue);
     const local = this.catalog.searchSessions(input);
     const children = input.states.includes("archived")
       ? this.#recursiveChildren(input.runtimeNodeIds)
       : [];
     if (children.length === 0) return local;
+    for (const child of children) this.#assertColdSearchChildCurrent(child);
+    const authority = canonicalJson(this.catalog.authority());
+    const identity = canonicalProtocolRecordJson({ query: input, authority: this.catalog.authority() });
 
     // Ask every immediate branch for the same authority-fenced keyset page.
     // Hot rows may be present both locally and below; identity de-duplication
@@ -351,13 +358,22 @@ export class ControlNodeService {
     // discoverable even when they predate attachment. The same identity from
     // two sibling branches is corruption, not a replay, and must fail closed.
     const childPages = await Promise.all(children.map(async (child) => {
-      const page = sessionSearchPageSchema.parse(await child.searchSessions(input));
-      this.#assertRecursiveChildCurrent(child);
+      const result = await this.#coldSearchReads.read(child, identity, () => child.searchSessions(input), signal);
+      this.#assertColdSearchCaller(signal);
+      const page = sessionSearchPageSchema.parse(result);
+      this.#assertColdSearchChildCurrent(child);
       for (const session of page.sessions) {
         this.#assertRecursiveSessionOwner(child, session);
       }
       return { child, page };
     }));
+    this.#assertColdSearchCaller(signal);
+    if (canonicalJson(this.catalog.authority()) !== authority) {
+      throw new ControlNodeCoreError("FENCED", "metadata authority changed during cold archive search");
+    }
+    // Recheck every source at the merge barrier: an earlier child may retire
+    // while a later child is still being read. No stale page can fill that gap.
+    for (const { child } of childPages) this.#assertColdSearchChildCurrent(child);
     const childOwnerBySession = new Map<SessionId, ControlNodeId>();
     for (const { child, page } of childPages) {
       for (const session of page.sessions) {
@@ -2600,6 +2616,19 @@ export class ControlNodeService {
       );
     }
     this.#assertChildConnectionMatchesActiveAttachment(connection);
+  }
+
+  #assertColdSearchCaller(signal?: AbortSignal): void {
+    if (this.#closed || signal?.aborted) {
+      throw new ControlNodeCoreError("UNAVAILABLE", "cold archive search is closed or cancelled");
+    }
+  }
+
+  #assertColdSearchChildCurrent(connection: ChildControlNodeConnection): void {
+    this.#assertRecursiveChildCurrent(connection);
+    if (this.catalog.getControlNode(connection.controlNodeId)?.presence !== "online") {
+      throw new ControlNodeCoreError("UNAVAILABLE", "a required child is stale during cold archive search");
+    }
   }
 
   #assertRecursiveRuntimeOwner(

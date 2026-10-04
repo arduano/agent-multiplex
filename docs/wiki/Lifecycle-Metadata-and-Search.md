@@ -135,6 +135,22 @@ An aggregate recursively searches children so archives created before
 attachment remain discoverable. The same session identity returned by two
 sibling subtrees is a conflict, not a deduplication opportunity.
 
+Cold search requires every branch selected by its runtime filter to answer.
+A disconnected or stale required branch returns `SERVICE_UNAVAILABLE`; it
+cannot produce a successful empty or partial page. A held child search has a
+15-second caller deadline. Repeating the same query on the same connection
+shares its pending read, and timeout retains that lane until the connection
+promise settles. Distinct queries and connection generations share a cap of
+64 pending child reads per control. Cancellation retires an available caller
+signal without claiming upstream cancellation; isolated-worker forwarding
+retains its separate existing IPC deadline and capacity limits.
+
+Late replies cannot replace the caller's unavailable result. Before merging,
+the control rechecks child connection/attachment, presence and metadata authority.
+Open-session search remains available from the hot canonical projection; a cold
+query explicitly limited to reachable runtimes can succeed independently. Native
+bindings, archive provenance, catalog state and metadata authority are preserved.
+
 ## History and interactions
 
 Resolving, expiring or retiring an imported interaction preserves its child

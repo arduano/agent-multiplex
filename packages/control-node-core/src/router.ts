@@ -165,7 +165,7 @@ export function createAccessRouter(service: ControlNodeService) {
       search: scoped("read")
         .input(accessContract.sessions.search.input)
         .output(accessContract.sessions.search.output)
-        .query(({ input }) => service.searchSessions(input)),
+        .query(({ input, signal }) => guarded(() => service.searchSessions(input, signal))),
       get: scoped("read")
         .input(accessContract.sessions.get.input)
         .output(accessContract.sessions.get.output)
@@ -444,7 +444,7 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
       search: t.procedure
         .input(controlNodeLinkContract.sessions.search.input)
         .output(controlNodeLinkContract.sessions.search.output)
-        .query(({ input, ctx }) => checked(ctx, input, () => service.searchSessions(input.query))),
+        .query(({ input, ctx, signal }) => checked(ctx, input, () => service.searchSessions(input.query, signal))),
       get: t.procedure
         .input(controlNodeLinkContract.sessions.get.input)
         .output(controlNodeLinkContract.sessions.get.output)

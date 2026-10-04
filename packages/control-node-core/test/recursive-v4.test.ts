@@ -19,13 +19,15 @@ import {
   type LaunchRecord,
   type SessionId,
   type SessionRecord,
+  type SessionSearchPage,
 } from "@arduano/agent-multiplex-protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ControlNodeCatalog,
   ControlNodeCoreError,
   ControlNodeService,
+  createAccessRouter,
   type ChildControlNodeConnection,
 } from "../src/index.js";
 
@@ -214,6 +216,164 @@ function childConnection(
     resolveInteraction: unused,
   };
 }
+
+async function coldSearchFixture(label: string) {
+  const rootCatalog = new ControlNodeCatalog({ filename: stateFile(`${label}-root`), now: clock });
+  const childCatalog = new ControlNodeCatalog({ filename: stateFile(`${label}-child`), now: clock });
+  const reachableCatalog = new ControlNodeCatalog({ filename: stateFile(`${label}-reachable`), now: clock });
+  const cold = addArchivedSession(childCatalog, `${label}-native-cold`);
+  const reachable = addArchivedSession(reachableCatalog, `${label}-native-reachable`);
+  const runtimeNodeId = newRuntimeNodeId();
+  rootCatalog.registerRuntimeNode({ runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(),
+    name: `${label}-local`, allowedRoots: ["/work"], harnesses: [], launchProfiles: [], protocolVersion: 6 });
+  const hot = rootCatalog.reconcileInventory({ runtimeNodeId, generation: `${label}-hot`, complete: true,
+    capturedAt: now, sessions: [{ harness: "codex", adapterScopeId: "recursive-codex" as AdapterScopeId,
+      vendorSessionId: `${label}-native-hot`, cwd: `/work/${label}`, availability: "active", runtimeStatus: "idle",
+      runtimeEpoch: newRuntimeEpoch(), lastActivityAt: now }] })[0]!;
+  const attached = attach(rootCatalog, childCatalog, `${label}-endpoint`);
+  const reachableAttachment = attach(rootCatalog, reachableCatalog, `${label}-reachable-endpoint`);
+  const rootService = new ControlNodeService({ catalog: rootCatalog });
+  const childService = new ControlNodeService({ catalog: childCatalog });
+  const reachableService = new ControlNodeService({ catalog: reachableCatalog });
+  const connection = childConnection(childCatalog, childService, attached.attachment, `${label}-endpoint`);
+  await rootService.attachChildConnection(connection);
+  await rootService.attachChildConnection(childConnection(reachableCatalog, reachableService,
+    reachableAttachment.attachment, `${label}-reachable-endpoint`));
+  return { rootCatalog, childCatalog, rootService, childService, connection, cold, reachable, hot,
+    async replace(searchSessions: ChildControlNodeConnection["searchSessions"]) {
+      const replacement = { ...connection, searchSessions };
+      await rootService.attachChildConnection(replacement);
+      return replacement;
+    },
+    close() {
+      rootService.close(); childService.close(); reachableService.close();
+      rootCatalog.close(); childCatalog.close(); reachableCatalog.close();
+    } };
+}
+
+describe("bounded recursive archive search", () => {
+  it("returns typed unavailable for a disconnected branch without hiding reachable or hot rows", async () => {
+    const fixture = await coldSearchFixture("disconnected-search");
+    try {
+      fixture.rootService.detachChildConnection(fixture.connection);
+      await expect(fixture.rootService.searchSessions({ states: ["archived"], limit: 10 }))
+        .rejects.toMatchObject({ code: "UNAVAILABLE" });
+      const reader = createAccessRouter(fixture.rootService).createCaller({ grantedScopes: ["read"] });
+      await expect(reader.sessions.search({ states: ["running", "stopped", "archived"], limit: 10 }))
+        .rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+      expect((await reader.sessions.search({ limit: 10 })).sessions).toEqual([fixture.hot]);
+      const scoped = await reader.sessions.search({ states: ["archived"],
+        runtimeNodeIds: [fixture.reachable.session.runtimeNodeId], limit: 10 });
+      expect(scoped.sessions).toMatchObject([{ sessionId: fixture.reachable.session.sessionId,
+        vendorSessionId: fixture.reachable.session.vendorSessionId,
+        bindingRevision: fixture.reachable.session.bindingRevision,
+        metadataAuthority: fixture.rootCatalog.authority() }]);
+      expect(scoped.nextCursor).toBeNull();
+      expect(fixture.rootCatalog.getSession(fixture.cold.session.sessionId)).toBeNull();
+      expect(fixture.childCatalog.getSession(fixture.cold.session.sessionId)?.catalogState).toBe("archived");
+    } finally { fixture.close(); }
+  });
+
+  it("does not treat a retained stale connection as a complete empty archive result", async () => {
+    const fixture = await coldSearchFixture("stale-search");
+    try {
+      await fixture.replace(async () => ({ sessions: [], nextCursor: null }));
+      fixture.rootCatalog.markChildDisconnected(fixture.connection.controlNodeId, fixture.connection.controlNodeBootId);
+      await expect(fixture.rootService.searchSessions({ states: ["archived"],
+        runtimeNodeIds: [fixture.cold.session.runtimeNodeId], limit: 10 }))
+        .rejects.toMatchObject({ code: "UNAVAILABLE" });
+      expect((await fixture.rootService.searchSessions({ limit: 10 })).sessions).toEqual([fixture.hot]);
+    } finally { fixture.close(); }
+  });
+
+  it("bounds a held child read, retains its lane and discards a late reply", async () => {
+    const fixture = await coldSearchFixture("held-search");
+    let release!: (page: SessionSearchPage) => void;
+    const held = new Promise<SessionSearchPage>(resolve => { release = resolve; });
+    const read = vi.fn().mockReturnValueOnce(held).mockImplementation(query => fixture.childService.searchSessions(query));
+    try {
+      await fixture.replace(read);
+      vi.useFakeTimers();
+      const first = fixture.rootService.searchSessions({ states: ["archived"], limit: 10 });
+      const rejection = expect(first).rejects.toMatchObject({ code: "UNAVAILABLE" });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await rejection;
+      await expect(fixture.rootService.searchSessions({ states: ["archived"], limit: 10 }))
+        .rejects.toMatchObject({ code: "UNAVAILABLE" });
+      expect(read).toHaveBeenCalledTimes(1);
+      expect((await fixture.rootService.searchSessions({ limit: 10 })).sessions).toEqual([fixture.hot]);
+      release({ sessions: [], nextCursor: null });
+      await vi.advanceTimersByTimeAsync(0);
+      const recovered = await fixture.rootService.searchSessions({ states: ["archived"], limit: 10 });
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(new Set(recovered.sessions.map(session => session.sessionId))).toEqual(new Set([
+        fixture.cold.session.sessionId, fixture.reachable.session.sessionId,
+      ]));
+      expect(fixture.rootCatalog.getSession(fixture.cold.session.sessionId)).toBeNull();
+    } finally { vi.useRealTimers(); fixture.close(); }
+  });
+
+  it("retires an aborted caller while another caller shares the exact child read", async () => {
+    const fixture = await coldSearchFixture("cancelled-search");
+    let release!: (page: SessionSearchPage) => void;
+    const held = new Promise<SessionSearchPage>(resolve => { release = resolve; });
+    const read = vi.fn().mockReturnValue(held);
+    try {
+      await fixture.replace(read);
+      const controller = new AbortController();
+      const caller = createAccessRouter(fixture.rootService).createCaller({ grantedScopes: ["read"] }, { signal: controller.signal });
+      const first = caller.sessions.search({ states: ["archived"], limit: 10 });
+      const rejected = expect(first).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      controller.abort();
+      await rejected;
+      const second = fixture.rootService.searchSessions({ states: ["archived"], limit: 10 });
+      release(await fixture.childService.searchSessions({ states: ["archived"], limit: 10 }));
+      const result = await second;
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(result.sessions).toContainEqual(expect.objectContaining({ sessionId: fixture.cold.session.sessionId,
+        vendorSessionId: fixture.cold.session.vendorSessionId, metadataAuthority: fixture.rootCatalog.authority() }));
+    } finally { fixture.close(); }
+  });
+
+  it("rejects a page from a replaced connection and permits a fresh exact-binding read", async () => {
+    const fixture = await coldSearchFixture("replaced-search");
+    let release!: (page: SessionSearchPage) => void;
+    const read = vi.fn(() => new Promise<SessionSearchPage>(resolve => { release = resolve; }));
+    try {
+      await fixture.replace(read);
+      const first = fixture.rootService.searchSessions({ states: ["archived"], limit: 10 });
+      const rejected = expect(first).rejects.toMatchObject({ code: "FENCED" });
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      await fixture.replace(query => fixture.childService.searchSessions(query));
+      const recovered = await fixture.rootService.searchSessions({ states: ["archived"], limit: 10 });
+      release({ sessions: [], nextCursor: null });
+      await rejected;
+      expect(recovered.sessions).toContainEqual(expect.objectContaining({
+        sessionId: fixture.cold.session.sessionId, vendorSessionId: fixture.cold.session.vendorSessionId,
+        adapterScopeId: fixture.cold.session.adapterScopeId, bindingRevision: fixture.cold.session.bindingRevision,
+        launchProvenance: fixture.cold.session.launchProvenance, metadataAuthority: fixture.rootCatalog.authority(),
+      }));
+    } finally { fixture.close(); }
+  });
+
+  it("rechecks a completed sibling when another required child returns later", async () => {
+    const fixture = await coldSearchFixture("merge-barrier-search");
+    let release!: (page: SessionSearchPage) => void;
+    const read = vi.fn(() => new Promise<SessionSearchPage>(resolve => { release = resolve; }));
+    try {
+      await fixture.replace(read);
+      const pending = fixture.rootService.searchSessions({ states: ["archived"], limit: 10 });
+      const rejected = expect(pending).rejects.toMatchObject({ code: "UNAVAILABLE" });
+      await vi.waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+      const owner = fixture.rootCatalog.getRuntimeNode(fixture.reachable.session.runtimeNodeId)!.ownerControlNodeId;
+      fixture.rootCatalog.markChildDisconnected(owner, fixture.rootCatalog.getControlNode(owner)!.controlNodeBootId);
+      release(await fixture.childService.searchSessions({ states: ["archived"], limit: 10 }));
+      await rejected;
+      expect(fixture.rootCatalog.getSession(fixture.cold.session.sessionId)).toBeNull();
+    } finally { fixture.close(); }
+  });
+});
 
 describe("protocol-v4 recursive cold discovery", () => {
   it("finds pre-attachment archives through an aggregate with fenced pagination", async () => {

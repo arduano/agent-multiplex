@@ -400,6 +400,30 @@ to the selected source/feed set. Attached controls recursively search child
 catalogs so an archive created before attachment remains discoverable without
 putting cold rows back into every hot snapshot.
 
+A cold page has the existing complete-page contract: if a required immediate
+child is disconnected or stale, the aggregate reports typed `UNAVAILABLE`
+(`SERVICE_UNAVAILABLE` through access/link routers) instead of omitting that
+branch. The optional runtime filter determines which child routes are required;
+hot queries do not traverse archive branches. Public input/output schemas,
+authority/query-bound cursors and old `.27`/`.28` page parsing remain unchanged.
+
+Each required child read has a 15-second result acceptance deadline. Identical
+parsed queries under the same authority and exact connection object share one
+read; the control retains timed-out reads until their returned connection
+promise settles. Distinct queries and replacement connection objects remain
+subject to a 64-read control-wide admission cap. A caller abort retires only
+that observation, and shutdown retires all local waits. Neither action proves
+remote cancellation. Existing isolated-worker forwarding has its separate IPC
+deadline and retained-lane capacity; this is not end-to-end cancellation.
+
+An expired result is discarded before page validation or catalog access. A
+successful merge rechecks all child connections, attachments, boots and presence
+after every page has arrived, plus the aggregate's original metadata authority.
+Duplicate sibling identities continue to conflict. Canonical parent metadata
+wins local/child deduplication, and returned native binding and launch provenance
+remain unchanged. These read deadlines do not archive, detach, re-enroll,
+promote or repair any runtime or catalog record.
+
 An archive is published as successful only after all of these steps complete:
 
 1. The native backend performs its idempotent per-session release.
