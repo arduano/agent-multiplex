@@ -5,7 +5,24 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-04 (hotfix.28 published and source/package qualified; consumer activation is recorded separately).
+Last reconciled: 2026-10-04 (hotfix.29 combined source candidate; publication and consumer activation remain pending).
+
+## Combined hotfix.29 release candidate
+
+Lockstep `.29` combines bounded recursive archive queries, retained native startup,
+mutation/permission ownership, command admission before the binding lock, active-
+only native history and a bounded optional managed agents registry read. Published
+`.27`/`.28` states and legacy launch profiles remain compatible; no persisted
+migration or vendor SDK/transport pin changes. New `agents` read request requires
+coordinated protocol/control/runtime/Gateway packages. Child registration is
+configuration evidence; actual execution model must be verified independently.
+
+Patched Vitest4 and optional tooling dependencies are development-only. Exact
+merged source/package/Docker gates and immutable signed prerelease publication
+are being performed by the release coordinator. No native model or deployed
+acceptance is implied by this candidate. The earlier `.28` publication remains
+immutable. Consumer maintenance uses its exact independently staged payload.
+
 
 ## October 4 read-only Copilot agents source candidate
 
