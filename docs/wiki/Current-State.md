@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-04 (immutable signed hotfix.29 published; task-read diagnostic correction is unpublished).
+Last reconciled: 2026-10-04 (immutable signed hotfix.29 published; task-read diagnostic hotfix.30 candidate is unpublished).
 
 ## Published aggregate ownership hotfix.29
 
@@ -30,7 +30,7 @@ own this release; consumer maintenance uses its separately staged exact payload.
 Two installed disposable child runs reached root idle but retained task-read
 retrying; corrected WSL traces confirm current-revision rejection. The exact
 rejected response was lost after Runtime recovery. An unpublished source
-correction preserves bounded known field paths,
+hotfix.30 source correction preserves bounded known field paths,
 validation codes and value types in the private failed-observation trace. Strict
 schemas, genuine uncertainty and revision/binding fences are unchanged. Controlled
 source regressions do not establish the original malformed shape. Published `.29`
