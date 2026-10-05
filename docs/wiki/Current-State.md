@@ -5,22 +5,31 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-05 (null task model metadata hotfix.32 preparation; installed acceptance remains consumer-owned).
+Last reconciled: 2026-10-05 (signed null task model metadata hotfix.32 published; installed acceptance remains consumer-owned).
 
-## Copilot null task model metadata hotfix.32 candidate
+## Published Copilot null task model metadata hotfix.32
 
 The consumer's two installed `.31` disposable Luna child fixtures independently
 reproduce `snapshotMalformed` at native agent-task `model: null`; exact installed
-offline reproduction agrees. The `.32` candidate admits only this requested
-model metadata as nullable and preserves its value. It never substitutes the
+offline reproduction agrees. Signed `hotfix-2026-10-05.2` publishes lockstep `.32`
+from exact artifact source `8638e14a79975de9838bb590d9ee2fdeef7fdb81`.
+It admits only this requested model metadata as nullable and preserves its value.
+It never substitutes the
 parent model or relaxes control, identity, ownership, wire/count or revision/
 binding validation. Genuine pending interactions remain uncertain/blocking.
 The historical `.29` Tariff initiating field remains unproved. Windows health
 publisher private-write failure is separate and outside this correction.
 
-Versioned source/package qualification and publication are in progress. No live
-role or owner session is changed; native installed acceptance remains with Leo.
-See [the correction evidence](../audits/copilot-null-task-model-20261005.md).
+Typecheck/build, **1,445 tests**, checkpoint/docs/release/secrets checks, all
+**16** isolated packed consumers with the exact published transport graph, SBOM
+and **19** independently matched public assets pass. Independent review covers
+the narrow schema change and real adapter-to-Runtime completion, pending-input,
+revision and binding regressions. Framework `main` is preserved and no npm stable
+promotion occurred. GitHub platform immutability is off; operator procedure freezes
+the release and consumers retain exact byte pins. No live role, owner session or
+real model action is included; native installed acceptance remains with Leo.
+See [release proof and limits](../audits/hotfix32-release-qualification-20261005.md)
+and [the correction evidence](../audits/copilot-null-task-model-20261005.md).
 
 ## Published Copilot observation recovery containment hotfix.31
 

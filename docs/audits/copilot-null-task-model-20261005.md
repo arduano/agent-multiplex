@@ -30,8 +30,17 @@ repair interval, require independent completed-task and whole-session idle facts
 for healthy Finished/Send, retain genuine pending user input, and reject delayed
 observations after native invalidation or explicit Stop/Resume. A read-only Vite
 transform supplies the old-schema negative control without changing source.
-Complete exact-source release gates are in progress. No SDK/network/model call
-is used by these tests.
+No SDK/network/model call is used by these tests. Independent final review finds
+no blocker and confirms the Leo task parser already treats null requested-model
+metadata as unknown without rejecting the task or inventing a model.
 
 Local receipts are under `receipts/copilot-null-model32/` and remain ignored.
-Source publication and native installed acceptance are separate checkpoints.
+At exact source `8638e14a79975de9838bb590d9ee2fdeef7fdb81`, typecheck, **1,445
+tests / 138 passing files** (eight tests/one file skipped), build, checkpoint/docs/
+release/secrets checks, all **16** isolated packed consumers with the reviewed
+exact published transport graph, and SBOM generation pass. Signed
+`hotfix-2026-10-05.2` publishes lockstep `0.2.4-hotfix.32`; all **19** public assets
+independently match the qualified bytes and API size/digest metadata.
+[Release proof, digests and retained failures](hotfix32-release-qualification-20261005.md)
+record publication and its limits. Source publication does not qualify native
+installed acceptance, which remains consumer-owned.

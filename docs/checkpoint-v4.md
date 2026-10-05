@@ -1,18 +1,31 @@
 # Release qualification checkpoint
 
-## Copilot native null task model metadata candidate — 2026-10-05
+## Published Copilot native null task model metadata hotfix.32 — 2026-10-05
 
-Lockstep `.32` narrowly admits requested agent-task `model: null`, preserving
-native null without attributing the parent model. Two installed consumer `.31`
+Signed `hotfix-2026-10-05.2` publishes lockstep `.32` from exact artifact source
+`8638e14a79975de9838bb590d9ee2fdeef7fdb81`. It narrowly admits requested agent-task
+`model: null`, preserving native null without attributing the parent model. Two installed consumer `.31`
 fixtures and unchanged-module offline reproduction prove this initiating
-rejection. Sixteen real-adapter regressions: before patch11 failed/39 passed,
-after50 passed. Four real adapter-to-Runtime lifecycle tests fail on the old
+rejection. Sixteen real-adapter regressions: before patch **11 failed/39 passed**,
+after **50 passed**. Four real adapter-to-Runtime lifecycle tests fail on the old
 schema and pass with the correction: healthy completion, pending user input,
-revision and Stop/Resume fencing. Control/identity/ownership, other optional metadata, count/wire,
-revision/binding and genuine interaction uncertainty remain strict. No native,
-transport, protocol/profile or migration identity changes. Complete release
-gates are in progress. No live service, owner
-session, additional SDK attachment or real model action is included.
+revision and Stop/Resume fencing. Control/identity/ownership, other optional
+metadata, count/wire, revision/binding and genuine interaction uncertainty remain
+strict. No native,
+transport, protocol/profile or migration identity changes. The historical Tariff
+initiating field remains unproved; the Windows health private-write issue is
+separate.
+
+Exact-source typecheck, **1,445 tests / 138 passing files** (eight tests/one file
+skipped), build, checkpoint/docs/release/secrets checks, all **16** isolated packed
+consumers with the reviewed exact published transport graph, and SBOM pass.
+All **19** public assets independently match bytes, hashes and API metadata.
+Trusted signed tag object `60efb49df7c6a24e3e7ef506b0cace393ef22cc4` binds the
+artifact source. Framework `main` remains preserved; no npm stable promotion,
+live service, owner session, additional SDK attachment or real model action is
+included. Native installed acceptance remains consumer-owned. GitHub platform
+immutability is off; the release is frozen by procedure with exact consumer pins.
+[Release proof, digests and retained failures](audits/hotfix32-release-qualification-20261005.md).
 [Correction scope and exact evidence](audits/copilot-null-task-model-20261005.md).
 
 ## Complete no-ID admission projection candidate — 2026-10-01
