@@ -307,6 +307,17 @@ is not invoked by the observation watchdog. See the
 The runtime daemon's presence heartbeat remains independent of inventory and
 metadata maintenance; see [process supervision](Operations.md#process-supervision).
 
+Private incident traces retain the current binding's invalidating gap cause on
+later records as `lastInvalidatingGap`; activation can report the prior persisted
+fixed diagnostic as `previousBindingGap` before replacement. These bounded
+metadata fields help embeddings preserve cause after recent16/log rotation.
+Embeddings must copy them explicitly into protected diagnostics. They grant no
+interaction completeness: the pinned SDK can enumerate permission history only,
+and has no complete pending-question, elicitation or plan snapshot. A retained
+callback map also cannot prove native absence after its response has been handed
+back to the SDK without native acknowledgement. See the
+[P0 recovery investigation](../audits/copilot-gap-interaction-recovery-20261005.md).
+
 
 ### Copilot registered agents
 

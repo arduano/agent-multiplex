@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emptyMetadataSnapshot, initialLifecycle, newCommandId, newRuntimeEpoch, newRuntimeNodeBootId,
+import { NATIVE_PAYLOAD_MAX_BYTES, emptyMetadataSnapshot, initialLifecycle, newCommandId, newRuntimeEpoch, newRuntimeNodeBootId,
   newRuntimeNodeId, newSessionId } from "@arduano/agent-multiplex-protocol";
 import { CopilotIncidentTracer, RuntimeNodeService, RuntimeNodeStore, copilotIncidentStateSummary,
   type AdapterEvent, type AdapterSession, type AgentAdapter, type CopilotIncidentTraceHook,
@@ -103,6 +103,85 @@ describe("private Copilot incident tracing", () => {
     expect(ordinals[1]).toBe(ordinals[0]! + 1);
     expect(gaps[0]!.recent.at(-1)?.ingressOrdinal).toBe(ordinals[0]);
     expect(gaps[1]!.recent.at(-1)?.ingressOrdinal).toBe(ordinals[1]);
+  });
+
+  it("retains the exact invalidating cause after recent ingress rotates and optional telemetry is omitted", async () => {
+    const f = await fixture(); const s = await f.add();
+    s.emit({ kind: "native", nativeType: "user_input.requested", ephemeral: true,
+      payload: { type: "user_input.requested", data: { requestId: "private-request", content: "x".repeat(1_100_000) } } });
+    await vi.waitFor(() => expect(f.traces.some(trace => trace.kind === "gap")).toBe(true));
+    const first = f.traces.find(trace => trace.kind === "gap")!;
+    expect(first).toMatchObject({ lastInvalidatingGap: {
+      diagnostic: { diagnosticId: first.kind === "gap" ? first.diagnosticId : "unused", code: "imageExtraction", errorClass: "schema" },
+      nativeEventType: "user_input.requested", nativeEphemeral: true, payloadFailure: "wireEnvelope",
+      decisionReason: "requiredNativeEvent", wireLimitBytes: NATIVE_PAYLOAD_MAX_BYTES,
+    } });
+    const cause = first.lastInvalidatingGap;
+    for (let i = 0; i < 20; i++) s.emit({ kind: "native", nativeType: "assistant.message_delta", ephemeral: true, payload: {} });
+    s.emit({ kind: "native", nativeType: "model.messages_snapshot", ephemeral: true,
+      payload: { type: "model.messages_snapshot", ephemeral: true, data: { kind: "messages_snapshot", messages: ["x".repeat(1_100_000)] } } });
+    await vi.waitFor(() => expect(f.traces.filter(trace => trace.kind === "gap")).toHaveLength(2));
+    s.emit({ kind: "lifecycle", fact: { type: "rootIdle", aborted: false } });
+    await vi.waitFor(() => expect(f.traces.some(trace => trace.kind === "transition" && trace.factType === "rootIdle")).toBe(true));
+    const last = f.traces.at(-1)!;
+    expect(last.lastInvalidatingGap).toEqual(cause);
+    expect(Object.isFrozen(last.lastInvalidatingGap)).toBe(true);
+    expect(last.recent.every(ingress => ingress.nativeEventType !== "user_input.requested")).toBe(true);
+    expect((await f.service.readLifecycle(s.target.sessionId)).view.actions.send).toEqual({ available: false, reason: "interactionStateUnknown" });
+    expect(JSON.stringify(f.traces)).not.toContain("private-request");
+  });
+
+  it("reports the persisted previous binding gap at recovery without applying it to replacement evidence", async () => {
+    const f = await fixture(); const old = await f.add();
+    old.emit({ kind: "native", nativeType: "unrecognized-private-type", ephemeral: true, payload: { content: "x".repeat(1_100_000) } });
+    await vi.waitFor(() => expect(f.traces.some(trace => trace.kind === "gap")).toBe(true));
+    const previousGap = f.store.getLifecycle(old.target.sessionId)!.lastGap!;
+    await f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "cause-stop", ...old.target });
+    await f.service.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "cause-resume", ...old.target });
+    await vi.waitFor(() => expect(f.traces.filter(trace => trace.kind === "binding" && trace.outcome === "activated")).toHaveLength(2));
+    const activated = f.traces.filter(trace => trace.kind === "binding" && trace.outcome === "activated");
+    expect(activated[1]).toMatchObject({ previousBindingGap: previousGap });
+    expect(f.store.getLifecycle(old.target.sessionId)!.lastGap).toBeUndefined();
+    expect(f.store.getLifecycle(old.target.sessionId)!.interactions.completeness).toBe("partial");
+    expect(activated[1]).not.toHaveProperty("lastInvalidatingGap");
+  });
+
+  it("ignores a failed diagnostic-only persisted read during activation", async () => {
+    const f = await fixture(); const old = await f.add();
+    await f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "diagnostic-stop", ...old.target });
+    vi.spyOn(f.store, "getLifecycle").mockImplementationOnce(() => { throw new Error("private-diagnostic-read-failure"); });
+    await expect(f.service.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "diagnostic-resume", ...old.target }))
+      .resolves.toMatchObject({ state: "succeeded" });
+    await vi.waitFor(() => expect(f.traces.filter(trace => trace.kind === "binding" && trace.outcome === "activated")).toHaveLength(2));
+    expect(f.traces.filter(trace => trace.kind === "binding" && trace.outcome === "activated")[1]).not.toHaveProperty("previousBindingGap");
+    expect(JSON.stringify(f.traces)).not.toContain("private-diagnostic-read-failure");
+  });
+
+  it.each(["runtimeNodeId", "bindingRevision"] as const)("does not attribute a previous gap from a mismatched %s", async field => {
+    const f = await fixture(); const old = await f.add();
+    old.emit({ kind: "native", nativeType: "unsupported", ephemeral: true, payload: { content: "x".repeat(1_100_000) } });
+    await vi.waitFor(() => expect(f.traces.some(trace => trace.kind === "gap")).toBe(true));
+    await f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "fenced-diagnostic-stop", ...old.target });
+    const previous = f.store.getLifecycle(old.target.sessionId)!;
+    const fence = field === "runtimeNodeId" ? { ...previous.fence, runtimeNodeId: newRuntimeNodeId() }
+      : { ...previous.fence, bindingRevision: previous.fence.bindingRevision + 1 };
+    f.store.putLifecycle({ ...previous, fence });
+    await f.service.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "fenced-diagnostic-resume", ...old.target });
+    await vi.waitFor(() => expect(f.traces.filter(trace => trace.kind === "binding" && trace.outcome === "activated")).toHaveLength(2));
+    expect(f.traces.filter(trace => trace.kind === "binding" && trace.outcome === "activated")[1]).not.toHaveProperty("previousBindingGap");
+  });
+
+  it("omits malformed gap context without throwing or retaining extra diagnostic data", async () => {
+    const records: CopilotIncidentTraceRecord[] = [];
+    const tracer = new CopilotIncidentTracer(record => { records.push(record); });
+    const binding = tracer.binding("synthetic-invalid-diagnostic");
+    expect(() => tracer.record(binding, { kind: "gap", diagnosticId: "synthetic-invalid", code: "eventHandling",
+      lifecycleImpact: "invalidated", decisionReason: "notWireEnvelope",
+      diagnostic: { privateValue: "private-diagnostic-sentinel" } as never })).not.toThrow();
+    await tick();
+    expect(records[0]).not.toHaveProperty("diagnostic");
+    expect(records[0]).not.toHaveProperty("lastInvalidatingGap");
+    expect(JSON.stringify(records)).not.toContain("private-diagnostic-sentinel");
   });
 
   it("keeps interleaved sessions separate, uses recent16 and carries an adapter event's original correlation through payload drain", async () => {

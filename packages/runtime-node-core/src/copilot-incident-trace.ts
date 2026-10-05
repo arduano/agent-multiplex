@@ -1,4 +1,5 @@
-import { lifecycleActionAvailability, type LifecycleFact, type LifecycleState, type NativeGapDiagnostic } from "@arduano/agent-multiplex-protocol";
+import { lifecycleActionAvailability, nativeGapDiagnosticSchema, type LifecycleFact, type LifecycleState, type NativeGapDiagnostic,
+  type NativePayloadValidationFailure } from "@arduano/agent-multiplex-protocol";
 import type { AdapterEvent, AdapterNativeStateReadReason, AdapterNativeStateValidationIssue, AdapterNativeStateValidationReason } from "./adapter.js";
 import { nativeDiagnosticEventType, type NativeDiagnosticEventType } from "./native-event-diagnostics.js";
 
@@ -49,8 +50,21 @@ export type CopilotIncidentDecisionReason = "optionalTelemetryOmitted" | "notWir
   | "notNativeEvent" | "unknownNativeEvent" | "requiredNativeEvent" | "notExplicitlyEphemeral"
   | "adapterPolicyRejected" | "adapterPolicyUnavailable" | "adapterPolicyFailed";
 
+/** One fixed metadata record. It is diagnostic context, never lifecycle evidence. */
+export interface CopilotIncidentGapContext {
+  readonly diagnostic: NativeGapDiagnostic;
+  readonly decisionReason: CopilotIncidentDecisionReason;
+  readonly nativeEventType?: NativeDiagnosticEventType;
+  readonly nativeEphemeral?: boolean;
+  readonly payloadFailure?: NativePayloadValidationFailure;
+  readonly wireUpperBoundBytes?: number;
+  readonly wireLimitBytes?: number;
+}
+
 export type CopilotIncidentTraceDetail =
-  | { readonly kind: "binding"; readonly outcome: "activated" | "retired" }
+  | { readonly kind: "binding"; readonly outcome: "activated" | "retired";
+      /** Persisted cause from a retired binding, copied before new evidence replaces it. */
+      readonly previousBindingGap?: NativeGapDiagnostic }
   | { readonly kind: "ingress"; readonly event: CopilotIncidentIngress; readonly outcome: "received" | "retiredBinding" | "runtimeClosing" | "overflowSuppressed" }
   | { readonly kind: "transition"; readonly factType: LifecycleFact["type"]; readonly outcome: "applied" | "retiredBinding" | "fenceUnavailable";
       readonly lifecycleSequenceBefore?: number; readonly lifecycleSequenceAfter?: number;
@@ -58,6 +72,10 @@ export type CopilotIncidentTraceDetail =
       readonly diagnosticId?: string; readonly ingressOrdinal?: number; readonly nativeEventOrdinal?: number }
   | { readonly kind: "gap"; readonly diagnosticId: string; readonly code: NativeGapDiagnostic["code"];
       readonly decisionReason: CopilotIncidentDecisionReason; readonly lifecycleImpact: "preserved" | "invalidated";
+      readonly diagnostic?: NativeGapDiagnostic;
+      readonly nativeEventType?: NativeDiagnosticEventType; readonly nativeEphemeral?: boolean;
+      readonly payloadFailure?: NativePayloadValidationFailure;
+      readonly wireUpperBoundBytes?: number; readonly wireLimitBytes?: number;
       readonly ingressOrdinal?: number; readonly nativeEventOrdinal?: number; readonly state?: CopilotIncidentStateSummary }
   | { readonly kind: "observation"; readonly view: "tasks" | "pendingMessages"; readonly outcome: "started" | "accepted" | "failed" | "stalled" | "staleRevision" | "retiredBinding" | "staleGeneration" | "fenceUnavailable";
       readonly generation: number; readonly revision?: number; readonly currentRevision?: number; readonly failures: number;
@@ -79,6 +97,8 @@ export type CopilotIncidentTraceRecord = CopilotIncidentTraceDetail & {
   readonly suppressedRecords: number;
   readonly pendingEvents?: number;
   readonly pendingEventBytes?: number;
+  /** Survives recent16 rotation and later optional omissions on this binding. */
+  readonly lastInvalidatingGap?: CopilotIncidentGapContext;
 };
 export type CopilotIncidentTraceHook = (record: CopilotIncidentTraceRecord) => void | Promise<void>;
 
@@ -88,6 +108,7 @@ export interface CopilotIncidentTraceBinding {
   readonly sdkAttachmentId?: number;
   ingressOrdinal: number;
   readonly recent: CopilotIncidentIngress[];
+  lastInvalidatingGap?: CopilotIncidentGapContext;
 }
 
 /** Bounded process-local metadata. Logging never runs on the native callback stack. */
@@ -131,10 +152,30 @@ export class CopilotIncidentTracer {
 
   public record(binding: CopilotIncidentTraceBinding, detail: CopilotIncidentTraceDetail,
     pressure?: { readonly pendingEvents: number; readonly pendingEventBytes: number }, recent = binding.recent): void {
-    const record: CopilotIncidentTraceRecord = Object.freeze({ ...detail, ...pressure, version: COPILOT_INCIDENT_TRACE_VERSION,
+    let recordDetail = detail;
+    const diagnostic = detail.kind === "gap" && detail.diagnostic ? nativeGapDiagnosticSchema.safeParse(detail.diagnostic) : undefined;
+    if (detail.kind === "gap" && detail.diagnostic) {
+      const { diagnostic: _original, ...withoutDiagnostic } = detail;
+      recordDetail = diagnostic?.success
+        ? { ...withoutDiagnostic, diagnostic: Object.freeze(diagnostic.data) } : withoutDiagnostic;
+    }
+    if (detail.kind === "gap" && detail.lifecycleImpact === "invalidated" && diagnostic?.success) {
+      // Copy only the strict durable metadata and fixed private fields. A later
+      // optional display omission cannot replace the cause of partial state.
+      binding.lastInvalidatingGap = Object.freeze({ diagnostic: Object.freeze(diagnostic.data),
+        decisionReason: detail.decisionReason,
+        ...(detail.nativeEventType === undefined ? {} : { nativeEventType: nativeDiagnosticEventType("copilot", detail.nativeEventType) }),
+        ...(detail.nativeEphemeral === undefined ? {} : { nativeEphemeral: detail.nativeEphemeral }),
+        ...(detail.payloadFailure === undefined ? {} : { payloadFailure: detail.payloadFailure }),
+        ...(detail.wireUpperBoundBytes === undefined ? {} : { wireUpperBoundBytes: detail.wireUpperBoundBytes }),
+        ...(detail.wireLimitBytes === undefined ? {} : { wireLimitBytes: detail.wireLimitBytes }),
+      });
+    }
+    const record: CopilotIncidentTraceRecord = Object.freeze({ ...recordDetail, ...pressure, version: COPILOT_INCIDENT_TRACE_VERSION,
       at: new Date().toISOString(), elapsedMs: this.elapsed(), traceSequence: ++this.#sequence,
       sessionTraceId: binding.sessionTraceId, bindingTraceId: binding.bindingTraceId,
       ...(binding.sdkAttachmentId === undefined ? {} : { sdkAttachmentId: binding.sdkAttachmentId }),
+      ...(binding.lastInvalidatingGap === undefined ? {} : { lastInvalidatingGap: binding.lastInvalidatingGap }),
       recent: Object.freeze([...recent]), suppressedRecords: 0 });
     if (this.#queue.length >= 128) {
       // Ordinary state bursts must not erase a failure before its sink sees it.

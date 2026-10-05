@@ -3145,6 +3145,18 @@ export class RuntimeNodeService {
   }
 
   #activate(sessionId: SessionId, session: AdapterSession): void {
+    // A new epoch starts uncertified. Preserve the prior fixed diagnostic only
+    // in the private trace before lifecycle.read replaces the old reduced row.
+    let previousBindingGap: NativeGapDiagnostic | undefined;
+    if (session.harness === "copilot" && this.#incidentTracer) {
+      try {
+        const previous = this.#store.getLifecycle(sessionId);
+        const installed = this.#store.getSession(sessionId);
+        if (previous?.lastGap && installed?.harness === "copilot" &&
+            previous.fence.sessionId === sessionId && previous.fence.runtimeNodeId === this.#runtimeNodeId &&
+            previous.fence.bindingRevision === installed.bindingRevision) previousBindingGap = previous.lastGap;
+      } catch { /* Diagnostic collection cannot interrupt native activation. */ }
+    }
     const existing = this.#active.get(sessionId);
     if (existing) this.#retireLifecycleObservations(existing);
     existing?.unsubscribe();
@@ -3188,7 +3200,8 @@ export class RuntimeNodeService {
       unsubscribe: () => undefined,
     };
     this.#active.set(sessionId, binding);
-    this.#trace(binding, { kind: "binding", outcome: "activated" });
+    this.#trace(binding, { kind: "binding", outcome: "activated",
+      ...(previousBindingGap === undefined ? {} : { previousBindingGap: Object.freeze({ ...previousBindingGap }) }) });
     try {
       const unsubscribe = session.subscribe((event) =>
         this.#queueAdapterEvent(sessionId, binding, event),
@@ -3325,6 +3338,11 @@ export class RuntimeNodeService {
     const fence = binding.incidentTrace && this.#lifecycleFence(sessionId, binding);
     this.#trace(binding, { kind: "gap", diagnosticId: diagnostic.diagnosticId, code,
       decisionReason, lifecycleImpact: optionalTelemetry ? "preserved" : "invalidated",
+      diagnostic,
+      ...(payloadFailure === undefined ? {} : { payloadFailure }),
+      ...(wireBounds === undefined ? {} : wireBounds),
+      ...(event.kind === "native" ? { nativeEventType: nativeDiagnosticEventType(binding.session.harness, event.nativeType),
+        nativeEphemeral: event.ephemeral === true } : {}),
       ...(ingress ? { ingressOrdinal: ingress.ingressOrdinal, ...(ingress.nativeEventOrdinal === undefined ? {} : { nativeEventOrdinal: ingress.nativeEventOrdinal }) } : {}),
       ...(fence ? { state: copilotIncidentStateSummary(this.#lifecycle.read(fence)) } : {}) }, ingress);
     this.#events.publish({ kind: "nativeGap", sessionId, reason: `native ${code} (diagnostic ${diagnostic.diagnosticId})`, recovery: "readNativeHistory" });
@@ -3368,9 +3386,11 @@ export class RuntimeNodeService {
   }
 
   #trace(binding: ActiveBinding, detail: CopilotIncidentTraceDetail, ingress = binding.currentIngress): void {
-    if (binding.incidentTrace) this.#incidentTracer?.record(binding.incidentTrace, detail,
-      { pendingEvents: binding.pendingEvents, pendingEventBytes: binding.pendingEventBytes },
-      ingress ? binding.eventRecent.get(ingress) ?? binding.incidentTrace.recent : binding.incidentTrace.recent);
+    try {
+      if (binding.incidentTrace) this.#incidentTracer?.record(binding.incidentTrace, detail,
+        { pendingEvents: binding.pendingEvents, pendingEventBytes: binding.pendingEventBytes },
+        ingress ? binding.eventRecent.get(ingress) ?? binding.incidentTrace.recent : binding.incidentTrace.recent);
+    } catch { /* Private trace collection cannot change native session behavior. */ }
   }
 
   #handleTracedAdapterEvent(sessionId: SessionId, binding: ActiveBinding, event: AdapterEvent, payload?: NativePayload,

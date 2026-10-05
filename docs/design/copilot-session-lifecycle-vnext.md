@@ -256,6 +256,18 @@ decision. Observation and recovery records explain stale revision/generation,
 retired binding, retry/stall and deadline decisions. The trace is best effort;
 suppression is explicit and missing records cannot prove event absence.
 
+Gap records additionally carry the strict fixed diagnostic, allowlisted native
+type and ephemeral flag, payload-validation stage and wire upper bound/limit.
+Each binding retains one immutable `lastInvalidatingGap` context on later trace
+records, so recent16 rotation or a later optional telemetry omission does not
+erase the cause of partial state. Activation may carry `previousBindingGap`,
+copied from the prior persisted lifecycle row before the new epoch replaces it.
+That previous-binding record is diagnostic context only; it is never applied to
+the new lifecycle state. Hosts must explicitly retain these bounded optional
+fields and preserve incident records beyond routine rotating logs. No raw
+payload, native request/event identity, provider data, wire or durable schema,
+or lifecycle/admission policy is added by this retention.
+
 A current-revision failed observation may include a fixed `failureReason` and
 up to eight `validationIssues`. Each issue contains only an allowlisted field
 path (at most eight segments, numeric indices saturated at 1,000), fixed issue

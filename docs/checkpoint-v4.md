@@ -1,5 +1,20 @@
 # Release qualification checkpoint
 
+## P0 Copilot interaction cause retention source — 2026-10-05
+
+Isolated source from `998128b0a9b00eaeb3c28f304554e79cdcaf16c3` retains one
+immutable invalidating-gap metadata context in private traces and reports the
+fenced prior persisted gap at activation. Two exact-base regressions fail;
+**106 focused tests**, typecheck/build and checkpoint/docs/release/secrets checks
+pass. The broad serial run passes 1,449 tests and fails two existing control
+cases; all 13 tests in their two files pass on isolated retry. The failed receipt
+is retained and a clean full-suite pass is unclaimed. No lifecycle/admission,
+public/durable schema, migration, dependency or version change is included.
+The supported pin cannot enumerate all pending UI kinds; P0 remains open with
+no native/model/owner action, release or deployment claim. The
+[owning audit](audits/copilot-gap-interaction-recovery-20261005.md) records exact
+cause limits, constrained recovery design, review corrections and receipts.
+
 ## Published Copilot native null task model metadata hotfix.32 — 2026-10-05
 
 Signed `hotfix-2026-10-05.2` publishes lockstep `.32` from exact artifact source
