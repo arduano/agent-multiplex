@@ -216,6 +216,14 @@ an observed task/queue fact. A rejected envelope cannot first claim a fresh
 complete snapshot. Projection validation also completes before the single
 lifecycle append; no fake healthy or empty task state repairs rejection.
 
+Native agent-task requested `model` metadata accepts absent, string or explicit
+`null`, preserving the original value. Null is unknown requested model metadata,
+not a lifecycle/control failure and not a claim about the model actually used.
+`resolvedModel` and other known optional metadata remain strict. Identity,
+ownership, status, control fields, wire/count limits and exact revision/binding
+fences are unchanged. Admission of this metadata cannot certify root idle,
+completed children, an empty queue or complete interaction hydration by itself.
+
 `sessions.readLifecycle` drains already admitted lifecycle work, rechecks the
 installed binding, and returns the compact `SessionLifecycleView`. The direct
 runtime response temporarily includes its exact private fence and reducer

@@ -344,6 +344,14 @@ preserved. Refresh on selection, reconnect and root
 `session.background_tasks_changed` events. Idle or completed native tasks are
 not evidence that the whole session is running.
 
+An agent task's requested `model` may be absent, a native string, or explicit
+`null`. Preserve these values: `null` means unknown requested model metadata,
+not the parent model or evidence of actual dispatch. `resolvedModel` remains an
+optional string. Task identity, ownership, status, execution/control fields,
+count/wire bounds and observation revision/binding checks remain strict. This
+narrow admission prevents valid native null metadata from withholding an
+otherwise fresh task snapshot; it does not repair interaction uncertainty.
+
 `tasks.progress` v1 adds `view: "taskProgress", id` for native recent shell output
 or agent/client progress. `tasks.promoteToBackground` v1 adds
 `view: "currentPromotableTask"` and the durable `promoteTaskToBackground` command

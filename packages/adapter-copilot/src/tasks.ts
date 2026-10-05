@@ -16,7 +16,8 @@ const common = {
 };
 const task = z.discriminatedUnion("type", [
   z.object({ ...common, type: z.literal("agent"), toolCallId: z.string(), agentType: z.string(), prompt: z.string(),
-    model: z.string().optional(), resolvedModel: z.string().optional(), displayName: z.string().optional() }).passthrough(),
+    // Native agent tasks can explicitly leave the requested model unknown.
+    model: z.string().nullable().optional(), resolvedModel: z.string().optional(), displayName: z.string().optional() }).passthrough(),
   z.object({ ...common, type: z.literal("shell"), command: z.string(), attachmentMode: z.enum(["attached", "detached"]),
     pid: z.number().int().positive().optional(), logPath: z.string().optional() }).passthrough(),
   z.object({ ...common, type: z.literal("client"), status: z.enum([...status.options, "orphaned"]),

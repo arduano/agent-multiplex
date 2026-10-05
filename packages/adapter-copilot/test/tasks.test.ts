@@ -39,6 +39,69 @@ describe("native Copilot task observations", () => {
     expect(f.tasks.refresh).toHaveBeenCalledOnce(); expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
     expect(f.session.status()).toBe("idle");
   });
+  it.each(["running", "completed"] as const)("preserves native null, absent and string agent model metadata in %s tasks", async status => {
+    const { model: _model, ...withoutModel } = agent;
+    const value = { tasks: [
+      { ...withoutModel, id: "null-model", status, model: null, nativeMetadata: { complete: status === "completed" } },
+      { ...withoutModel, id: "absent-model", status },
+      { ...withoutModel, id: "string-model", status, model: "gpt-6-luna" },
+    ] };
+    const f = fixture({ list: async () => value });
+    const snapshot = await f.session.readNativeState({ harness: "copilot", view: "tasks" });
+    expect(snapshot.payload).toEqual(value);
+    expect((snapshot.payload as typeof value).tasks[0]).toHaveProperty("model", null);
+    expect((snapshot.payload as typeof value).tasks[1]).not.toHaveProperty("model");
+    expect((snapshot.payload as typeof value).tasks[2]).toHaveProperty("model", "gpt-6-luna");
+    expect(f.tasks.refresh).toHaveBeenCalledOnce();
+    expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+    expect(f.session.status()).toBe("idle");
+  });
+  it("preserves null model metadata in the native promotable-agent read", async () => {
+    const value = { task: { ...agent, status: "running", model: null, canPromoteToBackground: true } };
+    const f = fixture({ getCurrentPromotable: async () => value });
+    expect((await f.session.readNativeState({ harness: "copilot", view: "currentPromotableTask" })).payload).toEqual(value);
+    expect(f.tasks.promoteToBackground).not.toHaveBeenCalled();
+    expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+  });
+  it.each([
+    { field: "model", value: 42, valueType: "number" },
+    { field: "model", value: true, valueType: "boolean" },
+    { field: "model", value: [], valueType: "array" },
+    { field: "model", value: {}, valueType: "object" },
+    { field: "resolvedModel", value: null, valueType: "null" },
+    { field: "displayName", value: null, valueType: "null" },
+  ])("keeps $field/$valueType metadata strict through the managed task read", async ({ field, value, valueType }) => {
+    const f = fixture({ list: async () => ({ tasks: [{ ...agent, model: null, [field]: value }] }) });
+    await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toMatchObject({
+      reason: "snapshotMalformed", issues: [{ path: ["tasks", 0, field], code: "invalid_type", valueType }],
+    });
+    expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+  });
+  it.each([
+    { field: "id", value: "", code: "too_small", valueType: "string" },
+    { field: "id", value: "x".repeat(4_097), code: "too_big", valueType: "string" },
+    { field: "status", value: "unknown", code: "invalid_value", valueType: "string" },
+    { field: "executionMode", value: null, code: "invalid_value", valueType: "null" },
+    { field: "canPromoteToBackground", value: "true", code: "invalid_type", valueType: "string" },
+    { field: "toolCallId", value: null, code: "invalid_type", valueType: "null" },
+  ])("keeps null-model task $field control validation strict", async ({ field, value, code, valueType }) => {
+    const f = fixture({ list: async () => ({ tasks: [{ ...agent, model: null, [field]: value }] }) });
+    await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toMatchObject({
+      reason: "snapshotMalformed", issues: [{ path: ["tasks", 0, field], code, valueType }],
+    });
+  });
+  it("keeps null-model task snapshots within the native wire and list bounds", async () => {
+    const nullModel = { ...agent, model: null };
+    for (const [value, reason] of [
+      [{ tasks: [{ ...nullModel, nativeMetadata: "x".repeat(NATIVE_PAYLOAD_MAX_BYTES) }] }, "snapshotTooLarge"],
+      [{ tasks: [{ ...nullModel, nativeMetadata: new Date(shell.startedAt) }] }, "snapshotWireInvalid"],
+      [{ tasks: Array.from({ length: 1_001 }, () => nullModel) }, "snapshotMalformed"],
+    ] as const) {
+      const f = fixture({ list: async () => value });
+      await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toMatchObject({ reason });
+      expect(f.send).not.toHaveBeenCalled(); expect(f.getEvents).not.toHaveBeenCalled();
+    }
+  });
   it("uses the exact ID for progress and preserves native absence", async () => {
     const f = fixture({ getProgress: vi.fn(async () => ({ progress: null })), getCurrentPromotable: async () => ({}) });
     expect((await f.session.readNativeState({ harness: "copilot", view: "taskProgress", id: "specific-task" })).payload).toEqual({ progress: null });

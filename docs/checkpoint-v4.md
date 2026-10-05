@@ -1,5 +1,20 @@
 # Release qualification checkpoint
 
+## Copilot native null task model metadata candidate — 2026-10-05
+
+Lockstep `.32` narrowly admits requested agent-task `model: null`, preserving
+native null without attributing the parent model. Two installed consumer `.31`
+fixtures and unchanged-module offline reproduction prove this initiating
+rejection. Sixteen real-adapter regressions: before patch11 failed/39 passed,
+after50 passed. Four real adapter-to-Runtime lifecycle tests fail on the old
+schema and pass with the correction: healthy completion, pending user input,
+revision and Stop/Resume fencing. Control/identity/ownership, other optional metadata, count/wire,
+revision/binding and genuine interaction uncertainty remain strict. No native,
+transport, protocol/profile or migration identity changes. Complete release
+gates are in progress. No live service, owner
+session, additional SDK attachment or real model action is included.
+[Correction scope and exact evidence](audits/copilot-null-task-model-20261005.md).
+
 ## Complete no-ID admission projection candidate — 2026-10-01
 
 The isolated runtime pending subset now omits only matching succeeded/accepted
