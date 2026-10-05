@@ -132,6 +132,9 @@ describe("CopilotAgentAdapter", () => {
       let finished = false;
       const describing = adapter.describe().then(result => { finished = true; return result; });
       const models = adapter.listModels();
+      // Keep the second caller observed even if the negative-control deadline
+      // fails the assertion before the final await below.
+      void models.catch(() => undefined);
       await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS * 2);
       expect(finished).toBe(false);
       expect(start).toHaveBeenCalledOnce();
