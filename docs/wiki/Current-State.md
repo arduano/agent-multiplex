@@ -5,11 +5,12 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-05 (observation recovery containment candidate; immutable signed hotfix.30 remains published).
+Last reconciled: 2026-10-05 (signed observation recovery containment hotfix.31 published; installed acceptance remains consumer-owned).
 
-## October 5 Copilot observation recovery containment candidate
+## Published Copilot observation recovery containment hotfix.31
 
-An isolated source candidate based on exact `.30` checkout `1dd9ae1` contains
+Signed `hotfix-2026-10-05.1` publishes lockstep `.31` from exact artifact source
+`8a876141624ecb65539a613f416ce8e02cf4dc66`. Based on exact `.30` checkout `1dd9ae1`, it contains
 a proved harmful escalation: task/queue observation failure cannot automatically
 restart the shared Copilot native owner and cancel children or peer work.
 Degraded admission, genuine pending interaction uncertainty, original receipts,
@@ -17,12 +18,17 @@ read ownership, binding/revision fences and explicit owner Stop/Recover remain.
 Typed fixed failure reasons distinguish admission from invalidation/read/owner
 failures. Complete envelope admission now precedes lifecycle snapshot evidence.
 
-Focused regression and exact-source qualification belong to the
-[recovery safety audit](../audits/copilot-observation-recovery-safety-20261005.md).
-Publication, combined release gates and installed Windows/WSL acceptance remain
-coordinator-owned. No native model or live service action is included; the
-original Tariff rejected task field remains unproved. Historical automatic
-observation retry descriptions below retain their original release scope.
+Typecheck/build, **1,425 tests**, repository gates, all **16** isolated packed
+consumers and **19** public byte matches passed. Independent review reconciled
+cleanup, exact interaction-resolution, revision and consumer logging findings.
+The corrected native shape/cleanup fixture used two loopback synthetic requests
+and **zero external model calls**. [Release proof and limits](../audits/hotfix31-release-qualification-20261005.md)
+record the exact signed source and digests. GitHub platform immutability is off;
+the release is frozen by procedure and consumers pin exact bytes. Previous `.30`
+is unchanged. Framework `main` was not advanced and no npm stable promotion
+occurred. Installed Windows/WSL acceptance remains consumer-owned. The original
+Tariff rejected task field remains unproved. Historical automatic observation
+retry descriptions below retain their original release scope.
 
 ## Published Copilot task observation diagnostics hotfix.30
 
