@@ -1,6 +1,33 @@
 # Release qualification checkpoint
 
-## P0 Copilot interaction cause retention source — 2026-10-05
+## Published P0 Copilot cause-retention hotfix.33 — 2026-10-05
+
+Signed `hotfix-2026-10-05.3` publishes lockstep `.33` from exact artifact source
+`454f044a86c689d0a2af037f2d1fa1571dd34cef`. Trusted signed tag object
+`57484bfa943d10abfa91b5d791e337ccee2120f9` and remote source match pass.
+The release includes published `.32`'s narrow null task model correction and
+immutable fixed invalidating-gap context, with exact session/runtime-node/
+binding-revision attribution for prior persisted diagnostics. Previous-binding
+history never becomes replacement lifecycle evidence.
+
+Exact-source typecheck, **1,451 tests / 138 passing files** (eight tests/one file
+skipped), build, checkpoint/docs/release/secrets checks, all **16** isolated packed
+consumers and SBOM pass. All **19** public assets independently match qualified
+bytes. Earlier failed/interrupted producer and integration receipts remain
+retained separately. The default packed verifier's registry E401 was resolved
+for qualification with the reviewed exact published transport verifier, without
+changing product dependencies.
+
+Native SDK/CLI, transport, wire/durable schemas, migration and interaction
+admission/recovery policies are unchanged. The initiating Tariff interaction
+event remains unproved; diagnostic retention does not close P0 recurrence
+prevention. Framework `main` remains preserved; no npm stable promotion,
+installed activation, native model or owner-session action is included.
+GitHub platform immutability is off; operator procedure freezes the release and
+consumers retain exact pins. Native acceptance remains consumer-owned.
+[Release proof, digests and limits](audits/hotfix33-release-qualification-20261005.md).
+
+## Isolated P0 Copilot interaction cause retention source — 2026-10-05
 
 Isolated source from `998128b0a9b00eaeb3c28f304554e79cdcaf16c3` retains one
 immutable invalidating-gap metadata context in private traces and reports the
@@ -8,10 +35,12 @@ fenced prior persisted gap at activation. Two exact-base regressions fail;
 **106 focused tests**, typecheck/build and checkpoint/docs/release/secrets checks
 pass. The broad serial run passes 1,449 tests and fails two existing control
 cases; all 13 tests in their two files pass on isolated retry. The failed receipt
-is retained and a clean full-suite pass is unclaimed. No lifecycle/admission,
+is retained; these isolated producer receipts claim no clean full-suite pass.
+The separate coordinated `.33` gate above subsequently passed. No lifecycle/admission,
 public/durable schema, migration, dependency or version change is included.
 The supported pin cannot enumerate all pending UI kinds; P0 remains open with
-no native/model/owner action, release or deployment claim. The
+no native/model/owner action, release or deployment claim from this isolated
+investigation. The
 [owning audit](audits/copilot-gap-interaction-recovery-20261005.md) records exact
 cause limits, constrained recovery design, review corrections and receipts.
 

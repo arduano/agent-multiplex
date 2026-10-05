@@ -5,44 +5,56 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-05 (P0 cause-retention hotfix.33 preparation; installed acceptance remains consumer-owned).
+Last reconciled: 2026-10-05 (signed P0 cause-retention hotfix.33 published; installed acceptance remains consumer-owned).
 
-## P0 cause-retention hotfix.33 preparation
+## Published P0 cause-retention hotfix.33
 
-The coordinated `.33` candidate includes the narrow published `.32` null task
-model correction and diagnostic cause retention described below. The final serial
-source gate passes **1,451 tests / 138 files** (eight tests/one file skipped),
+Signed `hotfix-2026-10-05.3` publishes lockstep `.33` from exact artifact source
+`454f044a86c689d0a2af037f2d1fa1571dd34cef`, including the narrow published `.32`
+null task model correction and diagnostic cause retention described below.
+The final serial source gate passes **1,451 tests / 138 files** (eight tests/one file skipped),
 typecheck/build and checkpoint/docs/release/secrets checks. An earlier integration
 run was interrupted after two payload-gap test failures; the isolated producer
 run also retains two different control-test failures. Neither failed receipt is
 relabeled as a pass; the successful serial gate is separate evidence.
 
-All 16 packages and internal edges advance together. Native SDK/CLI, transport,
-wire and durable schemas, lifecycle admission and recovery policy are unchanged.
-Package/publication and consumer preparation are separate following gates. No
-live role, owner session, SDK attachment, service or model action is included.
+All **16** isolated packed consumers and SBOM pass; all **19** independently
+downloaded public assets match. The default packed verifier first failed on
+transport registry E401; the reviewed exact published transport verifier then
+passed without product dependency changes. All 16 packages and internal edges
+advance together. Native SDK/CLI, transport, wire and durable schemas, lifecycle
+admission and recovery policy are unchanged. Framework `main` remains preserved;
+no npm stable promotion occurred. GitHub platform immutability is off; operator
+procedure freezes this release and consumers retain exact byte pins.
+
+No live role, owner session, SDK attachment, service or model action is included.
+Native installation and acceptance remain consumer-owned.
 The initiating interaction event remains unproved; cause retention is diagnostic
-coverage, not a recurrence-prevention claim.
+coverage and does not establish recurrence prevention. See
+[release proof, digests and retained failures](../audits/hotfix33-release-qualification-20261005.md).
 
-## October 5 P0 interaction-gap investigation and cause retention candidate
+## October 5 isolated P0 interaction-gap investigation
 
-Isolated source based on published hotfix.32 preserves the original invalidating
+The isolated producer patch based on published hotfix.32 preserves the original invalidating
 gap's fixed private metadata through later trace observations, recent16 rotation
 and optional omissions; binding activation reports the prior persisted fixed
 gap before epoch replacement. Two cause-retention regressions fail on the exact
 base and pass with the correction; **106 focused tests** pass. Typecheck/build
 and checkpoint/docs/release/secrets checks pass. The broad run passes 1,449 tests
 and fails two existing control cases; all 13 tests in those two files pass on
-isolated retry. A clean full-suite run is unclaimed. No lifecycle/admission, public/durable schema, migration,
-dependency or version changes are included.
+isolated retry. These producer receipts claim no clean full-suite pass; the
+separate coordinated release gate above subsequently passed. The isolated patch
+included no lifecycle/admission, public/durable schema, migration, dependency
+or package version changes.
 
 The reported Tariff pre-recovery state is consistent with either an earlier gap
 or a resumed partial interaction baseline after root idle and fresh task/queue
 reads. Its initiating native event and baseline provenance remain unproved. The pinned supported SDK offers
 permission-history enumeration and exact UI reply RPCs, but no complete pending
 UI snapshot; a callback registry alone lacks native response acknowledgement.
-P0 remains open. This candidate grants no interaction completeness and includes
-no live session, service, native process, model action, publication or deployment.
+P0 remains open. The investigation grants no interaction completeness and
+performed no live session, service, native process, model, publication or
+deployment action. The subsequent coordinated publication is recorded above.
 See [evidence and constrained recovery design](../audits/copilot-gap-interaction-recovery-20261005.md).
 
 ## Published Copilot null task model metadata hotfix.32
