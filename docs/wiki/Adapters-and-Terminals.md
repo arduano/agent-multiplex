@@ -293,8 +293,9 @@ resume sessions or retry commands. Sends, steering, settings, interrupts and
 lifecycle mutations keep their existing acknowledgement/unknown-outcome rules.
 The runtime owns task and queue refresh on activation, invalidation and a
 60-second repair interval. A read that remains occupied for 45 seconds degrades
-the binding and blocks new Copilot mutations while Stop and exact pending
-interaction resolution remain available. This is a no-success deadline, so a
+the binding and blocks Copilot mutations, including pending interaction
+resolution, while Stop remains available. Exact pending callbacks remain owned
+and can be resolved after observations heal or explicit owner recovery. This is a no-success deadline, so a
 promptly returned invalid snapshot can also degrade observation. The runtime
 continues bounded retries but never restarts the shared native owner solely
 for an observation failure: active children and healthy peer sessions remain

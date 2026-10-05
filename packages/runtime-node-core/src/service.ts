@@ -2741,12 +2741,12 @@ export class RuntimeNodeService {
         const fence = this.#lifecycleFence(sessionId, binding);
         if (!fence) return;
         const state = this.#lifecycle.read(fence);
-        const revision = lane.deadlineRevision ??
-          (view === "tasks" ? state.tasks.revision : state.queue.revision);
+        const currentRevision = view === "tasks" ? state.tasks.revision : state.queue.revision;
+        const revision = lane.deadlineRevision ?? currentRevision;
         const diagnosticId = newOperationId();
         this.#trace(binding, { kind: "observation", view, outcome: "stalled", generation: coordinator.generation,
-          revision, failures: Math.max(1, lane.failures + 1), deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt), diagnosticId,
-          ...(lane.lastFailure?.revision === revision ? { failureReason: lane.lastFailure.reason } : {}) });
+          revision, currentRevision, failures: Math.max(1, lane.failures + 1), deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt), diagnosticId,
+          ...(revision === currentRevision && lane.lastFailure?.revision === currentRevision ? { failureReason: lane.lastFailure.reason } : {}) });
         this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
         this.#appendLifecycle(sessionId, binding, {
           type: "observationFailed",

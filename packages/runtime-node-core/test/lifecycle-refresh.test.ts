@@ -508,6 +508,9 @@ describe("server-owned Copilot lifecycle refresh", () => {
       expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "failed", failureReason: error.reason }));
       expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "stalled", failureReason: error.reason }));
       expect(f.traces.filter(trace => trace.kind === "recovery" && trace.outcome === "manualRecoveryRequired")).toHaveLength(1);
+      await expect(f.service.resolveInteraction({ interactionId: pending.interactionId, sessionId: f.launch.sessionId,
+        harness: "copilot", response: { answer: "fixture deferred answer" } })).rejects.toMatchObject({ code: "UNAVAILABLE" });
+      expect(f.service.listInteractions(f.launch.sessionId)).toEqual([pending]);
       failing = false;
       await vi.advanceTimersByTimeAsync(30_000);
       const healed = await lifecycleState(f);
@@ -519,6 +522,35 @@ describe("server-owned Copilot lifecycle refresh", () => {
       await expect(f.service.resolveInteraction({ interactionId: pending.interactionId, sessionId: f.launch.sessionId,
         harness: "copilot", response: { answer: "fixture answer" } })).resolves.toMatchObject({ state: "resolved" });
     } finally { vi.useRealTimers(); }
+  });
+
+  it("does not label a newer watchdog revision with an older failed read reason", async () => {
+    vi.useFakeTimers();
+    const held = deferred<AdapterNativeStateResult>();
+    try {
+      let phase: "healthy" | "failed" | "held" = "healthy";
+      const f = await fixture(async (_session, request) => {
+        if (request.harness !== "copilot" || request.view !== "tasks") return queueResult;
+        if (phase === "failed") { phase = "held"; throw new AdapterNativeStateValidationError("snapshotMalformed"); }
+        return phase === "held" ? held.promise : tasksResult;
+      });
+      await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+      phase = "failed";
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.waitFor(() => expect(f.traces.filter(trace => trace.kind === "observation" && trace.view === "tasks" && trace.outcome === "started")).toHaveLength(3));
+      const previousRevision = (await lifecycleState(f)).tasks.revision;
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.advanceTimersByTimeAsync(45_000);
+      const currentRevision = (await lifecycleState(f)).tasks.revision;
+      expect(currentRevision).toBe(previousRevision + 1);
+      const stalled = f.traces.find(trace => trace.kind === "observation" && trace.view === "tasks" && trace.outcome === "stalled");
+      expect(stalled).toMatchObject({ revision: previousRevision, currentRevision });
+      expect(stalled).not.toHaveProperty("failureReason");
+      expect((await lifecycleState(f)).nativeAdmission.state).toBe("degraded");
+      phase = "healthy"; held.resolve(tasksResult);
+      await vi.advanceTimersByTimeAsync(0);
+    } finally { held.resolve(tasksResult); vi.useRealTimers(); }
   });
 
   it("runs at most one task or queue observation for a binding", async () => {

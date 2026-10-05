@@ -85,10 +85,16 @@ try {
   checks.push("Exact native task cancellation is acknowledged without a root prompt or external model");
   assert.deepEqual(await sourceHashes(), before);
 } finally {
-  await session?.stop().catch(() => undefined); await adapter?.close().catch(() => undefined);
+  const cleanupFailures = [];
+  try { await session?.stop(); } catch (error) { cleanupFailures.push(error); }
+  try { await adapter?.close(); } catch (error) { cleanupFailures.push(error); }
   for (const timer of timers) clearTimeout(timer);
   for (const socket of sockets) socket.destroy();
-  await new Promise(resolve => provider.close(resolve)); await rm(scratch, { recursive: true, force: true });
+  await new Promise(resolve => provider.close(resolve));
+  // Unproved owner release is failed qualification. Retain its disposable home
+  // for reconciliation rather than deleting state a surviving CLI might own.
+  if (cleanupFailures.length) throw new AggregateError(cleanupFailures, "Native fixture owner cleanup failed; disposable state retained");
+  await rm(scratch, { recursive: true, force: true });
 }
 const receipt = { result: "passed", source: execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim(),
   sourceHashes: before, node: process.version, platform: process.platform, arch: process.arch,
