@@ -8,13 +8,16 @@ import type {
 import { EventEmitter } from "node:events";
 import { RuntimeConnection } from "@github/copilot-sdk";
 import { runtimeEpochSchema, type RuntimeEpoch } from "@arduano/agent-multiplex-protocol";
-import { AdapterOutcomeUnknownError, type AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
+import { AdapterOutcomeUnknownError, AdapterResumeFailureError, type AdapterEvent } from "@arduano/agent-multiplex-runtime-node-core";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   CopilotAgentAdapter,
   COPILOT_ATTACHMENT_TIMEOUT_MS,
+  COPILOT_STARTUP_TIMEOUT_MS,
+  COPILOT_STARTUP_PROGRESS_INTERVAL_MS,
   type CopilotAdapterClient,
+  type CopilotStartupDiagnostic,
 } from "../src/adapter.js";
 import { COPILOT_NATIVE_OPERATION_TIMEOUT_MS } from "../src/operations.js";
 import type {
@@ -94,18 +97,151 @@ describe("CopilotAgentAdapter", () => {
     const client = new Client();
     const child = Object.assign(new EventEmitter(), { pid: 44, exitCode: null as number | null, signalCode: null as NodeJS.Signals | null });
     Object.assign(client, { isExternalServer: false, cliProcess: child });
+    const original = Object.assign(new Error("mock native startup failure"), { code: "EPIPE" });
     const start = vi.spyOn(client, "start").mockImplementation(async () => {
       await Promise.resolve();
       // The pinned SDK can clear this reference before rejecting start.
       Object.assign(client, { cliProcess: null });
       child.signalCode = "SIGKILL"; child.emit("exit");
-      throw new Error("mock native startup failure");
+      throw original;
     });
-    const adapter = adapterFor(client);
-    expect(await adapter.describe()).toMatchObject({ available: false });
+    const diagnostics: CopilotStartupDiagnostic[] = [];
+    const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onStartupDiagnostic: record => diagnostics.push(record) });
+    await expect(adapter.spawn({ harness: "copilot", cwd: "/repo" })).rejects.toMatchObject({ cause: original });
     expect(await adapter.describe()).toMatchObject({ available: false });
     expect(start).toHaveBeenCalledOnce();
     await expect(adapter.close()).resolves.toBeUndefined();
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ stage: "nativeStart", outcome: "unacknowledged", failureReason: "nativeStartRejected", childPid: 44,
+        childState: "exited", causes: [{ name: "Error", code: "EPIPE" }] }),
+      expect.objectContaining({ stage: "nativeTermination", outcome: "acknowledged", childPid: 44, childState: "exited" }),
+    ]));
+    expect(JSON.stringify(diagnostics)).not.toContain(original.message);
+  });
+
+  it("allows a slow cold startup beyond the command deadline without creating a second native request", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const child = Object.assign(new EventEmitter(), { pid: 45, exitCode: null, signalCode: null });
+      Object.assign(client, { isExternalServer: false, cliProcess: child });
+      let release!: () => void;
+      const start = vi.spyOn(client, "start").mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
+      const diagnostics: CopilotStartupDiagnostic[] = [];
+      const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onStartupDiagnostic: record => diagnostics.push(record) });
+      let finished = false;
+      const describing = adapter.describe().then(result => { finished = true; return result; });
+      const models = adapter.listModels();
+      await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS * 2);
+      expect(finished).toBe(false);
+      expect(start).toHaveBeenCalledOnce();
+      expect(diagnostics).toContainEqual(expect.objectContaining({ stage: "nativeStart", outcome: "progress", elapsedMs: 30_000,
+        deadlineMs: COPILOT_STARTUP_TIMEOUT_MS, childState: "running", childPid: 45 }));
+      expect(diagnostics.filter(record => record.outcome === "progress")).toHaveLength(30_000 / COPILOT_STARTUP_PROGRESS_INTERVAL_MS);
+      expect(diagnostics.every(record => record.startupId === diagnostics[0]?.startupId)).toBe(true);
+      release(); await vi.advanceTimersByTimeAsync(0);
+      expect(await describing).toMatchObject({ available: true }); await models;
+      expect(diagnostics.at(-1)).toMatchObject({ outcome: "acknowledged", elapsedMs: 30_000 });
+      const count = diagnostics.length;
+      await vi.advanceTimersByTimeAsync(COPILOT_STARTUP_TIMEOUT_MS);
+      expect(diagnostics).toHaveLength(count);
+      await adapter.close();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not treat a cleared getter or an alive captured startup child as proven termination", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const child = Object.assign(new EventEmitter(), { pid: 46, exitCode: null, signalCode: null });
+      Object.assign(client, { isExternalServer: false, cliProcess: child });
+      vi.spyOn(client, "start").mockImplementation(async () => {
+        await Promise.resolve(); Object.assign(client, { cliProcess: null }); throw new Error("mock rejected startup");
+      });
+      const diagnostics: CopilotStartupDiagnostic[] = [];
+      const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onStartupDiagnostic: record => diagnostics.push(record) });
+      const describing = adapter.describe();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await describing).toMatchObject({ available: false });
+      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      expect(diagnostics).toContainEqual(expect.objectContaining({ stage: "nativeTermination", outcome: "unacknowledged",
+        failureReason: "nativeTerminationUnproved", childState: "running", childPid: 46 }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("accepts later exit proof of a captured child only after its startup request has settled", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const child = Object.assign(new EventEmitter(), { pid: 50, exitCode: null as number | null, signalCode: null });
+      Object.assign(client, { isExternalServer: false, cliProcess: child });
+      const start = vi.spyOn(client, "start").mockImplementation(async () => {
+        await Promise.resolve(); Object.assign(client, { cliProcess: null }); throw new Error("mock rejected startup");
+      });
+      const adapter = adapterFor(client);
+      const describing = adapter.describe();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await describing).toMatchObject({ available: false });
+      child.exitCode = 0; child.emit("exit");
+      await expect(adapter.close()).resolves.toBeUndefined();
+      expect(start).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("isolates a failing startup diagnostic sink from native startup and cleanup", async () => {
+    const client = new Client();
+    const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onStartupDiagnostic: () => { throw new Error("mock sink failure"); } });
+    expect(await adapter.describe()).toMatchObject({ available: true });
+    await expect(adapter.close()).resolves.toBeUndefined();
+  });
+
+  it("cannot prove shutdown from a replacement getter while the captured original child is alive", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const original = Object.assign(new EventEmitter(), { pid: 47, exitCode: null, signalCode: null });
+      const replacement = Object.assign(new EventEmitter(), { pid: 48, exitCode: null, signalCode: null as string | null });
+      Object.assign(client, { isExternalServer: false, cliProcess: original });
+      const adapter = adapterFor(client);
+      expect(await adapter.describe()).toMatchObject({ available: true });
+      Object.assign(client, { cliProcess: replacement });
+      vi.spyOn(client, "stop").mockResolvedValue([new Error("mock graceful-stop failure")]);
+      vi.spyOn(client, "forceStop").mockImplementation(async () => { replacement.signalCode = "SIGKILL"; replacement.emit("exit"); });
+      const closing = adapter.close();
+      const failed = expect(closing).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      await vi.advanceTimersByTimeAsync(10_000); await failed;
+      expect(original.listenerCount("exit")).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("retains late startup rejection diagnostics after the caller expires without retrying or losing the captured child", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = new Client();
+      const child = Object.assign(new EventEmitter(), { pid: 49, exitCode: null, signalCode: null as string | null });
+      Object.assign(client, { isExternalServer: false, cliProcess: child });
+      let reject!: (error: Error) => void;
+      const start = vi.spyOn(client, "start").mockImplementation(() => new Promise<void>((_resolve, no) => { reject = no; }));
+      const diagnostics: CopilotStartupDiagnostic[] = [];
+      const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onStartupDiagnostic: record => diagnostics.push(record) });
+      const describing = adapter.describe();
+      await vi.advanceTimersByTimeAsync(COPILOT_STARTUP_TIMEOUT_MS);
+      expect(await describing).toMatchObject({ available: false });
+      expect(diagnostics.at(-1)).toMatchObject({ outcome: "timedOut", failureReason: "nativeStartTimedOut", childState: "running" });
+      const count = diagnostics.length;
+      await vi.advanceTimersByTimeAsync(COPILOT_STARTUP_PROGRESS_INTERVAL_MS * 3);
+      expect(diagnostics).toHaveLength(count);
+      Object.assign(client, { cliProcess: null });
+      child.signalCode = "SIGKILL"; child.emit("exit");
+      reject(Object.assign(new Error("mock late SDK failure"), { code: "EPIPE" }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(diagnostics).toContainEqual(expect.objectContaining({ stage: "nativeStart", outcome: "unacknowledged", causes: [{ name: "Error", code: "EPIPE" }],
+        childPid: 49, childState: "exited" }));
+      expect(diagnostics).toContainEqual(expect.objectContaining({ stage: "nativeTermination", outcome: "acknowledged", childPid: 49 }));
+      expect(await adapter.describe()).toMatchObject({ available: false });
+      expect(start).toHaveBeenCalledOnce();
+      await expect(adapter.close()).resolves.toBeUndefined();
+    } finally { vi.useRealTimers(); }
   });
 
   it("does not replay a timed-out permission decision even after its late SDK result", async () => {
@@ -147,7 +283,7 @@ describe("CopilotAgentAdapter", () => {
       const stages: Array<{ stage: string; outcome: string }> = [];
       const adapter = new CopilotAgentAdapter({ clientFactory: () => client, onOwnershipDiagnostic: record => stages.push(record) });
       const describing = adapter.describe();
-      await vi.advanceTimersByTimeAsync(COPILOT_NATIVE_OPERATION_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(COPILOT_STARTUP_TIMEOUT_MS);
       expect(await describing).toMatchObject({ available: false });
       expect(await adapter.describe()).toMatchObject({ available: false });
       expect(start).toHaveBeenCalledOnce();
@@ -434,6 +570,8 @@ describe("CopilotAgentAdapter", () => {
     const failure = await adapter.resume({ harness: "copilot", vendorSessionId: "empty-before-restart", continuePendingWork: false })
       .catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(Error);
+    expect(failure).toBeInstanceOf(AdapterResumeFailureError);
+    expect(failure).toMatchObject({ reason: "nativeHistoryMissing" });
     expect(failure).not.toBeInstanceOf(AdapterOutcomeUnknownError);
     expect((failure as Error).message).toContain("Stop and archive this entry");
     expect((failure as Error).cause).toBe(nativeError);

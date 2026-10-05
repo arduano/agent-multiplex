@@ -33,6 +33,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 import {
   AdapterOutcomeUnknownError,
+  AdapterResumeFailureError,
   RuntimeNodeProtocolError,
   type AdapterSession,
   type AgentAdapter,
@@ -41,7 +42,10 @@ import {
 import { copilotJson } from "./json.js";
 import { copilotOptionalNativeTelemetry } from "./native-event-policy.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadRequests } from "./reads.js";
-import { CopilotNativeOperations } from "./operations.js";
+import { CopilotNativeOperations, COPILOT_STARTUP_TIMEOUT_MS } from "./operations.js";
+import { startupCauses, type CopilotStartupDiagnostic } from "./startup-diagnostics.js";
+export { COPILOT_STARTUP_TIMEOUT_MS } from "./operations.js";
+export type { CopilotStartupDiagnostic, CopilotStartupCause } from "./startup-diagnostics.js";
 import {
   CopilotAdapterSession,
   CopilotSessionBridge,
@@ -56,6 +60,7 @@ import {
 export const COPILOT_SDK_VERSION = "1.0.14";
 export const COPILOT_GRACEFUL_SHUTDOWN_MS = COPILOT_SESSION_DISCONNECT_TIMEOUT_MS;
 export const COPILOT_ATTACHMENT_TIMEOUT_MS = COPILOT_READ_TIMEOUT_MS;
+export const COPILOT_STARTUP_PROGRESS_INTERVAL_MS = 5_000;
 
 interface PendingAttachment {
   bridge: CopilotSessionBridge;
@@ -99,6 +104,8 @@ export interface CopilotAdapterOptions {
   runtimeEpochFactory?: () => RuntimeEpoch;
   /** Private ownership-stage diagnostics; a sink failure cannot change native results. */
   onOwnershipDiagnostic?(record: CopilotOwnershipDiagnostic): void;
+  /** Private bounded startup progress/cause metadata; no native payload or error text. */
+  onStartupDiagnostic?(record: CopilotStartupDiagnostic): void;
 }
 
 export class CopilotAgentAdapter implements AgentAdapter {
@@ -109,6 +116,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #client: CopilotAdapterClient;
   readonly #epoch: () => RuntimeEpoch;
   readonly #ownershipDiagnostic: CopilotAdapterOptions["onOwnershipDiagnostic"];
+  readonly #startupDiagnostic: CopilotAdapterOptions["onStartupDiagnostic"];
   readonly #provider: ProviderConfig | undefined;
   readonly #defaultModel: string | undefined;
   readonly #providerModels: readonly string[];
@@ -120,6 +128,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #operations = new CopilotNativeOperations();
   #startupPending = false;
   #startupFailedUnproved = false;
+  #startupChild: unknown;
   #startPromise: Promise<void> | undefined;
   #closePromise: Promise<void> | undefined;
   #started = false;
@@ -160,6 +169,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.#client = factory(clientOptions);
     this.#epoch = options.runtimeEpochFactory ?? newRuntimeEpoch;
     this.#ownershipDiagnostic = options.onOwnershipDiagnostic;
+    this.#startupDiagnostic = options.onStartupDiagnostic;
   }
 
   public async describe(): Promise<HarnessCatalogEntry> {
@@ -370,7 +380,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
       // Keep the predicate exact: timeouts, transport failures and unrelated
       // native errors remain ambiguous and must not be blindly retried.
       if (isMissingNativeSession(cause, options.vendorSessionId)) {
-        throw new Error(
+        throw new AdapterResumeFailureError(
+          "nativeHistoryMissing",
           "Copilot has no saved history for this session. An empty session may not survive a host restart. Stop and archive this entry, then create a new session.",
           { cause },
         );
@@ -489,17 +500,22 @@ export class CopilotAgentAdapter implements AgentAdapter {
       // The pinned SDK's forceStop() suppresses child.kill() errors and clears
       // cliProcess without waiting for exit. Capture the owned child first;
       // a fulfilled forceStop alone cannot authorize another native owner.
-      const exitProof = captureOwnedCliExit(this.#client);
+      // An SDK startup failure may have cleared its getter. Retain the exact
+      // previously captured child rather than treating an empty getter as exit.
+      const children = new Set([ownedCliChild(this.#client), ownedCliChild(this.#client, this.#startupChild)]);
+      children.delete(undefined);
+      const exitProofs = [...children].map(child => captureOwnedCliExit(this.#client, child)).filter((proof): proof is OwnedCliExitProof => proof !== undefined);
       const forced = await settleWithin(this.#client.forceStop(), COPILOT_GRACEFUL_SHUTDOWN_MS);
       if (forced.status !== "fulfilled") {
-        exitProof?.cancel();
+        for (const proof of exitProofs) proof.cancel();
         errors.push(forced.status === "timedOut"
           ? new Error("Copilot CLI process termination could not be proved")
           : forced.reason);
-      } else if (exitProof && await exitProof.wait) {
+      } else if (exitProofs.length > 0 && (await Promise.all(exitProofs.map(proof => proof.wait))).every(Boolean)) {
         // The old native owner is gone. Earlier disconnect/stop failures no
         // longer prevent the runtime supervisor from safely reattaching.
         errors.length = 0;
+        if (!this.#startupPending && this.#startupChild !== undefined) this.#startupFailedUnproved = false;
       } else {
         errors.push(new Error("Copilot CLI process termination could not be proved"));
       }
@@ -507,6 +523,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
     // A pending SDK start can still acquire a process after a stop/forceStop.
     // Terminating the currently visible child does not certify that this
     // unacknowledged startup request cannot create another one later.
+    const capturedStartupChild = ownedCliChild(this.#client, this.#startupChild);
+    if (!this.#startupPending && capturedStartupChild && cliChildExited(capturedStartupChild)) this.#startupFailedUnproved = false;
     if (this.#startupPending || this.#startupFailedUnproved) errors.push(new Error("Copilot SDK startup ownership remains unproved; native owner termination could not be proved"));
     this.ownershipDiagnostic({ stage: "shutdown", outcome: errors.length > 0 ? "unacknowledged" : "closed" });
     if (errors.length > 0) throw new AggregateError(errors, "Failed to close Copilot adapter cleanly");
@@ -714,25 +732,54 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.assertOpen();
     if (this.#started) return;
     if (this.#startPromise) return this.#startPromise;
-    const pending = this.#operations.run("adapter:startup", "start", async () => {
+    const startupId = randomUUID();
+    const startedAt = Date.now();
+    let progress: ReturnType<typeof setInterval> | undefined;
+    let startupCause: unknown;
+    const captureChild = (): void => { this.#startupChild ??= ownedCliChild(this.#client); };
+    const trace = (stage: CopilotStartupDiagnostic["stage"], outcome: CopilotStartupDiagnostic["outcome"], cause?: unknown): void => {
+      try {
+        captureChild();
+        const child = childSnapshot(this.#startupChild);
+        this.#startupDiagnostic?.({
+          startupId, stage, outcome, elapsedMs: Math.max(0, Date.now() - startedAt), deadlineMs: COPILOT_STARTUP_TIMEOUT_MS,
+          ...child,
+          ...(stage === "nativeTermination" && outcome === "unacknowledged" ? { failureReason: "nativeTerminationUnproved" as const }
+            : outcome === "timedOut" ? { failureReason: "nativeStartTimedOut" as const }
+            : outcome === "retired" ? { failureReason: "nativeStartRetired" as const }
+            : stage === "nativeStart" && outcome === "unacknowledged" ? { failureReason: "nativeStartRejected" as const } : {}),
+          ...(cause === undefined ? {} : { causes: startupCauses(cause) }),
+        });
+      } catch { /* Private diagnostics cannot change startup or ownership. */ }
+    };
+    const pending = this.#operations.start(async () => {
       this.#startupPending = true;
-      let startupChild: unknown;
+      progress = setInterval(() => trace("nativeStart", "progress"), COPILOT_STARTUP_PROGRESS_INTERVAL_MS);
+      progress.unref?.();
       try {
         const starting = this.#client.start();
         // Configured stdio startup spawns synchronously in the pinned SDK.
         // Keep the exact child object even if SDK failure clears its getter.
-        startupChild = Reflect.get(this.#client, "cliProcess");
+        captureChild();
         await starting;
+        captureChild();
       }
       catch (error) {
+        startupCause = error;
+        clearInterval(progress);
+        captureChild();
+        trace("nativeStart", "unacknowledged", error);
         // Pinned SDK startup failure internally forceStops and may clear its
         // child reference without exit acknowledgement. A later empty stop
         // result cannot retroactively prove that lost child's termination.
-        const exitProof = captureOwnedCliExit(this.#client, startupChild);
+        trace("nativeTermination", "dispatched");
+        const exitProof = captureOwnedCliExit(this.#client, this.#startupChild);
         this.#startupFailedUnproved = exitProof === undefined || !await exitProof.wait;
+        trace("nativeTermination", this.#startupFailedUnproved ? "unacknowledged" : "acknowledged", error);
         throw error;
       }
       finally {
+        clearInterval(progress);
         this.#startupPending = false;
         if (this.#closed) {
           // Do not race the original close attempt. It may already have
@@ -741,7 +788,11 @@ export class CopilotAgentAdapter implements AgentAdapter {
           await this.closeNativeRuntime();
         }
       }
-    }, outcome => this.ownershipDiagnostic({ stage: "startup", outcome })).then(() => {
+    }, outcome => {
+      this.ownershipDiagnostic({ stage: "startup", outcome });
+      trace("nativeStart", outcome, outcome === "unacknowledged" ? startupCause : undefined);
+      if (outcome !== "dispatched") clearInterval(progress);
+    }).then(() => {
       this.assertOpen();
       this.#started = true;
     });
@@ -1009,22 +1060,41 @@ interface OwnedCliExitProof {
   cancel(): void;
 }
 
+interface OwnedCliChild {
+  pid: number;
+  exitCode?: unknown;
+  signalCode?: unknown;
+  once(event: string, listener: () => void): unknown;
+  removeListener(event: string, listener: () => void): unknown;
+}
+
+function ownedCliChild(client: CopilotAdapterClient, capturedChild?: unknown): OwnedCliChild | undefined {
+  try {
+    if (Reflect.get(client, "isExternalServer") !== false) return undefined;
+    const child: unknown = capturedChild ?? Reflect.get(client, "cliProcess");
+    if (!child || typeof child !== "object") return undefined;
+    const process = child as Partial<OwnedCliChild>;
+    return Number.isSafeInteger(process.pid) && Number(process.pid) >= 1 &&
+      typeof process.once === "function" && typeof process.removeListener === "function"
+      ? process as OwnedCliChild : undefined;
+  } catch { return undefined; }
+}
+
+function childSnapshot(child: unknown): Pick<CopilotStartupDiagnostic, "childState" | "childPid"> {
+  if (!child) return { childState: "notObserved" };
+  const process = child as OwnedCliChild;
+  return { childPid: process.pid, childState: cliChildExited(process) ? "exited" : "running" };
+}
+
+function cliChildExited(process: OwnedCliChild): boolean {
+  return process.exitCode !== null && process.exitCode !== undefined || process.signalCode !== null && process.signalCode !== undefined;
+}
+
 /** Only the pinned SDK's locally spawned CLI can establish process ownership. */
 function captureOwnedCliExit(client: CopilotAdapterClient, capturedChild?: unknown): OwnedCliExitProof | undefined {
-  if (Reflect.get(client, "isExternalServer") !== false) return undefined;
-  const child: unknown = capturedChild ?? Reflect.get(client, "cliProcess");
-  if (!child || typeof child !== "object") return undefined;
-  const process = child as {
-    pid?: unknown;
-    exitCode?: unknown;
-    signalCode?: unknown;
-    once?: (event: string, listener: () => void) => void;
-    removeListener?: (event: string, listener: () => void) => void;
-  };
-  if (!Number.isSafeInteger(process.pid) || Number(process.pid) < 1 ||
-    typeof process.once !== "function" || typeof process.removeListener !== "function") return undefined;
-  const exited = (): boolean => process.exitCode !== null && process.exitCode !== undefined ||
-    process.signalCode !== null && process.signalCode !== undefined;
+  const process = ownedCliChild(client, capturedChild);
+  if (!process) return undefined;
+  const exited = (): boolean => cliChildExited(process);
   let finish!: (value: boolean) => void;
   const wait = new Promise<boolean>(resolve => { finish = resolve; });
   let settled = false;

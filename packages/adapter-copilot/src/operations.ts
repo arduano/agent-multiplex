@@ -1,6 +1,10 @@
 import { AdapterOutcomeUnknownError, RuntimeNodeProtocolError } from "@arduano/agent-multiplex-runtime-node-core";
 
 export const COPILOT_NATIVE_OPERATION_TIMEOUT_MS = 15_000;
+/** Starting the shared CLI also includes process creation and its first protocol
+ * handshake. Give that one request a separate bounded cold-start budget; native
+ * commands keep their stricter deadline below. Neither budget cancels ownership. */
+export const COPILOT_STARTUP_TIMEOUT_MS = 60_000;
 const MAX_PENDING_OPERATIONS = 256;
 
 type Outcome = "dispatched" | "acknowledged" | "lateAcknowledged" | "timedOut" | "unacknowledged" | "retired";
@@ -39,6 +43,14 @@ export class CopilotNativeOperations {
   }
 
   public run<T>(group: string, lane: string, action: () => Promise<T>, diagnostic?: (outcome: Outcome) => void): Promise<T> {
+    return this.runWithin(group, lane, action, COPILOT_NATIVE_OPERATION_TIMEOUT_MS, diagnostic);
+  }
+
+  public start(action: () => Promise<void>, diagnostic?: (outcome: Outcome) => void): Promise<void> {
+    return this.runWithin("adapter:startup", "start", action, COPILOT_STARTUP_TIMEOUT_MS, diagnostic);
+  }
+
+  private runWithin<T>(group: string, lane: string, action: () => Promise<T>, timeoutMs: number, diagnostic?: (outcome: Outcome) => void): Promise<T> {
     try { this.assertAvailable(group, lane); } catch (error) { return Promise.reject(error); }
     const key = JSON.stringify([group, lane]);
     const trace = (outcome: Outcome): void => { try { diagnostic?.(outcome); } catch { /* Diagnostics never alter ownership. */ } };
@@ -59,7 +71,7 @@ export class CopilotNativeOperations {
     };
     const entry: PendingOperation = { group, completion: new Promise<void>(yes => { finishNative = yes; }), retire: () => abandon("retired") };
     this.#pending.set(key, entry);
-    const timer = setTimeout(() => abandon("timedOut"), COPILOT_NATIVE_OPERATION_TIMEOUT_MS);
+    const timer = setTimeout(() => abandon("timedOut"), timeoutMs);
     timer.unref?.();
     const settle = (): boolean => {
       clearTimeout(timer);

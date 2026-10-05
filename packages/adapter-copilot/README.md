@@ -23,6 +23,8 @@ parses vendor files, or recreates that session silently.
 
 The exact native missing-session load refusal is a failed resume with a recovery
 message, rather than an ambiguous operation that blocks lifecycle recovery.
+It is reported as `AdapterResumeFailureError` with reason `nativeHistoryMissing`,
+so runtime recovery can retain that fixed evidence without matching error text.
 Stop and archive that catalog entry explicitly, then create a replacement.
 Transport loss and unrecognized native failures still remain `outcomeUnknown`
 under the original operation ID; absence from an inventory page is never proof
@@ -68,6 +70,32 @@ Key behavior:
   event content.
 - `stop` disconnects the SDK handle but preserves the vendor session for native
   resume. `close` gracefully disconnects all handles and stops the shared CLI.
+
+## Cold startup and diagnostics
+
+The shared SDK/CLI starts once per adapter lifetime. Its cold process launch and
+first protocol handshake have a separate **60-second** caller deadline; native
+commands, permissions, attachments and reads retain their existing **15-second**
+deadlines. Startup waits between 15 and 60 seconds may now succeed without a
+replacement native request. This is a bounded startup budget, not proof that an
+unresponsive process is healthy or that the original Windows delay was caused
+by a particular native stage.
+
+`onStartupDiagnostic` is an optional private process-local hook. Records carry
+one startup ID, stage/outcome, elapsed/deadline time, the observed owned child
+PID/state, fixed failure reasons, and at most four allowlisted error-name/code
+causes. Progress is emitted every five seconds until acknowledgement, rejection,
+caller expiry or shutdown. Exception text, native payloads, configuration and
+paths are excluded. The original thrown error still retains its `cause` chain.
+A throwing diagnostic sink cannot alter startup or native ownership.
+
+A timeout never cancels the SDK request or releases its owner. The original
+startup promise is retained, so later calls cannot issue a second start. A late
+result after adapter shutdown is cleaned up without certifying the earlier
+failed shutdown. If the pinned SDK clears its child getter during failure,
+cleanup uses the exact previously captured child; an empty getter, a fulfilled
+`forceStop`, or an unresolved startup cannot prove termination. Only that owned
+child's acknowledged exit can supply exit proof. Unknown cleanup remains fenced.
 
 Read-only native requests have a 15-second caller deadline and coalesce identical
 in-flight reads. A timed-out request retains its native slot until settlement;
