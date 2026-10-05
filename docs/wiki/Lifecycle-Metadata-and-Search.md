@@ -151,6 +151,12 @@ Open-session search remains available from the hot canonical projection; a cold
 query explicitly limited to reachable runtimes can succeed independently. Native
 bindings, archive provenance, catalog state and metadata authority are preserved.
 
+Independent October 5 qualification of exact published `.29` bytes passes
+disconnected/hanging branch errors through real local Iroh and Gateway HTTP,
+plus scoped parent/sibling availability and unchanged archive authority.
+The correction is already included in `.29`/`.30`; it needs no further behavior
+change. See [artifact acceptance and limits](../audits/disconnected-archive-qualification-20261005.md).
+
 ## History and interactions
 
 Resolving, expiring or retiring an imported interaction preserves its child
