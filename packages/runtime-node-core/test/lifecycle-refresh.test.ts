@@ -9,6 +9,7 @@ import {
   newRuntimeNodeBootId,
   newRuntimeNodeId,
   newSessionId,
+  NATIVE_PAYLOAD_MAX_BYTES,
   type HarnessCatalogEntry,
   type HarnessCommand,
   type HarnessResumeOptions,
@@ -29,6 +30,7 @@ import {
   RuntimeLifecycleJournal,
   AdapterOutcomeUnknownError,
   AdapterNativeStateValidationError,
+  AdapterNativeStateReadError,
   type AdapterEvent,
   type AdapterNativeStateResult,
   type AdapterSession,
@@ -52,7 +54,6 @@ function deferred<T>(): Deferred<T> {
 class RefreshSession implements AdapterSession {
   public readonly harness = "copilot" as const;
   public readonly adapterScopeId = adapterScopeIdSchema.parse("lifecycle-refresh-test");
-  public readonly vendorSessionId = "native-lifecycle-refresh";
   public readonly runtimeEpoch = newRuntimeEpoch();
   readonly #listeners = new Set<(event: AdapterEvent) => void>();
   #stopped = false;
@@ -60,6 +61,7 @@ class RefreshSession implements AdapterSession {
   public constructor(
     public readonly cwd: string,
     public read: NativeRead,
+    public readonly vendorSessionId = "native-lifecycle-refresh",
   ) {}
 
   public status() { return this.#stopped ? "stopped" as const : "idle" as const; }
@@ -402,6 +404,123 @@ describe("server-owned Copilot lifecycle refresh", () => {
     expect(JSON.stringify(f.traces)).not.toContain("private-reason-sentinel");
   });
 
+  it.each(["nativeReadBusy", "nativeOwnerRetired", "nativeReadUnavailable"] as const)("distinguishes %s from snapshot admission without retaining exception text", async reason => {
+    let reads = 0;
+    const f = await fixture(async (_session, request) => {
+      if (request.harness !== "copilot" || request.view !== "tasks") return queueResult;
+      if (++reads === 1) throw new AdapterNativeStateReadError(reason, "private-read-error-sentinel");
+      return tasksResult;
+    });
+    await vi.waitFor(async () => expect((await lifecycleState(f)).tasks.observation.state).toBe("observed"));
+    expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "failed", failureReason: reason }));
+    expect(JSON.stringify(f.traces)).not.toContain("private-read-error-sentinel");
+  });
+
+  it("allowlists a typed read reason again at the emitted trace boundary", async () => {
+    const error = new AdapterNativeStateReadError("nativeReadBusy", "private-read-error-sentinel");
+    Object.assign(error, { reason: "private-read-reason-sentinel" });
+    const f = await fixture(async (_session, request) => {
+      if (request.harness === "copilot" && request.view === "tasks") throw error;
+      return queueResult;
+    });
+    await vi.waitFor(() => expect(f.traces).toContainEqual(expect.objectContaining({
+      kind: "observation", view: "tasks", outcome: "failed", failureReason: "nativeReadFailed",
+    })));
+    expect(JSON.stringify(f.traces)).not.toContain("private-read-reason-sentinel");
+  });
+
+  it.each([
+    { view: "tasks", reason: "snapshotTooLarge", payload: { tasks: [], extra: "x".repeat(NATIVE_PAYLOAD_MAX_BYTES) } },
+    { view: "tasks", reason: "snapshotWireInvalid", payload: { tasks: [], extra: undefined } },
+    { view: "pendingMessages", reason: "snapshotTooLarge", payload: { items: [], steeringMessages: [], extra: "x".repeat(NATIVE_PAYLOAD_MAX_BYTES) } },
+  ] as const)("admits the complete $view envelope before writing observed lifecycle evidence ($reason)", async ({ view, reason, payload }) => {
+    const f = await fixture(async (_session, request) => request.harness === "copilot" && request.view === view
+      ? { harness: "copilot", vendorSessionId: "native-lifecycle-refresh", payload: payload as unknown as JsonValue }
+      : request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult);
+    await vi.waitFor(async () => {
+      const state = await lifecycleState(f), observation = view === "tasks" ? state.tasks.observation : state.queue.observation;
+      expect(observation.state).toBe("retrying");
+      expect(observation.failures).toBeGreaterThan(0);
+      expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view, outcome: "failed", failureReason: reason }));
+    });
+    const observationFact = view === "tasks" ? "tasksObserved" : "queueObserved";
+    expect(f.traces.some(trace => trace.kind === "transition" && trace.factType === observationFact)).toBe(false);
+  });
+
+  it.each([
+    new AdapterNativeStateValidationError("snapshotMalformed"),
+    new AdapterNativeStateValidationError("snapshotTooLarge"),
+    new AdapterNativeStateValidationError("snapshotWireInvalid"),
+    new AdapterNativeStateReadError("snapshotInvalidated", "snapshot invalidated fixture"),
+    new AdapterNativeStateReadError("nativeReadTimedOut", "retained lane timed out fixture"),
+  ])("contains persistent $reason while children, a peer and exact pending input remain owned", async error => {
+    vi.useFakeTimers();
+    try {
+      let failing = false, queueReads = 0, taskReads = 0;
+      const recovery = vi.fn();
+      const f = await fixture(async (_session, request) => {
+        if (request.harness === "copilot" && request.view === "tasks") {
+          taskReads += 1;
+          if (failing) throw error;
+          return tasksResult;
+        }
+        queueReads += 1; return queueResult;
+      }, recovery);
+      await vi.waitFor(async () => expect((await lifecycleState(f)).queue.observation.state).toBe("observed"));
+      const peer = new RefreshSession(f.session.cwd, async request => ({
+        ...(request.harness === "copilot" && request.view === "tasks" ? tasksResult : queueResult),
+        vendorSessionId: "native-peer-refresh",
+      }), "native-peer-refresh");
+      f.adapter.spawn = async () => peer;
+      const peerLaunch = { ...f.launch, launchId: newLaunchId(), sessionId: newSessionId(), payloadHash: "peer-fixture-launch" };
+      f.service.createLaunch(peerLaunch);
+      await vi.waitFor(() => expect(f.service.getLaunch(peerLaunch.launchId)?.state).toBe("succeeded"));
+      const childItems = [{ id: "agent:child-a", state: "running" as const }, { id: "agent:child-b", state: "running" as const }];
+      f.session.emit({ kind: "lifecycle", fact: { type: "childrenHydrated", items: childItems, complete: true } });
+      f.session.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+      f.session.emit({ kind: "lifecycle", fact: { type: "rootStarted", cycleId: "owner-cycle" } });
+      f.session.emit({ kind: "interaction", lifecycleOwner: "root", nativeRequestId: "exact-question",
+        requestType: "userInput", payload: { question: "fixture question" }, ephemeral: false, resolve: async () => undefined });
+      peer.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+      peer.emit({ kind: "lifecycle", fact: { type: "rootStarted", cycleId: "peer-cycle" } });
+      await vi.waitFor(() => expect(f.service.listInteractions(f.launch.sessionId)).toHaveLength(1));
+      const pending = f.service.listInteractions(f.launch.sessionId)[0]!;
+      const ownerRecord = f.store.getSession(f.launch.sessionId)!;
+      const peerRecord = f.store.getSession(peerLaunch.sessionId)!;
+      const peerBefore = await f.service.readLifecycle(peerLaunch.sessionId);
+      const stop = vi.spyOn(f.session, "stop"), peerStop = vi.spyOn(peer, "stop"), close = vi.spyOn(f.adapter, "close");
+      failing = true;
+      f.session.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
+      await vi.advanceTimersByTimeAsync(300_000);
+      expect(recovery).not.toHaveBeenCalled();
+      expect(stop).not.toHaveBeenCalled(); expect(peerStop).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled();
+      const state = await lifecycleState(f);
+      expect(state.nativeAdmission.state).toBe("degraded");
+      expect(state.tasks.observation).toMatchObject({ state: "retrying", stalled: true });
+      expect(state.children.items).toEqual(childItems);
+      expect(f.service.listInteractions(f.launch.sessionId)).toEqual([pending]);
+      expect(state.root).toMatchObject({ phase: "working", cycle: "owner-cycle", outcome: "none" });
+      expect(f.store.getSession(f.launch.sessionId)).toMatchObject({ bindingRevision: ownerRecord.bindingRevision, runtimeEpoch: ownerRecord.runtimeEpoch, availability: "active" });
+      expect(f.store.getSession(peerLaunch.sessionId)).toMatchObject({ bindingRevision: peerRecord.bindingRevision, runtimeEpoch: peerRecord.runtimeEpoch, availability: "active" });
+      expect((await f.service.readLifecycle(peerLaunch.sessionId)).view).toMatchObject({ status: peerBefore.view.status, health: peerBefore.view.health, actions: peerBefore.view.actions });
+      // Failed task retries still permit periodic queue observation; retries are bounded.
+      expect(queueReads).toBeGreaterThan(2); expect(taskReads).toBeLessThan(30);
+      expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "failed", failureReason: error.reason }));
+      expect(f.traces).toContainEqual(expect.objectContaining({ kind: "observation", view: "tasks", outcome: "stalled", failureReason: error.reason }));
+      expect(f.traces.filter(trace => trace.kind === "recovery" && trace.outcome === "manualRecoveryRequired")).toHaveLength(1);
+      failing = false;
+      await vi.advanceTimersByTimeAsync(30_000);
+      const healed = await lifecycleState(f);
+      expect(healed.nativeAdmission.state).toBe("open");
+      expect(healed.tasks.observation.state).toBe("observed");
+      expect(healed.children.items).toEqual(childItems);
+      expect(f.service.listInteractions(f.launch.sessionId)).toEqual([pending]);
+      expect((await f.service.readLifecycle(f.launch.sessionId)).view.actions.send).toEqual({ available: false, reason: "waitingForInput" });
+      await expect(f.service.resolveInteraction({ interactionId: pending.interactionId, sessionId: f.launch.sessionId,
+        harness: "copilot", response: { answer: "fixture answer" } })).resolves.toMatchObject({ state: "resolved" });
+    } finally { vi.useRealTimers(); }
+  });
+
   it("runs at most one task or queue observation for a binding", async () => {
     let block: Deferred<void> | undefined;
     let activeReads = 0;
@@ -719,7 +838,7 @@ describe("server-owned Copilot lifecycle refresh", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("requests runtime-only recovery after persistent degraded observation, once per binding", async () => {
+  it("keeps a genuinely occupied observation degraded without restarting its shared owner", async () => {
     vi.useFakeTimers();
     try {
       const blocked = deferred<AdapterNativeStateResult>();
@@ -727,17 +846,15 @@ describe("server-owned Copilot lifecycle refresh", () => {
       const f = await fixture(async (_session, request) =>
         request.harness === "copilot" && request.view === "tasks" ? blocked.promise : queueResult,
       recovery);
+      const stop = vi.spyOn(f.session, "stop"), close = vi.spyOn(f.adapter, "close");
       await vi.advanceTimersByTimeAsync(45_000);
       expect((await lifecycleState(f)).nativeAdmission.state).toBe("degraded");
-      await vi.advanceTimersByTimeAsync(110_000);
+      await vi.advanceTimersByTimeAsync(240_000);
       expect(recovery).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(recovery).toHaveBeenCalledExactlyOnceWith(f.launch.sessionId);
-      await vi.advanceTimersByTimeAsync(120_000);
-      expect(recovery).toHaveBeenCalledTimes(1);
-      expect(f.traces.filter(trace => trace.kind === "recovery" && trace.outcome === "requested")).toHaveLength(1);
+      expect(stop).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled();
+      expect(f.traces.filter(trace => trace.kind === "recovery" && trace.outcome === "manualRecoveryRequired")).toHaveLength(1);
       expect(f.traces.some(trace => trace.kind === "observation" && trace.outcome === "stalled" && trace.deadlineAgeMs >= 45_000)).toBe(true);
-      expect(f.traces.some(trace => trace.kind === "recovery" && trace.outcome === "scheduled")).toBe(true);
+      expect(f.traces.some(trace => trace.kind === "recovery" && (trace.outcome === "scheduled" || trace.outcome === "requested"))).toBe(false);
       blocked.resolve(tasksResult);
     } finally { vi.useRealTimers(); }
   });
@@ -767,12 +884,12 @@ describe("server-owned Copilot lifecycle refresh", () => {
       await vi.advanceTimersByTimeAsync(1);
       expect((await lifecycleState(f)).nativeAdmission.state).toBe("degraded");
 
-      // The minute refresh must not restart either the 45-second observation
-      // deadline or the 120-second supervisor deadline.
+      // The minute refresh cannot reset the no-success deadline or replace
+      // the shared owner merely because this read lane remains occupied.
       await vi.advanceTimersByTimeAsync(119_999);
       expect(recovery).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(recovery).toHaveBeenCalledExactlyOnceWith(f.launch.sessionId);
+      expect(recovery).not.toHaveBeenCalled();
 
       await expect(f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "stop-occupied-read-lane",
         sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1 }))
@@ -780,7 +897,7 @@ describe("server-owned Copilot lifecycle refresh", () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it("cancels the recovery deadline when fresh observations heal or the binding stops", async () => {
+  it("heals degraded admission from fresh observations and retires late reads on explicit stop", async () => {
     vi.useFakeTimers();
     try {
       let blocked: Deferred<AdapterNativeStateResult> | undefined;

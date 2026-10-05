@@ -1,3 +1,5 @@
+import { AdapterNativeStateReadError } from "@arduano/agent-multiplex-runtime-node-core";
+
 export const COPILOT_READ_TIMEOUT_MS = 15_000;
 const MAX_PENDING_READS = 256;
 
@@ -9,8 +11,8 @@ interface PendingRead {
 }
 
 /** No new native observation was made; preserve newer observed settings. */
-export class CopilotReadBusyError extends Error {
-  public constructor(message: string, public readonly stalled = false) { super(message); }
+export class CopilotReadBusyError extends AdapterNativeStateReadError {
+  public constructor(message: string, public readonly stalled = false) { super("nativeReadBusy", message); }
 }
 
 /** Bound caller wait without pretending the SDK cancelled its native request.
@@ -28,9 +30,9 @@ export class CopilotReadRequests {
   }
 
   public read<T>(lane: string, identity: string, action: () => Promise<T>, deadlineAt?: number): Promise<T> {
-    if (this.#closed) return Promise.reject(new Error("Copilot native reads are closing"));
+    if (this.#closed) return Promise.reject(new AdapterNativeStateReadError("nativeOwnerRetired", "Copilot native reads are closing"));
     const timeoutMs = Math.min(COPILOT_READ_TIMEOUT_MS, deadlineAt === undefined ? COPILOT_READ_TIMEOUT_MS : deadlineAt - Date.now());
-    if (timeoutMs <= 0) return Promise.reject(new Error("Copilot native read timed out before its next page request"));
+    if (timeoutMs <= 0) return Promise.reject(new AdapterNativeStateReadError("nativeReadTimedOut", "Copilot native read timed out before its next page request"));
     const pending = this.#pending.get(lane);
     if (pending) {
       if (pending.identity !== identity) {
@@ -50,12 +52,12 @@ export class CopilotReadRequests {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
-      reject(new Error("Copilot owner is closing; the native read remains pending until owner termination"));
+      reject(new AdapterNativeStateReadError("nativeOwnerRetired", "Copilot owner is closing; the native read remains pending until owner termination"));
     } };
     this.#pending.set(lane, entry);
     const timer = setTimeout(() => {
       finished = true;
-      reject(new Error("Copilot native read timed out; the native request remains pending"));
+      reject(new AdapterNativeStateReadError("nativeReadTimedOut", "Copilot native read timed out; the native request remains pending"));
     }, timeoutMs);
     timer.unref?.();
     const settled = () => {
@@ -66,7 +68,7 @@ export class CopilotReadRequests {
       return accept;
     };
     void Promise.resolve().then(() => {
-      if (this.#closed) throw new Error("Copilot native reads are closing");
+      if (this.#closed) throw new AdapterNativeStateReadError("nativeOwnerRetired", "Copilot native reads are closing");
       return action();
     }).then(
       value => { if (settled()) resolve(value); },

@@ -55,7 +55,7 @@ version `6` so a later lifecycle revision can be negotiated deliberately.
 | `continuity` | `continuous \| gap` | Whether projection has an unbroken baseline for the current foreground cycle. An authoritative replacement snapshot or new fence can clear a gap. A uniquely identified later root start establishes continuity for its new foreground cycle; a later root whole-session idle establishes a quiescent root boundary. Other invalidated dimensions retain their own unknown markers. |
 | `lastGap` | Optional bounded diagnostic | The latest gap's ID, time, fixed failure stage and event kind, queue counts, and optional error class. It contains no SDK payload, message text or exception text and remains available after an idle event for incident correlation. It is evidence about runtime admission, not a certificate of recovered interaction state. |
 | `aggregateActivity` | `unknown \| active \| inactive` | The SDK's `metadata.activity()` bit covers root turns **or** tasks. It may block a Ready/Finished projection while active, but cannot start, finish, or identify a root cycle. A gap or current-revision failed activity observation resets it to unknown. |
-| `nativeAdmission` | `{state: open \| degraded, diagnosticId?}` | Runtime-owned native-read health for this binding. Degraded blocks further Copilot mutations and starts a bounded recovery deadline. Only fresh task and queue observations can reopen it. It persists across restart until a new binding is established. |
+| `nativeAdmission` | `{state: open \| degraded, diagnosticId?}` | Runtime-owned native-read health for this binding. Degraded blocks further Copilot mutations and retains explicit owner recovery. Only fresh task and queue observations can reopen it. It persists across restart until a new binding is established. |
 | `root` | `{phase, cycle, outcome}` | Root model/session dimension. `phase` is `unknown`, `paused`, `idle`, or `working`; `paused` means the model loop paused or an aggregate inactive read paused a working root, while `idle` requires a whole-session idle, explicit root failure or certified cold resume. `cycle` is the unique observed root-start event ID or `null`; `outcome` is `none`, `finished`, `interrupted`, or `failed`. A new explicit root start clears the prior outcome. |
 | `tasks` | `{revision, observation, items}` | Complete bounded task observation for one invalidation revision. `observation` is `pending`, `retrying`, or `observed`, with a failure count, optional safe diagnostic ID, and monotonic `stalled` marker for that revision. Retained items before `observed` are diagnostic only and cannot prove current presence or absence. |
 | `children` | `{completeness, items}` | Bounded native subagent/child observations, independently keyed and in `running`, `completed`, `failed`, `settled`, or `unknown`. `partial` means absence is unproved. `settled` means a newer whole-session idle proved no child remained in flight without claiming that child's outcome. These are members of the owning Copilot session, never catalog sessions. |
@@ -181,23 +181,40 @@ Native root starts and whole-session idle remain independent recovery evidence;
 an inactive snapshot alone cannot invent completion.
 
 At 45 seconds without a successful requested observation, the runtime marks the
-binding degraded with a safe diagnostic ID. It rejects further Copilot
-mutations for that binding while retaining Stop and shutdown recovery. A later
-successful exact-revision task and queue observation clears the degraded state.
+binding degraded with a safe diagnostic ID. This is a **no-success deadline**:
+repeated validation rejection and invalidation races can reach it even when
+SDK RPCs return promptly. It is not proof that transport or the native process
+has stalled. The runtime rejects further Copilot mutations for that binding
+while retaining exact pending interactions, children, commands and explicit
+Stop/Recover. A later successful exact-revision task and queue observation
+clears only degraded admission; it cannot certify unrelated pending state.
 The runtime refreshes both dimensions every 60 seconds even without a client
-observer. If the binding remains degraded for another 120 seconds, a trusted
-runtime-app callback aborts that runtime only. It closes the transport, service,
-Copilot adapter and SQLite writer before reporting a retryable runtime failure
-to its process supervisor; it does not restart the control node or replay any
-command. A healed, stopped or replaced binding cancels its recovery deadline.
-The supervisor may open another Copilot owner only after cleanup succeeds. For a
-forced stop, the host observes the owned CLI child exit; the pinned SDK's
-`forceStop()` promise alone does not prove termination because it suppresses
-`kill()` errors and does not await process exit. If exit or ownership cannot be
-proved, cleanup fails closed and the supervisor must not retry automatically.
-Stop, binding replacement, and runtime close retire timers and fence late
-replies. Observation reads run outside the session mutation lock, so an
-uncooperative SDK read cannot prevent bounded adapter shutdown.
+observer, with a single task/queue coordinator and retry backoff capped at
+30 seconds.
+
+Observation failure MUST NOT automatically abort the shared Copilot owner.
+Neither malformed/oversized admission, ordinary invalidation nor an occupied
+noncancellable read proves that working children and peer sessions can safely
+be disconnected. The deprecated `onCopilotObservationRecoveryRequired`
+embedding option is retained for source compatibility but is never invoked
+by observation watchdogs. One private `manualRecoveryRequired` trace per
+degraded interval records this policy. The reference Runtime app has no
+observation-triggered process restart.
+
+Explicit owner recovery and independently proved native process failure retain
+existing cleanup ownership rules. A supervisor may open another Copilot owner
+only after cleanup succeeds. For a forced stop, the host observes the owned CLI
+child exit; the pinned SDK's `forceStop()` promise alone does not prove
+termination because it suppresses `kill()` errors and does not await process
+exit. If exit or ownership cannot be proved, cleanup fails closed. Stop,
+binding replacement and runtime close retire timers and fence late replies.
+Observation reads run outside the session mutation lock, so an uncooperative
+SDK read cannot prevent bounded adapter shutdown.
+
+The runtime validates the entire native-state wire envelope before appending
+an observed task/queue fact. A rejected envelope cannot first claim a fresh
+complete snapshot. Projection validation also completes before the single
+lifecycle append; no fake healthy or empty task state repairs rejection.
 
 `sessions.readLifecycle` drains already admitted lifecycle work, rechecks the
 installed binding, and returns the compact `SessionLifecycleView`. The direct
@@ -235,9 +252,13 @@ A current-revision failed observation may include a fixed `failureReason` and
 up to eight `validationIssues`. Each issue contains only an allowlisted field
 path (at most eight segments, numeric indices saturated at 1,000), fixed issue
 code and actual value type. Unknown path names become `unknownField`. Snapshot
-schema, wire-size, invalid-wire-data, lifecycle-projection and generic native
-read failures are distinct reasons. No rejected value, enum contents, unknown
-key, nested vendor error or exception message is retained. These fields do not
+schema, wire-size, invalid-wire-data and lifecycle-projection failures are
+distinct from snapshot invalidation, read-lane contention, caller timeout,
+retired ownership, unavailable APIs, binding change and generic native failure.
+Reasons are fixed typed categories, never inferred from vendor exception text.
+The no-success watchdog retains only the last failed current-revision reason;
+a stale revision cannot label a newer watchdog interval. No rejected value,
+enum contents, unknown key, nested vendor error or exception message is retained. These fields do not
 change retry/fence precedence or turn a failed snapshot into task certainty.
 Embedding loggers must copy only the bounded allowlisted structure.
 
@@ -260,8 +281,8 @@ Original incidents cannot acquire this missing evidence retroactively.
 | `sessionActivityObserved(active=true)` | Fresh SDK aggregate activity read | Set aggregate activity `active`; retain root cycle, phase, and outcome | Root work, a new cycle identity, task identity or command cause |
 | `sessionActivityObserved(active=false)` | Fresh SDK aggregate activity read | Set aggregate activity `inactive`; if root was working, mark it only `paused` | Whole-session idle, Ready, Finished or a changed root outcome |
 | `sessionActivityUnavailable` | Current adapter activity revision; read rejected, malformed, expired or blocked by an expired native lane | Set aggregate activity `unknown`; change only a working root phase to `unknown`; retain cycle/outcome and independent work/input dimensions | Completion, an interaction gap, closed native admission or cancellation of the unresolved SDK call |
-| `nativeObservationDegraded(diagnosticId)` | Runtime's 45-second task/queue read watchdog or failed read | Set binding admission `degraded`; block new Copilot mutations and start the 120-second recovery deadline | Native process failure or command outcome |
-| `nativeObservationRecovered` | Both exact-revision task and queue observations are fresh | Reopen binding admission; cancel recovery deadline | Root completion or interaction completeness |
+| `nativeObservationDegraded(diagnosticId)` | Runtime's 45-second task/queue read watchdog or failed read | Set binding admission `degraded`; block new Copilot mutations and retain explicit owner recovery | Native process failure or command outcome |
+| `nativeObservationRecovered` | Both exact-revision task and queue observations are fresh | Reopen binding admission; retain all other evidence | Root completion or interaction completeness |
 | `rootFailed` | Root-owned native failure | Set phase `idle` and outcome `failed`; failure is the dominant terminal observation until a new root cycle | Background task cancellation |
 | `rootIdle(aborted=true)` | Root-owned whole-session idle | Set continuity `continuous` and phase `idle`; preserve any prior terminal outcome, otherwise set `interrupted`; mark child completeness `complete` and running or unknown children `settled` | Successful completion or a child-specific outcome |
 | `rootIdle(aborted=false)` | Root-owned whole-session idle | Set continuity `continuous` and phase `idle`; preserve any prior terminal outcome, otherwise set `finished` when a cycle exists or `none` when it does not; mark child completeness `complete` and running or unknown children `settled` | User-objective success, child-specific success or per-command settlement |
@@ -722,7 +743,7 @@ fallback or compatibility branch.
 | `@arduano/agent-multiplex-protocol` | Private lifecycle reducer, public version-2 view, `commands.observe`, typed command errors and exact v6 descriptors | Wire break; lifecycle contract version is 2. |
 | `@arduano/agent-multiplex-adapter-copilot` | Emit exact root/child/invalidation/display/compaction facts; fence task and queue reads; preserve raw native envelopes | No adapter-owned store. SDK/CLI pins remain qualification boundaries. |
 | `@arduano/agent-multiplex-runtime-node-core` | Single writer, private fenced read, automatic revision-fenced Copilot observations, trusted startup reattachment and command-receipt repair | Append runtime store v6 typed-error, v7 lifecycle, v8 contract rotation, v9 startup intent, and v10 activity/admission migrations. Old binaries must not open the upgraded store. |
-| Runtime app | Reattach exact persisted active Copilot bindings before control registration; signal ready only after first registration; abort only its runtime on persistent degraded observation and retry only after verified native cleanup | Restart into the lockstep package graph during the maintenance window. A failed reattachment or unproved termination rejects startup/retry. |
+| Runtime app | Reattach exact persisted active Copilot bindings before control registration; signal ready only after first registration; retain degraded admission without automatic shared-owner restart; explicit recovery retries only after verified native cleanup | Restart into the lockstep package graph during the maintenance window. A failed reattachment or unproved termination rejects startup/retry. |
 | `@arduano/agent-multiplex-control-node-core` | Route/fence lifecycle reads and command observations; carry bounded public views; preserve catalog authority | Control v7 converts command errors; v8 rotates incompatible lifecycle feeds. Obtain a new snapshot; discard old replay/import checkpoints as the migrations direct. |
 | Control app / isolated worker | Forward `readLifecycle` as a read and reject non-v6 peers | Main and worker must use identical package bytes. |
 | `@arduano/agent-multiplex-transport-p2prpc` | Bind the new read procedure and exact v6 descriptors | No local/file dependency may be committed. Seamless renewal is the external boundary below. |

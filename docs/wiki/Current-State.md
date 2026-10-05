@@ -5,7 +5,24 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-04 (immutable signed hotfix.30 published; native task-read cause/acceptance remains unproved).
+Last reconciled: 2026-10-05 (observation recovery containment candidate; immutable signed hotfix.30 remains published).
+
+## October 5 Copilot observation recovery containment candidate
+
+An isolated source candidate based on exact `.30` checkout `1dd9ae1` contains
+a proved harmful escalation: task/queue observation failure cannot automatically
+restart the shared Copilot native owner and cancel children or peer work.
+Degraded admission, genuine pending interaction uncertainty, original receipts,
+read ownership, binding/revision fences and explicit owner Stop/Recover remain.
+Typed fixed failure reasons distinguish admission from invalidation/read/owner
+failures. Complete envelope admission now precedes lifecycle snapshot evidence.
+
+Focused regression and exact-source qualification belong to the
+[recovery safety audit](../audits/copilot-observation-recovery-safety-20261005.md).
+Publication, combined release gates and installed Windows/WSL acceptance remain
+coordinator-owned. No native model or live service action is included; the
+original Tariff rejected task field remains unproved. Historical automatic
+observation retry descriptions below retain their original release scope.
 
 ## Published Copilot task observation diagnostics hotfix.30
 

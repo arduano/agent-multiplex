@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AdapterNativeStateReadError } from "@arduano/agent-multiplex-runtime-node-core";
 import { CopilotReadBusyError, CopilotReadRequests } from "../src/reads.js";
 
 afterEach(() => vi.useRealTimers());
@@ -18,6 +19,7 @@ describe("Copilot bounded read-only requests", () => {
     const rejected = expect(result).rejects.toThrow("owner is closing");
     reads.close();
     await rejected;
+    await expect(result).rejects.toMatchObject({ reason: "nativeOwnerRetired" });
     const action = vi.fn(async () => "replacement");
     await expect(reads.read("history", "cursor", action)).rejects.toThrow("reads are closing");
     native.resolve("late reply");
@@ -54,7 +56,8 @@ describe("Copilot bounded read-only requests", () => {
     const caught = first.catch(error => error);
     expect(reads.read("history", "cursor-1", action)).toBe(first);
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(await caught).toMatchObject({ message: expect.stringContaining("timed out") });
+    expect(await caught).toBeInstanceOf(AdapterNativeStateReadError);
+    expect(await caught).toMatchObject({ reason: "nativeReadTimedOut", message: expect.stringContaining("timed out") });
     expect(reads.read("history", "cursor-1", action)).toBe(first);
     await expect(reads.read("history", "cursor-1", action)).rejects.toThrow("remains pending");
     expect(action).toHaveBeenCalledOnce();
@@ -70,11 +73,11 @@ describe("Copilot bounded read-only requests", () => {
     const first = reads.read("history", "cursor-1", () => native.promise).catch(error => error);
     const replacement = vi.fn(async () => "incorrect page");
     await expect(reads.read("history", "cursor-2", replacement)).rejects.toBeInstanceOf(CopilotReadBusyError);
-    await expect(reads.read("history", "cursor-2", replacement)).rejects.toMatchObject({ stalled: false });
+    await expect(reads.read("history", "cursor-2", replacement)).rejects.toMatchObject({ reason: "nativeReadBusy", stalled: false });
     await vi.advanceTimersByTimeAsync(15_000);
     await first;
     await expect(reads.read("history", "cursor-2", replacement)).rejects.toBeInstanceOf(CopilotReadBusyError);
-    await expect(reads.read("history", "cursor-2", replacement)).rejects.toMatchObject({ stalled: true });
+    await expect(reads.read("history", "cursor-2", replacement)).rejects.toMatchObject({ reason: "nativeReadBusy", stalled: true });
     expect(replacement).not.toHaveBeenCalled();
     native.reject(new Error("late rejection"));
     await vi.advanceTimersByTimeAsync(0);

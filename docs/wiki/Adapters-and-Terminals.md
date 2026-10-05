@@ -293,12 +293,16 @@ resume sessions or retry commands. Sends, steering, settings, interrupts and
 lifecycle mutations keep their existing acknowledgement/unknown-outcome rules.
 The runtime owns task and queue refresh on activation, invalidation and a
 60-second repair interval. A read that remains occupied for 45 seconds degrades
-the binding and blocks new Copilot mutations while Stop remains available. If
-the binding is still degraded 120 seconds later, the runtime daemon shuts down
-for its process supervisor to retry. The old owned CLI must exit before a new
-runtime attaches; if native termination cannot be proved, the supervisor stops
-retrying. This recovery never resends an uncertain command or restarts the
-control node.
+the binding and blocks new Copilot mutations while Stop and exact pending
+interaction resolution remain available. This is a no-success deadline, so a
+promptly returned invalid snapshot can also degrade observation. The runtime
+continues bounded retries but never restarts the shared native owner solely
+for an observation failure: active children and healthy peer sessions remain
+owned. Explicit owner Stop/Recover is available when fresh observations cannot
+heal the binding. Replacement still requires acknowledged ownership cleanup;
+uncertain commands are never replayed. The deprecated embedding recovery hook
+is not invoked by the observation watchdog. See the
+[lifecycle recovery contract](../design/copilot-session-lifecycle-vnext.md).
 The runtime daemon's presence heartbeat remains independent of inventory and
 metadata maintenance; see [process supervision](Operations.md#process-supervision).
 

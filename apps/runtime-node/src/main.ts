@@ -155,9 +155,7 @@ export async function runRuntimeNode(
   const runtimeNodeBootId = newRuntimeNodeBootId();
   const store = new RuntimeNodeStore(join(config.stateDirectory, DATABASE_FILENAME));
   const controlNodeLocator = new PersistentControlNodeLocator(store, config.controlNode);
-  const recovery = new AbortController();
-  const runtimeSignal = AbortSignal.any([signal, recovery.signal]);
-  let recoverySessionId: string | undefined;
+  const runtimeSignal = signal;
   // Canonicalize the roots before constructing a harness. Most adapters start
   // lazily, but the opt-in Copilot UI-server must be probed eagerly so a
   // broken hidden CLI can fall back without advertising terminal support.
@@ -190,11 +188,6 @@ export async function runRuntimeNode(
       outputRoots: config.imageOutputRoots ?? [],
       ...(config.imageMaximumSessionBytes === undefined ? {} : { maximumSessionBytes: config.imageMaximumSessionBytes }),
       ...(config.imageMaximumRuntimeBytes === undefined ? {} : { maximumRuntimeBytes: config.imageMaximumRuntimeBytes }),
-    },
-    onCopilotObservationRecoveryRequired: (sessionId) => {
-      if (runtimeSignal.aborted) return;
-      recoverySessionId = sessionId;
-      recovery.abort();
     },
     ...(options.onNativeGapDiagnostic ? { onNativeGapDiagnostic: options.onNativeGapDiagnostic } : {}),
     ...(options.onCopilotIncidentTrace ? { onCopilotIncidentTrace: options.onCopilotIncidentTrace } : {}),
@@ -266,12 +259,8 @@ export async function runRuntimeNode(
     );
   } finally {
     runtimeSignal.removeEventListener("abort", closeTransport);
-    let transportClosed = true;
-    let transportCloseError: unknown;
     try { await node?.close(); }
     catch (error) {
-      transportClosed = false;
-      transportCloseError = error;
       logError("closing p2prpc", error);
     }
     try {
@@ -279,12 +268,6 @@ export async function runRuntimeNode(
     } finally {
       store.close();
     }
-    if (recoverySessionId && !transportClosed) {
-      throw new AggregateError([transportCloseError], "runtime node cleanup failed");
-    }
-  }
-  if (recoverySessionId && !signal.aborted) {
-    throw new Error(`Copilot native observation remained degraded for session ${recoverySessionId}; runtime owner closed for supervisor retry`);
   }
 }
 

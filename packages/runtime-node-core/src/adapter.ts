@@ -210,6 +210,23 @@ export const ADAPTER_NATIVE_STATE_VALIDATION_REASONS = [
   "snapshotMalformed", "snapshotTooLarge", "snapshotWireInvalid", "projectionMalformed",
 ] as const;
 export type AdapterNativeStateValidationReason = typeof ADAPTER_NATIVE_STATE_VALIDATION_REASONS[number];
+/** Read health is independent of snapshot admission and native mutation certainty. */
+export const ADAPTER_NATIVE_STATE_READ_REASONS = [
+  "snapshotInvalidated", "nativeReadBusy", "nativeReadTimedOut", "nativeOwnerRetired", "nativeReadUnavailable",
+] as const;
+export type AdapterNativeStateReadReason = typeof ADAPTER_NATIVE_STATE_READ_REASONS[number];
+
+/** Fixed read-stage diagnostics, without matching or retaining vendor error text. */
+export class AdapterNativeStateReadError extends Error {
+  public readonly reason: AdapterNativeStateReadReason;
+
+  public constructor(reason: AdapterNativeStateReadReason, message: string) {
+    super(message);
+    this.name = "AdapterNativeStateReadError";
+    this.reason = ADAPTER_NATIVE_STATE_READ_REASONS.includes(reason) ? reason : "nativeReadUnavailable";
+  }
+}
+
 export interface AdapterNativeStateValidationIssue {
   /** At most eight segments. Array indices saturate at 1,000. */
   readonly path: readonly (typeof ADAPTER_NATIVE_STATE_DIAGNOSTIC_FIELDS[number] | number)[];

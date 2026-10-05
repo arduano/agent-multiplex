@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { copilotCommandSchema, nativeStateRequestSchema, NATIVE_PAYLOAD_MAX_BYTES,
   newLaunchId, newRuntimeNodeId, newRuntimeNodeBootId, newRuntimeEpoch, newSessionId } from "@arduano/agent-multiplex-protocol";
-import { AdapterOutcomeUnknownError, AdapterNativeStateValidationError, RuntimeNodeService, RuntimeNodeStore,
+import { AdapterOutcomeUnknownError, AdapterNativeStateReadError, AdapterNativeStateValidationError, RuntimeNodeService, RuntimeNodeStore,
   type AgentAdapter, type CopilotIncidentTraceRecord } from "@arduano/agent-multiplex-runtime-node-core";
 import { CopilotAdapterSession, CopilotSessionBridge, type CopilotSessionRpc } from "../src/session.js";
 import { taskSnapshot } from "../src/tasks.js";
@@ -61,7 +61,8 @@ describe("native Copilot task observations", () => {
   it("does not continue listing after refresh exhausted the one read budget", async () => {
     vi.useFakeTimers(); const native = deferred<unknown>(); const f = fixture({ refresh: vi.fn(() => native.promise) });
     const first = f.session.readNativeState({ harness: "copilot", view: "tasks" }).catch(error => error);
-    await vi.advanceTimersByTimeAsync(15_000); expect(await first).toBeInstanceOf(Error);
+    await vi.advanceTimersByTimeAsync(15_000); expect(await first).toBeInstanceOf(AdapterNativeStateReadError);
+    expect(await first).toMatchObject({ reason: "nativeReadTimedOut" });
     await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toThrow("remains pending");
     expect(f.tasks.refresh).toHaveBeenCalledOnce(); native.resolve({}); await vi.advanceTimersByTimeAsync(0);
     expect(f.tasks.list).not.toHaveBeenCalled();
@@ -85,7 +86,7 @@ describe("native Copilot task observations", () => {
     const response = deferred<unknown>();
     const f = fixture({ list: vi.fn(() => response.promise) });
     const read = f.session.readNativeState({ harness: "copilot", view: "tasks" });
-    const result = expect(read).rejects.toThrow("invalidated");
+    const result = expect(read).rejects.toMatchObject({ reason: "snapshotInvalidated" });
     await vi.waitFor(() => expect(f.tasks.list).toHaveBeenCalledOnce());
     f.bridge.nativeEvent({ type: "session.background_tasks_changed", id: "new-work", parentId: null,
       data: {}, timestamp: shell.startedAt } as SessionEvent);
@@ -113,7 +114,7 @@ describe("native Copilot task observations", () => {
   });
   it("fences stopped and unsupported native sessions without dispatch", async () => {
     const f = fixture(); f.rpc.tasks = undefined;
-    await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toThrow("unavailable");
+    await expect(f.session.readNativeState({ harness: "copilot", view: "tasks" })).rejects.toMatchObject({ reason: "nativeReadUnavailable" });
     await f.session.stop(); await expect(f.session.readNativeState({ harness: "copilot", view: "taskProgress", id: "one" })).rejects.toThrow("stopped");
     expect(f.tasks.list).not.toHaveBeenCalled();
   });

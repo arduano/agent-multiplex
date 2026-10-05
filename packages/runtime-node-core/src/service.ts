@@ -99,6 +99,8 @@ import {
 
 import {
   ADAPTER_NATIVE_STATE_VALIDATION_REASONS,
+  ADAPTER_NATIVE_STATE_READ_REASONS,
+  AdapterNativeStateReadError,
   AdapterNativeStateValidationError,
   AdapterOutcomeUnknownError,
   type AdapterEvent,
@@ -200,7 +202,9 @@ export interface RuntimeNodeServiceOptions {
   images?: RuntimeImageOptions;
   nativeEventQueueLimit?: number;
   nativeEventQueueBytes?: number;
-  /** Trusted process supervisor hook. It must stop this runtime before retrying. */
+  /** @deprecated Observation failure cannot prove shared-owner cleanup is safe.
+   * Retained for embedding source compatibility; observation watchdogs never invoke it.
+   * Explicit owner Stop/Recover or independently proved process failure owns recovery. */
   onCopilotObservationRecoveryRequired?: (sessionId: SessionId) => void;
   /** Payload-free, best-effort operator diagnostics; lifecycle state is persisted first. */
   onNativeGapDiagnostic?: (diagnostic: NativeGapLogDiagnostic) => void;
@@ -236,6 +240,7 @@ interface LifecycleRefreshLane {
   dueAt: number;
   deadlineRevision: number | undefined;
   deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  lastFailure: { readonly revision: number; readonly reason: NonNullable<Extract<CopilotIncidentTraceDetail, { kind: "observation" }>["failureReason"]> } | undefined;
 }
 
 interface LifecycleObservationCoordinator {
@@ -244,8 +249,6 @@ interface LifecycleObservationCoordinator {
   generation: number;
   timer: ReturnType<typeof setTimeout> | undefined;
   refreshTimer: ReturnType<typeof setInterval> | undefined;
-  recoveryTimer: ReturnType<typeof setTimeout> | undefined;
-  recoveryRequested: boolean;
   lanes: Record<LifecycleRefreshView, LifecycleRefreshLane>;
 }
 
@@ -285,7 +288,6 @@ export class RuntimeNodeService {
   readonly #nativeEventTasks = new Map<Promise<void>, SessionId>();
   readonly #nativeEventQueueLimit: number;
   readonly #nativeEventQueueBytes: number;
-  readonly #onCopilotObservationRecoveryRequired: ((sessionId: SessionId) => void) | undefined;
   readonly #onNativeGapDiagnostic: ((diagnostic: NativeGapLogDiagnostic) => void) | undefined;
   readonly #incidentTracer: CopilotIncidentTracer | undefined;
   #acceptingNativeEvents = true;
@@ -303,7 +305,6 @@ export class RuntimeNodeService {
     this.#runtimeNodeBootId = options.runtimeNodeBootId;
     this.#name = options.name;
     this.#endpointId = options.endpointId;
-    this.#onCopilotObservationRecoveryRequired = options.onCopilotObservationRecoveryRequired;
     this.#onNativeGapDiagnostic = options.onNativeGapDiagnostic;
     this.#incidentTracer = options.onCopilotIncidentTrace ? new CopilotIncidentTracer(options.onCopilotIncidentTrace) : undefined;
     this.#resolvedInteractionCacheSize = options.resolvedInteractionCacheSize ?? 1_024;
@@ -1086,6 +1087,15 @@ export class RuntimeNodeService {
     if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
       throw new RuntimeNodeProtocolError("FENCED", "native state response does not match binding");
     }
+    let payload: NativePayload;
+    try { payload = packNativePayload(result.payload); }
+    catch (error) {
+      const category = nativePayloadValidationFailure(error);
+      if (request.harness === "copilot" && observation && category !== undefined) throw new AdapterNativeStateValidationError(
+        category === "wireEnvelope" ? "snapshotTooLarge" : "snapshotWireInvalid",
+      );
+      throw error;
+    }
     if (request.harness === "copilot" && observation) {
       if (!result.payload || typeof result.payload !== "object" || Array.isArray(result.payload)) {
         throw new AdapterNativeStateValidationError("projectionMalformed");
@@ -1105,23 +1115,26 @@ export class RuntimeNodeService {
       }
       if (request.view === "pendingMessages") {
         if (!Array.isArray(data.items) || !Array.isArray(data.steeringMessages)) {
-          throw new TypeError("Copilot queue observation omitted its complete pending-message lists");
+          throw new AdapterNativeStateValidationError("projectionMalformed");
         }
-        const fact = lifecycleFactSchema.parse({ type: "queueObserved", revision: observation.queue.revision,
-          items: data.items.map((item) => {
-            const value = item as Record<string, JsonValue>;
-            return { id: value.id, ...(typeof value.messageId === "string" ? { messageId: value.messageId } : {}), kind: "queued" };
-          }),
-          // Steering strings have no exact item identity. Preserve only their
-          // count; never synthesize queue IDs from text or array position.
-          unidentifiedSteering: data.steeringMessages.length,
-          inFlightSteering: typeof data.inFlightSteeringCount === "number" ? data.inFlightSteeringCount : null });
+        let fact: LifecycleFact;
+        try {
+          fact = lifecycleFactSchema.parse({ type: "queueObserved", revision: observation.queue.revision,
+            items: data.items.map((item) => {
+              const value = item as Record<string, JsonValue>;
+              return { id: value.id, ...(typeof value.messageId === "string" ? { messageId: value.messageId } : {}), kind: "queued" };
+            }),
+            // Steering strings have no exact item identity. Preserve only their
+            // count; never synthesize queue IDs from text or array position.
+            unidentifiedSteering: data.steeringMessages.length,
+            inFlightSteering: typeof data.inFlightSteeringCount === "number" ? data.inFlightSteeringCount : null });
+        } catch { throw new AdapterNativeStateValidationError("projectionMalformed"); }
         this.#appendLifecycle(sessionId, active, fact);
       }
     }
     // Queue views carry display text, not image attachments or retained history.
     // The ordinary native envelope enforces the bounded response without storage.
-    return { ...result, payload: packNativePayload(result.payload) };
+    return { ...result, payload };
   }
 
   async #readNativeHistory(
@@ -2608,7 +2621,7 @@ export class RuntimeNodeService {
     if (fence && lifecycleNativeObservationDegraded(this.#lifecycle.read(fence))) {
       throw new RuntimeNodeProtocolError(
         "UNAVAILABLE",
-        "Copilot native observation is stalled; stop or recover this runtime before dispatching another mutation",
+        "Copilot native observation is stalled; stop or recover this session before dispatching another mutation",
       );
     }
   }
@@ -2639,24 +2652,12 @@ export class RuntimeNodeService {
     if (!fence) return;
     if (this.#lifecycle.read(fence).nativeAdmission.state !== "degraded") {
       this.#appendLifecycle(sessionId, binding, { type: "nativeObservationDegraded", diagnosticId });
+      // Failed admission, invalidation races and occupied read lanes cannot prove
+      // the shared SDK owner is dead or safe to replace. Do not cancel children
+      // or healthy peer sessions. Keep diagnosis/admission honest until fresh
+      // observations heal or the owner explicitly chooses Stop/Recover.
+      this.#trace(binding, { kind: "recovery", outcome: "manualRecoveryRequired", generation: binding.lifecycleObservations.generation, diagnosticId });
     }
-    const coordinator = binding.lifecycleObservations;
-    if (coordinator.recoveryTimer || coordinator.recoveryRequested || !this.#onCopilotObservationRecoveryRequired) return;
-    this.#trace(binding, { kind: "recovery", outcome: "scheduled", generation: coordinator.generation, diagnosticId });
-    coordinator.recoveryTimer = setTimeout(() => {
-      coordinator.recoveryTimer = undefined;
-      if (coordinator.retired || this.#closed || this.#active.get(sessionId) !== binding) {
-        this.#trace(binding, { kind: "recovery", outcome: "retiredBinding", generation: coordinator.generation, diagnosticId });
-        return;
-      }
-      const currentFence = this.#lifecycleFence(sessionId, binding);
-      if (currentFence && this.#lifecycle.read(currentFence).nativeAdmission.state === "degraded") {
-        coordinator.recoveryRequested = true;
-        this.#trace(binding, { kind: "recovery", outcome: "requested", generation: coordinator.generation, diagnosticId });
-        this.#onCopilotObservationRecoveryRequired?.(sessionId);
-      } else this.#trace(binding, { kind: "recovery", outcome: currentFence ? "alreadyRecovered" : "fenceUnavailable", generation: coordinator.generation, diagnosticId });
-    }, 120_000);
-    coordinator.recoveryTimer.unref?.();
   }
 
   #appendLifecycle(sessionId: SessionId, binding: ActiveBinding, fact: LifecycleFact): void {
@@ -2731,6 +2732,7 @@ export class RuntimeNodeService {
     // retries and the periodic refresh must not move the watchdog forward.
     if (lane.requestedAt === 0) {
       lane.failures = 0;
+      lane.lastFailure = undefined;
       lane.requestedAt = timestamp;
       lane.dueAt = timestamp;
       lane.deadlineTimer = setTimeout(() => {
@@ -2743,7 +2745,8 @@ export class RuntimeNodeService {
           (view === "tasks" ? state.tasks.revision : state.queue.revision);
         const diagnosticId = newOperationId();
         this.#trace(binding, { kind: "observation", view, outcome: "stalled", generation: coordinator.generation,
-          revision, failures: Math.max(1, lane.failures + 1), deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt), diagnosticId });
+          revision, failures: Math.max(1, lane.failures + 1), deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt), diagnosticId,
+          ...(lane.lastFailure?.revision === revision ? { failureReason: lane.lastFailure.reason } : {}) });
         this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
         this.#appendLifecycle(sessionId, binding, {
           type: "observationFailed",
@@ -2830,11 +2833,16 @@ export class RuntimeNodeService {
     }
     const state = this.#lifecycle.read(fence);
     const currentRevision = view === "tasks" ? state.tasks.revision : state.queue.revision;
+    const failureReason = failure === undefined ? undefined
+      : failure.error instanceof AdapterNativeStateValidationError && ADAPTER_NATIVE_STATE_VALIDATION_REASONS.includes(failure.error.reason)
+        ? failure.error.reason
+        : failure.error instanceof AdapterNativeStateReadError && ADAPTER_NATIVE_STATE_READ_REASONS.includes(failure.error.reason)
+          ? failure.error.reason : failure.error instanceof RuntimeNodeProtocolError && failure.error.code === "FENCED"
+            ? "nativeBindingChanged" : "nativeReadFailed";
     this.#trace(binding, { kind: "observation", view, outcome: currentRevision !== revision ? "staleRevision" : failed ? "failed" : "accepted",
       generation, revision, currentRevision, failures: lane.failures + (failed ? 1 : 0), deadlineAgeMs,
       ...(failed && currentRevision === revision ? {
-        failureReason: failure.error instanceof AdapterNativeStateValidationError && ADAPTER_NATIVE_STATE_VALIDATION_REASONS.includes(failure.error.reason)
-          ? failure.error.reason : "nativeReadFailed",
+        failureReason: failureReason!,
         ...(failure.error instanceof AdapterNativeStateValidationError && failure.error.issues.length > 0 ? { validationIssues: failure.error.issues } : {}),
       } : {}) });
     if (currentRevision !== revision) {
@@ -2844,6 +2852,7 @@ export class RuntimeNodeService {
       lane.deadlineRevision = undefined;
       lane.dueAt = Date.now();
     } else if (failed) {
+      lane.lastFailure = { revision, reason: failureReason! };
       lane.failures += 1;
       const stalled = state.nativeAdmission.state === "degraded" ||
         Date.now() - lane.requestedAt >= LIFECYCLE_OBSERVATION_STALLED_MS;
@@ -2867,6 +2876,7 @@ export class RuntimeNodeService {
       lane.deadlineTimer = undefined;
       lane.deadlineRevision = undefined;
       lane.failures = 0;
+      lane.lastFailure = undefined;
       lane.requestedAt = 0;
       lane.dueAt = 0;
       // The same durable state controls admission and the public action view.
@@ -2875,9 +2885,6 @@ export class RuntimeNodeService {
         recovered.tasks.observation.state === "observed" && recovered.queue.observation.state === "observed") {
         this.#appendLifecycle(sessionId, binding, { type: "nativeObservationRecovered" });
         this.#trace(binding, { kind: "recovery", outcome: "recovered", generation: coordinator.generation });
-        if (coordinator.recoveryTimer) clearTimeout(coordinator.recoveryTimer);
-        coordinator.recoveryTimer = undefined;
-        coordinator.recoveryRequested = false;
       }
     }
     this.#pumpLifecycleObservations(sessionId, binding);
@@ -2891,10 +2898,8 @@ export class RuntimeNodeService {
     coordinator.generation += 1;
     if (coordinator.timer) clearTimeout(coordinator.timer);
     if (coordinator.refreshTimer) clearInterval(coordinator.refreshTimer);
-    if (coordinator.recoveryTimer) clearTimeout(coordinator.recoveryTimer);
     coordinator.timer = undefined;
     coordinator.refreshTimer = undefined;
-    coordinator.recoveryTimer = undefined;
     for (const lane of Object.values(coordinator.lanes)) {
       lane.pending = false;
       if (lane.deadlineTimer) clearTimeout(lane.deadlineTimer);
@@ -3175,11 +3180,9 @@ export class RuntimeNodeService {
         generation: 0,
         timer: undefined,
         refreshTimer: undefined,
-        recoveryTimer: undefined,
-        recoveryRequested: false,
         lanes: {
-          tasks: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined },
-          pendingMessages: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined },
+          tasks: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined, lastFailure: undefined },
+          pendingMessages: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined, lastFailure: undefined },
         },
       },
       unsubscribe: () => undefined,

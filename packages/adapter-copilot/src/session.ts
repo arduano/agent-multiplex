@@ -10,6 +10,8 @@ import type {
 import {
   type AdapterEvent,
   AdapterOutcomeUnknownError,
+  AdapterNativeStateReadError,
+  AdapterNativeStateValidationError,
   type AdapterSession,
 } from "@arduano/agent-multiplex-runtime-node-core";
 import {
@@ -972,12 +974,12 @@ export class CopilotAdapterSession implements AdapterSession {
     if (request.harness !== "copilot") throw new TypeError("Unsupported Copilot native state view");
     if (request.view === "agents") {
       const agent = this.#native.rpc.agent;
-      if (typeof agent?.list !== "function") throw new Error("Copilot agent registry observation is unavailable");
+      if (typeof agent?.list !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot agent registry observation is unavailable");
       const revision = this.#bridge.nativeStateRevision("agents");
       const value = await this.read("agents", String(revision), () => agent.list({ includeBuiltInAgents: false, includePrompt: false }));
       this.assertActive();
       if (revision !== this.#bridge.nativeStateRevision("agents")) {
-        throw new Error("Copilot agents snapshot was invalidated during the native read");
+        throw new AdapterNativeStateReadError("snapshotInvalidated", "Copilot agents snapshot was invalidated during the native read");
       }
       return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: agentsSnapshot(value) };
     }
@@ -986,28 +988,28 @@ export class CopilotAdapterSession implements AdapterSession {
       let value: unknown;
       switch (request.view) {
         case "tasks": {
-          if (typeof tasks?.list !== "function" || typeof tasks.refresh !== "function") throw new Error("Copilot task observation is unavailable");
+          if (typeof tasks?.list !== "function" || typeof tasks.refresh !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot task observation is unavailable");
           const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
           const observation = await this.read("tasks", String(this.#bridge.nativeStateRevision("tasks")), async () => {
             await tasks.refresh();
             this.assertActive();
-            if (Date.now() >= deadlineAt) throw new Error("Copilot task observation timed out before listing refreshed tasks");
+            if (Date.now() >= deadlineAt) throw new AdapterNativeStateReadError("nativeReadTimedOut", "Copilot task observation timed out before listing refreshed tasks");
             const revision = this.#bridge.nativeStateRevision("tasks");
             return { revision, payload: await tasks.list() };
           }, deadlineAt);
           if (observation.revision !== this.#bridge.nativeStateRevision("tasks")) {
-            throw new Error("Copilot task snapshot was invalidated during the native read");
+            throw new AdapterNativeStateReadError("snapshotInvalidated", "Copilot task snapshot was invalidated during the native read");
           }
           value = observation.payload;
           break;
         }
         case "taskProgress":
-          if (typeof tasks?.getProgress !== "function") throw new Error("Copilot task progress is unavailable");
+          if (typeof tasks?.getProgress !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot task progress is unavailable");
           taskId(request.id);
           value = await this.read("taskProgress", request.id, () => tasks.getProgress({ id: request.id }));
           break;
         case "currentPromotableTask":
-          if (typeof tasks?.getCurrentPromotable !== "function") throw new Error("Copilot promotable task observation is unavailable");
+          if (typeof tasks?.getCurrentPromotable !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot promotable task observation is unavailable");
           value = await this.read("currentPromotableTask", "", () => tasks.getCurrentPromotable());
           break;
         default: throw new TypeError("Unsupported Copilot native state view");
@@ -1016,22 +1018,25 @@ export class CopilotAdapterSession implements AdapterSession {
       return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: taskSnapshot(request.view, value) };
     }
     const queue = this.#native.rpc.queue;
-    if (typeof queue?.pendingItems !== "function") throw new Error("Copilot pending queue observation is unavailable");
+    if (typeof queue?.pendingItems !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot pending queue observation is unavailable");
     const revision = this.#bridge.nativeStateRevision("pendingMessages");
     const value = await this.read("pendingMessages", String(revision), () => queue.pendingItems());
     this.assertActive();
     if (revision !== this.#bridge.nativeStateRevision("pendingMessages")) {
-      throw new Error("Copilot pending queue snapshot was invalidated during the native read");
+      throw new AdapterNativeStateReadError("snapshotInvalidated", "Copilot pending queue snapshot was invalidated during the native read");
     }
     if (!isObject(value) || !Array.isArray(value.items) || !Array.isArray(value.steeringMessages) ||
       value.items.some(item => !isObject(item) || typeof item.id !== "string" || !item.id || typeof item.kind !== "string" ||
         typeof item.displayText !== "string" || typeof item.agentMode !== "string" || item.messageId !== undefined && typeof item.messageId !== "string") ||
       value.steeringMessages.some(item => typeof item !== "string") || value.inFlightSteeringCount !== undefined &&
         (!Number.isInteger(value.inFlightSteeringCount) || (value.inFlightSteeringCount as number) < 0 || (value.inFlightSteeringCount as number) > value.steeringMessages.length)) {
-      throw new TypeError("Unrecognized Copilot pending queue snapshot");
+      throw new AdapterNativeStateValidationError("snapshotMalformed");
     }
-    if (value.items.length + value.steeringMessages.length > 1_000 || jsonWireByteUpperBound(value) + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
-      throw new Error("Copilot pending queue exceeds the bounded native state envelope");
+    let wireBytes: number;
+    try { wireBytes = jsonWireByteUpperBound(value); }
+    catch { throw new AdapterNativeStateValidationError("snapshotWireInvalid"); }
+    if (value.items.length + value.steeringMessages.length > 1_000 || wireBytes + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
+      throw new AdapterNativeStateValidationError("snapshotTooLarge");
     }
     return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: copilotJson(value) };
   }
@@ -1088,7 +1093,7 @@ export class CopilotAdapterSession implements AdapterSession {
   }
 
   private assertActive(): void {
-    if (this.#stopped) throw new Error(`Copilot session ${this.vendorSessionId} is stopped`);
+    if (this.#stopped) throw new AdapterNativeStateReadError("nativeOwnerRetired", `Copilot session ${this.vendorSessionId} is stopped`);
   }
 
   private async mutation<T>(description: string, operation: () => Promise<T>): Promise<T> {
