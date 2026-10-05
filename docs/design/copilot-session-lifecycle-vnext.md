@@ -705,6 +705,49 @@ both nonterminal states to `outcomeUnknown`, conservatively preserving uncertain
 without replay or a new durable schema. `started` denotes processing under the
 lock; private adapter traces identify the exact native-dispatch boundary.
 
+### Retained-session startup containment
+
+The runtime normalizes prior active bindings to resumable bindings and retains
+their exact Copilot startup intents. Trusted reattachment is deduplicated once
+per runtime boot and requests `continuePendingWork: false`; it never replays a
+prompt or resumes pending native work automatically. Each binding is recovered
+independently. A native refusal or uncertain attachment must not prevent healthy
+siblings from recovering or make the runtime globally unavailable.
+
+Recovery checks the logical session, runtime, harness/scope, native ID and binding
+revision before dispatch and again at durable handle commit. The persisted intent
+must still be exactly the intent captured for this boot. An owner Stop atomically
+persists its received command receipt and cancels only the matching intent before
+waiting for the session lock. This applies when the binding is already resumable,
+when recovery is in flight, and when the process exits after Stop admission. A
+matching durable Stop fence also prevents generation of a new startup intent if
+the binding was still active when the process exited. An explicit successful
+Resume clears only the Stop that preceded its own admission; a later Stop remains
+effective. A stale Stop cannot cancel another binding. A late handle after cancellation is
+detached without being published; unacknowledged cleanup remains uncertain. A
+faulty adapter returning an occupied sibling native ID cannot cause that sibling
+to be stopped. Native attachment fences remain adapter-owned until exact cleanup
+acknowledgement or proved owner termination.
+
+Append-only runtime migration 11 stores private per-binding startup failure
+receipts and exact Stop cancellation fences. Failures retain binding/boot identity, fixed recovery-stage error, bounded
+reason and suggested action. Missing saved native history is an explicit typed
+adapter refusal; it suggests Stop then Archive without inspecting vendor files.
+Other failures suggest an explicit Resume retry or reconciliation of uncertain
+native ownership. Raw error causes go only to the trusted embedding's private
+diagnostic hook, never to this durable journal or the public catalog. Failed
+bindings remain resumable with error/unknown runtime status; healthy bindings
+retain their own native IDs, revisions and lifecycle uncertainty.
+
+An interrupted recovery retains its intent for the next boot; a successful
+reattachment atomically commits the active handle and deletes its intent/failure
+receipt. Explicit Stop cancellation remains durable even if its command receipt
+becomes unknown after a crash. A Stop without a handle cannot claim native owner
+cleanup when this boot has an uncertain attachment. Backend shutdown still owns
+verified termination. Storage failure rejects startup rather than being mislabeled
+as a single-session native refusal. Migration 11 does not rewrite migrations 3–10
+or public wire/lifecycle schemas; older binaries cannot open the newer store.
+
 The optional `history.active-binding` v1 capability controls a narrower history
 request via `native.activeBindingOnly: true`. An occupied session lock fails
 promptly, and a stopped binding fails after the runtime lock recheck without
@@ -762,8 +805,8 @@ fallback or compatibility branch.
 | --- | --- | --- |
 | `@arduano/agent-multiplex-protocol` | Private lifecycle reducer, public version-2 view, `commands.observe`, typed command errors and exact v6 descriptors | Wire break; lifecycle contract version is 2. |
 | `@arduano/agent-multiplex-adapter-copilot` | Emit exact root/child/invalidation/display/compaction facts; fence task and queue reads; preserve raw native envelopes | No adapter-owned store. SDK/CLI pins remain qualification boundaries. |
-| `@arduano/agent-multiplex-runtime-node-core` | Single writer, private fenced read, automatic revision-fenced Copilot observations, trusted startup reattachment and command-receipt repair | Append runtime store v6 typed-error, v7 lifecycle, v8 contract rotation, v9 startup intent, and v10 activity/admission migrations. Old binaries must not open the upgraded store. |
-| Runtime app | Reattach exact persisted active Copilot bindings before control registration; signal ready only after first registration; retain degraded admission without automatic shared-owner restart; explicit recovery retries only after verified native cleanup | Restart into the lockstep package graph during the maintenance window. A failed reattachment or unproved termination rejects startup/retry. |
+| `@arduano/agent-multiplex-runtime-node-core` | Single writer, private fenced read, automatic revision-fenced Copilot observations, independently contained trusted startup reattachment and command-receipt repair | Append runtime store v6 typed-error, v7 lifecycle, v8 contract rotation, v9 startup intent, v10 activity/admission and v11 private startup failures. Old binaries must not open the upgraded store. |
+| Runtime app | Register the runtime so Stop/Archive remain routable while exact retained bindings recover independently; retain degraded admission without automatic shared-owner restart; explicit recovery retries only after verified native cleanup | Restart into the lockstep package graph during the maintenance window. Storage failure or unproved owner termination rejects startup/retry; one failed retained binding does not reject the entire runtime. |
 | `@arduano/agent-multiplex-control-node-core` | Route/fence lifecycle reads and command observations; carry bounded public views; preserve catalog authority | Control v7 converts command errors; v8 rotates incompatible lifecycle feeds. Obtain a new snapshot; discard old replay/import checkpoints as the migrations direct. |
 | Control app / isolated worker | Forward `readLifecycle` as a read and reject non-v6 peers | Main and worker must use identical package bytes. |
 | `@arduano/agent-multiplex-transport-p2prpc` | Bind the new read procedure and exact v6 descriptors | No local/file dependency may be committed. Seamless renewal is the external boundary below. |

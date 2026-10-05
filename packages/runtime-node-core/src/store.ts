@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { z } from "zod";
 
 import {
   HardenedSqliteDatabase,
@@ -12,7 +13,13 @@ import {
   archiveRecordSchema,
   archiveRequestSchema,
   canonicalJson,
+  canonicalProtocolRecordJson,
   commandRecordSchema,
+  commandErrorSchema,
+  sessionBindingRefSchema,
+  runtimeNodeBootIdSchema,
+  commandIdSchema,
+  isoDateSchema,
   safeCommandError,
   jsonObjectSchema,
   launchRecordSchema,
@@ -40,6 +47,7 @@ import {
   type SessionLaunchProvenance,
   type Harness,
   type AdapterScopeId,
+  type StopCommand,
 } from "@arduano/agent-multiplex-protocol";
 
 import {
@@ -48,6 +56,13 @@ import {
 } from "./launch-provider.js";
 
 type Row = Record<string, unknown>;
+
+type RetainedBinding = Pick<RuntimeNodeSessionRecord, "sessionId" | "runtimeNodeId" | "bindingRevision" | "harness" | "adapterScopeId" | "vendorSessionId">;
+function sameRetainedBinding(left: RetainedBinding, right: RetainedBinding): boolean {
+  return left.sessionId === right.sessionId && left.runtimeNodeId === right.runtimeNodeId &&
+    left.bindingRevision === right.bindingRevision && left.harness === right.harness &&
+    left.adapterScopeId === right.adapterScopeId && left.vendorSessionId === right.vendorSessionId;
+}
 
 const encode = (value: unknown): string => JSON.stringify(value);
 const decode = (value: unknown): unknown => JSON.parse(String(value));
@@ -91,6 +106,25 @@ export interface RuntimeImageEntry {
   sourceKey: string | null;
 }
 
+/** Private startup receipt. Fixed reasons/errors only; never native history,
+ * exception text, credentials, provider configuration or launch input. */
+export const runtimeCopilotStartupFailureSchema = z.object({
+  binding: sessionBindingRefSchema,
+  runtimeNodeBootId: runtimeNodeBootIdSchema,
+  stage: z.enum(["prepareResume", "validateOptions", "nativeResume", "validateHandle", "commitBinding"]),
+  reason: z.enum(["nativeHistoryMissing", "resumeFailed", "ownershipUncertain", "bindingChanged", "preparationFailed", "handleRejected"]),
+  error: commandErrorSchema,
+  action: z.enum(["stopOrRetryResume", "stopThenArchive", "reconcileNativeOwner"]),
+  failedAt: isoDateSchema,
+}).strict();
+export type RuntimeCopilotStartupFailure = z.infer<typeof runtimeCopilotStartupFailureSchema>;
+
+const runtimeCopilotStartupStopFenceSchema = z.object({
+  binding: sessionBindingRefSchema,
+  commandId: commandIdSchema,
+  admittedAt: isoDateSchema,
+}).strict();
+
 export class RuntimeNodeStore {
   readonly #sqlite: HardenedSqliteDatabase;
   readonly #db: DatabaseSync;
@@ -132,6 +166,13 @@ export class RuntimeNodeStore {
         version: 10,
         name: "runtime-node-store-v10-lifecycle-activity-admission",
         apply: migrateRuntimeNodeLifecycleActivityAdmission,
+      }, {
+        version: 11,
+        name: "runtime-node-store-v11-copilot-startup-recovery",
+        apply: (database) => database.exec(`
+          CREATE TABLE copilot_startup_failures (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT;
+          CREATE TABLE copilot_startup_stop_fences (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT;
+        `),
       }],
     });
     this.#db = this.#sqlite.database;
@@ -285,12 +326,23 @@ export class RuntimeNodeStore {
           lastSeenAt: timestamp,
         });
         this.#putParsedSession(stopped);
-        if (record.harness === "copilot") {
+        if (record.harness === "copilot" && !this.#hasStartupStopFence(record)) {
           this.#db.prepare(`INSERT INTO copilot_startup_intent(session_id, record_json) VALUES (?, ?)
             ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json`)
             .run(record.sessionId, encode(record));
         }
         normalized.push(stopped);
+      }
+      // A Stop admitted while a previous native operation owned the lock may
+      // leave the binding active at process loss. Its durable cancellation must
+      // suppress a newly generated intent as well as an already existing one.
+      for (const record of this.listSessions()) {
+        if (record.harness === "copilot" && this.#hasStartupStopFence(record)) {
+          const intent = this.getStartupCopilotIntent(record.sessionId);
+          if (intent && sameRetainedBinding(intent, record)) {
+            this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(record.sessionId);
+          }
+        }
       }
       const pendingCopilot = (this.#db.prepare("SELECT record_json FROM copilot_startup_intent ORDER BY session_id").all() as Row[])
         .map((row) => runtimeNodeSessionRecordSchema.parse(decode(row.record_json)));
@@ -302,21 +354,134 @@ export class RuntimeNodeStore {
     }
   }
 
-  /** An accepted native handle and removal of recovery intent are one commit. */
-  public commitStartupCopilotReattachment(record: RuntimeNodeSessionRecord): void {
+  public getStartupCopilotIntent(sessionId: SessionId): RuntimeNodeSessionRecord | undefined {
+    const row = this.#db.prepare("SELECT record_json FROM copilot_startup_intent WHERE session_id=?").get(sessionId) as Row | undefined;
+    return row ? runtimeNodeSessionRecordSchema.parse(decode(row.record_json)) : undefined;
+  }
+
+  public listStartupCopilotFailures(): RuntimeCopilotStartupFailure[] {
+    return (this.#db.prepare("SELECT record_json FROM copilot_startup_failures ORDER BY session_id").all() as Row[])
+      .map(row => runtimeCopilotStartupFailureSchema.parse(decode(row.record_json)));
+  }
+
+  /** An explicit successful Resume acknowledges the same retained binding,
+   * replacing its pending startup recovery rather than leaving a stale retry. */
+  public commitExplicitCopilotResume(record: RuntimeNodeSessionRecord, expected: RuntimeNodeSessionRecord, supersededStopCommandId?: CommandId): void {
+    const parsed = runtimeNodeSessionRecordSchema.parse(record);
+    if (parsed.harness !== "copilot" || parsed.availability !== "active" || parsed.runtimeEpoch === null ||
+      !sameRetainedBinding(parsed, expected)) throw new Error("explicit Copilot resume changed the retained binding");
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.getSession(expected.sessionId);
+      if (!current || !sameRetainedBinding(current, expected) || current.runtimeEpoch !== expected.runtimeEpoch) {
+        throw new Error("explicit Copilot resume targets a changed binding");
+      }
+      this.#putParsedSession(parsed);
+      if (supersededStopCommandId && this.startupCopilotStopCommandId(expected) === supersededStopCommandId) {
+        this.#db.prepare("DELETE FROM copilot_startup_stop_fences WHERE session_id=?").run(expected.sessionId);
+      }
+      const intent = this.getStartupCopilotIntent(expected.sessionId);
+      if (intent && sameRetainedBinding(intent, expected)) this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(expected.sessionId);
+      this.clearStartupCopilotFailure(expected);
+      this.#db.exec("COMMIT");
+    } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
+  }
+
+  public clearStartupCopilotFailure(expected: RetainedBinding): void {
+    const row = this.#db.prepare("SELECT record_json FROM copilot_startup_failures WHERE session_id=?").get(expected.sessionId) as Row | undefined;
+    if (row && sameRetainedBinding(runtimeCopilotStartupFailureSchema.parse(decode(row.record_json)).binding, expected)) {
+      this.#db.prepare("DELETE FROM copilot_startup_failures WHERE session_id=?").run(expected.sessionId);
+    }
+  }
+
+  /** Exact intent, current binding and accepted native handle commit together.
+   * A Stop admitted during an awaited native resume removes the intent first;
+   * the caller must detach the returned handle instead of publishing it. */
+  public commitStartupCopilotReattachment(record: RuntimeNodeSessionRecord, expected: RuntimeNodeSessionRecord): boolean {
     const parsed = runtimeNodeSessionRecordSchema.parse(record);
     if (parsed.harness !== "copilot" || parsed.availability !== "active" || parsed.runtimeEpoch === null) {
       throw new Error("startup Copilot reattachment requires an active native binding");
     }
     this.#db.exec("BEGIN IMMEDIATE");
     try {
+      if (!this.matchesStartupCopilotIntent(expected)) {
+        this.#db.exec("COMMIT");
+        return false;
+      }
+      if (!sameRetainedBinding(parsed, expected)) throw new Error("startup handle changed the retained binding");
       this.#putParsedSession(parsed);
       this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(parsed.sessionId);
+      this.#db.prepare("DELETE FROM copilot_startup_failures WHERE session_id=?").run(parsed.sessionId);
       this.#db.exec("COMMIT");
+      return true;
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  /** Persist per-binding failure without overwriting a Stop or newer binding. */
+  public commitStartupCopilotFailure(expected: RuntimeNodeSessionRecord, failure: RuntimeCopilotStartupFailure, requireIntent = true): RuntimeNodeSessionRecord | undefined {
+    const parsed = runtimeCopilotStartupFailureSchema.parse(failure);
+    if (!sameRetainedBinding(parsed.binding, expected)) throw new Error("startup failure changed the retained binding");
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.getSession(expected.sessionId);
+      if (requireIntent ? !this.matchesStartupCopilotIntent(expected) :
+        !current || !sameRetainedBinding(current, expected) || current.availability !== "resumable" || current.runtimeEpoch !== null) {
+        this.#db.exec("COMMIT");
+        return undefined;
+      }
+      const record = runtimeNodeSessionRecordSchema.parse({ ...current!,
+        runtimeStatus: parsed.error.certainty === "outcomeUnknown" ? "unknown" : "error",
+        updatedAt: parsed.failedAt, lastSeenAt: parsed.failedAt });
+      this.#putParsedSession(record);
+      this.#db.prepare("INSERT INTO copilot_startup_failures(session_id,record_json) VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json")
+        .run(expected.sessionId, encode(parsed));
+      this.#db.exec("COMMIT");
+      return record;
+    } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
+  }
+
+  public matchesStartupCopilotIntent(expected: RuntimeNodeSessionRecord): boolean {
+    const current = this.getSession(expected.sessionId);
+    const intent = this.getStartupCopilotIntent(expected.sessionId);
+    return current !== undefined && intent !== undefined && !this.#hasStartupStopFence(current) && sameRetainedBinding(current, expected) &&
+      canonicalProtocolRecordJson(intent) === canonicalProtocolRecordJson(expected) && current.availability === "resumable" && current.runtimeEpoch === null;
+  }
+
+  /** Durable Stop admission and cancellation are one transaction, before the
+   * session lock. Invalid/stale Stop still gets its normal journal receipt but
+   * cannot cancel another binding's recovery. */
+  public admitStopCommand(record: CommandRecord, input: StopCommand): void {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.putCommand(record);
+      const current = this.getSession(input.sessionId);
+      const intent = this.getStartupCopilotIntent(input.sessionId);
+      if (current?.harness === "copilot" && current.runtimeNodeId === input.runtimeNodeId && current.bindingRevision === input.bindingRevision) {
+        const fence = runtimeCopilotStartupStopFenceSchema.parse({
+          binding: { sessionId: current.sessionId, runtimeNodeId: current.runtimeNodeId, harness: current.harness,
+            adapterScopeId: current.adapterScopeId, vendorSessionId: current.vendorSessionId, bindingRevision: current.bindingRevision },
+          commandId: input.commandId, admittedAt: record.createdAt,
+        });
+        this.#db.prepare("INSERT INTO copilot_startup_stop_fences(session_id,record_json) VALUES (?,?) ON CONFLICT(session_id) DO UPDATE SET record_json=excluded.record_json")
+          .run(input.sessionId, encode(fence));
+        if (intent && sameRetainedBinding(current, intent)) this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(input.sessionId);
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
+  }
+
+  #hasStartupStopFence(binding: RetainedBinding): boolean {
+    return this.startupCopilotStopCommandId(binding) !== undefined;
+  }
+
+  public startupCopilotStopCommandId(binding: RetainedBinding): CommandId | undefined {
+    const row = this.#db.prepare("SELECT record_json FROM copilot_startup_stop_fences WHERE session_id=?").get(binding.sessionId) as Row | undefined;
+    if (!row) return undefined;
+    const fence = runtimeCopilotStartupStopFenceSchema.parse(decode(row.record_json));
+    return sameRetainedBinding(fence.binding, binding) ? fence.commandId : undefined;
   }
 
   public deleteSession(sessionId: SessionId): boolean {

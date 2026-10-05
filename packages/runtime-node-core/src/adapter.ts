@@ -190,6 +190,15 @@ export class AdapterOutcomeUnknownError extends Error {
   }
 }
 
+/** A native resume refusal proved to have no attachment side effect. Reasons
+ * are explicit adapter evidence, never inferred from arbitrary error text. */
+export class AdapterResumeFailureError extends Error {
+  public constructor(public readonly reason: "nativeHistoryMissing", message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "AdapterResumeFailureError";
+  }
+}
+
 /** Fixed native-state diagnostics only. Never retain values, vendor IDs, error
  * messages or unrecognized property names in an incident trace. */
 export const ADAPTER_NATIVE_STATE_DIAGNOSTIC_FIELDS = [

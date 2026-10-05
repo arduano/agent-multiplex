@@ -103,6 +103,7 @@ import {
   AdapterNativeStateReadError,
   AdapterNativeStateValidationError,
   AdapterOutcomeUnknownError,
+  AdapterResumeFailureError,
   type AdapterEvent,
   type AdapterInteractionEvent,
   type AdapterSession,
@@ -126,6 +127,7 @@ import {
 } from "./launch-provider.js";
 import {
   RuntimeNodeStore,
+  type RuntimeCopilotStartupFailure,
   type RuntimeArchiveJournalEntry,
   type RuntimeLaunchJournalEntry,
 } from "./store.js";
@@ -176,6 +178,12 @@ export type NativeGapLogDiagnostic = NativeGapDiagnostic & {
   readonly lifecycleImpact: "preserved" | "invalidated";
 };
 
+export interface RuntimeCopilotStartupRecoverySummary {
+  readonly reattached: number;
+  readonly cancelled: number;
+  readonly failures: readonly RuntimeCopilotStartupFailure[];
+}
+
 export interface RuntimeNodeServiceOptions {
   store: RuntimeNodeStore;
   runtimeNodeId: RuntimeNodeId;
@@ -210,6 +218,9 @@ export interface RuntimeNodeServiceOptions {
   onNativeGapDiagnostic?: (diagnostic: NativeGapLogDiagnostic) => void;
   /** Bounded async private metadata hook. Never enters wire or durable schemas. */
   onCopilotIncidentTrace?: CopilotIncidentTraceHook;
+  /** Private per-binding startup diagnostics. Raw cause is available only to
+   * the trusted embedding; the durable failure contains fixed bounded fields. */
+  onCopilotStartupRecoveryFailure?: (failure: RuntimeCopilotStartupFailure, cause: unknown) => void;
 }
 
 interface ActiveBinding {
@@ -290,13 +301,15 @@ export class RuntimeNodeService {
   readonly #nativeEventQueueBytes: number;
   readonly #onNativeGapDiagnostic: ((diagnostic: NativeGapLogDiagnostic) => void) | undefined;
   readonly #incidentTracer: CopilotIncidentTracer | undefined;
+  readonly #onCopilotStartupRecoveryFailure: RuntimeNodeServiceOptions["onCopilotStartupRecoveryFailure"];
   #acceptingNativeEvents = true;
   #lastSnapshot: InventorySnapshot | undefined;
   #closed = false;
   #closePromise: Promise<void> | undefined;
   readonly #admitted = new Set<Promise<unknown>>();
   readonly #startupCopilotBindings: readonly RuntimeNodeSessionRecord[];
-  #startupReattach: Promise<void> | undefined;
+  readonly #retiringStartupHandles = new Map<SessionId, { readonly record: RuntimeNodeSessionRecord; readonly session: AdapterSession }>();
+  #startupReattach: Promise<RuntimeCopilotStartupRecoverySummary> | undefined;
 
   public constructor(options: RuntimeNodeServiceOptions) {
     this.#store = options.store;
@@ -307,6 +320,7 @@ export class RuntimeNodeService {
     this.#endpointId = options.endpointId;
     this.#onNativeGapDiagnostic = options.onNativeGapDiagnostic;
     this.#incidentTracer = options.onCopilotIncidentTrace ? new CopilotIncidentTracer(options.onCopilotIncidentTrace) : undefined;
+    this.#onCopilotStartupRecoveryFailure = options.onCopilotStartupRecoveryFailure;
     this.#resolvedInteractionCacheSize = options.resolvedInteractionCacheSize ?? 1_024;
     if (
       !Number.isSafeInteger(this.#resolvedInteractionCacheSize) ||
@@ -367,38 +381,108 @@ export class RuntimeNodeService {
   /**
    * Trusted startup recovery for handles owned by the previous process. This
    * has no public command ID and never replays work left pending in Copilot.
-   * A failure prevents this boot from advertising a healthy runtime; the app
-   * closes its adapter before its supervisor may attempt another boot.
+   * Native failure is isolated to its exact binding; healthy siblings and
+   * runtime registration stay available. Storage failure still rejects startup.
    */
-  public reattachPersistedCopilotSessions(): Promise<void> {
+  public reattachPersistedCopilotSessions(): Promise<RuntimeCopilotStartupRecoverySummary> {
     if (!this.#startupReattach) {
       this.#startupReattach = this.#admit(async () => {
+        let reattached = 0;
+        let cancelled = 0;
+        const failures: RuntimeCopilotStartupFailure[] = [];
         for (const persisted of this.#startupCopilotBindings) {
           await this.#serialize(persisted.sessionId, async () => {
+            if (this.#closed || !this.#store.matchesStartupCopilotIntent(persisted)) { cancelled++; return; }
             const current = this.#store.getSession(persisted.sessionId);
-            if (!current || current.runtimeNodeId !== persisted.runtimeNodeId ||
+            if (!current || current.runtimeNodeId !== this.#runtimeNodeId || current.runtimeNodeId !== persisted.runtimeNodeId ||
               current.bindingRevision !== persisted.bindingRevision ||
               nativeBindingKey(current) !== nativeBindingKey(persisted) || current.availability !== "resumable" ||
               current.runtimeEpoch !== null || this.#active.has(persisted.sessionId)) {
-              throw new RuntimeNodeProtocolError("FENCED", "startup Copilot binding changed during reattachment");
+              cancelled++;
+              return;
             }
-            const plan = await this.#resumePlan(current, "interactive");
-            const validated = await this.#validateResumeOptions(current, plan.resumeOptions);
-            if (validated.harness !== "copilot") {
-              throw new RuntimeNodeProtocolError("FENCED", "startup Copilot resume changed harness");
+            let stage: RuntimeCopilotStartupFailure["stage"] = "prepareResume";
+            let session: AdapterSession | undefined;
+            let failure: unknown;
+            let failedNativeRecovery = false;
+            try {
+              const plan = await this.#resumePlan(current, "interactive");
+              stage = "validateOptions";
+              const validated = await this.#validateResumeOptions(current, plan.resumeOptions);
+              if (validated.harness !== "copilot") throw new RuntimeNodeProtocolError("FENCED", "startup Copilot resume changed harness");
+              // Stop may cancel while provider/path preparation is awaiting.
+              if (this.#closed || !this.#store.matchesStartupCopilotIntent(persisted)) { cancelled++; return; }
+              const request: HarnessResumeOptions = { ...validated, continuePendingWork: false };
+              stage = "nativeResume";
+              session = await plan.backend.adapter.resume(request);
+              stage = "validateHandle";
+              // This validator owns cleanup for rejected/mismatched handles.
+              const returned = session;
+              session = undefined;
+              await this.#validateResumedHandle(current, request, plan.backend, returned);
+              session = returned;
+            } catch (cause) { failure = cause; failedNativeRecovery = true; }
+            if (failedNativeRecovery) {
+              const uncertain = failure instanceof AdapterOutcomeUnknownError || failure instanceof LaunchProviderOutcomeUnknownError;
+              const receipt: RuntimeCopilotStartupFailure = {
+                binding: { sessionId: current.sessionId, runtimeNodeId: current.runtimeNodeId, harness: current.harness,
+                  adapterScopeId: current.adapterScopeId, vendorSessionId: current.vendorSessionId, bindingRevision: current.bindingRevision },
+                runtimeNodeBootId: this.#runtimeNodeBootId, stage,
+                reason: uncertain ? "ownershipUncertain" : failure instanceof AdapterResumeFailureError ? failure.reason : stage === "validateHandle" ? "handleRejected"
+                  : stage === "nativeResume" ? "resumeFailed" : "preparationFailed",
+                error: safeCommandError(failure, { stage: "recovery", certainty: uncertain ? "outcomeUnknown" : "definiteFailure" }),
+                action: uncertain ? "reconcileNativeOwner" : failure instanceof AdapterResumeFailureError ? "stopThenArchive" : "stopOrRetryResume", failedAt: now(),
+              };
+              const failed = this.#store.commitStartupCopilotFailure(persisted, receipt);
+              if (failed) {
+                failures.push(receipt);
+                this.#publishSession(failed);
+                try { this.#onCopilotStartupRecoveryFailure?.(receipt, failure); } catch { /* Diagnostics cannot gate recovery. */ }
+              } else cancelled++;
+              return;
             }
-            const request: HarnessResumeOptions = { ...validated, continuePendingWork: false };
-            const session = await plan.backend.adapter.resume(request);
-            await this.#validateResumedHandle(current, request, plan.backend, session);
-            const record = this.#recordForHandle(persisted.sessionId, session, { existing: current });
-            this.#store.commitStartupCopilotReattachment(record);
-            this.#activate(persisted.sessionId, session);
+            const record = this.#recordForHandle(persisted.sessionId, session!, { existing: current });
+            // SQLite admission stays outside the native failure catch: a broken
+            // durable writer must not be mistaken for a single bad session.
+            if (this.#closed || !this.#store.commitStartupCopilotReattachment(record, persisted)) {
+              cancelled++;
+              this.#retiringStartupHandles.set(persisted.sessionId, { record: current, session: session! });
+              try { await session!.stop(); }
+              catch (cause) {
+                const receipt: RuntimeCopilotStartupFailure = {
+                  binding: { sessionId: current.sessionId, runtimeNodeId: current.runtimeNodeId, harness: current.harness,
+                    adapterScopeId: current.adapterScopeId, vendorSessionId: current.vendorSessionId, bindingRevision: current.bindingRevision },
+                  runtimeNodeBootId: this.#runtimeNodeBootId, stage: "commitBinding", reason: "ownershipUncertain",
+                  error: safeCommandError(cause, { stage: "recovery", certainty: "outcomeUnknown" }),
+                  action: "reconcileNativeOwner", failedAt: now(),
+                };
+                const failed = this.#store.commitStartupCopilotFailure(persisted, receipt, false);
+                if (failed) { failures.push(receipt); this.#publishSession(failed); }
+                try { this.#onCopilotStartupRecoveryFailure?.(receipt, cause); } catch { /* Diagnostic only. */ }
+                return;
+              }
+              this.#retiringStartupHandles.delete(persisted.sessionId);
+              return;
+            }
+            this.#activate(persisted.sessionId, session!);
             this.#publishSession(record);
+            reattached++;
           });
         }
+        return { reattached, cancelled, failures };
       });
     }
     return this.#startupReattach;
+  }
+
+  /** Current private failure receipts; stale identities never describe a newer owner. */
+  public startupCopilotRecoveryFailures(): readonly RuntimeCopilotStartupFailure[] {
+    return this.#store.listStartupCopilotFailures().filter(({ binding }) => {
+      const current = this.#store.getSession(binding.sessionId);
+      return current && current.availability === "resumable" && current.runtimeEpoch === null &&
+        current.runtimeNodeId === binding.runtimeNodeId && current.bindingRevision === binding.bindingRevision &&
+        nativeBindingKey(current) === nativeBindingKey(binding);
+    });
   }
 
   /** Fence delayed reverse-RPC calls from an earlier runtime-node process epoch. */
@@ -898,8 +982,15 @@ export class RuntimeNodeService {
   }
 
   async #resume(input: ResumeCommand): Promise<CommandRecord> {
+    // Explicit Resume may supersede an earlier Stop, but cannot erase a Stop
+    // admitted after this Resume while its native request is still pending.
+    const bindingAtAdmission = this.#store.getSession(input.sessionId);
+    const supersededStop = bindingAtAdmission && this.#store.startupCopilotStopCommandId(bindingAtAdmission);
     return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
       const existing = this.#boundSessionForCommand(input, "resume");
+      if (bindingAtAdmission && nativeBindingKey(bindingAtAdmission) !== nativeBindingKey(existing)) {
+        throw new RuntimeNodeProtocolError("FENCED", "Resume targets a changed native binding");
+      }
       const active = this.#active.get(input.sessionId);
       if (active) {
         throw new RuntimeNodeProtocolError(
@@ -922,7 +1013,8 @@ export class RuntimeNodeService {
         session,
         { existing },
       );
-      this.#store.putSession(record);
+      if (record.harness === "copilot") this.#store.commitExplicitCopilotResume(record, existing, supersededStop);
+      else this.#store.putSession(record);
       this.#activate(input.sessionId, session);
       this.#publishSession(record);
       return { sessionId: input.sessionId, vendorSessionId: session.vendorSessionId };
@@ -934,13 +1026,27 @@ export class RuntimeNodeService {
   }
 
   async #stop(input: StopCommand): Promise<CommandRecord> {
+    const bindingAtAdmission = this.#store.getSession(input.sessionId);
     return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
       const record = this.#boundSessionForCommand(input, "stop");
+      if (bindingAtAdmission && nativeBindingKey(bindingAtAdmission) !== nativeBindingKey(record)) {
+        throw new RuntimeNodeProtocolError("FENCED", "Stop targets a changed native binding");
+      }
       const active = this.#active.get(input.sessionId);
+      const retiring = this.#retiringStartupHandles.get(input.sessionId);
+      const uncertainAttachment = !active && !retiring && this.#store.listStartupCopilotFailures().some(failure =>
+        failure.runtimeNodeBootId === this.#runtimeNodeBootId && failure.error.certainty === "outcomeUnknown" &&
+        failure.binding.sessionId === record.sessionId && failure.binding.bindingRevision === record.bindingRevision &&
+        nativeBindingKey(failure.binding) === nativeBindingKey(record));
       let stopError: unknown;
       try {
         if (active) this.#retireLifecycleObservations(active);
         await active?.session.stop();
+        if (retiring && retiring.record.bindingRevision === record.bindingRevision &&
+          nativeBindingKey(retiring.record) === nativeBindingKey(record)) {
+          await retiring.session.stop();
+          this.#retiringStartupHandles.delete(input.sessionId);
+        }
       } catch (error) {
         stopError = error;
       } finally {
@@ -958,11 +1064,13 @@ export class RuntimeNodeService {
         this.#persistStopped(record);
       }
       if (stopError !== undefined) throw stopError;
+      if (uncertainAttachment) throw new AdapterOutcomeUnknownError("Stop cancelled startup recovery but native attachment ownership remains unproved");
       const stopped = this.#store.getSession(record.sessionId) ?? record;
       const providerContext = this.#sessionProviderContext(stopped);
       await providerContext?.provider.stop?.(providerContext.context);
+      this.#store.clearStartupCopilotFailure(record);
       return { sessionId: input.sessionId };
-    });
+    }, input);
   }
 
   public execute(input: CommandEnvelope): Promise<CommandRecord> {
@@ -1778,13 +1886,16 @@ export class RuntimeNodeService {
     this.#acceptingNativeEvents = false;
     await Promise.allSettled(this.#nativeEventTasks.keys());
     errors.push(...await collectCleanupErrors([() => this.#terminals.close()]));
-    const sessionCleanup = await Promise.all([...this.#active.values()].map(async ({ session, unsubscribe }) => ({
+    const cleanupBindings = [...this.#active.values(), ...[...this.#retiringStartupHandles.values()]
+      .map(({ session }) => ({ session, unsubscribe: () => undefined }))];
+    const sessionCleanup = await Promise.all(cleanupBindings.map(async ({ session, unsubscribe }) => ({
       harness: session.harness,
       unsubscribeErrors: await collectCleanupErrors([unsubscribe]),
       stopErrors: await collectCleanupErrors([() => session.stop()]),
     })));
     for (const result of sessionCleanup) errors.push(...result.unsubscribeErrors);
     this.#active.clear();
+    this.#retiringStartupHandles.clear();
     this.#pendingInteractions.clear();
     this.#resolvedInteractions.clear();
     // Backend processes may depend on provider-owned resources during close.
@@ -2539,6 +2650,11 @@ export class RuntimeNodeService {
         );
       }
     } catch (error) {
+      // A faulty adapter may return a handle already installed for a sibling.
+      // Reject it without stopping that independently owned live session.
+      const occupied = [...this.#active.values()].some(binding =>
+        nativeInventoryKey(binding.session) === nativeInventoryKey(session));
+      if (occupied) throw new AdapterOutcomeUnknownError("resumed handle belongs to an already active native owner", { cause: error });
       try {
         await session.stop();
       } catch (cleanupError) {
@@ -3603,6 +3719,7 @@ export class RuntimeNodeService {
     sessionId: SessionId | null,
     request: unknown,
     execute: () => Promise<unknown>,
+    cancelStartupIntent?: StopCommand,
   ): Promise<CommandRecord> {
     const encodedRequest = toJsonValue(JSON.parse(JSON.stringify(request)));
     const existing = this.#store.getCommand(commandId);
@@ -3634,7 +3751,8 @@ export class RuntimeNodeService {
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    this.#store.putCommand(record);
+    if (cancelStartupIntent) this.#store.admitStopCommand(record, cancelStartupIntent);
+    else this.#store.putCommand(record);
     const run = () => this.#runJournal(record, execute);
     return sessionId === null ? run() : this.#serialize(sessionId, run);
   }
