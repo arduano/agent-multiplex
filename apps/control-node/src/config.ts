@@ -70,7 +70,7 @@ export interface ControlNodeAppConfig {
   readonly runtimeNodeStaleMs: number;
   readonly childControlNodeStaleMs: number;
   readonly enrollment: ControlNodeEnrollmentConfig;
-  /** Environment bootstrap only; the catalog remains the source of truth. */
+  /** Initial bootstrap, then same-parent locator fallback; catalog owns identity. */
   readonly bootstrapUpstream?: DesiredControlNodeUpstream;
   readonly upstreamHeartbeatMs: number;
   readonly reconnectMaxMs: number;

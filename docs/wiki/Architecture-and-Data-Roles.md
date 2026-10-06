@@ -146,3 +146,13 @@ an intermediate branch is rejected pending a coordinated handoff design.
 Graceful detach remains unsupported. See the
 [initial authority handoff](../design/data-roles-v4.md#initial-attachment-of-an-existing-standalone-authority)
 for receipt, restart and offline guarantees.
+
+On reconnect, the durable desired parent and locator are tried first. The
+startup parent document may supply a fallback locator only after that dial
+fails, and only when both the logical parent ID and pinned endpoint ID match
+the durable selection. Dialing a fallback does not rewrite desired state:
+only a successfully attached, authenticated parent heartbeat can renew its
+ticket. A concurrent locator change restarts the durable dial; explicit
+detach, cleared selection or another parent cancels the attempt. The fallback
+therefore supports reachability-policy maintenance without reparenting or
+reviving detached branches.

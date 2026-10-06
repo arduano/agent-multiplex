@@ -20,6 +20,8 @@ import {
 export interface UpstreamSupervisorOptions {
   readonly node: MultiplexP2PNode<AnyTRPCRouter, AnyTRPCRouter>;
   readonly initialUpstream: DesiredControlNodeUpstream;
+  /** Reachability fallback only; both identities must match durable desired state. */
+  readonly bootstrapUpstream?: DesiredControlNodeUpstream;
   readonly catalog: ControlNodeCatalog;
   readonly service: ControlNodeService;
   readonly metadataUpstream: ReconnectableMetadataUpstream;
@@ -38,13 +40,15 @@ export async function superviseUpstreamControlNode(
   options: UpstreamSupervisorOptions,
 ): Promise<void> {
   let desired = snapshotUpstream(options.initialUpstream);
+  const bootstrap = options.bootstrapUpstream === undefined
+    ? undefined : snapshotUpstream(options.bootstrapUpstream);
   let attempt = 0;
   while (!options.signal.aborted) {
     let connection: P2PParentControlNodeConnection | undefined;
     try {
       const configured = readDesiredUpstream(options.catalog);
       if (!configured || !sameUpstreamIdentity(configured, desired)) return;
-      desired = configured;
+      desired = snapshotUpstream(configured);
 
       const local = options.catalog.localControlNode();
       if (
@@ -61,11 +65,28 @@ export async function superviseUpstreamControlNode(
         );
       }
 
-      const target = {
-        endpointId: desired.endpointId,
-        locator: desired.locator,
-      } as const;
-      const peer = await options.node.connectAs<AnyTRPCRouter>(target);
+      const connect = (upstream: DesiredControlNodeUpstream) =>
+        options.node.connectAs<AnyTRPCRouter>({
+          endpointId: upstream.endpointId,
+          locator: upstream.locator,
+        });
+      let peer;
+      try {
+        peer = await connect(desired);
+      } catch (error) {
+        // An environment value never selects a parent. It may only locate the
+        // already selected logical and transport identity after its saved
+        // locator fails. Authentication and ticket validation remain transport-owned.
+        const current = selectedUpstream(options.catalog, desired, options.signal);
+        if (!current) return;
+        if (!sameUpstreamSelection(current, desired)) continue;
+        if (!bootstrap || !sameUpstreamIdentity(bootstrap, desired) ||
+          sameUpstreamSelection(bootstrap, desired)) throw error;
+        peer = await connect(bootstrap);
+      }
+      const afterConnect = selectedUpstream(options.catalog, desired, options.signal);
+      if (!afterConnect) return;
+      if (!sameUpstreamSelection(afterConnect, desired)) continue;
       connection = parentControlNodeConnectionFromPeer(peer, {
         controlNodeId: local.controlNodeId,
         controlNodeBootId: local.controlNodeBootId,
@@ -95,6 +116,9 @@ export async function superviseUpstreamControlNode(
       if (result.attachment.parentControlNodeId !== desired.controlNodeId) {
         throw new Error("upstream logical identity does not match the configured pin");
       }
+      const afterAttach = selectedUpstream(options.catalog, desired, options.signal);
+      if (!afterAttach) return;
+      if (!sameUpstreamSelection(afterAttach, desired)) continue;
 
       options.catalog.applyParentAttachment(
         result.attachment,
@@ -105,6 +129,9 @@ export async function superviseUpstreamControlNode(
       // Readiness barrier: the parent can only pull the reverse subtree after
       // this child has durably committed its attachment and parent enrollment.
       desired = await heartbeat(connection, desired, options.catalog);
+      const afterHeartbeat = selectedUpstream(options.catalog, desired, options.signal);
+      if (!afterHeartbeat) return;
+      if (!sameUpstreamSelection(afterHeartbeat, desired)) continue;
       await options.service.flushMetadataOutbox();
       await options.service.flushMetadataDeliveries();
       options.onConnected?.(desired.controlNodeId);
@@ -115,7 +142,12 @@ export async function superviseUpstreamControlNode(
         if (options.signal.aborted) break;
         const stillDesired = readDesiredUpstream(options.catalog);
         if (!stillDesired || !sameUpstreamIdentity(stillDesired, desired)) return;
+        if (isDetached(options.catalog)) return;
+        if (!sameUpstreamSelection(stillDesired, desired)) break;
         desired = await heartbeat(connection, stillDesired, options.catalog);
+        const afterHeartbeat = selectedUpstream(options.catalog, desired, options.signal);
+        if (!afterHeartbeat) return;
+        if (!sameUpstreamSelection(afterHeartbeat, desired)) break;
         await options.service.flushMetadataOutbox();
         await options.service.flushMetadataDeliveries();
       }
@@ -175,10 +207,34 @@ async function heartbeat(
     locator: { kind: "ticket", ticket: response.p2pTicket },
   });
   const current = readDesiredUpstream(catalog);
-  if (current && sameUpstreamIdentity(current, desired)) {
+  if (current && sameUpstreamSelection(current, desired) &&
+    !isDetached(catalog)) {
     catalog.setDesiredUpstream(renewed);
   }
   return renewed;
+}
+
+function isDetached(catalog: ControlNodeCatalog): boolean {
+  const role = catalog.dataRole();
+  return role.role === "branch" && role.branch.lifecycle === "detached";
+}
+
+function selectedUpstream(
+  catalog: ControlNodeCatalog,
+  desired: DesiredControlNodeUpstream,
+  signal: AbortSignal,
+): DesiredControlNodeUpstream | null {
+  if (signal.aborted || isDetached(catalog)) return null;
+  const current = readDesiredUpstream(catalog);
+  return current !== null && sameUpstreamIdentity(current, desired) ? current : null;
+}
+
+function sameUpstreamSelection(
+  left: DesiredControlNodeUpstream,
+  right: DesiredControlNodeUpstream,
+): boolean {
+  return sameUpstreamIdentity(left, right) &&
+    JSON.stringify(left.locator) === JSON.stringify(right.locator);
 }
 
 function readDesiredUpstream(

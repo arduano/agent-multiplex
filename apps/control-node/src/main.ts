@@ -302,6 +302,8 @@ export async function runControlNode(
       : superviseUpstreamControlNode({
           node: p2pNode,
           initialUpstream: desiredUpstream,
+          ...(config.bootstrapUpstream === undefined
+            ? {} : { bootstrapUpstream: config.bootstrapUpstream }),
           catalog,
           service,
           metadataUpstream,

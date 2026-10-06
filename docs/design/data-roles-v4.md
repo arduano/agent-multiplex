@@ -785,6 +785,18 @@ restart therefore binds Iroh to a stable UDP address/port (or is provisioned
 with another supported discovery mechanism). The endpoint secret preserves
 identity; the stable listener preserves the ticket's direct route.
 
+The reference control supervisor retains a startup bootstrap locator as a
+same-parent reachability fallback. Durable desired state always selects the
+logical parent and pinned endpoint and is dialed first. After a failed dial,
+bootstrap may be tried only for the identical parent/endpoint pair with a
+different locator. Each asynchronous dial, attach and heartbeat rechecks the
+durable selection: detach, a cleared selection or identity change cancels it;
+a newer same-parent locator restarts the primary attempt. The fallback never
+directly changes desired state or bypasses authenticated attachment checks.
+Only an accepted authenticated heartbeat renews the durable locator, guarded
+against replacing a concurrently newer selection. Saved attachment, boot,
+authority and replay fences remain unchanged.
+
 The protocol-v6 source pins the independently published
 `@arduano/p2prpc-core@0.3.0-renewal.0`. Its transport renewal must preserve
 authority/feed, runtime boot, binding, native epoch,
