@@ -58,11 +58,44 @@ Those failed receipts are diagnostic evidence. The later successful short-path
 run is separate evidence and does not relabel the earlier failures or increase
 timeouts.
 
+## Packed artifacts and independent consumers
+
+Clean artifact source `47f3b7ee416541dced114f46509f84172ce40c21` produces all
+**16** lockstep `.35` tarballs. `sha256sum -c SHA256SUMS` passes for the complete
+set. All16 role-isolated consumers pass declaration/import/browser/CLI surfaces,
+publint/ATTW and the reviewed exact Iroh/Koffi dependency boundary. SBOM generation
+passes with498 components, all16 released packages and125 web-bundled identities.
+Packing, verification and SBOM run sequentially without concurrent rebuilding.
+
+Stock `npm run release:verify` first fails with transport registry E401. Its
+original stdout/stderr remain in the ignored receipt. The unchanged reviewed
+published-transport verifier then passes using independent
+`@arduano/p2prpc-core@0.3.0-renewal.1` at its exact public release URL and locked
+SRI; product dependencies and registry policy do not change. That verifier's
+SHA-256 is `31b2593ffd60b1f91da78f027e826da29dc945e3f1b4ef21ae5925e944f985af`.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| `SHA256SUMS` | `c2f9b06d393b07bbd6fe27a7912d9d326d7d5c73cde7976134f4e836a0cfedd1` |
+| `pack-manifest.json` | `bf257ff73af2b3c2204ea0ff6cc4c02de8b7633a2bca710c8d4370fd81118b0c` |
+| `sbom.cdx.json` | `e750ee31f9bd305c06a6a21fa5ad025c9de0d35a0aba7e90639c3d8abdfc5113` |
+
+This qualification documentation follows in a separate commit; the exact
+artifact source and packed bytes stay unchanged. Artifacts remain in this
+release worktree's ignored `release-artifacts/`; the source and package gate
+receipt remains in the protected ignored namespace recorded above.
+
 ## Remaining acceptance
 
-Packing, all16 isolated consumers, SBOM and deterministic Docker topology/scale
-qualification are pending at this source checkpoint. Publication, tag creation,
-push, npm stable promotion and native installation belong to the release owner.
+Deterministic Docker topology/scale qualification is pending. Read-only review
+finds that the stock runners use default public Iroh relay behavior and provide
+no relay override. Their bridge network is not an offline/private-relay fence.
+The release owner must resolve that fixture-policy boundary before running the
+required suites; no successful Docker result or native/private-relay migration
+acceptance is inferred from the source and package gates.
+
+Publication, tag creation, push, npm stable promotion and native installation
+belong to the release owner.
 Read-only tag inspection found no `hotfix-2026-10-06.2` tag; this source pass did
 not create one. No production service stop, policy/VPN change, owner-session
 operation or model call occurred. Native private-relay migration and installed

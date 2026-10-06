@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source qualification; package and installed acceptance remain pending).
+Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source/package qualification; Docker and installed acceptance remain pending).
 
 ## Same-parent bootstrap fallback hotfix.35
 
@@ -21,8 +21,12 @@ The combined source passes **1,514 tests / 140 files** (eight tests/one file
 skipped), typecheck/build and checkpoint/docs/release/secrets checks. The suite
 uses unchanged timeouts and a short process-only protected fixture directory;
 the prior overlong Unix socket path failure remains retained separately.
-Package consumers, SBOM, Docker topology/scale and native installed acceptance
-are not yet claimed. No live role, policy, session or model call changed.
+All **16** packed consumers and the release-build SBOM pass from exact artifact
+source `47f3b7ee416541dced114f46509f84172ce40c21`. Stock consumer verification
+retains its transport registry E401; the reviewed exact published-transport
+variant passes without product dependency or registry-policy changes. Docker
+topology/scale and native installed acceptance remain pending. No live role,
+policy, session or model call changed; no publication is claimed.
 
 See [the source qualification and remaining acceptance](../audits/hotfix35-same-parent-bootstrap-20261006.md).
 
