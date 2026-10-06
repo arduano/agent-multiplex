@@ -5,7 +5,25 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-05 (signed P0 cause-retention hotfix.33 published; installed acceptance remains consumer-owned).
+Last reconciled: 2026-10-06 (B22 startup containment hotfix.34 qualification; installed acceptance remains consumer-owned).
+
+## P0 retained Copilot startup containment hotfix.34
+
+New source contains per-binding startup failure receipts, transactional exact Stop
+cancellation, once-per-boot recovery after transport registration and a separate
+bounded60-second cold-start budget. Commands/attachments retain15-second bounds;
+uncertain native ownership, pending interactions and published native/transport
+pins remain strict. Migration11 requires stopped pre-upgrade runtime-state recovery
+for an older-code rollback. Legacy terminal Stop receipts are not heuristically
+backfilled. Offline Archive terminal replay and slow catalog-startup diagnosis
+remain separate; native Windows/WSL installed acceptance is pending.
+Already-normalized v10 startup intents remain held until a fresh supported Resume
+or Stop; active bindings recover normally. Concurrent canonical metadata/authority
+is merged in startup/Resume/Stop transactions, and durable preparation failures
+retain their global failure boundary.
+
+[Source, compatibility, qualification and deferrals](../audits/hotfix34-startup-containment-20261006.md)
+contains the exact evidence. This source pass starts no live role or model turn.
 
 ## Published P0 cause-retention hotfix.33
 
@@ -545,7 +563,7 @@ and native sequence are not browser inputs. Missing continuity and incomplete
 native hydration remain Unknown; catalog idle, elapsed time, text equality,
 queue disappearance, or a successful generic command receipt cannot
 manufacture completion. Runtime startup reattaches persisted active Copilot
-bindings before control registration, with native pending work disabled.
+bindings after recovery transport registration, with native pending work disabled.
 That cold reattach may complete empty child/interaction hydration only from the
 first session-scoped native resume boundary carrying explicit
 `continuePendingWork:false` and `sessionWasActive:false`, provided no positive

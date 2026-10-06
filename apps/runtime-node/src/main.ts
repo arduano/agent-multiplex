@@ -56,6 +56,7 @@ import {
   type RuntimeAgentBackend,
   type RuntimeLaunchProvider,
   type CopilotIncidentTraceHook,
+  type RuntimeCopilotStartupFailure,
 } from "@arduano/agent-multiplex-runtime-node-core";
 
 import {
@@ -81,6 +82,8 @@ const VERSION: string = JSON.parse(readFileSync(new URL("../package.json", impor
 export const runtimePathPolicyInjectionVersion = 1 as const;
 /** Embedded Hosts can require this exact payload-free diagnostic hook. */
 export const nativeGapDiagnosticsVersion = 1 as const;
+/** Per-binding startup recovery containment and private failure reporting. */
+export const startupRecoveryVersion = 1 as const;
 
 type HarnessName = "codex" | "copilot";
 type AdapterMode = "native" | "mock";
@@ -191,6 +194,7 @@ export async function runRuntimeNode(
     },
     ...(options.onNativeGapDiagnostic ? { onNativeGapDiagnostic: options.onNativeGapDiagnostic } : {}),
     ...(options.onCopilotIncidentTrace ? { onCopilotIncidentTrace: options.onCopilotIncidentTrace } : {}),
+    ...(options.onCopilotStartupRecoveryFailure ? { onCopilotStartupRecoveryFailure: options.onCopilotStartupRecoveryFailure } : {}),
     });
   } catch (error) {
     // Registration can reject a conflicting static provider/backend. The service
@@ -211,10 +215,8 @@ export async function runRuntimeNode(
   runtimeSignal.addEventListener("abort", closeTransport, { once: true });
 
   try {
-    // Install the previous boot's active Copilot bindings before this boot can
-    // register with control. Resume is trusted local recovery with pending
-    // native work disabled; it never manufactures a public command receipt.
-    await service.reattachPersistedCopilotSessions();
+    // Native catalog description is bounded by each adapter. A refused SDK
+    // start advertises an unavailable harness; recovery transport still opens.
     // Resolve every configured root before opening the network listener. The
     // service repeats this policy for every spawn/resume path it accepts.
     const descriptor = await service.describe();
@@ -256,6 +258,12 @@ export async function runRuntimeNode(
       config,
       runtimeSignal,
       options.onReady,
+      async () => {
+        // The recovery router is registered before any retained resume. A
+        // failed binding cannot retire the transport or its healthy siblings.
+        const report = await service.reattachPersistedCopilotSessions();
+        try { options.onStartupRecoveryComplete?.(report); } catch { /* Observer only. */ }
+      },
     );
   } finally {
     runtimeSignal.removeEventListener("abort", closeTransport);
@@ -288,8 +296,11 @@ export async function superviseControlNodeConnection(
   config: MaintenanceConfig,
   signal: AbortSignal,
   onReady?: () => void,
+  recoverStartup?: () => Promise<void>,
 ): Promise<void> {
   let attempt = 0;
+  let startupRecovery: Promise<void> | undefined;
+  let startupFailure: { error: unknown } | undefined;
   let readyNotified = false;
   // Keep the slots across connection epochs. Expiring a read does not cancel
   // native work, so a reconnect must not start another unresolved discovery.
@@ -310,8 +321,16 @@ export async function superviseControlNodeConnection(
       await register(peer, service);
       if (signal.aborted) return;
       if (!readyNotified) {
-        onReady?.();
+        // Recover once per runtime boot. Reconnect must never redispatch a
+        // retained native mutation or clear an unresolved ownership fence.
+        startupRecovery = Promise.resolve().then(() => recoverStartup?.()).catch(error => {
+          // Per-binding native failures resolve in the typed summary. A
+          // rejected recovery means durable/invariant failure: fail this boot
+          // so the embedding retains its independent control/command route.
+          startupFailure = { error };
+        });
         readyNotified = true;
+        try { onReady?.(); } catch (error) { logError("runtime readiness observer", error); }
       }
       console.log(`Connected to control node ${controlNodeLocator.endpointId}`);
       attempt = 0;
@@ -324,9 +343,12 @@ export async function superviseControlNodeConnection(
         config,
         signal,
         jobs,
+        startupRecovery,
+        () => startupFailure,
       );
     } catch (error) {
       if (signal.aborted) return;
+      if (startupFailure) throw startupFailure.error;
       const delayMs = reconnectDelay(attempt++, config.reconnectMaxMs);
       logError(`control-node connection lost; retrying in ${delayMs}ms`, error);
       await abortableDelay(delayMs, signal);
@@ -343,6 +365,8 @@ async function maintainControlNodeConnection(
   config: MaintenanceConfig,
   signal: AbortSignal,
   jobs: MaintenanceJobs,
+  startupRecovery?: Promise<void>,
+  startupFailure?: () => { error: unknown } | undefined,
 ): Promise<void> {
   const connection = new AbortController();
   const abortConnection = (): void => connection.abort();
@@ -393,9 +417,13 @@ async function maintainControlNodeConnection(
 
   try {
     while (!connection.signal.aborted) {
+      const failed = startupFailure?.();
+      if (failed) throw failed.error;
       const nextDue = Math.min(heartbeatDue, inventoryDue, metadataDue);
       await abortableDelay(Math.max(1, nextDue - Date.now()), connection.signal);
       if (connection.signal.aborted) break;
+      const failedAfterWait = startupFailure?.();
+      if (failedAfterWait) throw failedAfterWait.error;
 
       const timestamp = Date.now();
       if (timestamp >= heartbeatDue) {
@@ -418,8 +446,12 @@ async function maintainControlNodeConnection(
       }
       if (timestamp >= inventoryDue) {
         inventoryDue = timestamp + config.inventoryRefreshMs;
-        startJob("inventory", (jobSignal) =>
-          refreshAndReconcile(peer, service, runtimeNodeBootId, jobSignal));
+        startJob("inventory", async (jobSignal) => {
+          // Discovery must not race startup intent normalization. Its existing
+          // bounded job slot may wait while transport heartbeats keep flowing.
+          await startupRecovery;
+          if (!jobSignal.aborted && !startupFailure?.()) await refreshAndReconcile(peer, service, runtimeNodeBootId, jobSignal);
+        });
       }
       if (timestamp >= metadataDue) {
         metadataDue = timestamp + config.metadataFlushMs;
@@ -576,12 +608,16 @@ export interface RuntimeNodeAppOptions {
   createComponents?: (config: RuntimeNodeAppConfig) => RuntimeComponents | Promise<RuntimeComponents>;
   /** Trusted static admission policy shared by startup, service and native path validation. */
   pathPolicy?: RuntimePathPolicy;
-  /** Called once after startup reattachment and first control registration. */
+  /** Called once after recovery transport registers; harness readiness is separate. */
   onReady?: () => void;
   /** Fixed-code native-gap diagnostics after durable lifecycle persistence. */
   onNativeGapDiagnostic?: (diagnostic: NativeGapDiagnostic) => void;
   /** Runtime-private incident correlation; failures never block native work. */
   onCopilotIncidentTrace?: CopilotIncidentTraceHook;
+  /** Fixed per-binding recovery outcome; never contains raw SDK/provider data. */
+  onCopilotStartupRecoveryFailure?: (failure: RuntimeCopilotStartupFailure, cause: unknown) => void;
+  /** Native startup recovery settled; failed bindings remain individually actionable. */
+  onStartupRecoveryComplete?: (report: Awaited<ReturnType<RuntimeNodeService["reattachPersistedCopilotSessions"]>>) => void;
 }
 
 export async function createRuntimeComponents(

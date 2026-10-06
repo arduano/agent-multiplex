@@ -15,8 +15,8 @@ unknown operation receipt into success. An optional process-local `beginClose`
 adapter hook retires read/attachment caller waits before Runtime drains them;
 backend `close` still owns and proves native cleanup.
 
-The source candidate also bounds initial SDK startup and native mutation caller
-waits to 15 seconds. An expired send, setting, interrupt, task control or
+SDK cold startup has a separate bounded 60-second caller wait, with five-second
+private progress reports. Native mutation caller waits remain 15 seconds. An expired send, setting, interrupt, task control or
 permission decision retains its native request lane; it is never cancelled or
 replayed. Another mutation in that lane fails before native dispatch. Stop
 retires the local bridge immediately but releases its native-ID fence only after
@@ -31,6 +31,29 @@ An unresolved startup cannot certify cleanup: it could acquire a late process.
 If failed SDK startup clears its child getter, only exit acknowledgement from the
 exact child captured before that failure can establish native termination.
 No package publication or installed acceptance is implied by this candidate.
+
+Runtime startup registers the recovery router before reattaching the previous
+boot's retained Copilot bindings. Discovery waits for that once-per-boot recovery
+while transport heartbeats continue. Each native/provider refusal produces an
+exact per-binding private receipt and leaves healthy siblings available. A
+storage/invariant failure still terminates the runtime boot; an embedding must
+keep its independent recovery control/command path available.
+
+The exact SDK missing-history refusal carries typed `nativeHistoryMissing`
+evidence and recommends Stop then Archive. Arbitrary errors are not interpreted
+as missing history; an ambiguous resume remains fenced and requires native owner
+reconciliation. Recovery always uses `continuePendingWork:false`.
+
+Stop journals its stable received receipt and cancels only matching durable
+startup intent in the same transaction, before waiting for the binding lock.
+Recovery revalidates that exact intent after awaits; a cancelled late handle is
+privately retired instead of published. Unproved retirement keeps uncertain
+ownership visible. Explicit successful Resume clears its matching intent/failure
+atomically. Private runtime schema migration11 retains failure receipts;
+older pre-upgrade runtime binaries require the stopped pre-upgrade database
+recovery copy when rolling back. Archive's public admission and native-history
+retention are unchanged; offline terminal Archive receipt replay is separate
+work and is not claimed by this change.
 
 An SDK handle must match the requested native ID before publication. A wrong,
 otherwise unowned ID is privately detached while both requested and returned

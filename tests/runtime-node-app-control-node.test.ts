@@ -107,11 +107,12 @@ function maintenanceFixture() {
     locator: { kind: "ticket", ticket: "disposable-maintenance-locator" },
   });
   const abort = new AbortController();
-  const start = (onReady?: () => void) => superviseControlNodeConnection(
+  const start = (onReady?: () => void, recoverStartup?: () => Promise<void>) => superviseControlNodeConnection(
     node, service, runtimeNodeBootId, locator,
     { heartbeatMs: 1_000, inventoryRefreshMs: 2_000, metadataFlushMs: 1_000, reconnectMaxMs: 1 },
     abort.signal,
     onReady,
+    recoverStartup,
   );
   return { inventory, patch, service, first, second, node, abort, start };
 }
@@ -519,5 +520,61 @@ describe("runtime-node control-node RPC path", () => {
       (await f.service.describe()).runtimeNodeBootId, abort.signal);
     expect(f.first.reconcile).toHaveBeenCalledTimes(1);
     expect(f.service.applyCanonicalSessions).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("runtime startup recovery registration", () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("registers recovery before resuming native bindings, retains one attempt across reconnects, and keeps heartbeats flowing", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = maintenanceFixture();
+    const registration = deferred<{ accepted: boolean }>();
+    const recovery = deferred<void>();
+    f.first.register.mockImplementationOnce(() => registration.promise);
+    f.first.heartbeat.mockResolvedValueOnce({ accepted: false });
+    f.node.connect.mockResolvedValueOnce(f.first.peer).mockResolvedValue(f.second.peer);
+    const recover = vi.fn(() => recovery.promise);
+    const ready = vi.fn();
+    const running = f.start(ready, recover);
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      expect(recover).not.toHaveBeenCalled();
+      registration.resolve({ accepted: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ready).toHaveBeenCalledOnce();
+      expect(recover).toHaveBeenCalledOnce();
+      expect(f.service.refreshInventory).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5_005);
+      expect(f.second.register).toHaveBeenCalledOnce();
+      expect(f.second.heartbeat.mock.calls.length).toBeGreaterThan(2);
+      expect(recover).toHaveBeenCalledOnce();
+      expect(f.service.refreshInventory).not.toHaveBeenCalled();
+      recovery.resolve();
+      await vi.advanceTimersByTimeAsync(2_005);
+      expect(f.service.refreshInventory).toHaveBeenCalledOnce();
+      expect(f.second.reconcile).toHaveBeenCalledOnce();
+    } finally { recovery.resolve(); f.abort.abort(); await running; }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("fails the runtime boot on durable recovery failure after registering the independent recovery route", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = maintenanceFixture();
+    const recover = vi.fn(async () => { throw new Error("disposable recovery refusal"); });
+    const running = f.start(undefined, recover);
+    const result = running.catch(error => error);
+    await vi.advanceTimersByTimeAsync(2_005);
+    expect(await result).toMatchObject({ message: "disposable recovery refusal" });
+    expect(recover).toHaveBeenCalledOnce();
+    expect(f.first.register).toHaveBeenCalledOnce();
+    expect(f.node.connect).toHaveBeenCalledOnce();
+    expect(f.service.refreshInventory).not.toHaveBeenCalled();
+    f.abort.abort();
   });
 });
