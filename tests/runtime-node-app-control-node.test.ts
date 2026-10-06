@@ -577,4 +577,42 @@ describe("runtime startup recovery registration", () => {
     expect(f.service.refreshInventory).not.toHaveBeenCalled();
     f.abort.abort();
   });
+
+  it.each(["connect", "register", "heartbeat"] as const)("propagates a durable recovery failure while %s is stalled", async stage => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const f = maintenanceFixture();
+    const recovery = deferred<void>();
+    let fail!: (error: unknown) => void;
+    const fatal = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const error = new Error("exact durable fixture failure");
+    const connecting = deferred<RuntimeNodeControlNodePeer>();
+    const registering = deferred<{ accepted: boolean }>();
+    const heartbeat = deferred<{ accepted: boolean }>();
+    if (stage === "heartbeat") f.first.heartbeat.mockImplementationOnce(() => heartbeat.promise);
+    else {
+      f.first.heartbeat.mockResolvedValueOnce({ accepted: false });
+      f.node.connect.mockResolvedValueOnce(f.first.peer).mockImplementation(() => connecting.promise);
+      if (stage === "register") {
+        connecting.resolve(f.second.peer);
+        f.second.register.mockImplementationOnce(() => registering.promise);
+      }
+    }
+    let settled: unknown;
+    const running = f.start(undefined, () => Promise.race([recovery.promise, fatal]));
+    const result = running.then(() => { settled = "resolved"; }, cause => { settled = cause; });
+    try {
+      await vi.advanceTimersByTimeAsync(1_005);
+      fail(error);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(error);
+      expect(f.service.refreshInventory).not.toHaveBeenCalled();
+    } finally {
+      f.abort.abort(); recovery.resolve(); connecting.resolve(f.second.peer);
+      registering.resolve({ accepted: true }); heartbeat.resolve({ accepted: true });
+      await vi.advanceTimersByTimeAsync(0); await result;
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

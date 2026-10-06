@@ -14,6 +14,9 @@ continue while inventory waits. A single definite/ambiguous native failure is
 persisted for its exact binding and does not take healthy siblings offline.
 SQLite/invariant failures still fail the runtime boot; embedding recovery control
 and command routes remain separate. Diagnostic observers cannot alter admission.
+The fatal recovery promise wakes a stalled connect/registration/heartbeat rather
+than waiting for a later maintenance tick. Three negative-control regressions
+failed before that correction and all18 app connection tests pass afterward.
 
 Stop's stable received receipt and exact startup cancellation fence commit
 atomically before waiting for the binding lock. A cancelled late returned handle
@@ -69,7 +72,7 @@ fixture expectations: runtime schema10 versus newly appended11, and a legacy
 error migration fixture retaining the newly added tables. Both fixture definitions
 were corrected without changing released migrations or relaxing checks. The
 Initial corrected full suite passed1,482 tests/139 files with8 tests/one file skipped.
-The final reviewed source passes **1,490 tests/139 files**, with8 tests/one file
+The final reviewed source passes **1,493 tests/139 files**, with8 tests/one file
 skipped, typecheck/build and checkpoint/docs/release/secrets checks. Package
 consumer results will be recorded after their receipts settle. No native Windows installed acceptance,
 real model call, deployment or stable npm promotion is claimed.
@@ -79,3 +82,10 @@ build produced those outputs and the normal checkpoint gate then passed. A misty
 `node scripts/check:secrets.mjs` invocation did not find a module; the required
 `npm run check:secrets` passed unchanged. These command mistakes are not passing
 receipts or product regressions.
+
+An unpublished first pack from `7d76a83` passed16 isolated consumers. Review then
+added fatal propagation regressions/correction before publication. Its SBOM command
+failed because concurrent rebuilding had removed the generated web output; that
+partial artifact set is retained locally and is not published or relabeled as the
+final release. Final packing/consumer/SBOM gates run sequentially after the
+corrected clean source/build gate.

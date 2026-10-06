@@ -301,59 +301,71 @@ export async function superviseControlNodeConnection(
   let attempt = 0;
   let startupRecovery: Promise<void> | undefined;
   let startupFailure: { error: unknown } | undefined;
+  const startupAbort = new AbortController();
+  const connectionSignal = AbortSignal.any([signal, startupAbort.signal]);
+  let failStartup!: (error: unknown) => void;
+  const fatalStartup = new Promise<never>((_resolve, reject) => { failStartup = reject; });
+  // A fatal durable recovery must wake a stalled connect/registration/heartbeat.
+  // Observe this once even when recovery rejects between awaited phases.
+  void fatalStartup.catch(() => undefined);
+  const awaitPhase = <T>(operation: Promise<T>): Promise<T> => Promise.race([operation, fatalStartup]);
   let readyNotified = false;
   // Keep the slots across connection epochs. Expiring a read does not cancel
   // native work, so a reconnect must not start another unresolved discovery.
   const jobs: MaintenanceJobs = {};
-  while (!signal.aborted) {
-    try {
-      const peer = await connectWithBootstrapFallback({
-        locator: controlNodeLocator,
-        connect: (target) => node.connect(target),
-        onFallback: (error) => {
-          logError(
-            "persisted control-node ticket failed; trying configured bootstrap",
-            error,
-          );
-        },
-      });
-      if (signal.aborted) return;
-      await register(peer, service);
-      if (signal.aborted) return;
-      if (!readyNotified) {
-        // Recover once per runtime boot. Reconnect must never redispatch a
-        // retained native mutation or clear an unresolved ownership fence.
-        startupRecovery = Promise.resolve().then(() => recoverStartup?.()).catch(error => {
-          // Per-binding native failures resolve in the typed summary. A
-          // rejected recovery means durable/invariant failure: fail this boot
-          // so the embedding retains its independent control/command route.
-          startupFailure = { error };
-        });
-        readyNotified = true;
-        try { onReady?.(); } catch (error) { logError("runtime readiness observer", error); }
+  try {
+    while (!signal.aborted) {
+      try {
+        const peer = await awaitPhase(connectWithBootstrapFallback({
+          locator: controlNodeLocator,
+          connect: (target) => node.connect(target),
+          onFallback: (error) => {
+            logError(
+              "persisted control-node ticket failed; trying configured bootstrap",
+              error,
+            );
+          },
+        }));
+        if (signal.aborted) return;
+        await awaitPhase(register(peer, service));
+        if (signal.aborted) return;
+        if (!readyNotified) {
+          // Recover once per runtime boot. Reconnect must never redispatch a
+          // retained native mutation or clear an unresolved ownership fence.
+          startupRecovery = Promise.resolve().then(() => recoverStartup?.()).catch(error => {
+            // Per-binding native failures resolve in the typed summary. A
+            // rejected recovery means durable/invariant failure: fail this boot
+            // so the embedding retains its independent control/command route.
+            startupFailure = { error };
+            startupAbort.abort();
+            failStartup(error);
+          });
+          readyNotified = true;
+          try { onReady?.(); } catch (error) { logError("runtime readiness observer", error); }
+        }
+        console.log(`Connected to control node ${controlNodeLocator.endpointId}`);
+        attempt = 0;
+        await awaitPhase(maintainControlNodeConnection(
+          peer,
+          service,
+          runtimeNodeBootId,
+          node,
+          controlNodeLocator,
+          config,
+          connectionSignal,
+          jobs,
+          startupRecovery,
+          () => startupFailure,
+        ));
+      } catch (error) {
+        if (signal.aborted) return;
+        if (startupFailure) throw startupFailure.error;
+        const delayMs = reconnectDelay(attempt++, config.reconnectMaxMs);
+        logError(`control-node connection lost; retrying in ${delayMs}ms`, error);
+        await awaitPhase(abortableDelay(delayMs, connectionSignal));
       }
-      console.log(`Connected to control node ${controlNodeLocator.endpointId}`);
-      attempt = 0;
-      await maintainControlNodeConnection(
-        peer,
-        service,
-        runtimeNodeBootId,
-        node,
-        controlNodeLocator,
-        config,
-        signal,
-        jobs,
-        startupRecovery,
-        () => startupFailure,
-      );
-    } catch (error) {
-      if (signal.aborted) return;
-      if (startupFailure) throw startupFailure.error;
-      const delayMs = reconnectDelay(attempt++, config.reconnectMaxMs);
-      logError(`control-node connection lost; retrying in ${delayMs}ms`, error);
-      await abortableDelay(delayMs, signal);
     }
-  }
+  } finally { startupAbort.abort(); }
 }
 
 async function maintainControlNodeConnection(
