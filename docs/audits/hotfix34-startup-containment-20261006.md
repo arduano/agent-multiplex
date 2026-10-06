@@ -1,5 +1,13 @@
 # Copilot startup containment hotfix.34 — October 6, 2026
 
+Published signed [prerelease](https://github.com/arduano/agent-multiplex/releases/tag/hotfix-2026-10-06.1)
+from exact artifact source `4ec0c89da895f57421860d279eb6610d01d45c83`, signed
+tag object `7b9e330b4dfdef07c7e4d46052044180a7d62bf3`. All19 downloaded assets
+byte/hash match and trusted signature/remote refs match. Framework main remains
+`c95e5a0483aa2601e101dcfe9b2809d7deba7679`; no stable npm promotion occurred.
+GitHub platform immutability is off; the release is frozen by operator procedure
+and exact consumer integrities. Later documentation commits do not repack bytes.
+
 ## Source scope
 
 This candidate combines per-binding retained Copilot recovery and exact Stop
@@ -73,8 +81,9 @@ error migration fixture retaining the newly added tables. Both fixture definitio
 were corrected without changing released migrations or relaxing checks. The
 Initial corrected full suite passed1,482 tests/139 files with8 tests/one file skipped.
 The final reviewed source passes **1,493 tests/139 files**, with8 tests/one file
-skipped, typecheck/build and checkpoint/docs/release/secrets checks. Package
-consumer results will be recorded after their receipts settle. No native Windows installed acceptance,
+skipped, typecheck/build and checkpoint/docs/release/secrets checks. All16
+isolated packed consumers using the exact reviewed public p2prpc/Iroh graph pass;
+SBOM includes498 components and verifies125 web-bundled identities. No native Windows installed acceptance,
 real model call, deployment or stable npm promotion is claimed.
 
 An early checkpoint invocation before generated package output existed failed;
@@ -89,3 +98,16 @@ failed because concurrent rebuilding had removed the generated web output; that
 partial artifact set is retained locally and is not published or relabeled as the
 final release. Final packing/consumer/SBOM gates run sequentially after the
 corrected clean source/build gate.
+
+## Exact release evidence
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Pack manifest | `fb6d33f887f365b8f85e8b87a0c4c12d7bc08513a120083441713d33257acc5d` |
+| SHA256SUMS | `a2a690d13d29ca5c33436bfe6f8d74f03cb13a1d41f29ca19f0bd69045072bec` |
+| CycloneDX SBOM | `4716671552bcd39d3cf99c3a50cf7c3651a9ea4f5418492709c68f917308665e` |
+
+Local producer receipts remain in `receipts/b22-framework34/`, with the exact
+published-byte comparison in Leo's `receipts/b22-startup34/public-release34.json`.
+Source gate logs retain the initial fixture failures, negative controls and final
+passes. No failed receipt is relabeled as successful.

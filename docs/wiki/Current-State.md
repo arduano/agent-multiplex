@@ -5,9 +5,18 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-06 (B22 startup containment hotfix.34 qualification; installed acceptance remains consumer-owned).
+Last reconciled: 2026-10-06 (B22 startup containment hotfix.34 published; installed acceptance remains consumer-owned).
 
 ## P0 retained Copilot startup containment hotfix.34
+
+Signed `hotfix-2026-10-06.1` publishes lockstep `.34` from artifact source
+`4ec0c89da895f57421860d279eb6610d01d45c83`, tag object
+`7b9e330b4dfdef07c7e4d46052044180a7d62bf3`. Typecheck/build, **1,493 tests/139
+files** (eight tests/one file skipped), checkpoint/docs/release/secrets checks,
+all16 isolated packed consumers and SBOM pass. All19 independently downloaded
+public assets match; trusted signature and remote tag/source match. Framework
+main and npm stable remain unchanged. GitHub immutability is off; operator
+procedure freezes this release and consumers retain exact byte pins.
 
 New source contains per-binding startup failure receipts, transactional exact Stop
 cancellation, once-per-boot recovery after transport registration and a separate
