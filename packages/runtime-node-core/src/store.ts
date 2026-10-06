@@ -64,6 +64,15 @@ function sameRetainedBinding(left: RetainedBinding, right: RetainedBinding): boo
     left.adapterScopeId === right.adapterScopeId && left.vendorSessionId === right.vendorSessionId;
 }
 
+function acceptedHandleRecord(handle: RuntimeNodeSessionRecord, current: RuntimeNodeSessionRecord): RuntimeNodeSessionRecord {
+  const { metadataAuthority: _earlierAuthority, nativeSummary: _earlierSummary, ...withoutAuthority } = handle;
+  return runtimeNodeSessionRecordSchema.parse({ ...withoutAuthority,
+    metadata: current.metadata, ...(current.metadataAuthority === undefined ? {} : { metadataAuthority: current.metadataAuthority }),
+    createdAt: current.createdAt, launchProvenance: current.launchProvenance,
+    ...(current.nativeSummary === undefined ? {} : { nativeSummary: current.nativeSummary }),
+  });
+}
+
 const encode = (value: unknown): string => JSON.stringify(value);
 const decode = (value: unknown): unknown => JSON.parse(String(value));
 const RUNTIME_NODE_STORE_APPLICATION_ID = 0x414d_5254; // "AMRT" (agent-multiplex runtime)
@@ -110,11 +119,11 @@ export interface RuntimeImageEntry {
  * exception text, credentials, provider configuration or launch input. */
 export const runtimeCopilotStartupFailureSchema = z.object({
   binding: sessionBindingRefSchema,
-  runtimeNodeBootId: runtimeNodeBootIdSchema,
-  stage: z.enum(["prepareResume", "validateOptions", "nativeResume", "validateHandle", "commitBinding"]),
-  reason: z.enum(["nativeHistoryMissing", "resumeFailed", "ownershipUncertain", "bindingChanged", "preparationFailed", "handleRejected"]),
+  runtimeNodeBootId: runtimeNodeBootIdSchema.nullable(),
+  stage: z.enum(["legacyAdmission", "prepareResume", "validateOptions", "nativeResume", "validateHandle", "commitBinding"]),
+  reason: z.enum(["legacyIntentUnverified", "nativeHistoryMissing", "resumeFailed", "ownershipUncertain", "bindingChanged", "preparationFailed", "handleRejected"]),
   error: commandErrorSchema,
-  action: z.enum(["stopOrRetryResume", "stopThenArchive", "reconcileNativeOwner"]),
+  action: z.enum(["explicitResumeOrStop", "stopOrRetryResume", "stopThenArchive", "reconcileNativeOwner"]),
   failedAt: isoDateSchema,
 }).strict();
 export type RuntimeCopilotStartupFailure = z.infer<typeof runtimeCopilotStartupFailureSchema>;
@@ -169,10 +178,7 @@ export class RuntimeNodeStore {
       }, {
         version: 11,
         name: "runtime-node-store-v11-copilot-startup-recovery",
-        apply: (database) => database.exec(`
-          CREATE TABLE copilot_startup_failures (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT;
-          CREATE TABLE copilot_startup_stop_fences (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT;
-        `),
+        apply: migrateRuntimeNodeStartupRecovery,
       }],
     });
     this.#db = this.#sqlite.database;
@@ -364,9 +370,14 @@ export class RuntimeNodeStore {
       .map(row => runtimeCopilotStartupFailureSchema.parse(decode(row.record_json)));
   }
 
+  public getStartupCopilotFailure(sessionId: SessionId): RuntimeCopilotStartupFailure | undefined {
+    const row = this.#db.prepare("SELECT record_json FROM copilot_startup_failures WHERE session_id=?").get(sessionId) as Row | undefined;
+    return row ? runtimeCopilotStartupFailureSchema.parse(decode(row.record_json)) : undefined;
+  }
+
   /** An explicit successful Resume acknowledges the same retained binding,
    * replacing its pending startup recovery rather than leaving a stale retry. */
-  public commitExplicitCopilotResume(record: RuntimeNodeSessionRecord, expected: RuntimeNodeSessionRecord, supersededStopCommandId?: CommandId): void {
+  public commitExplicitCopilotResume(record: RuntimeNodeSessionRecord, expected: RuntimeNodeSessionRecord, supersededStopCommandId?: CommandId): RuntimeNodeSessionRecord {
     const parsed = runtimeNodeSessionRecordSchema.parse(record);
     if (parsed.harness !== "copilot" || parsed.availability !== "active" || parsed.runtimeEpoch === null ||
       !sameRetainedBinding(parsed, expected)) throw new Error("explicit Copilot resume changed the retained binding");
@@ -376,7 +387,8 @@ export class RuntimeNodeStore {
       if (!current || !sameRetainedBinding(current, expected) || current.runtimeEpoch !== expected.runtimeEpoch) {
         throw new Error("explicit Copilot resume targets a changed binding");
       }
-      this.#putParsedSession(parsed);
+      const committed = acceptedHandleRecord(parsed, current);
+      this.#putParsedSession(committed);
       if (supersededStopCommandId && this.startupCopilotStopCommandId(expected) === supersededStopCommandId) {
         this.#db.prepare("DELETE FROM copilot_startup_stop_fences WHERE session_id=?").run(expected.sessionId);
       }
@@ -384,6 +396,7 @@ export class RuntimeNodeStore {
       if (intent && sameRetainedBinding(intent, expected)) this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(expected.sessionId);
       this.clearStartupCopilotFailure(expected);
       this.#db.exec("COMMIT");
+      return committed;
     } catch (error) { this.#db.exec("ROLLBACK"); throw error; }
   }
 
@@ -397,7 +410,7 @@ export class RuntimeNodeStore {
   /** Exact intent, current binding and accepted native handle commit together.
    * A Stop admitted during an awaited native resume removes the intent first;
    * the caller must detach the returned handle instead of publishing it. */
-  public commitStartupCopilotReattachment(record: RuntimeNodeSessionRecord, expected: RuntimeNodeSessionRecord): boolean {
+  public commitStartupCopilotReattachment(record: RuntimeNodeSessionRecord, expected: RuntimeNodeSessionRecord): RuntimeNodeSessionRecord | undefined {
     const parsed = runtimeNodeSessionRecordSchema.parse(record);
     if (parsed.harness !== "copilot" || parsed.availability !== "active" || parsed.runtimeEpoch === null) {
       throw new Error("startup Copilot reattachment requires an active native binding");
@@ -406,14 +419,15 @@ export class RuntimeNodeStore {
     try {
       if (!this.matchesStartupCopilotIntent(expected)) {
         this.#db.exec("COMMIT");
-        return false;
+        return undefined;
       }
       if (!sameRetainedBinding(parsed, expected)) throw new Error("startup handle changed the retained binding");
-      this.#putParsedSession(parsed);
+      const committed = acceptedHandleRecord(parsed, this.getSession(expected.sessionId)!);
+      this.#putParsedSession(committed);
       this.#db.prepare("DELETE FROM copilot_startup_intent WHERE session_id=?").run(parsed.sessionId);
       this.#db.prepare("DELETE FROM copilot_startup_failures WHERE session_id=?").run(parsed.sessionId);
       this.#db.exec("COMMIT");
-      return true;
+      return committed;
     } catch (error) {
       this.#db.exec("ROLLBACK");
       throw error;
@@ -446,7 +460,9 @@ export class RuntimeNodeStore {
   public matchesStartupCopilotIntent(expected: RuntimeNodeSessionRecord): boolean {
     const current = this.getSession(expected.sessionId);
     const intent = this.getStartupCopilotIntent(expected.sessionId);
-    return current !== undefined && intent !== undefined && !this.#hasStartupStopFence(current) && sameRetainedBinding(current, expected) &&
+    const failure = this.getStartupCopilotFailure(expected.sessionId);
+    const legacyHold = failure?.reason === "legacyIntentUnverified" && sameRetainedBinding(failure.binding, expected);
+    return current !== undefined && intent !== undefined && !legacyHold && !this.#hasStartupStopFence(current) && sameRetainedBinding(current, expected) &&
       canonicalProtocolRecordJson(intent) === canonicalProtocolRecordJson(expected) && current.availability === "resumable" && current.runtimeEpoch === null;
   }
 
@@ -1188,6 +1204,37 @@ function assertCanonicalDoesNotDiverge(
 function assertPositiveLimit(limit: number): void {
   if (!Number.isSafeInteger(limit) || limit < 1) {
     throw new RangeError("metadata outbox limit must be a positive integer");
+  }
+}
+
+function migrateRuntimeNodeStartupRecovery(database: DatabaseSync): void {
+  database.exec(`
+    CREATE TABLE copilot_startup_failures (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT;
+    CREATE TABLE copilot_startup_stop_fences (session_id TEXT PRIMARY KEY REFERENCES bindings(session_id) ON DELETE CASCADE, record_json TEXT NOT NULL CHECK(json_valid(record_json))) STRICT;
+  `);
+  // Older Stop did not cancel these intents. An existing normalized intent
+  // cannot distinguish interrupted recovery from a later explicit Stop: the
+  // command journal has no immutable causal sequence/native-epoch fence.
+  // Preserve both the binding and intent, but require an explicit owner action
+  // for this exact legacy case. Prior active bindings still recover normally.
+  const rows = database.prepare(`SELECT b.record_json AS binding_json, i.record_json AS intent_json
+    FROM bindings b JOIN copilot_startup_intent i ON i.session_id=b.session_id`).all() as Row[];
+  const timestamp = new Date().toISOString();
+  for (const row of rows) {
+    const binding = runtimeNodeSessionRecordSchema.parse(decode(row.binding_json));
+    const intent = runtimeNodeSessionRecordSchema.parse(decode(row.intent_json));
+    if (binding.harness !== "copilot" || binding.availability !== "resumable" || binding.runtimeEpoch !== null ||
+      !sameRetainedBinding(binding, intent)) continue;
+    const failure = runtimeCopilotStartupFailureSchema.parse({
+      binding: { sessionId: binding.sessionId, runtimeNodeId: binding.runtimeNodeId, harness: binding.harness,
+        adapterScopeId: binding.adapterScopeId, vendorSessionId: binding.vendorSessionId, bindingRevision: binding.bindingRevision },
+      runtimeNodeBootId: null, stage: "legacyAdmission", reason: "legacyIntentUnverified",
+      error: safeCommandError(undefined, { stage: "recovery", certainty: "outcomeUnknown" }),
+      action: "explicitResumeOrStop", failedAt: timestamp,
+    });
+    database.prepare("INSERT INTO copilot_startup_failures(session_id,record_json) VALUES (?,?)").run(binding.sessionId, encode(failure));
+    const updated = runtimeNodeSessionRecordSchema.parse({ ...binding, runtimeStatus: "unknown", updatedAt: timestamp });
+    database.prepare("UPDATE bindings SET record_json=?,updated_at=? WHERE session_id=?").run(encode(updated), timestamp, binding.sessionId);
   }
 }
 

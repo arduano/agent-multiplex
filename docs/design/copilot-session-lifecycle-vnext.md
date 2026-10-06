@@ -748,6 +748,23 @@ verified termination. Storage failure rejects startup rather than being mislabel
 as a single-session native refusal. Migration 11 does not rewrite migrations 3–10
 or public wire/lifecycle schemas; older binaries cannot open the newer store.
 
+For an upgraded v10 store, an already-normalized resumable binding with a matching
+old startup intent has no reliable durable distinction between interrupted
+recovery and a later explicit Stop. The old command journal does not retain an
+immutable causal sequence or native epoch fence. Migration 11 therefore preserves
+that exact binding and intent, adds a private `legacyIntentUnverified` hold with
+no current boot ID, and requires an explicit new Resume or Stop. It does not infer
+ordering from wall-clock timestamps, transcript text or SQLite row IDs. Existing
+active bindings recover normally, and new v11 interrupted recovery retains its
+ordinary retry behavior. Replaying an original successful Stop remains receipt
+observation; it neither changes a later resumed owner nor fabricates a new action.
+
+Metadata and authority can arrive while native attachment is awaiting. Accepted
+handle transactions merge the latest same-binding canonical metadata/authority
+and publish that committed record. Native resume must not overwrite those fields
+with its earlier snapshot. The same merge applies to explicit Resume; Stop also
+persists the latest exact same-binding record after awaited cleanup.
+
 The optional `history.active-binding` v1 capability controls a narrower history
 request via `native.activeBindingOnly: true`. An occupied session lock fails
 promptly, and a stopped binding fails after the runtime lock recheck without

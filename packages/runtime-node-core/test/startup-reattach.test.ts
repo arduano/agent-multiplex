@@ -1,11 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import {
   adapterScopeIdSchema,
   emptyMetadataSnapshot,
   newCommandId,
+  newControlNodeId,
+  newRealmId,
+  newAuthorityEpochId,
+  launchBackendIdSchema,
   newLaunchId,
   newRuntimeEpoch,
   newRuntimeNodeBootId,
@@ -371,6 +376,97 @@ describe("per-binding Copilot startup containment", () => {
         expect(await service.reattachPersistedCopilotSessions()).toMatchObject({ reattached: 2, failures: [] });
         expect(reopened.listStartupCopilotFailures()).toHaveLength(0);
         expect(adapter.resumes.every(request => request.continuePendingWork === false)).toBe(true);
+      } finally { await service.close(); reopened.close(); }
+    } finally { await f.service.close(); rmSync(f.root, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it.each(["startup", "resume"] as const)("preserves canonical metadata/authority delivered during delayed %s attachment", async operation => {
+    const f = retainedFixture(1);
+    let release!: (handle: AdapterSession) => void;
+    f.adapter.resumeHook = () => new Promise<AdapterSession>(resolve => { release = resolve; });
+    const events = f.service.events({ native: {} })[Symbol.asyncIterator]();
+    await events.next();
+    const pending = operation === "startup" ? f.service.reattachPersistedCopilotSessions() :
+      f.service.resume({ ...f.stop(0), operation: "resume", payloadHash: "metadata-race-explicit-resume" });
+    try {
+      await vi.waitFor(() => expect(f.adapter.resumes).toHaveLength(1));
+      const retained = f.service.retainedSessionBindings();
+      const metadataAuthority = { controlNodeId: newControlNodeId(), realmId: newRealmId(), epochId: newAuthorityEpochId() };
+      const metadata = { revision: 1, values: { "agent.title": "Canonical title during attachment" }, keyRevisions: { "agent.title": 1 } };
+      f.service.applyCanonicalSessions([{ ...f.store.getSession(f.ids[0]!)!, metadataAuthority, metadata,
+        catalogState: "open", catalogRevision: 1, archivedAt: null }], retained);
+      release(new CopilotSession(f.root, "native-0"));
+      await pending;
+      expect(f.store.getSession(f.ids[0]!)).toMatchObject({ availability: "active", metadata, metadataAuthority });
+      const event = await events.next();
+      expect(event.value).toMatchObject({ kind: "control", change: { type: "session.upsert", session: { metadata, metadataAuthority } } });
+    } finally { release?.(new CopilotSession(f.root, "native-0")); await pending; await events.return?.(); await f.close(); }
+  });
+
+  it.each(["listSessions", "getLaunchEntry"] as const)("rejects a genuine durable-state %s failure instead of recording a per-binding native failure", async method => {
+    const f = retainedFixture(1);
+    const error = new Error("injected SQLite read failure");
+    if (method === "getLaunchEntry") {
+      const profile = f.service.launchProfiles()[0]!;
+      f.store.putSession({ ...f.store.getSession(f.ids[0]!)!, launchProvenance: {
+        launchId: newLaunchId(), providerId: profile.providerId, profileId: profile.profileId,
+        backendId: launchBackendIdSchema.parse("copilot:startup-reattach-test"),
+        contractVersion: profile.contractVersion, requestSchemaHash: profile.requestSchemaHash,
+        implementationVersion: profile.implementationVersion,
+      } });
+    }
+    const read = vi.spyOn(f.store, method).mockImplementation(() => { throw error; });
+    try {
+      await expect(f.service.reattachPersistedCopilotSessions()).rejects.toMatchObject({ name: "RuntimeNodePersistenceError", cause: error });
+      expect(f.adapter.resumes).toHaveLength(0);
+      expect(f.store.listStartupCopilotFailures()).toHaveLength(0);
+    } finally { read.mockRestore(); await f.close(); }
+  });
+
+  it.each(["successfulStop", "interruptedRecovery", "laterSuccessfulResume", "staleStop"] as const)("upgrades v10 %s without guessing legacy intent order or replaying a saved Stop", async state => {
+    const root = mkdtempSync(join(tmpdir(), "multiplex-copilot-startup-v10-upgrade-"));
+    const filename = join(root, "runtime.sqlite");
+    const f = retainedFixture(2, filename);
+    const request = { ...f.stop(0), payloadHash: "legacy-stop-fixture-operation",
+      ...(state === "staleStop" ? { bindingRevision: 99 } : {}) };
+    const timestamp = new Date().toISOString();
+    try {
+      if (state !== "interruptedRecovery") f.store.putCommand({ commandId: request.commandId, payloadHash: request.payloadHash,
+        sessionId: request.sessionId, runtimeNodeId: request.runtimeNodeId, state: "succeeded", request,
+        createdAt: timestamp, updatedAt: timestamp });
+      // Public fixture APIs model an already successful explicit Resume and a
+      // healthy sibling. Only this disposable schema is reduced to exact v10.
+      if (state === "laterSuccessfulResume" || state === "staleStop") f.store.putSession(f.originals[0]!);
+      if (state === "laterSuccessfulResume") {
+        const resumed = { ...request, operation: "resume" as const, commandId: newCommandId(), payloadHash: "legacy-later-resume-operation" };
+        f.store.putCommand({ commandId: resumed.commandId, payloadHash: resumed.payloadHash,
+          sessionId: resumed.sessionId, runtimeNodeId: resumed.runtimeNodeId, state: "succeeded", request: resumed,
+          createdAt: timestamp, updatedAt: timestamp });
+      }
+      f.store.putSession(f.originals[1]!);
+      await f.service.close(); f.store.close();
+      const legacy = new DatabaseSync(filename);
+      legacy.exec("DROP TABLE copilot_startup_failures; DROP TABLE copilot_startup_stop_fences; DELETE FROM schema_migrations WHERE version=11; PRAGMA user_version=10");
+      legacy.close();
+      const reopened = new RuntimeNodeStore(filename);
+      const adapter = new CopilotAdapter(f.root);
+      const service = new RuntimeNodeService({ store: reopened, adapters: [adapter], runtimeNodeId: f.runtimeNodeId,
+        runtimeNodeBootId: newRuntimeNodeBootId(), name: "v10 upgrade", allowedRoots: [f.root] });
+      try {
+        expect(reopened.diagnostics().userVersion).toBe(11);
+        const held = state === "successfulStop" || state === "interruptedRecovery";
+        const summary = await service.reattachPersistedCopilotSessions();
+        expect(summary.reattached).toBe(held ? 1 : 2);
+        expect(summary.failures).toMatchObject(held ? [{ reason: "legacyIntentUnverified", runtimeNodeBootId: null,
+          action: "explicitResumeOrStop", error: { certainty: "outcomeUnknown" } }] : []);
+        expect(adapter.resumes.map(options => options.vendorSessionId)).toEqual(held ? ["native-1"] : ["native-0", "native-1"]);
+        if (state === "successfulStop") {
+          expect(await service.stop(request)).toMatchObject({ state: "succeeded", commandId: request.commandId });
+          expect(reopened.getStartupCopilotIntent(request.sessionId)).toEqual(f.originals[0]);
+          expect(await service.stop({ ...request, commandId: newCommandId(), payloadHash: "fresh-stop-after-legacy-upgrade" })).toMatchObject({ state: "succeeded" });
+          expect(reopened.getStartupCopilotIntent(request.sessionId)).toBeUndefined();
+          expect(service.startupCopilotRecoveryFailures()).toHaveLength(0);
+        }
       } finally { await service.close(); reopened.close(); }
     } finally { await f.service.close(); rmSync(f.root, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
   });

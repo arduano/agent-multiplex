@@ -151,6 +151,17 @@ const LIFECYCLE_OBSERVATION_RETRY_BASE_MS = 250;
 const LIFECYCLE_OBSERVATION_RETRY_MAX_MS = 30_000;
 const LIFECYCLE_OBSERVATION_STALLED_MS = 45_000;
 
+class RuntimeNodePersistenceError extends Error {
+  constructor(cause: unknown) {
+    super("Runtime durable state could not be read or written", { cause });
+    this.name = "RuntimeNodePersistenceError";
+  }
+}
+
+function durableState<T>(operation: () => T): T {
+  try { return operation(); } catch (cause) { throw new RuntimeNodePersistenceError(cause); }
+}
+
 export class RuntimeNodeProtocolError extends Error {
   public constructor(
     public readonly code:
@@ -392,8 +403,19 @@ export class RuntimeNodeService {
         const failures: RuntimeCopilotStartupFailure[] = [];
         for (const persisted of this.#startupCopilotBindings) {
           await this.#serialize(persisted.sessionId, async () => {
-            if (this.#closed || !this.#store.matchesStartupCopilotIntent(persisted)) { cancelled++; return; }
+            if (this.#closed) { cancelled++; return; }
             const current = this.#store.getSession(persisted.sessionId);
+            const legacy = this.#store.getStartupCopilotFailure(persisted.sessionId);
+            if (legacy?.reason === "legacyIntentUnverified" && legacy.binding.bindingRevision === persisted.bindingRevision &&
+              nativeBindingKey(legacy.binding) === nativeBindingKey(persisted) && current?.runtimeNodeId === this.#runtimeNodeId &&
+              current.bindingRevision === persisted.bindingRevision && nativeBindingKey(current) === nativeBindingKey(persisted) &&
+              current.availability === "resumable" && current.runtimeEpoch === null) {
+              failures.push(legacy);
+              this.#publishSession(current);
+              try { this.#onCopilotStartupRecoveryFailure?.(legacy, undefined); } catch { /* Diagnostic only. */ }
+              return;
+            }
+            if (this.#closed || !this.#store.matchesStartupCopilotIntent(persisted)) { cancelled++; return; }
             if (!current || current.runtimeNodeId !== this.#runtimeNodeId || current.runtimeNodeId !== persisted.runtimeNodeId ||
               current.bindingRevision !== persisted.bindingRevision ||
               nativeBindingKey(current) !== nativeBindingKey(persisted) || current.availability !== "resumable" ||
@@ -421,7 +443,10 @@ export class RuntimeNodeService {
               session = undefined;
               await this.#validateResumedHandle(current, request, plan.backend, returned);
               session = returned;
-            } catch (cause) { failure = cause; failedNativeRecovery = true; }
+            } catch (cause) {
+              if (cause instanceof RuntimeNodePersistenceError) throw cause;
+              failure = cause; failedNativeRecovery = true;
+            }
             if (failedNativeRecovery) {
               const uncertain = failure instanceof AdapterOutcomeUnknownError || failure instanceof LaunchProviderOutcomeUnknownError;
               const receipt: RuntimeCopilotStartupFailure = {
@@ -444,7 +469,8 @@ export class RuntimeNodeService {
             const record = this.#recordForHandle(persisted.sessionId, session!, { existing: current });
             // SQLite admission stays outside the native failure catch: a broken
             // durable writer must not be mistaken for a single bad session.
-            if (this.#closed || !this.#store.commitStartupCopilotReattachment(record, persisted)) {
+            const committed = this.#closed ? undefined : this.#store.commitStartupCopilotReattachment(record, persisted);
+            if (!committed) {
               cancelled++;
               this.#retiringStartupHandles.set(persisted.sessionId, { record: current, session: session! });
               try { await session!.stop(); }
@@ -465,7 +491,7 @@ export class RuntimeNodeService {
               return;
             }
             this.#activate(persisted.sessionId, session!);
-            this.#publishSession(record);
+            this.#publishSession(committed);
             reattached++;
           });
         }
@@ -1008,12 +1034,12 @@ export class RuntimeNodeService {
       ) {
         this.#retireInteractions(input.sessionId, existing.runtimeEpoch);
       }
-      const record = this.#recordForHandle(
+      let record = this.#recordForHandle(
         input.sessionId,
         session,
         { existing },
       );
-      if (record.harness === "copilot") this.#store.commitExplicitCopilotResume(record, existing, supersededStop);
+      if (record.harness === "copilot") record = this.#store.commitExplicitCopilotResume(record, existing, supersededStop);
       else this.#store.putSession(record);
       this.#activate(input.sessionId, session);
       this.#publishSession(record);
@@ -2436,7 +2462,7 @@ export class RuntimeNodeService {
     context: LaunchSessionContext;
   } | undefined {
     if (!session.launchProvenance) return undefined;
-    const launch = this.#store.getLaunchEntry(session.launchProvenance.launchId);
+    const launch = durableState(() => this.#store.getLaunchEntry(session.launchProvenance!.launchId));
     if (!launch?.preparation || launch.record.state !== "succeeded") {
       throw new RuntimeNodeProtocolError(
         "FENCED",
@@ -2457,12 +2483,13 @@ export class RuntimeNodeService {
       prepared: launch.preparation,
       checkpoint: launch.checkpoint,
       saveCheckpoint: (checkpoint) => {
-        const latest = this.#store.getLaunchEntry(launch.record.launchId);
+        const latest = durableState(() => this.#store.getLaunchEntry(launch.record.launchId));
         if (!latest) throw new RuntimeNodeProtocolError("FENCED", "launch journal disappeared");
-        this.#store.putLaunchEntry({
+        const updated = {
           ...latest,
           checkpoint: toJsonValue(checkpoint) as JsonObject,
-        });
+        };
+        durableState(() => this.#store.putLaunchEntry(updated));
       },
       backend: (backendId) => this.#launchRegistry.backend(backendId),
     };
@@ -2669,7 +2696,11 @@ export class RuntimeNodeService {
 
   #persistStopped(record: RuntimeNodeSessionRecord): RuntimeNodeSessionRecord {
     const timestamp = now();
-    const { lifecycle: _lifecycle, ...active } = record;
+    const current = this.#store.getSession(record.sessionId);
+    if (!current || current.bindingRevision !== record.bindingRevision || nativeBindingKey(current) !== nativeBindingKey(record)) {
+      throw new RuntimeNodeProtocolError("FENCED", "stopped native handle no longer owns the retained binding");
+    }
+    const { lifecycle: _lifecycle, ...active } = current;
     const stopped: RuntimeNodeSessionRecord = {
       ...active,
       availability: "resumable",
@@ -3091,7 +3122,7 @@ export class RuntimeNodeService {
     vendorSessionId: string;
     requestedCwd?: string;
   }): Promise<string> {
-    const existing = this.#store.getSession(input.sessionId);
+    const existing = durableState(() => this.#store.getSession(input.sessionId));
     if (
       existing &&
       (existing.runtimeNodeId !== this.#runtimeNodeId ||
@@ -3105,8 +3136,7 @@ export class RuntimeNodeService {
       );
     }
 
-    const matchingBindings = this.#store
-      .listSessions()
+    const matchingBindings = durableState(() => this.#store.listSessions())
       .filter(
         (record) =>
           record.runtimeNodeId === this.#runtimeNodeId &&
