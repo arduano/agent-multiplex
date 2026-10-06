@@ -5,7 +5,26 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-06 (B22 startup containment hotfix.34 qualification; installed acceptance remains consumer-owned).
+Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source qualification; package and installed acceptance remain pending).
+
+## Same-parent bootstrap fallback hotfix.35
+
+Lockstep `.35` retains the reviewed `.34` startup containment and adds a
+same-parent bootstrap locator fallback to the reference control supervisor.
+Durable desired state still selects the parent and is dialed first. Only after
+that dial fails may the configured bootstrap locate the identical logical and
+pinned transport parent. Concurrent detach, identity changes and newer locator
+selections cancel or supersede the attempt. Authenticated heartbeat renewal
+retains its comparison fence; the fallback itself never writes desired state.
+
+The combined source passes **1,514 tests / 140 files** (eight tests/one file
+skipped), typecheck/build and checkpoint/docs/release/secrets checks. The suite
+uses unchanged timeouts and a short process-only protected fixture directory;
+the prior overlong Unix socket path failure remains retained separately.
+Package consumers, SBOM, Docker topology/scale and native installed acceptance
+are not yet claimed. No live role, policy, session or model call changed.
+
+See [the source qualification and remaining acceptance](../audits/hotfix35-same-parent-bootstrap-20261006.md).
 
 ## P0 retained Copilot startup containment hotfix.34
 
