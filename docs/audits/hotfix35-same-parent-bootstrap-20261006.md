@@ -85,14 +85,64 @@ artifact source and packed bytes stay unchanged. Artifacts remain in this
 release worktree's ignored `release-artifacts/`; the source and package gate
 receipt remains in the protected ignored namespace recorded above.
 
+## Deterministic Docker qualification
+
+The required tree and mock-scale gates pass with the original workloads,
+timeouts and assertions. Source archive `47f3b7ee416541dced114f46509f84172ce40c21`
+is exported to a separate protected disposable copy. Independent review compares
+all1,447 committed files and finds only an eight-line central transport creation
+fence: `relay: { mode: "disabled" }`, `discovery: { dns: false, mdns: false }`
+and `allowRelayUrl: () => false`. Identity, security, direct/bind policy, routing,
+protocol and all workload inputs remain unchanged. All maintained role creation
+paths used by these suites reach that wrapper.
+
+Stock suites use default public Iroh relay behavior without a relay override;
+they were not run. The approved variant qualifies direct-only deterministic mock
+topology/scale and introduces no producer default, source release, package or
+installed policy change. Neither image requires a lock resolved-URL overlay:
+the tracked credential-free npmrc and unchanged exact dependency graph build
+successfully. Browser capture uses `/run/current-system/sw/bin/chromium`.
+
+- `npm run test:docker:v4:tree` passes in136,153ms, including routing, retained
+  identity/authority recovery, metadata, streams, immutable images, browser and
+  local CLI image checks. Run: `direct35-tree-ed529e686d9848c6`.
+- `npm run test:docker:v4:mock:scale` passes in105,009ms: one control, one gateway,
+  ten mock runtimes with ten sessions each, all100 overlapping sends, reconnect,
+  history, stream replay, resource and accessibility checks. Run:
+  `direct35-scale-886d8bdba2f04ec6`.
+
+Both successful manifests/checks and exact-owned cleanup records pass;
+independent `sha256sum -c SHA256SUMS` passes. Each runner removes only its owned
+containers, bridge, image tag and temporary state. The extra wrapper's fresh
+protected `/dev/shm/d35.*` namespaces are removed after completion. The ignored
+receipt is `receipts/hotfix35-direct-docker-f530b3053fb04fed89dd820a1d7efe02/`;
+it retains the source archive, exact patch, independent review, source/context
+digests and separate successful tree/scale receipts.
+
+| Evidence | SHA-256 |
+| --- | --- |
+| Source47f3b7 archive | `59fec29fca6144bf0648599467a3bcd8020c04e19965e9096647cecfa5617a23` |
+| Fixture-only policy patch | `6df9277a3c4f1e7775cea3a9e86b16cd4b4b4eb2fc0494e12133b115b2819b22` |
+| Tracked fixture context | `4c27f27ff581a53c47a23ac7f5fbd117b68d0ec19baa2511bf4883fe419d3a3b` |
+| Successful tree manifest | `cf5c67f5abcea6af4efe4571ba50997f268aca8310108344c2d4fb111f579dc5` |
+| Successful tree `SHA256SUMS` | `6ff562ac30958ff1a5e0bda2200709747b865b872b329c12211c545510c72c11` |
+| Successful scale manifest | `b562593b8579d35ac5d985918b39cedfcedea389f27a54e56f002d920d33ba91` |
+| Successful scale `SHA256SUMS` | `019565d2ffac8fc5944250d526af362f9ec1b869bd1bd3627d0b261a0e507abb` |
+
+The first tree run, `direct35-tree-e4ddf6e1aa8a44ca`, fails after the image,
+transport, main topology summary and browser phases because the Git-export
+fixture lacks `apps/cli/dist/main.js` for the final local CLI image probe.
+Its failure remains retained, and its exact-owned containers/network/image are
+independently confirmed absent. Building only the disposable fixture succeeds
+in16,047ms; all committed files still differ only by the reviewed transport fence.
+A fresh tree receipt then passes the unchanged assertions. This preparation
+failure is not relabeled as transport success or a product regression.
+
 ## Remaining acceptance
 
-Deterministic Docker topology/scale qualification is pending. Read-only review
-finds that the stock runners use default public Iroh relay behavior and provide
-no relay override. Their bridge network is not an offline/private-relay fence.
-The release owner must resolve that fixture-policy boundary before running the
-required suites; no successful Docker result or native/private-relay migration
-acceptance is inferred from the source and package gates.
+These direct-only mock receipts do not establish custom-private-relay migration,
+native model behavior or installed Windows/WSL acceptance. Those remain
+consumer-owned and require their own exact-source evidence.
 
 Publication, tag creation, push, npm stable promotion and native installation
 belong to the release owner.

@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source/package qualification; Docker and installed acceptance remain pending).
+Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source/package/direct-Docker qualification; installed acceptance remains pending).
 
 ## Same-parent bootstrap fallback hotfix.35
 
@@ -24,9 +24,14 @@ the prior overlong Unix socket path failure remains retained separately.
 All **16** packed consumers and the release-build SBOM pass from exact artifact
 source `47f3b7ee416541dced114f46509f84172ce40c21`. Stock consumer verification
 retains its transport registry E401; the reviewed exact published-transport
-variant passes without product dependency or registry-policy changes. Docker
-topology/scale and native installed acceptance remain pending. No live role,
-policy, session or model call changed; no publication is claimed.
+variant passes without product dependency or registry-policy changes. The
+required deterministic Docker tree and100-session scale gates also pass using
+a separately reviewed disposable direct-only variant: relays and discovery
+disabled, original workloads and assertions retained. Stock public-relay suites
+were not run. The first tree fixture lacked local CLI output; its failure remains
+retained separately from the corrected fixture's passing receipt. Native/custom
+relay installed acceptance remains pending. No live role, policy, session or
+model call changed; no publication is claimed.
 
 See [the source qualification and remaining acceptance](../audits/hotfix35-same-parent-bootstrap-20261006.md).
 
