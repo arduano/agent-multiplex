@@ -286,6 +286,11 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     releaseCommand.resolve();
     await disconnection;
     await expect.poll(() => runtimeStore.getCommand(command.commandId)?.state).toBe("succeeded");
+    // Closing the receiving peer proves local closure, not that the dialing
+    // endpoint has observed it. Reconnect only after both sides have observed
+    // the injected network loss; otherwise connect can return its still-live
+    // incumbent just before native closure is delivered.
+    await expect.poll(() => runtime?.getPeer(child!.id)).toBeUndefined();
     await runtime.connect({ endpointId: child.id, locator: { kind: "ticket", ticket: child.ticket() } });
     await expect.poll(() => child?.getPeerAs<RuntimeNodeRouter>(runtime!.id)).toBeDefined();
     await expect(rootService.recoverCommand(command.commandId)).resolves.toMatchObject({ state: "succeeded" });
@@ -317,6 +322,7 @@ it("keeps a real root/child/runtime tree reachable with durable cursor continuit
     await childPeer.close("disposable child network-loss test");
     await expect.poll(() => rootCatalog.getControlNode(childDescriptor.controlNodeId)?.presence).toBe("stale");
     expect(rootCatalog.getRuntimeNode(runtimeRegistration.runtimeNodeId)?.reachability).toBe("unreachable");
+    await expect.poll(() => child?.getPeer(root!.id)).toBeUndefined();
     await child.connect({ endpointId: root.id, locator: { kind: "ticket", ticket: root.ticket() } });
     await expect.poll(() => root?.getPeer(child!.id), { timeout: 5_000 }).toBeDefined();
     await rootService.heartbeatChild({
