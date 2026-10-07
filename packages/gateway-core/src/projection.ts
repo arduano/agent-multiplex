@@ -24,6 +24,8 @@ import {
   type GatewayCatalogStamp,
   type GatewayCatalogView,
   type GatewayCatalogRead,
+  type GatewayCatalogSession,
+  type GatewayCatalogPage,
   commandObservationView,
   commandObservationViewSchema,
   offlineLifecycleView,
@@ -698,7 +700,7 @@ export class AccessGatewayProjection {
     });
   }
 
-  public async getCatalogSession(id: SessionId) {
+  public async getCatalogSession(id: SessionId): Promise<GatewayCatalogSession> {
     const local = this.#recordForOwner(this.#sessionOwners.get(id), "sessions", record => record.sessionId === id);
     if (local) return { evidence: { kind: "projection" as const, stamp: this.catalogStamp() }, session: structuredClone(local) };
     const stamp = this.catalogStamp();
@@ -707,7 +709,7 @@ export class AccessGatewayProjection {
     return { evidence: { kind: "source-read" as const, stamp, orderedWithProjection: false as const }, session };
   }
 
-  public async searchCatalogSessions(input: SessionSearchInput) {
+  public async searchCatalogSessions(input: SessionSearchInput): Promise<GatewayCatalogPage> {
     const stamp = this.catalogStamp();
     const page = await this.searchSessions(input);
     this.#assertCatalogReadCurrent(stamp);
