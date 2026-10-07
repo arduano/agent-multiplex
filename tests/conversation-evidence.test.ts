@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationEvidenceSchema, stampConversationObservation, type ConversationItemEvidence } from "../packages/protocol/src/conversation.js";
+import { boundedConversationEvidence, conversationEvidenceSchema, stampConversationObservation, type ConversationItemEvidence } from "../packages/protocol/src/conversation.js";
 import { compareConversationItems, compareConversationRevisions, mergeConversationOrder } from "../packages/client/src/conversation.js";
 import { copilotConversationEvidence } from "../packages/adapter-copilot/src/conversation.js";
 import { codexConversationEvidence } from "../packages/adapter-codex/src/conversation.js";
@@ -44,5 +44,27 @@ describe("native conversation evidence", () => {
   });
   it("reports contradictory anchors instead of inventing a causal order", () => {
     expect(mergeConversationOrder(["a", "b"], ["b", "a"])).toEqual({ ids: ["a", "b"], conflict: true });
+  });
+  it("keeps admitted native context before newly discovered context and an ephemeral prefix", () => {
+    expect(mergeConversationOrder(["native-old", "reasoning", "answer", "tail"], ["next-old", "answer"], "after", new Set(["native-old", "answer"])).ids)
+      .toEqual(["native-old", "next-old", "reasoning", "answer", "tail"]);
+  });
+  it("compares progressing live observations without declaring unrelated history fresher", () => {
+    const evidence = codexConversationEvidence({ item: { id: "message", type: "agentMessage", text: "observed" } }, "thread");
+    const first = stampConversationObservation(evidence, "attachment", 1), next = stampConversationObservation(evidence, "attachment", 2);
+    expect(compareConversationItems(first.items[0]!, next.items[0]!)).toBe("newer");
+    const snapshot = codexConversationEvidence({ data: [{ item: { id: "message", type: "agentMessage", text: "snapshot" } }] }, "thread", { history: true });
+    expect(compareConversationRevisions(next.items[0]!.revision, snapshot.items[0]!.revision)).toBe("incomparable");
+  });
+  it("bounds metadata and stamped generations independently of the untouched native payload", () => {
+    const native = Array.from({ length: 1_000 }, (_, index) => ({ id: `event-${index}`, type: "assistant.message", data: { messageId: `${index}-${"x".repeat(3_900)}`, content: "native content" } }));
+    const original = JSON.stringify(native);
+    const evidence = copilotConversationEvidence(native, "thread", { history: true });
+    expect(evidence.items.length).toBeLessThan(native.length);
+    expect(conversationEvidenceSchema.safeParse(evidence).success).toBe(true);
+    expect(conversationEvidenceSchema.safeParse(stampConversationObservation(evidence, "generation".repeat(300), 10)).success).toBe(true);
+    expect(boundedConversationEvidence(evidence).coverage).toEqual({ kind: "unknown" });
+    expect(JSON.stringify(native)).toBe(original);
+    expect(conversationEvidenceSchema.safeParse(copilotConversationEvidence({ id: "event", type: "assistant.reasoning", data: { reasoningId: "r".repeat(4_096) } }, "thread")).success).toBe(true);
   });
 });

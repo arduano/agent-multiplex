@@ -30,4 +30,5 @@ export function copilotConversationEvidence(payload: unknown, vendorSessionId: s
 }
 
 function object(value: unknown): Record<string, unknown> | undefined { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined; }
-function text(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 && value.length <= 4_096 ? value : undefined; }
+// Leave room for adapter-owned item prefixes inside the 4,096-character wire ID.
+function text(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 && value.length <= 4_000 ? value : undefined; }

@@ -34,7 +34,7 @@ export interface ConversationOrderResult { readonly ids: readonly string[]; read
 /** Join two ordered runs only at exact item anchors. Unshared rows retain their
  * admitted placement; persistence is not implied by placement in this view.
  * Deltas do not call this function, so work is bounded to page admission. */
-export function mergeConversationOrder(previous: readonly string[], run: readonly string[], placement: "before" | "after" = "after"): ConversationOrderResult {
+export function mergeConversationOrder(previous: readonly string[], run: readonly string[], placement: "before" | "after" = "after", retainedNativeIds: ReadonlySet<string> = new Set()): ConversationOrderResult {
   const incoming = [...new Set(run)];
   const incomingSet = new Set(incoming);
   const positions = new Map(previous.map((id, index) => [id, index]));
@@ -52,6 +52,9 @@ export function mergeConversationOrder(previous: readonly string[], run: readonl
     // New older context precedes an unshared observed prefix at the first
     // anchor. Between anchors retained rows keep their existing placement.
     if (oldIndex === 0) {
+      let retainedPrefix = -1;
+      for (let index = oldIndex; index < anchor.old; index++) if (retainedNativeIds.has(previous[index]!) && !incomingSet.has(previous[index]!)) retainedPrefix = index;
+      for (; oldIndex <= retainedPrefix; oldIndex++) if (!incomingSet.has(previous[oldIndex]!)) result.push(previous[oldIndex]!);
       for (; nextIndex < anchor.next; nextIndex++) result.push(incoming[nextIndex]!);
       for (; oldIndex < anchor.old; oldIndex++) if (!incomingSet.has(previous[oldIndex]!)) result.push(previous[oldIndex]!);
     } else {

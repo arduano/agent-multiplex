@@ -64,12 +64,12 @@ export function boundedConversationEvidence(evidence: ConversationEvidence): Con
 /** Only the live effect owner can stamp an observed mutable update. A history
  * response cannot call this with its arrival time or a fabricated watermark. */
 export function stampConversationObservation(evidence: ConversationEvidence, generation: string, sequence: number): ConversationEvidence {
-  return {
+  return boundedConversationEvidence({
     ...evidence,
     items: evidence.items.map(item => ({ ...item,
       position: item.position.kind === "unknown" ? { kind: "observation", generation, sequence } : item.position,
       revision: { kind: "observation", generation, sequence,
         ...(item.revision.kind === "immutable" ? { recordId: item.revision.recordId } : item.revision.kind === "observation" && item.revision.recordId ? { recordId: item.revision.recordId } : {}) },
     })),
-  };
+  });
 }
