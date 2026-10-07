@@ -7,6 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source/package/direct-Docker qualification; installed acceptance remains pending).
 
+## Architecture candidate `.36` — not deployed
+
+The October 8 implementation consolidates native ownership/termination, Copilot
+attachment observation and durable Recover, explicit stopped inspection,
+conversation evidence, revisioned catalog views and source admission. Live
+consumers require the new capability boundary; historical state migrations stay
+supported independently. All sixteen packages advance together to `.36`.
+
+The supported consumer graph now uses independently signed
+`@arduano/p2prpc-core@0.3.0-renewal.2` owner candidate assets plus the exact
+published Iroh fork. The maintained release verifier uses that same URL/SRI
+contract rather than disposable registry substitutions. This is candidate asset
+distribution, not official semver/main/GitHub Packages promotion. Public CI remains
+blocked by the owner's billing decision; official promotion gates are unchanged.
+Combined qualification/publication and native consumer acceptance are pending.
+Installed personal roles remain unchanged on `.35`; no live/model action.
+
 ## Same-parent bootstrap fallback hotfix.35
 
 Lockstep `.35` retains the reviewed `.34` startup containment and adds a

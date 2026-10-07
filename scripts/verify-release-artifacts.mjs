@@ -13,10 +13,12 @@ import {
   assert,
   assertReviewedIrohLock,
   assertReviewedKoffiLock,
+  assertReviewedP2prpcLock,
   releasePackages,
   releaseVersion,
   repositoryRoot,
   reviewedIrohClosure,
+  reviewedP2prpc,
 } from "./release-config.mjs";
 import { validateReleaseArtifactSet } from "./release-artifact-validation.mjs";
 
@@ -52,9 +54,11 @@ function verifyIsolatedConsumer(subject) {
       );
     const dependencies = {
       ...frameworkDependencies,
+      [reviewedP2prpc.name]: reviewedP2prpc.url,
       ...Object.fromEntries(reviewedIrohClosure.map(({ name, url }) => [name, url])),
     };
     const overrides = {
+      [reviewedP2prpc.name]: `$${reviewedP2prpc.name}`,
       ...Object.fromEntries(reviewedIrohClosure.map(({ name }) => [name, `$${name}`])),
       koffi: "3.2.1",
     };
@@ -108,6 +112,7 @@ function verifyIsolatedConsumer(subject) {
     const lock = JSON.parse(readFileSync(resolve(directory, "package-lock.json"), "utf8"));
     assertReviewedIrohLock(lock);
     assertReviewedKoffiLock(lock);
+    assertReviewedP2prpcLock(lock);
 
     if (subject.workspace.startsWith("packages/") || subject.workspace === "apps/web") {
       writeFileSync(

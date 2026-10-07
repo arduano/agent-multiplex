@@ -1,3 +1,4 @@
+import { assertReviewedP2prpcLock, reviewedP2prpc } from "./release-config.mjs";
 import {
   existsSync,
   readFileSync,
@@ -144,7 +145,7 @@ for (const dockerfilePath of maintainedDockerBuilds) {
 const transportManifest = readJson("packages/transport-p2prpc/package.json");
 const p2prpcVersion = transportManifest.dependencies?.["@arduano/p2prpc-core"];
 assert(
-  p2prpcVersion === "0.3.0-renewal.1",
+  p2prpcVersion === reviewedP2prpc.version,
   "@arduano/p2prpc-core must remain pinned to the exact independently released transport version",
 );
 assert(
@@ -152,13 +153,9 @@ assert(
     p2prpcVersion,
   "the lockfile must preserve the transport's exact @arduano/p2prpc-core pin",
 );
-const lockedP2prpc = lockfile.packages?.["node_modules/@arduano/p2prpc-core"];
-assert(
-  lockedP2prpc?.version === p2prpcVersion &&
-    typeof lockedP2prpc.resolved === "string" &&
-    lockedP2prpc.resolved.startsWith("https://npm.pkg.github.com/"),
-  `the lockfile must resolve @arduano/p2prpc-core@${p2prpcVersion} from GitHub Packages`,
-);
+// The supported consumer uses the exact signed owner artifact; this structural
+// gate does not certify official CI/main/registry promotion.
+assertReviewedP2prpcLock(lockfile);
 
 console.log(
   `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v6 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,

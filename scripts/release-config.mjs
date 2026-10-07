@@ -54,6 +54,24 @@ export const reviewedIrohClosure = Object.freeze([
     integrity: "sha512-LI6vNhKQQZBJV+pC3w/yNxXQoP+pMpmYVHrOo9Y3IHFbMnvkWhV1qzArOn34lQ8JU/pbEMdHVHgZYwmTFnDIDQ==",
   }),
 ]);
+/** The independent transport is a separately signed owner candidate asset.
+ * This consumer contract grants no official CI/registry promotion claim. */
+export const reviewedP2prpc = Object.freeze({
+  name: "@arduano/p2prpc-core", version: "0.3.0-renewal.2",
+  url: "https://github.com/arduano/p2prpc/releases/download/owner-candidate-2026-10-08.1/arduano-p2prpc-core-0.3.0-renewal.2.tgz",
+  integrity: "sha512-TsJawNJPRqY/ejjHJrXiap9FC0nkTL+8pPd3x57nfI2divymut2l+cj+aSi9q1uUG+qUX3SbElYMXj0ELiTJiA==",
+});
+export function assertReviewedP2prpcLock(lock) {
+  const { name, version, url, integrity } = reviewedP2prpc;
+  assert(lock.packages?.[""]?.dependencies?.[name] === url, "consumer transport root differs from reviewed URL");
+  for (const [path, entry] of Object.entries(lock.packages ?? {})) {
+    if (path === `node_modules/${name}` || path.endsWith(`/node_modules/${name}`)) {
+      assert(entry.version === version && entry.resolved === url && entry.integrity === integrity,
+        "consumer transport differs from reviewed artifact");
+    }
+  }
+  assert(lock.packages?.[`node_modules/${name}`], "reviewed consumer transport missing");
+}
 export const reviewedKoffi = Object.freeze({
   version: "3.2.1",
   integrity: "sha512-0qE3lZ8jllRqPN4Ob6Ajl7c2bJSJDhQWuKLGP5hIEpHLllJWv1ydHFMhHmHc5p/W9GticKVDbYzZd7TBoQ4CZg==",
