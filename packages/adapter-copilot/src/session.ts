@@ -1,3 +1,4 @@
+import { copilotConversationEvidence } from "./conversation.js";
 import type { AdapterNativeHistoryResult, AdapterNativeStateResult } from "@arduano/agent-multiplex-runtime-node-core";
 import type {
   ElicitationResult,
@@ -11,6 +12,8 @@ import {
   type AdapterEvent,
   AdapterOutcomeUnknownError,
   AdapterNativeStateReadError,
+  CopilotAttachmentDriver,
+  type CopilotSnapshotTicket,
   AdapterNativeStateValidationError,
   type AdapterSession,
 } from "@arduano/agent-multiplex-runtime-node-core";
@@ -125,6 +128,7 @@ interface PendingPermission {
  * inventing a second transcript representation.
  */
 export class CopilotSessionBridge {
+  constructor(private readonly vendorSessionId?: string) {}
   readonly #listeners = new Set<(event: AdapterEvent) => void>();
   readonly #buffer: AdapterEvent[] = [];
   readonly #pending = new Set<PendingBridgeInteraction>();
@@ -148,23 +152,13 @@ export class CopilotSessionBridge {
   #modeChanged: (() => void) | undefined;
   #closed = false;
   #status: SessionRuntimeStatus = "idle";
-  #activityRevision = 0;
-  #taskRevision = 0;
-  #queueRevision = 0;
-  #agentsRevision = 0;
+  public readonly observationDriver = new CopilotAttachmentDriver();
   #awaitingResumeBoundary = false;
   #resumePositiveEvidenceObserved = false;
-  #nativeEventOrdinal = 0;
-  #currentNativeEventOrdinal: number | undefined;
   #permissionMutation: ((lane: string, action: () => Promise<unknown>) => Promise<unknown>) | undefined;
 
   public attachPermissionMutation(run: (lane: string, action: () => Promise<unknown>) => Promise<unknown>): void {
     this.#permissionMutation = run;
-  }
-
-  /** Adapter observation fences; native snapshots do not carry a log cursor. */
-  public nativeStateRevision(view: NativeStateRequest["view"]): number {
-    return view === "agents" ? this.#agentsRevision : view === "pendingMessages" ? this.#queueRevision : this.#taskRevision;
   }
 
   /** Fresh creation observes every interaction callback from the beginning.
@@ -196,16 +190,13 @@ export class CopilotSessionBridge {
 
   public nativeEvent(event: SessionEvent): void {
     if (this.#closed) return;
-    const previous = this.#currentNativeEventOrdinal;
-    this.#currentNativeEventOrdinal = ++this.#nativeEventOrdinal;
-    try { this.dispatchNativeEvent(event); }
-    finally { this.#currentNativeEventOrdinal = previous; }
+    this.observationDriver.ingress(() => this.dispatchNativeEvent(event));
   }
 
   private dispatchNativeEvent(event: SessionEvent): void {
-    if (event.type === "session.custom_agents_updated" && eventOwner(event) === undefined) this.#agentsRevision += 1;
-    if (event.type === "session.background_tasks_changed") this.#taskRevision += 1;
-    if (event.type === "pending_messages.modified") this.#queueRevision += 1;
+    if (event.type === "session.custom_agents_updated" && eventOwner(event) === undefined) this.observationDriver.invalidate("agents");
+    if (event.type === "session.background_tasks_changed") this.observationDriver.invalidate("tasks");
+    if (event.type === "pending_messages.modified") this.observationDriver.invalidate("pendingMessages");
     if (this.#awaitingResumeBoundary && (
       event.type === "permission.requested" || event.type === "user_input.requested" ||
       event.type === "elicitation.requested" || event.type === "exit_plan_mode.requested"
@@ -213,6 +204,7 @@ export class CopilotSessionBridge {
     this.emit({
       kind: "native",
       nativeType: event.type,
+      ...(this.vendorSessionId ? { conversation: copilotConversationEvidence(copilotJson(event), this.vendorSessionId) } : {}),
       payload: copilotJson(event),
       ephemeral: event.ephemeral === true,
     });
@@ -399,29 +391,29 @@ export class CopilotSessionBridge {
         (status === "running" || status === "waitingForInput" || status === "error" || status === "stopped")) {
       this.#resumePositiveEvidenceObserved = true;
     }
-    this.#activityRevision += 1;
+    this.observationDriver.invalidate("activity");
     if (this.#status === status) return;
     this.#status = status;
     this.emit({ kind: "status", status });
   }
 
-  public get activityRevision(): number { return this.#activityRevision; }
+  public get activityRevision(): number { return this.observationDriver.version("activity"); }
   public beginMessage(): void {
     this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
   }
   public uncertainMutation(expectedRevision: number): void {
-    if (expectedRevision !== this.#activityRevision) return;
+    if (expectedRevision !== this.observationDriver.version("activity")) return;
     this.setStatus(this.waitingForInput() ? "waitingForInput" : "unknown");
   }
   public observeActivity(value: unknown, expectedRevision: number): void {
-    if (this.#closed || expectedRevision !== this.#activityRevision) return;
+    if (this.#closed || expectedRevision !== this.observationDriver.version("activity")) return;
     if (!isObject(value) || typeof value.hasActiveWork !== "boolean") { this.activityUnavailable(expectedRevision); return; }
     this.setStatus(this.waitingForInput() ? "waitingForInput" : value.hasActiveWork ? "running" : "idle");
     this.emit({ kind: "lifecycle", fact: { type: "sessionActivityObserved", active: value.hasActiveWork } });
   }
 
   public activityUnavailable(expectedRevision: number): void {
-    if (this.#closed || expectedRevision !== this.#activityRevision) return;
+    if (this.#closed || expectedRevision !== this.observationDriver.version("activity")) return;
     this.emit({ kind: "lifecycle", fact: { type: "sessionActivityUnavailable" } });
     if (!this.waitingForInput() && (this.#status === "running" || this.#status === "idle")) this.setStatus("unknown");
   }
@@ -469,6 +461,7 @@ export class CopilotSessionBridge {
   public close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    this.observationDriver.retire();
     for (const pending of this.#pending) {
       if (!pending.settled) {
         pending.settled = true;
@@ -539,7 +532,7 @@ export class CopilotSessionBridge {
         const decision = permissionResponse(response);
         if (decision.kind === "no-result") throw new TypeError("A permission decision is required");
         pending.resolving = true;
-        const activityRevision = this.#activityRevision;
+        const activityRevision = this.observationDriver.version("activity");
         let result: unknown;
         try {
           const action = () => rpc.handlePendingPermissionRequest({ requestId, result: decision });
@@ -563,7 +556,7 @@ export class CopilotSessionBridge {
         }
         this.#permissions.delete(nativeRequestId);
         this.rememberCompletedPermission(nativeRequestId);
-        if (!pending.child && activityRevision === this.#activityRevision) this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
+        if (!pending.child && activityRevision === this.observationDriver.version("activity")) this.setStatus(this.waitingForInput() ? "waitingForInput" : "running");
       },
     });
   }
@@ -597,9 +590,10 @@ export class CopilotSessionBridge {
 
   private emit(event: AdapterEvent): void {
     if (this.#closed) return;
-    if (this.#currentNativeEventOrdinal !== undefined) {
+    const ordinal = this.observationDriver.currentNativeEventOrdinal;
+    if (ordinal !== undefined) {
       // Queue byte admission continues measuring the exact preexisting envelope.
-      Object.defineProperty(event, "diagnosticNativeEventOrdinal", { value: this.#currentNativeEventOrdinal });
+      Object.defineProperty(event, "diagnosticNativeEventOrdinal", { value: ordinal });
     }
     if (this.#listeners.size === 0) {
       this.#buffer.push(event);
@@ -639,6 +633,7 @@ export class CopilotAdapterSession implements AdapterSession {
     this.runtimeEpoch = options.runtimeEpoch;
     this.#native = options.native;
     this.#bridge = options.bridge;
+    this.copilotObservationDriver = options.bridge.observationDriver;
     this.#settings = options.settings;
     this.#onStopped = options.onStopped;
     this.#reads = options.reads ?? new CopilotReadRequests();
@@ -660,6 +655,7 @@ export class CopilotAdapterSession implements AdapterSession {
   public readonly cwd: string | null;
   public readonly runtimeEpoch: RuntimeEpoch;
   public readonly incidentTraceAttachmentId?: number;
+  public readonly copilotObservationDriver: CopilotAttachmentDriver;
 
   public status(): SessionRuntimeStatus {
     return this.#bridge.status();
@@ -908,12 +904,15 @@ export class CopilotAdapterSession implements AdapterSession {
       if (typeof eventLog?.read !== "function") throw new Error(`Copilot ${request.native.view === "primary" ? "primary" : "subagent"} history is unavailable on this native session`);
       const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
       const readScoped = request.native.view === "subagent" ? readSubagentHistory : readPrimaryHistory;
-      return readScoped(this.vendorSessionId, request, async input => {
+      const result = await readScoped(this.vendorSessionId, request, async input => {
         const lane = input.agentIds ? `subagentHistory:${input.agentIds[0]}` : "primaryHistory";
         const result = await this.read(lane, JSON.stringify(input), () => eventLog.read(input), deadlineAt);
         this.assertActive();
         return result;
       });
+      return { ...result, conversation: copilotConversationEvidence(result.payload, this.vendorSessionId, {
+        history: true, ...(result.sortDirection ? { sortDirection: result.sortDirection } : {}), view: request.native.view === "primary" ? "primary" : "child",
+      }) };
     }
     if (request.native?.view !== undefined) throw new TypeError("Unsupported Copilot native history view");
 
@@ -963,6 +962,7 @@ export class CopilotAdapterSession implements AdapterSession {
       harness: "copilot",
       vendorSessionId: this.vendorSessionId,
       payload, sortDirection,
+      conversation: copilotConversationEvidence(payload, this.vendorSessionId, { history: true, sortDirection, view: "all" }),
       ...(complete ? {} : { nextCursor: `${descending ? REVERSE_HISTORY_CURSOR_PREFIX : HISTORY_CURSOR_PREFIX}${position}` }),
       complete,
       ...(messageDeliveryFacts.length ? { messageDeliveryFacts } : {}),
@@ -975,31 +975,31 @@ export class CopilotAdapterSession implements AdapterSession {
     if (request.view === "agents") {
       const agent = this.#native.rpc.agent;
       if (typeof agent?.list !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot agent registry observation is unavailable");
-      const revision = this.#bridge.nativeStateRevision("agents");
-      const value = await this.read("agents", String(revision), () => agent.list({ includeBuiltInAgents: false, includePrompt: false }));
-      this.assertActive();
-      if (revision !== this.#bridge.nativeStateRevision("agents")) {
-        throw new AdapterNativeStateReadError("snapshotInvalidated", "Copilot agents snapshot was invalidated during the native read");
-      }
-      return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: agentsSnapshot(value) };
+      const ticket = this.copilotObservationDriver.capture("agents");
+      try {
+        const value = await this.read("agents", String(ticket.version), () => agent.list({ includeBuiltInAgents: false, includePrompt: false }));
+        this.assertActive();
+        return this.copilotObservationDriver.certify(ticket,
+          { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: agentsSnapshot(value) });
+      } catch (error) { this.copilotObservationDriver.rethrow(ticket, error); }
     }
     if (request.view !== "pendingMessages") {
       const tasks = this.#native.rpc.tasks;
       let value: unknown;
+      let ticket: CopilotSnapshotTicket | undefined;
       switch (request.view) {
         case "tasks": {
           if (typeof tasks?.list !== "function" || typeof tasks.refresh !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot task observation is unavailable");
           const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
-          const observation = await this.read("tasks", String(this.#bridge.nativeStateRevision("tasks")), async () => {
+          const observation = await this.read("tasks", String(this.copilotObservationDriver.version("tasks")), async () => {
             await tasks.refresh();
             this.assertActive();
             if (Date.now() >= deadlineAt) throw new AdapterNativeStateReadError("nativeReadTimedOut", "Copilot task observation timed out before listing refreshed tasks");
-            const revision = this.#bridge.nativeStateRevision("tasks");
-            return { revision, payload: await tasks.list() };
+            const captured = this.copilotObservationDriver.capture("tasks");
+            try { return { ticket: captured, payload: await tasks.list() }; }
+            catch (error) { this.copilotObservationDriver.rethrow(captured, error); }
           }, deadlineAt);
-          if (observation.revision !== this.#bridge.nativeStateRevision("tasks")) {
-            throw new AdapterNativeStateReadError("snapshotInvalidated", "Copilot task snapshot was invalidated during the native read");
-          }
+          ticket = observation.ticket;
           value = observation.payload;
           break;
         }
@@ -1015,30 +1015,36 @@ export class CopilotAdapterSession implements AdapterSession {
         default: throw new TypeError("Unsupported Copilot native state view");
       }
       this.assertActive();
-      return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: taskSnapshot(request.view, value) };
+      try {
+        const result = { harness: "copilot" as const, vendorSessionId: this.vendorSessionId, payload: taskSnapshot(request.view, value) };
+        return ticket ? this.copilotObservationDriver.certify(ticket, result) : result;
+      } catch (error) {
+        if (ticket) this.copilotObservationDriver.rethrow(ticket, error);
+        throw error;
+      }
     }
     const queue = this.#native.rpc.queue;
     if (typeof queue?.pendingItems !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot pending queue observation is unavailable");
-    const revision = this.#bridge.nativeStateRevision("pendingMessages");
-    const value = await this.read("pendingMessages", String(revision), () => queue.pendingItems());
-    this.assertActive();
-    if (revision !== this.#bridge.nativeStateRevision("pendingMessages")) {
-      throw new AdapterNativeStateReadError("snapshotInvalidated", "Copilot pending queue snapshot was invalidated during the native read");
-    }
-    if (!isObject(value) || !Array.isArray(value.items) || !Array.isArray(value.steeringMessages) ||
-      value.items.some(item => !isObject(item) || typeof item.id !== "string" || !item.id || typeof item.kind !== "string" ||
-        typeof item.displayText !== "string" || typeof item.agentMode !== "string" || item.messageId !== undefined && typeof item.messageId !== "string") ||
-      value.steeringMessages.some(item => typeof item !== "string") || value.inFlightSteeringCount !== undefined &&
-        (!Number.isInteger(value.inFlightSteeringCount) || (value.inFlightSteeringCount as number) < 0 || (value.inFlightSteeringCount as number) > value.steeringMessages.length)) {
-      throw new AdapterNativeStateValidationError("snapshotMalformed");
-    }
-    let wireBytes: number;
-    try { wireBytes = jsonWireByteUpperBound(value); }
-    catch { throw new AdapterNativeStateValidationError("snapshotWireInvalid"); }
-    if (value.items.length + value.steeringMessages.length > 1_000 || wireBytes + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
-      throw new AdapterNativeStateValidationError("snapshotTooLarge");
-    }
-    return { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: copilotJson(value) };
+    const ticket = this.copilotObservationDriver.capture("pendingMessages");
+    try {
+      const value = await this.read("pendingMessages", String(ticket.version), () => queue.pendingItems());
+      this.assertActive();
+      if (!isObject(value) || !Array.isArray(value.items) || !Array.isArray(value.steeringMessages) ||
+        value.items.some(item => !isObject(item) || typeof item.id !== "string" || !item.id || typeof item.kind !== "string" ||
+          typeof item.displayText !== "string" || typeof item.agentMode !== "string" || item.messageId !== undefined && typeof item.messageId !== "string") ||
+        value.steeringMessages.some(item => typeof item !== "string") || value.inFlightSteeringCount !== undefined &&
+          (!Number.isInteger(value.inFlightSteeringCount) || (value.inFlightSteeringCount as number) < 0 || (value.inFlightSteeringCount as number) > value.steeringMessages.length)) {
+        throw new AdapterNativeStateValidationError("snapshotMalformed");
+      }
+      let wireBytes: number;
+      try { wireBytes = jsonWireByteUpperBound(value); }
+      catch { throw new AdapterNativeStateValidationError("snapshotWireInvalid"); }
+      if (value.items.length + value.steeringMessages.length > 1_000 || wireBytes + 256 > NATIVE_PAYLOAD_MAX_BYTES) {
+        throw new AdapterNativeStateValidationError("snapshotTooLarge");
+      }
+      return this.copilotObservationDriver.certify(ticket,
+        { harness: "copilot", vendorSessionId: this.vendorSessionId, payload: copilotJson(value) });
+    } catch (error) { this.copilotObservationDriver.rethrow(ticket, error); }
   }
 
   private read<T>(method: string, identity: string, action: () => Promise<T>, deadlineAt?: number): Promise<T> {

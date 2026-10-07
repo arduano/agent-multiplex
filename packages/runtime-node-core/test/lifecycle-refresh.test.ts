@@ -26,6 +26,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RuntimeNodeService,
+  CopilotAttachmentDriver,
   RuntimeNodeStore,
   RuntimeLifecycleJournal,
   AdapterOutcomeUnknownError,
@@ -53,6 +54,7 @@ function deferred<T>(): Deferred<T> {
 
 class RefreshSession implements AdapterSession {
   public readonly harness = "copilot" as const;
+  public readonly copilotObservationDriver = new CopilotAttachmentDriver();
   public readonly adapterScopeId = adapterScopeIdSchema.parse("lifecycle-refresh-test");
   public readonly runtimeEpoch = newRuntimeEpoch();
   readonly #listeners = new Set<(event: AdapterEvent) => void>();
@@ -70,13 +72,18 @@ class RefreshSession implements AdapterSession {
     return () => this.#listeners.delete(listener);
   }
   public emit(event: AdapterEvent): void {
+    if (event.kind === "lifecycle" && event.fact.type === "tasksInvalidated") this.copilotObservationDriver.invalidate("tasks");
+    if (event.kind === "lifecycle" && event.fact.type === "queueInvalidated") this.copilotObservationDriver.invalidate("pendingMessages");
     for (const listener of [...this.#listeners]) listener(event);
   }
   public execute(_command: HarnessCommand): Promise<JsonValue | undefined> {
     return Promise.resolve(undefined);
   }
-  public readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
-    return this.read(request);
+  public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
+    const view = request.view === "pendingMessages" ? "pendingMessages" : request.view === "agents" ? "agents" : "tasks";
+    const ticket = this.copilotObservationDriver.capture(view);
+    try { return this.copilotObservationDriver.certify(ticket, { ...await this.read(request) }); }
+    catch (error) { this.copilotObservationDriver.rethrow(ticket, error); }
   }
   public readNativeHistory(_request: NativeHistoryRequest): Promise<NativeHistoryResult> {
     return Promise.reject(new Error("lifecycle refresh must not read history"));
@@ -593,7 +600,7 @@ describe("server-owned Copilot lifecycle refresh", () => {
     expect(maximumReads).toBe(1);
   });
 
-  it("hydrates both views on activation and follows a refresh-time invalidation once", async () => {
+  it("hydrates both views on activation and follows a list-time invalidation once", async () => {
     const reads: NativeStateRequest[] = [];
     let taskReads = 0;
     const f = await fixture(async (session, request) => {

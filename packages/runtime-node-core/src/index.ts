@@ -1,4 +1,5 @@
 export * from "./adapter.js";
+export * from "./copilot-attachment-driver.js";
 export * from "./native-owner.js";
 export * from "./native-images.js";
 export * from "./native-event-diagnostics.js";

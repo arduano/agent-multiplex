@@ -41,6 +41,7 @@ import type {
   MetadataOperationRecord,
   ResolveInteractionInput,
   ResumeCommand,
+  RecoverCommand,
   SessionId,
   RuntimeNodeEventCursor,
   RuntimeNodeEventItem,
@@ -182,6 +183,10 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
     });
   }
 
+  public recover(command: RecoverCommand): Promise<CommandRecord> {
+    return this.peer.rpc.sessions.recover.mutate({ runtimeNodeBootId: this.runtimeNodeBootId, command });
+  }
+
   public resume(command: ResumeCommand): Promise<CommandRecord> {
     return this.peer.rpc.sessions.resume.mutate({
       runtimeNodeBootId: this.runtimeNodeBootId,
@@ -228,6 +233,17 @@ export class P2PRuntimeNodeConnection implements RuntimeNodeConnection {
     request: NativeStateRequest,
   ): Promise<NativeStateResult> {
     return this.peer.rpc.sessions.readNativeState.query({
+      runtimeNodeBootId: this.runtimeNodeBootId,
+      sessionId,
+      request,
+    });
+  }
+
+  public inspectNativeHistory(
+    sessionId: SessionId,
+    request: NativeHistoryRequest,
+  ): Promise<NativeHistoryResult> {
+    return this.peer.rpc.sessions.inspectNativeHistory.mutate({
       runtimeNodeBootId: this.runtimeNodeBootId,
       sessionId,
       request,

@@ -35,6 +35,7 @@ import type {
   NativeModel,
   ResolveInteractionInput,
   ResumeCommand,
+  RecoverCommand,
   RuntimeNodeBootId,
   RuntimeNodeEventItem,
   RuntimeNodeId,
@@ -76,6 +77,7 @@ export interface RuntimeNodeConnection extends ImagePort {
   createLaunch(request: LaunchRequest): Promise<LaunchRecord>;
   getLaunch(launchId: LaunchId): Promise<LaunchRecord | null>;
   listLaunches(query: LaunchListInput): Promise<LaunchListPage>;
+  recover?(command: RecoverCommand): Promise<CommandRecord>;
   resume(command: ResumeCommand): Promise<CommandRecord>;
   stop(command: StopCommand): Promise<CommandRecord>;
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
@@ -83,6 +85,7 @@ export interface RuntimeNodeConnection extends ImagePort {
   execute(command: CommandEnvelope): Promise<CommandRecord>;
   readLifecycle(sessionId: SessionId): Promise<RuntimeLifecycleProjection>;
   readNativeState?(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult>;
+  inspectNativeHistory?(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   getTerminal?(input: TerminalGetInput): Promise<TerminalDescriptor | null>;
   openTerminal?(input: TerminalOpenInput): Promise<TerminalOpenResult>;
@@ -126,6 +129,7 @@ export interface ChildControlNodeConnection extends ImagePort {
   listLaunches(query: LaunchListInput): Promise<LaunchListPage>;
   searchSessions(query: SessionSearchInput): Promise<SessionSearchPage>;
   getSession(sessionId: SessionId): Promise<SessionRecord | null>;
+  recover?(command: RecoverCommand): Promise<CommandRecord>;
   resume(command: ResumeCommand): Promise<CommandRecord>;
   stop(command: StopCommand): Promise<CommandRecord>;
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
@@ -133,6 +137,7 @@ export interface ChildControlNodeConnection extends ImagePort {
   execute(command: CommandEnvelope): Promise<CommandRecord>;
   readLifecycle(sessionId: SessionId): Promise<SessionLifecycleView>;
   readNativeState?(sessionId: SessionId, request: NativeStateRequest): Promise<NativeStateResult>;
+  inspectNativeHistory?(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   getTerminal?(input: TerminalGetInput): Promise<TerminalDescriptor | null>;
   openTerminal?(input: TerminalOpenInput): Promise<TerminalOpenResult>;

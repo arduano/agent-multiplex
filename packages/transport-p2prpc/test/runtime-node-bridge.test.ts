@@ -16,6 +16,22 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 describe("P2PRuntimeNodeConnection", () => {
+  it("routes recovery and explicit inspection as boot-fenced mutations, leaving ordinary history a read", async () => {
+    const runtimeNodeId = newRuntimeNodeId(), runtimeNodeBootId = newRuntimeNodeBootId(), sessionId = newSessionId();
+    const recover = vi.fn(async () => ({ state: "started" })), inspect = vi.fn(async () => ({ complete: true })), read = vi.fn(async () => ({ complete: true }));
+    const endpointId = "runtime-recovery-endpoint";
+    const connection = new P2PRuntimeNodeConnection(runtimeNodeId, runtimeNodeBootId, endpointId,
+      { identity: { id: endpointId }, principal: { id: endpointId }, rpc: { sessions: {
+        recover: { mutate: recover }, inspectNativeHistory: { mutate: inspect }, readNativeHistory: { query: read },
+      } } } as never, endpointId);
+    const command = { operation: "recover" as const, commandId: newCommandId(), payloadHash: "original-recovery", sessionId,
+      runtimeNodeId, bindingRevision: 1, expectedRuntimeEpoch: newRuntimeEpoch() };
+    const request = { harness: "copilot" as const, includeTurns: true, limit: 10 };
+    await connection.recover(command); await connection.inspectNativeHistory(sessionId, request); await connection.readNativeHistory(sessionId, request);
+    expect(recover).toHaveBeenCalledExactlyOnceWith({ runtimeNodeBootId, command });
+    expect(inspect).toHaveBeenCalledExactlyOnceWith({ runtimeNodeBootId, sessionId, request });
+    expect(read).toHaveBeenCalledExactlyOnceWith({ runtimeNodeBootId, sessionId, request });
+  });
   it("forwards runtime lifecycle and command observation reads with the boot fence", async () => {
     const runtimeNodeBootId = newRuntimeNodeBootId();
     const sessionId = newSessionId();

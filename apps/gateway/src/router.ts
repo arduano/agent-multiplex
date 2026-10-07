@@ -244,6 +244,10 @@ export function createAccessGatewayRouter(
         .input(accessContract.sessions.refresh.input)
         .output(accessContract.sessions.refresh.output)
         .mutation(({ input }) => guarded(() => projection.refresh(input.runtimeNodeId))),
+      recover: agentControl
+        .input(accessContract.sessions.recover.input)
+        .output(accessContract.sessions.recover.output)
+        .mutation(({ input }) => guarded(() => projection.recover(input))),
       resume: agentControl
         .input(accessContract.sessions.resume.input)
         .output(accessContract.sessions.resume.output)
@@ -270,6 +274,10 @@ export function createAccessGatewayRouter(
         .query(({ input }) =>
           guarded(() => projection.readNativeState(input.sessionId, input.request)),
         ),
+      inspectNativeHistory: agentControl
+        .input(accessContract.sessions.inspectNativeHistory.input)
+        .output(accessContract.sessions.inspectNativeHistory.output)
+        .mutation(({ input }) => guarded(() => projection.inspectNativeHistory(input.sessionId, input.request))),
       readNativeHistory: read
         .input(accessContract.sessions.readNativeHistory.input)
         .output(accessContract.sessions.readNativeHistory.output)

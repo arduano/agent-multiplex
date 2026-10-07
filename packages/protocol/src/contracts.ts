@@ -23,6 +23,7 @@ import {
   commandEnvelopeSchema,
   commandRecordSchema,
   resumeCommandSchema,
+  recoverCommandSchema,
   stopCommandSchema,
 } from "./command.js";
 import {
@@ -265,6 +266,7 @@ export const accessContract = {
       input: z.object({ runtimeNodeId: runtimeNodeIdSchema }),
       output: inventorySnapshotSchema,
     },
+    recover: { input: recoverCommandSchema, output: commandRecordSchema },
     resume: { input: resumeCommandSchema, output: commandRecordSchema },
     stop: { input: stopCommandSchema, output: commandRecordSchema },
     archive: { input: archiveRequestSchema, output: archiveRecordSchema },
@@ -279,6 +281,13 @@ export const accessContract = {
         request: nativeStateRequestSchema,
       }),
       output: nativeStateResultSchema,
+    },
+    inspectNativeHistory: {
+      input: z.object({
+        sessionId: sessionIdSchema,
+        request: nativeHistoryRequestSchema,
+      }),
+      output: nativeHistoryResultSchema,
     },
     readNativeHistory: {
       input: z.object({
@@ -439,6 +448,12 @@ export const runtimeNodeContract = {
     },
   },
   sessions: {
+    recover: {
+      input: z.object({
+        runtimeNodeBootId: runtimeNodeBootIdSchema, command: recoverCommandSchema,
+      }),
+      output: commandRecordSchema,
+    },
     resume: {
       input: z.object({
         runtimeNodeBootId: runtimeNodeBootIdSchema,
@@ -471,6 +486,14 @@ export const runtimeNodeContract = {
         request: nativeStateRequestSchema,
       }),
       output: nativeStateResultSchema,
+    },
+    inspectNativeHistory: {
+      input: z.object({
+        runtimeNodeBootId: runtimeNodeBootIdSchema,
+        sessionId: sessionIdSchema,
+        request: nativeHistoryRequestSchema,
+      }),
+      output: nativeHistoryResultSchema,
     },
     readNativeHistory: {
       input: z.object({
@@ -811,6 +834,10 @@ export const controlNodeLinkContract = {
       }),
       output: inventorySnapshotSchema,
     },
+    recover: {
+      input: controlNodeLinkFenceSchema.extend({ command: recoverCommandSchema }),
+      output: commandRecordSchema,
+    },
     resume: {
       input: controlNodeLinkFenceSchema.extend({ command: resumeCommandSchema }),
       output: commandRecordSchema,
@@ -833,6 +860,13 @@ export const controlNodeLinkContract = {
         request: nativeStateRequestSchema,
       }),
       output: nativeStateResultSchema,
+    },
+    inspectNativeHistory: {
+      input: controlNodeLinkFenceSchema.extend({
+        sessionId: sessionIdSchema,
+        request: nativeHistoryRequestSchema,
+      }),
+      output: nativeHistoryResultSchema,
     },
     readNativeHistory: {
       input: controlNodeLinkFenceSchema.extend({

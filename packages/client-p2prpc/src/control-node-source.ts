@@ -33,6 +33,7 @@ import {
   type MetadataPatch,
   type ResolveInteractionInput,
   type ResumeCommand,
+  type RecoverCommand,
   type RuntimeNodeId,
   type SessionId,
   type SessionSearchInput,
@@ -198,6 +199,10 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
       (await this.#access()).sessions.refresh.mutate({ runtimeNodeId }));
   }
 
+  public async recover(command: RecoverCommand) {
+    return this.#mutation(async () => (await this.#access()).sessions.recover.mutate(command));
+  }
+
   public async resume(command: ResumeCommand) {
     return this.#mutation(async () =>
       (await this.#access()).sessions.resume.mutate(command));
@@ -233,6 +238,17 @@ export class P2PControlNodeSourceClient implements ControlNodeSourceClient {
   ): Promise<NativeStateResult> {
     return this.#query(async () =>
       (await this.#access()).sessions.readNativeState.query({
+        sessionId,
+        request,
+      }));
+  }
+
+  public async inspectNativeHistory(
+    sessionId: SessionId,
+    request: NativeHistoryRequest,
+  ) {
+    return this.#mutation(async () =>
+      (await this.#access()).sessions.inspectNativeHistory.mutate({
         sessionId,
         request,
       }));

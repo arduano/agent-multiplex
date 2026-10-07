@@ -95,6 +95,7 @@ import {
   type NativeModel,
   type ResolveInteractionInput,
   type ResumeCommand,
+  type RecoverCommand,
   type RuntimeNodeEventItem,
   type RuntimeNodeFence,
   type RuntimeNodeId,
@@ -1136,6 +1137,16 @@ export class ControlNodeService {
     return promise;
   }
 
+  public recover(command: RecoverCommand): Promise<CommandRecord> {
+    this.#assertOpenBinding(command.sessionId, command.runtimeNodeId, command.bindingRevision);
+    return this.#dispatch(command.commandId, command, () => {
+      const route = this.#route(command.runtimeNodeId);
+      const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(command.runtimeNodeId);
+      if (!owner.recover) throw new ControlNodeCoreError("UNSUPPORTED", "Runtime route does not support recovery");
+      return owner.recover(command);
+    }, true);
+  }
+
   public resume(command: ResumeCommand): Promise<CommandRecord> {
     this.#assertOpenBinding(command.sessionId, command.runtimeNodeId, command.bindingRevision);
     return this.#dispatch(command.commandId, command, () => {
@@ -1220,6 +1231,15 @@ export class ControlNodeService {
         ? this.#child(route).execute(command)
         : this.#runtime(command.runtimeNodeId).execute(command);
     });
+  }
+
+  public inspectNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult> {
+    const session = this.catalog.getSession(sessionId);
+    if (!session || session.catalogState === "archived") throw new ControlNodeCoreError("CONFLICT", "History inspection requires an open retained binding");
+    const route = this.#route(session.runtimeNodeId);
+    const owner = route.immediateChildControlNodeId ? this.#child(route) : this.#runtime(session.runtimeNodeId);
+    if (!owner.inspectNativeHistory) throw new ControlNodeCoreError("UNSUPPORTED", "Runtime does not support explicit history inspection");
+    return owner.inspectNativeHistory(sessionId, request);
   }
 
   public readNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult> {
@@ -1650,7 +1670,7 @@ export class ControlNodeService {
 
   #dispatch(
     id: CommandId,
-    input: ResumeCommand | StopCommand | CommandEnvelope,
+    input: ResumeCommand | StopCommand | RecoverCommand | CommandEnvelope,
     operation: () => Promise<CommandRecord>,
     refreshLifecycle = false,
   ): Promise<CommandRecord> {
@@ -2877,7 +2897,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 
 function assertCommandRequest(
   record: CommandRecord,
-  input: ResumeCommand | StopCommand | CommandEnvelope,
+  input: ResumeCommand | StopCommand | RecoverCommand | CommandEnvelope,
 ): void {
   if (
     record.commandId !== input.commandId ||
@@ -2895,7 +2915,7 @@ function assertCommandRequest(
 
 function assertCommandResponse(
   record: CommandRecord,
-  input: ResumeCommand | StopCommand | CommandEnvelope,
+  input: ResumeCommand | StopCommand | RecoverCommand | CommandEnvelope,
 ): void {
   assertCommandRequest(record, input);
   if (record.state === "received" || record.state === "started") {

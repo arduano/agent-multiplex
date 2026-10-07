@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  stampConversationObservation,
   lifecycleActionAvailability,
   lifecycleProjection,
   lifecycleNativeObservationDegraded,
@@ -70,6 +71,7 @@ import {
   type NativeModel,
   type ResolveInteractionInput,
   type ResumeCommand,
+  type RecoverCommand,
   type SessionId,
   type SessionRecord,
   type SessionBindingRef,
@@ -98,9 +100,6 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 import {
-  ADAPTER_NATIVE_STATE_VALIDATION_REASONS,
-  ADAPTER_NATIVE_STATE_READ_REASONS,
-  AdapterNativeStateReadError,
   AdapterNativeStateValidationError,
   AdapterOutcomeUnknownError,
   AdapterResumeFailureError,
@@ -147,9 +146,6 @@ import { CopilotIncidentTracer, copilotIncidentStateSummary, copilotIncidentRout
   type CopilotIncidentDecisionReason } from "./copilot-incident-trace.js";
 
 const now = (): string => new Date().toISOString();
-const LIFECYCLE_OBSERVATION_RETRY_BASE_MS = 250;
-const LIFECYCLE_OBSERVATION_RETRY_MAX_MS = 30_000;
-const LIFECYCLE_OBSERVATION_STALLED_MS = 45_000;
 
 class RuntimeNodePersistenceError extends Error {
   constructor(cause: unknown) {
@@ -246,32 +242,10 @@ interface ActiveBinding {
   eventOverflowed: boolean;
   queuedInteractions: Set<AdapterInteractionEvent>;
   deferredLifecycle: Map<string, Exclude<AdapterEvent, { kind: "native" | "interaction" }>>;
-  lifecycleObservations: LifecycleObservationCoordinator;
   incidentTrace?: CopilotIncidentTraceBinding;
   eventIngress: WeakMap<AdapterEvent, CopilotIncidentIngress>;
   eventRecent: WeakMap<CopilotIncidentIngress, CopilotIncidentIngress[]>;
   currentIngress: CopilotIncidentIngress | undefined;
-}
-
-type LifecycleRefreshView = "tasks" | "pendingMessages";
-
-interface LifecycleRefreshLane {
-  pending: boolean;
-  failures: number;
-  requestedAt: number;
-  dueAt: number;
-  deadlineRevision: number | undefined;
-  deadlineTimer: ReturnType<typeof setTimeout> | undefined;
-  lastFailure: { readonly revision: number; readonly reason: NonNullable<Extract<CopilotIncidentTraceDetail, { kind: "observation" }>["failureReason"]> } | undefined;
-}
-
-interface LifecycleObservationCoordinator {
-  retired: boolean;
-  running: boolean;
-  generation: number;
-  timer: ReturnType<typeof setTimeout> | undefined;
-  refreshTimer: ReturnType<typeof setInterval> | undefined;
-  lanes: Record<LifecycleRefreshView, LifecycleRefreshLane>;
 }
 
 interface PendingInteraction {
@@ -567,7 +541,10 @@ export class RuntimeNodeService {
       const capabilities = entry.harness === "codex" || entry.harness === "copilot"
         ? [...entry.capabilities, { name: "messages.delivery", version: "v1", experimental: false },
           { name: "messages.deliveryWarnings", version: "v1", experimental: false },
-          { name: "history.active-binding", version: "v1", experimental: false }]
+          { name: "history.active-binding", version: "v1", experimental: false },
+          { name: "history.explicit-inspection", version: "v1", experimental: false },
+          { name: "conversation.evidence", version: "v1", experimental: false },
+          ...(entry.harness === "copilot" ? [{ name: "session.recover", version: "v1", experimental: false }] : [])]
         : entry.capabilities;
       if (!backend || !entry.available) return { ...entry, capabilities };
       return {
@@ -1003,6 +980,56 @@ export class RuntimeNodeService {
     };
   }
 
+  /** One durable command owns Stop -> same-native Resume. Transport/browser
+   * loss cannot cancel the transaction or manufacture a second operation. */
+  public recover(input: RecoverCommand): Promise<CommandRecord> {
+    return this.#admit(() => this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
+      const original = this.#boundSessionForCommand(input, "recover");
+      const active = this.#active.get(input.sessionId);
+      if (original.harness !== "copilot" || !active || original.runtimeEpoch !== input.expectedRuntimeEpoch ||
+        active.session.runtimeEpoch !== input.expectedRuntimeEpoch) {
+        throw new RuntimeNodeProtocolError("FENCED", "Recovery targets a changed native attachment");
+      }
+      await active.events;
+      const current = this.#boundSessionForCommand(input, "recover");
+      if (this.#active.get(input.sessionId) !== active || nativeBindingKey(current) !== nativeBindingKey(original) || current.runtimeEpoch !== input.expectedRuntimeEpoch) {
+        throw new RuntimeNodeProtocolError("FENCED", "Recovery targets a changed native attachment");
+      }
+      const fence = this.#lifecycleFence(input.sessionId, active);
+      const view = fence && lifecycleProjection(this.#lifecycle.read(fence)).view;
+      if (active.session.status() !== "idle" || !view?.actions.stop.available ||
+        view.status === "working" || view.status === "waitingForInput" || view.status === "waitingForBackground" || view.health.state === "healthy") {
+        throw new RuntimeNodeProtocolError("CONFLICT", "Recovery is unavailable for working, waiting or healthy sessions");
+      }
+      const phase = (value: "stopping" | "stopped" | "resuming") => {
+        const receipt = this.#store.getCommand(input.commandId)!;
+        this.#store.putCommand({ ...receipt, result: packNativePayload({ operation: "recover", phase: value }), updatedAt: now() });
+      };
+      const supersededStop = this.#store.startupCopilotStopCommandId(original);
+      phase("stopping");
+      await this.#stopBinding(input, original);
+      phase("stopped");
+      const stopped = this.#boundSessionForCommand(input, "recover");
+      if (nativeBindingKey(stopped) !== nativeBindingKey(original) || stopped.availability !== "resumable" || stopped.runtimeStatus !== "stopped") {
+        throw new RuntimeNodeProtocolError("FENCED", "Recovery lost its original stopped native binding");
+      }
+      // Runtime close fences the next native dispatch even if Stop finished.
+      this.#assertOpen();
+      phase("resuming");
+      await this.#resumeBinding(input, stopped, supersededStop);
+      const resumed = this.#store.getSession(input.sessionId)!;
+      if (nativeBindingKey(resumed) !== nativeBindingKey(original) || !resumed.runtimeEpoch || resumed.runtimeEpoch === input.expectedRuntimeEpoch) {
+        throw new AdapterOutcomeUnknownError("Recovery resume did not prove a fresh attachment to the same native session");
+      }
+      const recoveredBinding = this.#active.get(input.sessionId)!;
+      const recoveredFence = this.#lifecycleFence(input.sessionId, recoveredBinding)!;
+      const recovered = lifecycleProjection(this.#lifecycle.read(recoveredFence)).view;
+      return { operation: "recover", phase: "complete", sessionId: input.sessionId,
+        vendorSessionId: resumed.vendorSessionId, runtimeEpoch: resumed.runtimeEpoch,
+        health: recovered.health.state, status: recovered.status };
+    }));
+  }
+
   public resume(input: ResumeCommand): Promise<CommandRecord> {
     return this.#admit(() => this.#resume(input));
   }
@@ -1012,7 +1039,12 @@ export class RuntimeNodeService {
     // admitted after this Resume while its native request is still pending.
     const bindingAtAdmission = this.#store.getSession(input.sessionId);
     const supersededStop = bindingAtAdmission && this.#store.startupCopilotStopCommandId(bindingAtAdmission);
-    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
+    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input,
+      () => this.#resumeBinding(input, bindingAtAdmission, supersededStop));
+  }
+
+  async #resumeBinding(input: ResumeCommand | RecoverCommand,
+    bindingAtAdmission: RuntimeNodeSessionRecord | undefined, supersededStop: CommandId | undefined): Promise<unknown> {
       const existing = this.#boundSessionForCommand(input, "resume");
       if (bindingAtAdmission && nativeBindingKey(bindingAtAdmission) !== nativeBindingKey(existing)) {
         throw new RuntimeNodeProtocolError("FENCED", "Resume targets a changed native binding");
@@ -1026,6 +1058,7 @@ export class RuntimeNodeService {
       }
       const plan = await this.#resumePlan(existing, "interactive");
       const request = await this.#validateResumeOptions(existing, plan.resumeOptions);
+      this.#assertOpen();
       const session = await plan.backend.adapter.resume(request);
       await this.#validateResumedHandle(existing, request, plan.backend, session);
       if (
@@ -1044,7 +1077,6 @@ export class RuntimeNodeService {
       this.#activate(input.sessionId, session);
       this.#publishSession(record);
       return { sessionId: input.sessionId, vendorSessionId: session.vendorSessionId };
-    });
   }
 
   public stop(input: StopCommand): Promise<CommandRecord> {
@@ -1053,7 +1085,12 @@ export class RuntimeNodeService {
 
   async #stop(input: StopCommand): Promise<CommandRecord> {
     const bindingAtAdmission = this.#store.getSession(input.sessionId);
-    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input, async () => {
+    return this.#journal(input.commandId, input.payloadHash, input.sessionId, input,
+      () => this.#stopBinding(input, bindingAtAdmission), input);
+  }
+
+  async #stopBinding(input: StopCommand | RecoverCommand,
+    bindingAtAdmission: RuntimeNodeSessionRecord | undefined): Promise<unknown> {
       const record = this.#boundSessionForCommand(input, "stop");
       if (bindingAtAdmission && nativeBindingKey(bindingAtAdmission) !== nativeBindingKey(record)) {
         throw new RuntimeNodeProtocolError("FENCED", "Stop targets a changed native binding");
@@ -1096,7 +1133,6 @@ export class RuntimeNodeService {
       await providerContext?.provider.stop?.(providerContext.context);
       this.#store.clearStartupCopilotFailure(record);
       return { sessionId: input.sessionId };
-    }, input);
   }
 
   public execute(input: CommandEnvelope): Promise<CommandRecord> {
@@ -1167,6 +1203,10 @@ export class RuntimeNodeService {
     });
   }
 
+  public inspectNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult> {
+    return this.#admit(() => this.#readNativeHistory(sessionId, request, true));
+  }
+
   public readNativeHistory(
     sessionId: SessionId,
     request: NativeHistoryRequest,
@@ -1210,7 +1250,6 @@ export class RuntimeNodeService {
     }
     if (!active.session.readNativeState) throw new RuntimeNodeProtocolError("UNSUPPORTED", "native state observation is unavailable");
     const lifecycleFence = this.#lifecycleFence(sessionId, active);
-    const observation = recordLifecycle && lifecycleFence ? this.#lifecycle.read(lifecycleFence) : undefined;
     const result = await active.session.readNativeState(request);
     await active.events;
     if (this.#active.get(sessionId) !== active) throw new RuntimeNodeProtocolError("FENCED", "native state binding changed");
@@ -1221,61 +1260,73 @@ export class RuntimeNodeService {
     if (result.harness !== record.harness || result.vendorSessionId !== record.vendorSessionId) {
       throw new RuntimeNodeProtocolError("FENCED", "native state response does not match binding");
     }
+    const driver = request.harness === "copilot" ? active.session.copilotObservationDriver : undefined;
+    const snapshotView = request.harness === "copilot" && (request.view === "tasks" || request.view === "pendingMessages" || request.view === "agents") ? request.view : undefined;
+    if (snapshotView && !driver) throw new RuntimeNodeProtocolError("UNSUPPORTED", "Copilot snapshot requires attachment observation evidence");
+    const snapshot = driver && snapshotView ? driver.accept(snapshotView, result) : undefined;
+    const observation = recordLifecycle && currentFence ? this.#lifecycle.read(currentFence) : undefined;
     let payload: NativePayload;
-    try { payload = packNativePayload(result.payload); }
-    catch (error) {
-      const category = nativePayloadValidationFailure(error);
-      if (request.harness === "copilot" && observation && category !== undefined) throw new AdapterNativeStateValidationError(
-        category === "wireEnvelope" ? "snapshotTooLarge" : "snapshotWireInvalid",
-      );
-      throw error;
-    }
-    if (request.harness === "copilot" && observation) {
-      if (!result.payload || typeof result.payload !== "object" || Array.isArray(result.payload)) {
-        throw new AdapterNativeStateValidationError("projectionMalformed");
+    try {
+      try { payload = packNativePayload(result.payload); }
+      catch (error) {
+        const category = nativePayloadValidationFailure(error);
+        if (request.harness === "copilot" && recordLifecycle && category !== undefined) throw new AdapterNativeStateValidationError(
+          category === "wireEnvelope" ? "snapshotTooLarge" : "snapshotWireInvalid",
+        );
+        throw error;
       }
-      const data = result.payload;
-      if (request.view === "tasks") {
-        if (!Array.isArray(data.tasks)) throw new AdapterNativeStateValidationError("projectionMalformed");
-        let fact: LifecycleFact;
-        try {
-          fact = lifecycleFactSchema.parse({ type: "tasksObserved", revision: observation.tasks.revision,
-            items: data.tasks.map((task) => {
-              const value = task as Record<string, JsonValue>;
-              return { id: value.id, kind: value.type, status: value.status };
-            }) });
-        } catch { throw new AdapterNativeStateValidationError("projectionMalformed"); }
-        this.#appendLifecycle(sessionId, active, fact);
-      }
-      if (request.view === "pendingMessages") {
-        if (!Array.isArray(data.items) || !Array.isArray(data.steeringMessages)) {
+      if (request.harness === "copilot" && observation) {
+        if (!result.payload || typeof result.payload !== "object" || Array.isArray(result.payload)) {
           throw new AdapterNativeStateValidationError("projectionMalformed");
         }
-        let fact: LifecycleFact;
-        try {
-          fact = lifecycleFactSchema.parse({ type: "queueObserved", revision: observation.queue.revision,
-            items: data.items.map((item) => {
-              const value = item as Record<string, JsonValue>;
-              return { id: value.id, ...(typeof value.messageId === "string" ? { messageId: value.messageId } : {}), kind: "queued" };
-            }),
-            // Steering strings have no exact item identity. Preserve only their
-            // count; never synthesize queue IDs from text or array position.
-            unidentifiedSteering: data.steeringMessages.length,
-            inFlightSteering: typeof data.inFlightSteeringCount === "number" ? data.inFlightSteeringCount : null });
-        } catch { throw new AdapterNativeStateValidationError("projectionMalformed"); }
-        this.#appendLifecycle(sessionId, active, fact);
+        const data = result.payload;
+        if (request.view === "tasks") {
+          if (!Array.isArray(data.tasks)) throw new AdapterNativeStateValidationError("projectionMalformed");
+          let fact: LifecycleFact;
+          try {
+            fact = lifecycleFactSchema.parse({ type: "tasksObserved", revision: observation.tasks.revision,
+              items: data.tasks.map((task) => {
+                const value = task as Record<string, JsonValue>;
+                return { id: value.id, kind: value.type, status: value.status };
+              }) });
+          } catch { throw new AdapterNativeStateValidationError("projectionMalformed"); }
+          this.#appendLifecycle(sessionId, active, fact);
+        }
+        if (request.view === "pendingMessages") {
+          if (!Array.isArray(data.items) || !Array.isArray(data.steeringMessages)) {
+            throw new AdapterNativeStateValidationError("projectionMalformed");
+          }
+          let fact: LifecycleFact;
+          try {
+            fact = lifecycleFactSchema.parse({ type: "queueObserved", revision: observation.queue.revision,
+              items: data.items.map((item) => {
+                const value = item as Record<string, JsonValue>;
+                return { id: value.id, ...(typeof value.messageId === "string" ? { messageId: value.messageId } : {}), kind: "queued" };
+              }),
+              // Steering strings have no exact item identity. Preserve only their
+              // count; never synthesize queue IDs from text or array position.
+              unidentifiedSteering: data.steeringMessages.length,
+              inFlightSteering: typeof data.inFlightSteeringCount === "number" ? data.inFlightSteeringCount : null });
+          } catch { throw new AdapterNativeStateValidationError("projectionMalformed"); }
+          this.#appendLifecycle(sessionId, active, fact);
+        }
       }
+    } catch (error) {
+      if (snapshot && driver) driver.rethrow(snapshot, error);
+      throw error;
     }
     // Queue views carry display text, not image attachments or retained history.
     // The ordinary native envelope enforces the bounded response without storage.
-    return { ...result, payload };
+    const packed = { ...result, payload };
+    return snapshot && driver ? driver.certify(snapshot, packed) : packed;
   }
 
   async #readNativeHistory(
     sessionId: SessionId,
     request: NativeHistoryRequest,
+    inspectStopped = false,
   ): Promise<NativeHistoryResult> {
-    const activeOnly = request.native?.activeBindingOnly === true;
+    const activeOnly = !inspectStopped || request.native?.activeBindingOnly === true;
     if (activeOnly && this.#sessionLocks.has(sessionId)) {
       throw new RuntimeNodeProtocolError("CONFLICT", "active history is busy with another binding operation; retry after it settles");
     }
@@ -1894,10 +1945,9 @@ export class RuntimeNodeService {
 
   async #close(): Promise<void> {
     const errors: unknown[] = [];
-    // Copilot SDK caller deadlines cannot cancel upstream attachment/reads.
+    // Native caller deadlines cannot cancel upstream attachment/reads.
     // Retire those caller waits before draining, preserving ownership inside
-    // the backend until its later close proves CLI termination. Other adapters
-    // retain their existing complete-operation drain semantics.
+    // the backend until its later close proves process termination.
     for (const { adapter } of this.#launchRegistry.backends()) {
       try { adapter.beginClose?.(); } catch (error) { errors.push(error); }
     }
@@ -1929,10 +1979,10 @@ export class RuntimeNodeService {
     errors.push(...backendErrors);
     for (const result of sessionCleanup) {
       for (const error of result.stopErrors) {
-        // A timed-out Copilot session disconnect is uncertain until its owning
-        // adapter closes. Successful backend cleanup proves the old CLI owner
+        // A timed-out session disconnect is uncertain until its owning
+        // adapter closes. Successful backend cleanup proves the old owner
         // is gone; an unproved forced stop makes closeBackends fail instead.
-        if (result.harness === "copilot" && error instanceof AdapterOutcomeUnknownError && backendErrors.length === 0) continue;
+        if (error instanceof AdapterOutcomeUnknownError && backendErrors.length === 0) continue;
         errors.push(error);
       }
     }
@@ -2803,7 +2853,7 @@ export class RuntimeNodeService {
       // the shared SDK owner is dead or safe to replace. Do not cancel children
       // or healthy peer sessions. Keep diagnosis/admission honest until fresh
       // observations heal or the owner explicitly chooses Stop/Recover.
-      this.#trace(binding, { kind: "recovery", outcome: "manualRecoveryRequired", generation: binding.lifecycleObservations.generation, diagnosticId });
+      this.#trace(binding, { kind: "recovery", outcome: "manualRecoveryRequired", generation: binding.session.copilotObservationDriver?.generation ?? 0, diagnosticId });
     }
   }
 
@@ -2812,6 +2862,7 @@ export class RuntimeNodeService {
       this.#trace(binding, { kind: "transition", factType: fact.type, outcome: "retiredBinding" });
       return;
     }
+    if (fact.type === "gap") binding.session.copilotObservationDriver?.gap();
     const fence = this.#lifecycleFence(sessionId, binding);
     if (!fence) {
       this.#trace(binding, { kind: "transition", factType: fact.type, outcome: "fenceUnavailable" });
@@ -2857,201 +2908,45 @@ export class RuntimeNodeService {
     if (fence) this.#lifecycle.append(fence, fact);
   }
 
-  #scheduleLifecycleRefresh(
-    sessionId: SessionId,
-    binding: ActiveBinding,
-    view: LifecycleRefreshView,
-  ): void {
-    if (
-      this.#active.get(sessionId) !== binding ||
-      binding.session.harness !== "copilot" ||
-      !binding.session.readNativeState
-    ) {
-      return;
-    }
-    const coordinator = binding.lifecycleObservations;
-    if (coordinator.retired) return;
-    const lane = coordinator.lanes[view];
-    const timestamp = Date.now();
-    lane.pending = true;
-    // This is a no-success deadline, not a per-attempt timeout. Native read
-    // adapters may release the caller while retaining an occupied SDK lane, so
-    // retries and the periodic refresh must not move the watchdog forward.
-    if (lane.requestedAt === 0) {
-      lane.failures = 0;
-      lane.lastFailure = undefined;
-      lane.requestedAt = timestamp;
-      lane.dueAt = timestamp;
-      lane.deadlineTimer = setTimeout(() => {
-        lane.deadlineTimer = undefined;
-        if (coordinator.retired || lane.requestedAt !== timestamp || this.#active.get(sessionId) !== binding) return;
+  #scheduleLifecycleRefresh(sessionId: SessionId, binding: ActiveBinding, view: "tasks" | "pendingMessages"): void {
+    if (binding.session.harness === "copilot" && this.#active.get(sessionId) === binding) binding.session.copilotObservationDriver?.request(view);
+  }
+
+  #observeCopilotAttachment(sessionId: SessionId, binding: ActiveBinding): void {
+    const driver = binding.session.copilotObservationDriver;
+    if (binding.session.harness !== "copilot" || !driver) return;
+    const active = () => !this.#closed && this.#active.get(sessionId) === binding && this.#lifecycleFence(sessionId, binding) !== undefined;
+    driver.observe({
+      active,
+      revision: view => {
         const fence = this.#lifecycleFence(sessionId, binding);
-        if (!fence) return;
+        if (!fence) return undefined;
         const state = this.#lifecycle.read(fence);
-        const currentRevision = view === "tasks" ? state.tasks.revision : state.queue.revision;
-        const revision = lane.deadlineRevision ?? currentRevision;
-        const diagnosticId = newOperationId();
-        this.#trace(binding, { kind: "observation", view, outcome: "stalled", generation: coordinator.generation,
-          revision, currentRevision, failures: Math.max(1, lane.failures + 1), deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt), diagnosticId,
-          ...(revision === currentRevision && lane.lastFailure?.revision === currentRevision ? { failureReason: lane.lastFailure.reason } : {}) });
-        this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
-        this.#appendLifecycle(sessionId, binding, {
-          type: "observationFailed",
-          view: view === "tasks" ? "tasks" : "queue",
-          revision,
-          failures: Math.max(1, lane.failures + 1),
-          diagnosticId,
-          stalled: true,
-        });
-      }, LIFECYCLE_OBSERVATION_STALLED_MS);
-      lane.deadlineTimer.unref?.();
-    }
-    this.#pumpLifecycleObservations(sessionId, binding);
-  }
-
-  #pumpLifecycleObservations(sessionId: SessionId, binding: ActiveBinding): void {
-    const coordinator = binding.lifecycleObservations;
-    if (this.#closed || coordinator.retired || coordinator.running || this.#active.get(sessionId) !== binding) return;
-    if (coordinator.timer) {
-      clearTimeout(coordinator.timer);
-      coordinator.timer = undefined;
-    }
-    const pending = (Object.entries(coordinator.lanes) as Array<[LifecycleRefreshView, LifecycleRefreshLane]>)
-      .filter(([, lane]) => lane.pending)
-      .sort((left, right) => left[1].dueAt - right[1].dueAt || left[0].localeCompare(right[0]));
-    const selected = pending[0];
-    if (!selected) return;
-    const [view, lane] = selected;
-    const delay = Math.max(0, lane.dueAt - Date.now());
-    if (delay > 0) {
-      coordinator.timer = setTimeout(() => {
-        coordinator.timer = undefined;
-        this.#pumpLifecycleObservations(sessionId, binding);
-      }, delay);
-      coordinator.timer.unref?.();
-      return;
-    }
-    lane.pending = false;
-    coordinator.running = true;
-    const generation = ++coordinator.generation;
-    const fence = this.#lifecycleFence(sessionId, binding);
-    const revision = fence === undefined ? undefined
-      : view === "tasks" ? this.#lifecycle.read(fence).tasks.revision : this.#lifecycle.read(fence).queue.revision;
-    if (!fence || revision === undefined) {
-      coordinator.running = false;
-      return;
-    }
-    lane.deadlineRevision = revision;
-    this.#trace(binding, { kind: "observation", view, outcome: "started", generation, revision,
-      failures: lane.failures, deadlineAgeMs: Math.max(0, Date.now() - lane.requestedAt) });
-
-    // This read deliberately runs outside the per-session mutation lock and is
-    // not admitted shutdown work. The SDK has no cancellation signal; fencing
-    // makes a late result inert while stop/close remain able to proceed.
-    const task = this.#readNativeState(sessionId, { harness: "copilot", view }, binding, true);
-    void task.then(
-      () => this.#settleLifecycleObservation(sessionId, binding, view, revision, generation),
-      error => this.#settleLifecycleObservation(sessionId, binding, view, revision, generation, { error }),
-    );
-  }
-
-  #settleLifecycleObservation(
-    sessionId: SessionId,
-    binding: ActiveBinding,
-    view: LifecycleRefreshView,
-    revision: number,
-    generation: number,
-    failure?: { readonly error: unknown },
-  ): void {
-    const failed = failure !== undefined;
-    const coordinator = binding.lifecycleObservations;
-    const lane = coordinator.lanes[view];
-    const deadlineAgeMs = lane.requestedAt === 0 ? 0 : Math.max(0, Date.now() - lane.requestedAt);
-    if (coordinator.retired || this.#active.get(sessionId) !== binding || coordinator.generation !== generation) {
-      this.#trace(binding, { kind: "observation", view, outcome: coordinator.retired || this.#active.get(sessionId) !== binding ? "retiredBinding" : "staleGeneration",
-        generation, revision, failures: lane.failures, deadlineAgeMs });
-      return;
-    }
-    coordinator.running = false;
-    const fence = this.#lifecycleFence(sessionId, binding);
-    if (!fence) {
-      this.#trace(binding, { kind: "observation", view, outcome: "fenceUnavailable", generation, revision, failures: lane.failures, deadlineAgeMs });
-      return;
-    }
-    const state = this.#lifecycle.read(fence);
-    const currentRevision = view === "tasks" ? state.tasks.revision : state.queue.revision;
-    const failureReason = failure === undefined ? undefined
-      : failure.error instanceof AdapterNativeStateValidationError && ADAPTER_NATIVE_STATE_VALIDATION_REASONS.includes(failure.error.reason)
-        ? failure.error.reason
-        : failure.error instanceof AdapterNativeStateReadError && ADAPTER_NATIVE_STATE_READ_REASONS.includes(failure.error.reason)
-          ? failure.error.reason : failure.error instanceof RuntimeNodeProtocolError && failure.error.code === "FENCED"
-            ? "nativeBindingChanged" : "nativeReadFailed";
-    this.#trace(binding, { kind: "observation", view, outcome: currentRevision !== revision ? "staleRevision" : failed ? "failed" : "accepted",
-      generation, revision, currentRevision, failures: lane.failures + (failed ? 1 : 0), deadlineAgeMs,
-      ...(failed && currentRevision === revision ? {
-        failureReason: failureReason!,
-        ...(failure.error instanceof AdapterNativeStateValidationError && failure.error.issues.length > 0 ? { validationIssues: failure.error.issues } : {}),
-      } : {}) });
-    if (currentRevision !== revision) {
-      // The invalidation callback already requested the newer revision. Ensure
-      // it cannot be lost even when a malformed adapter omitted that callback.
-      lane.pending = true;
-      lane.deadlineRevision = undefined;
-      lane.dueAt = Date.now();
-    } else if (failed) {
-      lane.lastFailure = { revision, reason: failureReason! };
-      lane.failures += 1;
-      const stalled = state.nativeAdmission.state === "degraded" ||
-        Date.now() - lane.requestedAt >= LIFECYCLE_OBSERVATION_STALLED_MS;
-      const diagnosticId = newOperationId();
-      if (stalled) this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
-      this.#appendLifecycle(sessionId, binding, {
-        type: "observationFailed",
-        view: view === "tasks" ? "tasks" : "queue",
-        revision,
-        failures: lane.failures,
-        diagnosticId,
-        stalled,
-      });
-      lane.pending = true;
-      lane.dueAt = Date.now() + Math.min(
-        LIFECYCLE_OBSERVATION_RETRY_MAX_MS,
-        LIFECYCLE_OBSERVATION_RETRY_BASE_MS * 2 ** Math.min(30, lane.failures - 1),
-      );
-    } else {
-      if (lane.deadlineTimer) clearTimeout(lane.deadlineTimer);
-      lane.deadlineTimer = undefined;
-      lane.deadlineRevision = undefined;
-      lane.failures = 0;
-      lane.lastFailure = undefined;
-      lane.requestedAt = 0;
-      lane.dueAt = 0;
-      // The same durable state controls admission and the public action view.
-      const recovered = this.#lifecycle.read(fence);
-      if (recovered.nativeAdmission.state === "degraded" &&
-        recovered.tasks.observation.state === "observed" && recovered.queue.observation.state === "observed") {
-        this.#appendLifecycle(sessionId, binding, { type: "nativeObservationRecovered" });
-        this.#trace(binding, { kind: "recovery", outcome: "recovered", generation: coordinator.generation });
-      }
-    }
-    this.#pumpLifecycleObservations(sessionId, binding);
+        return view === "tasks" ? state.tasks.revision : state.queue.revision;
+      },
+      read: view => this.#readNativeState(sessionId, { harness: "copilot", view }, binding, true),
+      trace: detail => this.#trace(binding, detail),
+      failed: ({ view, revision, failures, diagnosticId, stalled }) => {
+        if (!active()) return;
+        const fence = this.#lifecycleFence(sessionId, binding)!;
+        stalled ||= this.#lifecycle.read(fence).nativeAdmission.state === "degraded";
+        if (stalled) this.#markLifecycleObservationDegraded(sessionId, binding, diagnosticId);
+        this.#appendLifecycle(sessionId, binding, { type: "observationFailed", view: view === "tasks" ? "tasks" : "queue",
+          revision, failures, diagnosticId, stalled });
+      },
+      recovered: generation => {
+        if (!active()) return;
+        const state = this.#lifecycle.read(this.#lifecycleFence(sessionId, binding)!);
+        if (state.nativeAdmission.state === "degraded" && state.tasks.observation.state === "observed" && state.queue.observation.state === "observed") {
+          this.#appendLifecycle(sessionId, binding, { type: "nativeObservationRecovered" });
+          this.#trace(binding, { kind: "recovery", outcome: "recovered", generation });
+        }
+      },
+    });
   }
 
   #retireLifecycleObservations(binding: ActiveBinding): void {
-    const coordinator = binding.lifecycleObservations;
-    if (coordinator.retired) return;
-    coordinator.retired = true;
-    this.#trace(binding, { kind: "binding", outcome: "retired" });
-    coordinator.generation += 1;
-    if (coordinator.timer) clearTimeout(coordinator.timer);
-    if (coordinator.refreshTimer) clearInterval(coordinator.refreshTimer);
-    coordinator.timer = undefined;
-    coordinator.refreshTimer = undefined;
-    for (const lane of Object.values(coordinator.lanes)) {
-      lane.pending = false;
-      if (lane.deadlineTimer) clearTimeout(lane.deadlineTimer);
-      lane.deadlineTimer = undefined;
-    }
+    if (binding.session.copilotObservationDriver?.retire()) this.#trace(binding, { kind: "binding", outcome: "retired" });
   }
 
   #publishLaunch(launch: LaunchRecord): void {
@@ -3291,6 +3186,9 @@ export class RuntimeNodeService {
   }
 
   #activate(sessionId: SessionId, session: AdapterSession): void {
+    if (session.harness === "copilot" && session.readNativeState && !session.copilotObservationDriver) {
+      throw new RuntimeNodeProtocolError("UNSUPPORTED", "Copilot native state requires its exact attachment observation driver");
+    }
     // A new epoch starts uncertified. Preserve the prior fixed diagnostic only
     // in the private trace before lifecycle.read replaces the old reduced row.
     let previousBindingGap: NativeGapDiagnostic | undefined;
@@ -3332,23 +3230,13 @@ export class RuntimeNodeService {
       currentIngress: undefined,
       ...(session.harness === "copilot" && this.#incidentTracer
         ? { incidentTrace: this.#incidentTracer.binding(sessionId, session.incidentTraceAttachmentId) } : {}),
-      lifecycleObservations: {
-        retired: false,
-        running: false,
-        generation: 0,
-        timer: undefined,
-        refreshTimer: undefined,
-        lanes: {
-          tasks: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined, lastFailure: undefined },
-          pendingMessages: { pending: false, failures: 0, requestedAt: 0, dueAt: 0, deadlineRevision: undefined, deadlineTimer: undefined, lastFailure: undefined },
-        },
-      },
       unsubscribe: () => undefined,
     };
     this.#active.set(sessionId, binding);
     this.#trace(binding, { kind: "binding", outcome: "activated",
       ...(previousBindingGap === undefined ? {} : { previousBindingGap: Object.freeze({ ...previousBindingGap }) }) });
     try {
+      this.#observeCopilotAttachment(sessionId, binding);
       const unsubscribe = session.subscribe((event) =>
         this.#queueAdapterEvent(sessionId, binding, event),
       );
@@ -3358,11 +3246,6 @@ export class RuntimeNodeService {
       if (this.#active.get(sessionId) !== binding) unsubscribe();
       this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
       this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
-      binding.lifecycleObservations.refreshTimer = setInterval(() => {
-        this.#scheduleLifecycleRefresh(sessionId, binding, "tasks");
-        this.#scheduleLifecycleRefresh(sessionId, binding, "pendingMessages");
-      }, 60_000);
-      binding.lifecycleObservations.refreshTimer.unref?.();
     } catch (error) {
       this.#retireLifecycleObservations(binding);
       if (this.#active.get(sessionId) === binding) this.#active.delete(sessionId);
@@ -3583,6 +3466,7 @@ export class RuntimeNodeService {
         sessionId,
         harness: binding.session.harness,
         runtimeEpoch: binding.session.runtimeEpoch,
+        ...(event.conversation ? { conversation: stampConversationObservation(event.conversation, binding.session.runtimeEpoch, binding.sequence) } : {}),
         sequence: binding.sequence++,
         nativeType: event.nativeType,
         payload: payload ?? packNativePayload(event.payload),
@@ -3817,6 +3701,7 @@ export class RuntimeNodeService {
       const uncertain = error instanceof AdapterOutcomeUnknownError || error instanceof LaunchProviderOutcomeUnknownError;
       record = {
         ...record,
+        ...(this.#store.getCommand(commandId)?.result ? { result: this.#store.getCommand(commandId)!.result! } : {}),
         state: uncertain ? "outcomeUnknown" : "failed",
         error: safeCommandError(error, {
           stage: failureStage === "native" && (error instanceof PathPolicyError || error instanceof RuntimeNodeProtocolError || error instanceof RuntimeImageError)

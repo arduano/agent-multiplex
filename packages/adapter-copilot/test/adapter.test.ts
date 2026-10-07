@@ -1,3 +1,4 @@
+import { NativeOwnerTerminationError } from "@arduano/agent-multiplex-runtime-node-core";
 import type {
   ModelInfo,
   ResumeSessionConfig,
@@ -148,6 +149,7 @@ describe("CopilotAgentAdapter", () => {
       const count = diagnostics.length;
       await vi.advanceTimersByTimeAsync(COPILOT_STARTUP_TIMEOUT_MS);
       expect(diagnostics).toHaveLength(count);
+      vi.spyOn(client, "stop").mockImplementation(async () => { child.emit("exit"); return []; });
       await adapter.close();
     } finally { vi.useRealTimers(); }
   });
@@ -166,7 +168,8 @@ describe("CopilotAgentAdapter", () => {
       const describing = adapter.describe();
       await vi.advanceTimersByTimeAsync(10_000);
       expect(await describing).toMatchObject({ available: false });
-      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      const closing = expect(adapter.close()).rejects.toBeInstanceOf(NativeOwnerTerminationError);
+      await vi.advanceTimersByTimeAsync(10_000); await closing;
       expect(diagnostics).toContainEqual(expect.objectContaining({ stage: "nativeTermination", outcome: "unacknowledged",
         failureReason: "nativeTerminationUnproved", childState: "running", childPid: 46 }));
     } finally { vi.useRealTimers(); }
@@ -211,9 +214,10 @@ describe("CopilotAgentAdapter", () => {
       vi.spyOn(client, "stop").mockResolvedValue([new Error("mock graceful-stop failure")]);
       vi.spyOn(client, "forceStop").mockImplementation(async () => { replacement.signalCode = "SIGKILL"; replacement.emit("exit"); });
       const closing = adapter.close();
-      const failed = expect(closing).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      const failed = expect(closing).rejects.toBeInstanceOf(NativeOwnerTerminationError);
       await vi.advanceTimersByTimeAsync(10_000); await failed;
-      expect(original.listenerCount("exit")).toBe(0);
+      expect(original.listenerCount("exit")).toBe(1); // retained owner still observes its eventual exit
+      original.emit("exit"); expect(original.listenerCount("exit")).toBe(0);
     } finally { vi.useRealTimers(); }
   });
 
@@ -291,7 +295,7 @@ describe("CopilotAgentAdapter", () => {
       expect(await adapter.describe()).toMatchObject({ available: false });
       expect(start).toHaveBeenCalledOnce();
       expect(client.forceStops).toBe(0);
-      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      await expect(adapter.close()).rejects.toBeInstanceOf(NativeOwnerTerminationError);
       expect(stop).toHaveBeenCalledOnce();
       release();
       await vi.advanceTimersByTimeAsync(0);
@@ -302,7 +306,7 @@ describe("CopilotAgentAdapter", () => {
       ]));
       // Late cleanup does not turn the failed original close into proof it had
       // completed safely at that earlier time.
-      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      await expect(adapter.close()).rejects.toBeInstanceOf(NativeOwnerTerminationError);
       expect(start).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
   });
@@ -313,7 +317,7 @@ describe("CopilotAgentAdapter", () => {
     const adapter = adapterFor(client);
     const describing = adapter.describe();
     await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
-    await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+    await expect(adapter.close()).rejects.toBeInstanceOf(NativeOwnerTerminationError);
     expect(await describing).toMatchObject({ available: false });
     expect(start).toHaveBeenCalledOnce();
   });
@@ -662,11 +666,11 @@ describe("CopilotAgentAdapter", () => {
       const native = client.sessions.get(session.vendorSessionId)!;
       vi.spyOn(native, "disconnect").mockImplementation(() => new Promise(() => {}));
       const closing = adapter.close();
-      const rejected = expect(closing).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      const rejected = expect(closing).rejects.toBeInstanceOf(NativeOwnerTerminationError);
       await vi.advanceTimersByTimeAsync(10_000);
       await rejected;
       expect(client.forceStops).toBe(1);
-      await expect(adapter.close()).rejects.toThrow("Failed to close Copilot adapter cleanly");
+      await expect(adapter.close()).rejects.toBeInstanceOf(NativeOwnerTerminationError);
       expect(client.forceStops).toBe(1);
     } finally {
       vi.useRealTimers();

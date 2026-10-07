@@ -134,6 +134,13 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
         }),
     }),
     sessions: t.router({
+      recover: t.procedure
+        .input(runtimeNodeContract.sessions.recover.input)
+        .output(runtimeNodeContract.sessions.recover.output)
+        .mutation(({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.recover(input.command).catch(toTRPC);
+        }),
       resume: t.procedure
         .input(runtimeNodeContract.sessions.resume.input)
         .output(runtimeNodeContract.sessions.resume.output)
@@ -172,6 +179,13 @@ export function createRuntimeNodeRouter(service: RuntimeNodeService) {
         .query(async ({ input }) => {
           assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
           return service.readNativeState(input.sessionId, input.request).catch(toTRPC);
+        }),
+      inspectNativeHistory: t.procedure
+        .input(runtimeNodeContract.sessions.inspectNativeHistory.input)
+        .output(runtimeNodeContract.sessions.inspectNativeHistory.output)
+        .mutation(({ input }) => {
+          assertRuntimeNodeBootId(service, input.runtimeNodeBootId);
+          return service.inspectNativeHistory(input.sessionId, input.request).catch(toTRPC);
         }),
       readNativeHistory: t.procedure
         .input(runtimeNodeContract.sessions.readNativeHistory.input)

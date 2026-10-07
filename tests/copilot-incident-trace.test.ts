@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NATIVE_PAYLOAD_MAX_BYTES, emptyMetadataSnapshot, initialLifecycle, newCommandId, newRuntimeEpoch, newRuntimeNodeBootId,
   newRuntimeNodeId, newSessionId } from "@arduano/agent-multiplex-protocol";
-import { CopilotIncidentTracer, RuntimeNodeService, RuntimeNodeStore, copilotIncidentStateSummary,
+import { CopilotAttachmentDriver, CopilotIncidentTracer, RuntimeNodeService, RuntimeNodeStore, copilotIncidentStateSummary,
   type AdapterEvent, type AdapterSession, type AgentAdapter, type CopilotIncidentTraceHook,
   type CopilotIncidentTraceRecord } from "../packages/runtime-node-core/src/index.js";
 import { CopilotAdapterSession, CopilotSessionBridge } from "../packages/adapter-copilot/src/session.js";
@@ -15,6 +15,14 @@ import { copilotOptionalNativeTelemetry } from "../packages/adapter-copilot/src/
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); });
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+
+function observationRead(driver: CopilotAttachmentDriver, read: NonNullable<AdapterSession["readNativeState"]>): NonNullable<AdapterSession["readNativeState"]> {
+  return async request => {
+    const ticket = driver.capture(request.view === "tasks" ? "tasks" : "pendingMessages");
+    try { return driver.certify(ticket, { ...await read(request) }); }
+    catch (error) { driver.rethrow(ticket, error); }
+  };
+}
 
 async function fixture(hook?: CopilotIncidentTraceHook) {
   const directory = mkdtempSync(join(tmpdir(), "copilot-incident-trace-"));
@@ -29,14 +37,15 @@ async function fixture(hook?: CopilotIncidentTraceHook) {
     listModels: async () => [], listSessions: async () => [], spawn: async () => { throw new Error("unused"); },
     resume: async options => {
       const listeners: Array<(event: AdapterEvent) => void> = [];
+      const copilotObservationDriver = new CopilotAttachmentDriver();
       const session: AdapterSession = {
-        harness: "copilot", adapterScopeId: "incident-trace", vendorSessionId: options.vendorSessionId,
+        copilotObservationDriver, harness: "copilot", adapterScopeId: "incident-trace", vendorSessionId: options.vendorSessionId,
         runtimeEpoch: newRuntimeEpoch(), cwd: directory, incidentTraceAttachmentId: sessions.length + 41,
         status: () => "idle", subscribe: listener => { listeners.push(listener); return () => undefined; },
         execute: vi.fn(async () => null), stop: async () => undefined,
         readNativeHistory: async () => ({ harness: "copilot", vendorSessionId: options.vendorSessionId, payload: [] }),
-        readNativeState: async request => ({ harness: "copilot", vendorSessionId: options.vendorSessionId,
-          payload: request.view === "tasks" ? { tasks: [] } : { items: [], steeringMessages: [], inFlightSteeringCount: 0 } }),
+        readNativeState: observationRead(copilotObservationDriver, async request => ({ harness: "copilot", vendorSessionId: options.vendorSessionId,
+          payload: request.view === "tasks" ? { tasks: [] } : { items: [], steeringMessages: [], inFlightSteeringCount: 0 } })),
       };
       sessions.push({ session, listeners });
       return session;
@@ -54,7 +63,11 @@ async function fixture(hook?: CopilotIncidentTraceHook) {
       launchProvenance: null, metadata: emptyMetadataSnapshot(), createdAt: timestamp, updatedAt: timestamp, lastSeenAt: timestamp, lastActivityAt: timestamp });
     await service.resume({ operation: "resume", commandId: newCommandId(), payloadHash: "fixture-resume", ...target });
     const active = sessions.at(-1)!;
-    const emit = (event: AdapterEvent) => active.listeners.forEach(listener => listener(event));
+    const emit = (event: AdapterEvent) => {
+      if (event.kind === "lifecycle" && event.fact.type === "tasksInvalidated") active.session.copilotObservationDriver!.invalidate("tasks");
+      if (event.kind === "lifecycle" && event.fact.type === "queueInvalidated") active.session.copilotObservationDriver!.invalidate("pendingMessages");
+      active.listeners.forEach(listener => listener(event));
+    };
     emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
     await vi.waitFor(() => expect(store.getLifecycle(sessionId)?.queue.observation.state).toBe("observed"));
     return { target, ...active, emit };
@@ -209,8 +222,8 @@ describe("private Copilot incident tracing", () => {
   it("records a late observation and event on the retired attachment without advancing its replacement", async () => {
     const f = await fixture(); const old = await f.add();
     let release!: (result: Awaited<ReturnType<NonNullable<AdapterSession["readNativeState"]>>>) => void;
-    old.session.readNativeState = request => request.view === "tasks" ? new Promise(resolve => { release = resolve; })
-      : Promise.resolve({ harness: "copilot", vendorSessionId: old.session.vendorSessionId, payload: { items: [], steeringMessages: [] } });
+    old.session.readNativeState = observationRead(old.session.copilotObservationDriver!, request => request.view === "tasks" ? new Promise(resolve => { release = resolve; })
+      : Promise.resolve({ harness: "copilot", vendorSessionId: old.session.vendorSessionId, payload: { items: [], steeringMessages: [] } }));
     old.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
     await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     await f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "fixture-stop", ...old.target });
@@ -310,14 +323,14 @@ describe("private Copilot incident tracing", () => {
     const f = await fixture(); const s = await f.add();
     let release!: (result: Awaited<ReturnType<NonNullable<AdapterSession["readNativeState"]>>>) => void;
     let reads = 0;
-    s.session.readNativeState = async request => {
+    s.session.readNativeState = observationRead(s.session.copilotObservationDriver!, async request => {
       if (request.view === "tasks") {
         reads += 1;
         if (reads === 1) return new Promise(resolve => { release = resolve; });
         return { harness: "copilot", vendorSessionId: s.session.vendorSessionId, payload: { tasks: [] } };
       }
       return { harness: "copilot", vendorSessionId: s.session.vendorSessionId, payload: { items: [], steeringMessages: [] } };
-    };
+    });
     s.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });
     await vi.waitFor(() => expect(release).toBeTypeOf("function"));
     s.emit({ kind: "lifecycle", fact: { type: "tasksInvalidated" } });

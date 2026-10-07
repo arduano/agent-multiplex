@@ -74,6 +74,7 @@ import {
   type LaunchRequest,
   type ResolveInteractionInput,
   type ResumeCommand,
+  type RecoverCommand,
   type RuntimeNodeDescriptor,
   type RuntimeNodeId,
   type SessionId,
@@ -154,6 +155,7 @@ export interface ControlNodeSourceClient extends ImagePort {
   searchSessions(query: SessionSearchInput): Promise<SessionSearchPage>;
   getSession(sessionId: SessionId): Promise<SessionRecord | null>;
   refresh(runtimeNodeId: RuntimeNodeId): Promise<InventorySnapshot>;
+  recover?(command: RecoverCommand): Promise<CommandRecord>;
   resume(command: ResumeCommand): Promise<CommandRecord>;
   stop(command: StopCommand): Promise<CommandRecord>;
   archive(request: ArchiveRequest): Promise<ArchiveRecord>;
@@ -164,6 +166,7 @@ export interface ControlNodeSourceClient extends ImagePort {
     sessionId: SessionId,
     request: NativeStateRequest,
   ): Promise<NativeStateResult>;
+  inspectNativeHistory?(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult>;
   readNativeHistory(
     sessionId: SessionId,
     request: NativeHistoryRequest,
@@ -985,6 +988,13 @@ export class AccessGatewayProjection {
     return { sessions: [], nextCursor: null };
   }
 
+  public recover(command: RecoverCommand): Promise<CommandRecord> {
+    const owner = this.#ownerForSessionBinding(command);
+    if (!owner.definition.client.recover) throw new GatewayRoutingError("UNSUPPORTED", "Source does not support runtime-owned recovery");
+    this.#rememberCommandOwner(command.commandId, owner.definition.sourceId);
+    return this.#mutate(owner, `recover command ${command.commandId}`, () => owner.definition.client.recover!(command));
+  }
+
   public resume(command: ResumeCommand): Promise<CommandRecord> {
     const owner = this.#ownerForSessionBinding(command);
     this.#rememberCommandOwner(command.commandId, owner.definition.sourceId);
@@ -1042,6 +1052,12 @@ export class AccessGatewayProjection {
     }
     this.#rememberCommandOwner(command.commandId, owner.definition.sourceId);
     return this.#mutate(owner, `agent command ${command.commandId}`, () => owner.definition.client.execute(command));
+  }
+
+  public inspectNativeHistory(sessionId: SessionId, request: NativeHistoryRequest): Promise<NativeHistoryResult> {
+    const owner = this.#ownerForSession(sessionId);
+    if (!owner.definition.client.inspectNativeHistory) throw new GatewayRoutingError("UNSUPPORTED", "Source does not support explicit history inspection");
+    return this.#mutate(owner, "native history inspection", () => owner.definition.client.inspectNativeHistory!(sessionId, request));
   }
 
   public readNativeHistory(

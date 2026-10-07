@@ -188,9 +188,27 @@ has stalled. The runtime rejects further Copilot mutations for that binding
 while retaining exact pending interactions, children, commands and explicit
 Stop/Recover. A later successful exact-revision task and queue observation
 clears only degraded admission; it cannot certify unrelated pending state.
-The runtime refreshes both dimensions every 60 seconds even without a client
-observer, with a single task/queue coordinator and retry backoff capped at
-30 seconds.
+One `CopilotAttachmentDriver`, constructed before SDK callbacks, owns this
+attachment's ordered native ingress, view versions and task/queue refresh
+schedule. Reentrant native callbacks cannot split one native envelope from its
+lifecycle facts. The bridge, native read result and installed Runtime binding
+share that exact driver; Runtime never constructs a replacement or maintains a
+second view-validity coordinator. It requests both dimensions every 60 seconds
+without a client observer, serializes their observations and caps retry backoff
+at 30 seconds.
+
+Task observation refreshes native tasks before capturing its snapshot ticket;
+invalidation during refresh is covered by the subsequent list, while invalidation
+during listing makes that snapshot stale. Queue and agent snapshots capture
+before their read. Result evidence is held in the driver's private WeakMap;
+no vendor payload, protocol field or durable schema carries that ticket.
+Runtime drains admitted ingress, validates that exact attachment evidence and
+the complete bounded payload, then writes lifecycle facts using its current
+durable reducer revision. A Runtime-originated continuity gap invalidates all
+driver views too. Stop retires the driver, timers and queued ingress; late native
+results are inert, while their noncancellable request slots remain adapter-owned
+until exact settlement. Native observation failure and true pending interaction
+uncertainty remain independent.
 
 Observation failure MUST NOT automatically abort the shared Copilot owner.
 Neither malformed/oversized admission, ordinary invalidation nor an occupied
@@ -597,6 +615,30 @@ unknown compact receipt.
 
 ## Recovery, crash and gaps
 
+### One runtime-owned recovery command
+
+An explicit `sessions.recover` command MUST identify the current native
+attachment using its expected runtime epoch and ordinary immutable binding
+fences. The runtime MUST admit one durable original command before waiting for
+the session lock. Only an idle, unhealthy Copilot attachment with available
+Stop may enter recovery; a newly working, waiting or healthy attachment MUST
+refuse before native dispatch.
+
+The runtime owns Stop and same-native Resume within that one lock. It persists
+the phase before each side effect and proves exact cleanup before any new
+attachment. A failed phase terminates this attempt and retains that phase in
+its original receipt; duplicates MUST observe that receipt without replay.
+Process replacement marks an interrupted original command `outcomeUnknown` and
+retains the saved phase. A successful fresh attachment MUST NOT manufacture
+interaction completeness or healthy action availability. Browser lifetime,
+reconnect and component mounting have no role in this native transaction.
+
+Ordinary native history MUST use the currently installed owner. A stopped
+binding can be inspected only through the separate explicit agent-control
+mutation `sessions.inspectNativeHistory`. Its temporary native attachment is
+retired under the session lock and cannot become a catalog activation, delivery
+certificate or interaction-recovery certificate.
+
 ### Command uncertainty
 
 `outcomeUnknown` is terminal uncertainty for dispatch policy, not proof of
@@ -677,8 +719,8 @@ the backend's existing graceful/verified-force termination completes. This
 prevents a stalled temporary history attachment from postponing owner shutdown
 indefinitely without unlocking the session merely on a client timeout.
 
-Initial SDK startup and native mutation caller waits are bounded to 15 seconds
-in the source candidate. Native requests retain their lanes until settlement;
+Initial SDK cold startup caller waits are bounded to 60 seconds and native
+mutation caller waits to 15 seconds in the source candidate. Native requests retain their lanes until settlement;
 timeouts and shutdown retire only caller waits. Mutations in an occupied lane
 fail before native dispatch. Late mutation acknowledgements cannot publish
 settings, settle the original receipt or resolve an uncertain interaction.

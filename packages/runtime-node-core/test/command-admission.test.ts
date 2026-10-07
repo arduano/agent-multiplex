@@ -8,7 +8,7 @@ import {
   type Harness, type HarnessCommand, type JsonValue, type NativeHistoryRequest, type NativeStateRequest,
 } from "@arduano/agent-multiplex-protocol";
 import {
-  RuntimeNodeService, RuntimeNodeStore,
+  RuntimeNodeService, RuntimeNodeStore, CopilotAttachmentDriver,
   type AdapterNativeHistoryResult, type AdapterNativeStateResult, type AdapterSession, type AgentAdapter,
 } from "../src/index.js";
 
@@ -17,6 +17,7 @@ class Session implements AdapterSession {
   readonly runtimeEpoch = newRuntimeEpoch();
   readonly vendorSessionId = "native-admission-fixture";
   readonly stopped = false;
+  readonly copilotObservationDriver: CopilotAttachmentDriver | undefined;
   execute = vi.fn(async (_request: HarnessCommand): Promise<JsonValue> => ({ acknowledged: true }));
   read = vi.fn(async (_request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult> => ({
     harness: this.harness, vendorSessionId: this.vendorSessionId, payload: [], complete: true,
@@ -26,11 +27,17 @@ class Session implements AdapterSession {
     payload: request.view === "tasks" ? { tasks: [] } : request.view === "pendingMessages" ? { items: [], steeringMessages: [], inFlightSteeringCount: 0 } : { agents: [] },
   }));
   stop = vi.fn(async () => undefined);
-  constructor(readonly harness: Harness, readonly cwd: string) {}
+  constructor(readonly harness: Harness, readonly cwd: string) { this.copilotObservationDriver = harness === "copilot" ? new CopilotAttachmentDriver() : undefined; }
   status() { return "idle" as const; }
   subscribe() { return () => undefined; }
   readNativeHistory(request: NativeHistoryRequest) { return this.read(request); }
-  readNativeState(request: NativeStateRequest) { return this.state(request); }
+  async readNativeState(request: NativeStateRequest) {
+    const driver = this.copilotObservationDriver;
+    const view = request.view === "agents" ? "agents" : request.view === "pendingMessages" ? "pendingMessages" : "tasks";
+    const ticket = driver?.capture(view);
+    const result = await this.state(request);
+    return ticket && driver ? driver.certify(ticket, { ...result }) : result;
+  }
 }
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -84,7 +91,7 @@ describe("durable command admission before the session lock", () => {
       temporary.read.mockImplementation(() => pendingHistory.result);
       return temporary;
     });
-    const history = f.history();
+    const history = f.service.inspectNativeHistory(f.launch.sessionId, { harness, includeTurns: true, limit: 5 });
     await vi.waitFor(() => expect(temporary?.read).toHaveBeenCalledOnce());
     const request = f.lifecycle("resume");
     const resumed = f.service.resume(request);

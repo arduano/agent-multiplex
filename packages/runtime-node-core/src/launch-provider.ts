@@ -19,6 +19,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 
 import type { RuntimeAgentBackend } from "./adapter.js";
+import { NativeOwnerTerminationError } from "./native-owner.js";
 import { collectCleanupErrors, waitForAll } from "./settled-work.js";
 
 /** Durable provider output written before the first native spawn attempt. */
@@ -220,7 +221,14 @@ export class LaunchProviderRegistry {
 
   public async closeBackends(): Promise<void> {
     const errors = await collectCleanupErrors(
-      this.backends().map((backend) => () => backend.adapter.close()),
+      this.backends().map((backend) => async () => {
+        try { await backend.adapter.close(); }
+        catch (cause) {
+          // A backend close failure is an explicit failed ownership proof,
+          // independent of adapter error names or vendor diagnostic text.
+          throw new NativeOwnerTerminationError("Agent backend owner termination is unproved", { cause });
+        }
+      }),
     );
     if (errors.length > 0) throw new AggregateError(errors, "agent backend cleanup failed");
   }

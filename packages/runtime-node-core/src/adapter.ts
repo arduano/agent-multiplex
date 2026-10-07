@@ -1,5 +1,6 @@
 import type {
   AdapterScopeId,
+  ConversationEvidence,
   Harness,
   HarnessCatalogEntry,
   HarnessCommand,
@@ -20,9 +21,11 @@ import type {
   RuntimeNodeSessionRecord,
   SessionRuntimeStatus,
 } from "@arduano/agent-multiplex-protocol";
+import type { CopilotAttachmentDriver } from "./copilot-attachment-driver.js";
 
 /** Adapter results retain harness-native JSON until runtime-owned image extraction. */
 export interface AdapterNativeHistoryResult {
+  conversation?: ConversationEvidence;
   harness: Harness;
   vendorSessionId: string;
   payload: JsonValue;
@@ -50,6 +53,7 @@ export interface NativeImageCodec {
 }
 
 export interface AdapterNativeEvent {
+  conversation?: ConversationEvidence;
   kind: "native";
   nativeType: string;
   payload: JsonValue;
@@ -114,6 +118,9 @@ export interface AdapterSession {
   readonly runtimeEpoch: RuntimeEpoch;
   /** Process-local SDK attachment ordinal shared with an embedding Host's read log. */
   readonly incidentTraceAttachmentId?: number;
+  /** Exact Copilot attachment owner. Required with Copilot native-state reads;
+   * Runtime must never manufacture a substitute observation driver. */
+  readonly copilotObservationDriver?: CopilotAttachmentDriver;
   status(): SessionRuntimeStatus;
   /** Last settings acknowledged by the native harness, when observable. */
   settings?(): HarnessSessionSettings | undefined;

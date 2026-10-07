@@ -53,6 +53,7 @@ import type {
   SessionSearchPage,
   StreamCursor,
   StopCommand,
+  RecoverCommand,
   TerminalAttachInput,
   TerminalDescriptor,
   TerminalGetInput,
@@ -165,6 +166,7 @@ interface ControlNodeLinkPeerRpc {
         input: ControlNodeLinkFence & { runtimeNodeId: RuntimeNodeId },
       ): Promise<InventorySnapshot>;
     };
+    recover: { mutate(input: ControlNodeLinkFence & { command: RecoverCommand }): Promise<CommandRecord> },
     resume: {
       mutate(
         input: ControlNodeLinkFence & {
@@ -194,6 +196,14 @@ interface ControlNodeLinkPeerRpc {
           request: NativeStateRequest;
         },
       ): Promise<NativeStateResult>;
+    };
+    inspectNativeHistory: {
+      mutate(
+        input: ControlNodeLinkFence & {
+          sessionId: SessionId;
+          request: NativeHistoryRequest;
+        },
+      ): Promise<NativeHistoryResult>;
     };
     readNativeHistory: {
       query(
@@ -423,6 +433,7 @@ export function childControlNodeConnectionFromPeerResolver(
       rpc().sessions.search.query({ ...fence(), query }),
     getSession: (sessionId) =>
       rpc().sessions.get.query({ ...fence(), sessionId }),
+    recover: (command) => rpc().sessions.recover.mutate({ ...fence(), command }),
     resume: (command) => rpc().sessions.resume.mutate({ ...fence(), command }),
     stop: (command) => rpc().sessions.stop.mutate({ ...fence(), command }),
     archive: (request) => rpc().sessions.archive.mutate({ ...fence(), request }),
@@ -432,6 +443,8 @@ export function childControlNodeConnectionFromPeerResolver(
     readLifecycle: (sessionId) => rpc().sessions.readLifecycle.query({ ...fence(), sessionId }),
     readNativeState: (sessionId, request) =>
       rpc().sessions.readNativeState.query({ ...fence(), sessionId, request }),
+    inspectNativeHistory: (sessionId, request) =>
+      rpc().sessions.inspectNativeHistory.mutate({ ...fence(), sessionId, request }),
     readNativeHistory: (sessionId, request) =>
       rpc().sessions.readNativeHistory.query({ ...fence(), sessionId, request }),
     beginImageUpload: (request) => rpc().images.beginUpload.mutate({ ...fence(), request }),

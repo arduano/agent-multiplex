@@ -10,7 +10,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 import { copilotImageCodec } from "../packages/adapter-copilot/src/images.js";
 import { copilotOptionalNativeTelemetry } from "../packages/adapter-copilot/src/native-event-policy.js";
-import { RuntimeNodeService, RuntimeNodeStore, type AdapterEvent, type AdapterSession, type AgentAdapter, type NativeGapLogDiagnostic, type NativeImageCodec, type CopilotIncidentTraceRecord } from "../packages/runtime-node-core/src/index.js";
+import { CopilotAttachmentDriver, RuntimeNodeService, RuntimeNodeStore, type AdapterEvent, type AdapterSession, type AgentAdapter, type NativeGapLogDiagnostic, type NativeImageCodec, type CopilotIncidentTraceRecord } from "../packages/runtime-node-core/src/index.js";
 
 type NativeEvent = Extract<AdapterEvent, { kind: "native" }>;
 const releases: Array<() => Promise<void>> = [];
@@ -68,13 +68,15 @@ function fixture(options: { imageCodec?: NativeImageCodec; nativeEventQueueBytes
   const gaps: NativeGapLogDiagnostic[] = [];
   const traces: CopilotIncidentTraceRecord[] = [];
   const execute = vi.fn(async () => null);
+  const copilotObservationDriver = new CopilotAttachmentDriver();
   const session: AdapterSession = {
-    harness: "copilot", adapterScopeId: scope, vendorSessionId: "synthetic-native-session",
+    copilotObservationDriver, harness: "copilot", adapterScopeId: scope, vendorSessionId: "synthetic-native-session",
     cwd: directory, runtimeEpoch: newRuntimeEpoch(), status: () => "idle", execute,
     subscribe: (listener) => { emit = listener; return () => undefined; }, stop: async () => undefined,
     readNativeHistory: async () => ({ harness: "copilot", vendorSessionId: "synthetic-native-session", payload: [] }),
-    readNativeState: async (request) => ({ harness: "copilot", vendorSessionId: "synthetic-native-session", view: request.view,
-      payload: request.view === "tasks" ? { tasks: [] } : { items: [], steeringMessages: [], inFlightSteeringCount: 0 } }),
+    readNativeState: async (request) => copilotObservationDriver.certify(copilotObservationDriver.capture(request.view === "tasks" ? "tasks" : "pendingMessages"),
+      { harness: "copilot", vendorSessionId: "synthetic-native-session", view: request.view,
+        payload: request.view === "tasks" ? { tasks: [] } : { items: [], steeringMessages: [], inFlightSteeringCount: 0 } }),
   };
   const adapter: AgentAdapter = {
     harness: "copilot", adapterScopeId: scope, imageCodec: options.imageCodec ?? copilotImageCodec, optionalNativeTelemetry: copilotOptionalNativeTelemetry,
@@ -90,7 +92,11 @@ function fixture(options: { imageCodec?: NativeImageCodec; nativeEventQueueBytes
     onCopilotIncidentTrace: trace => { traces.push(trace); },
     ...(options.nativeEventQueueBytes === undefined ? {} : { nativeEventQueueBytes: options.nativeEventQueueBytes }) });
   releases.push(async () => { await service.close(); store.close(); rmSync(directory, { recursive: true, force: true }); });
-  return { store, service, target, session, adapter, execute, gaps, traces, emit: (event: AdapterEvent) => emit(event) };
+  return { store, service, target, session, adapter, execute, gaps, traces, emit: (event: AdapterEvent) => {
+    if (event.kind === "lifecycle" && event.fact.type === "tasksInvalidated") copilotObservationDriver.invalidate("tasks");
+    if (event.kind === "lifecycle" && event.fact.type === "queueInvalidated") copilotObservationDriver.invalidate("pendingMessages");
+    emit(event);
+  } };
 }
 
 describe("synthetic Copilot imageExtraction/schema gap diagnosis", () => {

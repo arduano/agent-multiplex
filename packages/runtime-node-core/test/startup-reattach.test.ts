@@ -33,6 +33,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   RuntimeNodeService,
+  CopilotAttachmentDriver,
   RuntimeNodeStore,
   AdapterOutcomeUnknownError,
   AdapterResumeFailureError,
@@ -44,6 +45,7 @@ import {
 
 class CopilotSession implements AdapterSession {
   readonly harness = "copilot" as const;
+  readonly copilotObservationDriver = new CopilotAttachmentDriver();
   readonly adapterScopeId = adapterScopeIdSchema.parse("startup-reattach-test");
   readonly vendorSessionId: string;
   readonly runtimeEpoch = newRuntimeEpoch();
@@ -63,13 +65,13 @@ class CopilotSession implements AdapterSession {
     return Promise.resolve({ harness: "copilot", vendorSessionId: this.vendorSessionId, payload: [], complete: true });
   }
   readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
-    return Promise.resolve({
-      harness: "copilot",
+    return Promise.resolve(this.copilotObservationDriver.certify(this.copilotObservationDriver.capture(request.view === "tasks" ? "tasks" : "pendingMessages"), {
+      harness: "copilot" as const,
       vendorSessionId: this.vendorSessionId,
       payload: request.harness === "copilot" && request.view === "tasks"
         ? { tasks: [] }
         : { items: [], steeringMessages: [], inFlightSteeringCount: 0 },
-    });
+    }));
   }
   stop(): Promise<void> {
     this.#stopped = true;

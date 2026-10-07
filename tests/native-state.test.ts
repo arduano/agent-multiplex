@@ -6,7 +6,7 @@ import {
   packNativePayload, type LaunchRequest, type NativeStateRequest,
 } from "@arduano/agent-multiplex-protocol";
 import {
-  AdapterOutcomeUnknownError, RuntimeLifecycleJournal, RuntimeNodeService, RuntimeNodeStore, createRuntimeNodeRouter,
+  CopilotAttachmentDriver, AdapterOutcomeUnknownError, RuntimeLifecycleJournal, RuntimeNodeService, RuntimeNodeStore, createRuntimeNodeRouter,
   type AdapterEvent, type AdapterSession, type AgentAdapter,
 } from "@arduano/agent-multiplex-runtime-node-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -20,12 +20,14 @@ async function fixture() {
   const store = new RuntimeNodeStore(":memory:");
   const runtimeNodeId = newRuntimeNodeId(); const runtimeNodeBootId = newRuntimeNodeBootId();
   const payload = { items: [{ id: "queue-id", messageId: "message-id", displayText: "hello", agentMode: "interactive", kind: "message" }], steeringMessages: [], inFlightSteeringCount: 0 };
-  const readNativeState = vi.fn(async (input: NativeStateRequest) => ({ harness: "copilot" as const, vendorSessionId: "native-state",
-    payload: input.harness === "copilot" && input.view === "tasks" ? { tasks: [] } : payload }));
+  const copilotObservationDriver = new CopilotAttachmentDriver();
+  const readNativeState = vi.fn(async (input: NativeStateRequest) => copilotObservationDriver.certify(
+    copilotObservationDriver.capture(input.view === "tasks" ? "tasks" : "pendingMessages"),
+    { harness: "copilot" as const, vendorSessionId: "native-state", payload: input.harness === "copilot" && input.view === "tasks" ? { tasks: [] } : payload }));
   const readNativeHistory = vi.fn(async () => { throw new Error("history must not run"); });
   const listeners = new Set<(event: AdapterEvent) => void>();
   const session: AdapterSession = {
-    harness: "copilot", adapterScopeId: "native-state-test", vendorSessionId: "native-state", cwd, runtimeEpoch: newRuntimeEpoch(),
+    copilotObservationDriver, harness: "copilot", adapterScopeId: "native-state-test", vendorSessionId: "native-state", cwd, runtimeEpoch: newRuntimeEpoch(),
     status: () => "idle", subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     execute: vi.fn(async () => ({ steered: true })), readNativeState, readNativeHistory, stop: vi.fn(async () => {}),
   };

@@ -16,6 +16,7 @@ import {
   type LaunchProfileIdentity,
   type LaunchRequest,
   type ResumeCommand,
+  type RecoverCommand,
   type RuntimeNodeId,
   type SessionRecord,
   type StopCommand,
@@ -71,6 +72,15 @@ export async function resumeCommand(session: SessionRecord): Promise<ResumeComma
     runtimeNodeId: session.runtimeNodeId,
     bindingRevision: session.bindingRevision,
   };
+  return { commandId, payloadHash: await payloadHash(body), ...body };
+}
+
+export async function recoverCommand(session: SessionRecord): Promise<RecoverCommand> {
+  if (!session.runtimeEpoch) throw new Error("Recovery requires an observed active attachment");
+  const commandId = newCommandId();
+  const body = { operation: "recover" as const, sessionId: session.sessionId,
+    runtimeNodeId: session.runtimeNodeId, bindingRevision: session.bindingRevision,
+    expectedRuntimeEpoch: session.runtimeEpoch };
   return { commandId, payloadHash: await payloadHash(body), ...body };
 }
 

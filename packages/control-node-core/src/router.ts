@@ -197,6 +197,10 @@ export function createAccessRouter(service: ControlNodeService) {
         .input(accessContract.sessions.refresh.input)
         .output(accessContract.sessions.refresh.output)
         .mutation(({ input }) => guarded(() => service.refresh(input.runtimeNodeId))),
+      recover: scoped("agent-control")
+        .input(accessContract.sessions.recover.input)
+        .output(accessContract.sessions.recover.output)
+        .mutation(({ input }) => guarded(() => service.recover(input))),
       resume: scoped("agent-control")
         .input(accessContract.sessions.resume.input)
         .output(accessContract.sessions.resume.output)
@@ -221,6 +225,10 @@ export function createAccessRouter(service: ControlNodeService) {
         .input(accessContract.sessions.readNativeState.input)
         .output(accessContract.sessions.readNativeState.output)
         .query(({ input }) => guarded(() => service.readNativeState(input.sessionId, input.request))),
+      inspectNativeHistory: scoped("agent-control")
+        .input(accessContract.sessions.inspectNativeHistory.input)
+        .output(accessContract.sessions.inspectNativeHistory.output)
+        .mutation(({ input }) => guarded(() => service.inspectNativeHistory(input.sessionId, input.request))),
       readNativeHistory: scoped("read")
         .input(accessContract.sessions.readNativeHistory.input)
         .output(accessContract.sessions.readNativeHistory.output)
@@ -476,6 +484,10 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
         .input(controlNodeLinkContract.sessions.refresh.input)
         .output(controlNodeLinkContract.sessions.refresh.output)
         .mutation(({ input, ctx }) => checked(ctx, input, () => service.refresh(input.runtimeNodeId))),
+      recover: t.procedure
+        .input(controlNodeLinkContract.sessions.recover.input)
+        .output(controlNodeLinkContract.sessions.recover.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.recover(input.command))),
       resume: t.procedure
         .input(controlNodeLinkContract.sessions.resume.input)
         .output(controlNodeLinkContract.sessions.resume.output)
@@ -496,6 +508,10 @@ export function createControlNodeLinkRouter(service: ControlNodeService) {
         .input(controlNodeLinkContract.sessions.readNativeState.input)
         .output(controlNodeLinkContract.sessions.readNativeState.output)
         .query(({ input, ctx }) => checked(ctx, input, () => service.readNativeState(input.sessionId, input.request))),
+      inspectNativeHistory: t.procedure
+        .input(controlNodeLinkContract.sessions.inspectNativeHistory.input)
+        .output(controlNodeLinkContract.sessions.inspectNativeHistory.output)
+        .mutation(({ input, ctx }) => checked(ctx, input, () => service.inspectNativeHistory(input.sessionId, input.request))),
       readNativeHistory: t.procedure
         .input(controlNodeLinkContract.sessions.readNativeHistory.input)
         .output(controlNodeLinkContract.sessions.readNativeHistory.output)

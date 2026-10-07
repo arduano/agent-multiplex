@@ -72,6 +72,15 @@ An adapter owns one `harness` and `adapterScopeId` and implements:
 - optional read-only native state views for an already active binding;
 - stop and optional idempotent session release.
 
+`CopilotNativeOwner` is the explicit lifetime capability consumed by the
+adapter, Host account probe and independent MCP helper. The pinned SDK's private
+process fields are observed only inside that adapter seam. Wrapper clients
+forward the capability rather than exposing SDK-private getters. A pending
+startup remains owned after a caller deadline; helper shutdown cannot succeed
+while it may acquire a late owner. An unproved cleanup reports the typed
+`NativeOwnerTerminationError`, including through causes or aggregate errors;
+supervisors never classify replacement safety from exception wording.
+
 Copilot exposes model-specific string reasoning choices in native model
 metadata. Create and resume accept `reasoningEffort`; an active session uses a
 fenced `setEffort` command. Its reported `harnessSettings.effort` comes from
@@ -83,18 +92,42 @@ provider, profile, implementation, backend, adapter scope, vendor session ID,
 and binding revision. Resume, history, stop, and archive use that provenance
 instead of guessing from `harness`.
 
-### Bounded native history
+Copilot's bridge and Runtime share one attachment-owned observation driver.
+It orders native callbacks, certifies snapshots privately and owns the sole
+task/queue refresh schedule; Runtime keeps the durable lifecycle writer. Task
+refresh precedes snapshot capture, so its own invalidation cannot reject the
+subsequent list. Runtime gaps invalidate the same driver, and Stop makes late
+observations inert without cancelling their retained native request slots.
+See [the lifecycle ownership contract](../design/copilot-session-lifecycle-vnext.md).
 
-New runtime source advertises `history.active-binding` v1. Clients selecting
-`request.native.activeBindingOnly: true` receive history only from an installed
-active handle. An occupied binding-operation lock returns a prompt conflict;
-the runtime rechecks the active binding after taking the lock and never attaches
-a temporary stopped handle for this request. It strips this runtime-only flag
-before invoking the native adapter. The existing runtime boot and returned
-binding fences still apply, and original uncertain lifecycle receipts are
-unchanged. Clients may use this capability to display current active history
-despite an older uncertain lifecycle receipt, while retaining current dispatch,
-archive and stopped-session guards. Older runtimes omit this capability.
+### Host-owned recovery and bounded native history
+
+`sessions.recover` is one durable Copilot command with the original command ID,
+payload hash, binding revision and observed runtime epoch. The owning runtime
+holds the binding lock across proven Stop and same-native Resume. Its journal
+retains `stopping`, `stopped` or `resuming` before each next dispatch and returns
+`complete` only after a fresh attachment to that same native session is proved.
+Changed epochs, healthy attachments, working turns and pending input refuse
+recovery before Stop. A later admitted Stop retains its startup fence. Browser
+loss does not interrupt this command or authorize a replacement. An interrupted
+command retains its phase as `outcomeUnknown`; its original ID never replays it.
+Reattachment does not certify unknown interaction state or invent readiness.
+
+Ordinary `sessions.readNativeHistory` reads only an installed active handle.
+An occupied binding-operation lock returns a prompt conflict; the runtime
+rechecks ownership after taking the lock. It never acquires a stopped native
+owner implicitly, including when the legacy `activeBindingOnly` field is false.
+The compatibility field is stripped before native dispatch. Runtime boot and
+returned binding fences still apply, and uncertain lifecycle receipts remain
+unchanged. `history.active-binding` v1 advertises that behavior.
+
+Explicit `sessions.inspectNativeHistory` is a separate agent-control mutation,
+advertised as `history.explicit-inspection` v1. It may acquire and retire one
+temporary owner for a stopped binding under the same session lock and immutable
+launch provenance. It never activates the stopped catalog binding, writes
+active delivery evidence, clears interaction uncertainty or sends model work.
+Unproved temporary cleanup retains the native-ID owner fence. Clients must
+request this effect explicitly rather than falling back from ordinary history.
 
 Codex and Copilot history reads default to ascending order. Clients can select
 `request.native.sortDirection: "desc"` to open at the latest native items and

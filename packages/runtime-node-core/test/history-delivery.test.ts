@@ -9,7 +9,7 @@ import {
   type NativeHistoryRequest, type NativeStateRequest,
 } from "@arduano/agent-multiplex-protocol";
 import {
-  RuntimeLifecycleJournal, RuntimeNodeService, RuntimeNodeStore,
+  AdapterOutcomeUnknownError, RuntimeLifecycleJournal, RuntimeNodeService, RuntimeNodeStore, CopilotAttachmentDriver,
   type AdapterEvent, type AdapterNativeHistoryResult, type AdapterSession, type AgentAdapter,
 } from "../src/index.js";
 import { copilotHistoryDeliveryFacts } from "../../adapter-copilot/src/lifecycle.js";
@@ -21,18 +21,26 @@ class HistorySession implements AdapterSession {
   runtimeEpoch = newRuntimeEpoch();
   readonly listeners = new Set<(event: AdapterEvent) => void>();
   stopped = false;
+  copilotObservationDriver: CopilotAttachmentDriver | undefined;
   read: (request: NativeHistoryRequest) => Promise<AdapterNativeHistoryResult>;
   execute = vi.fn(async (_command: HarnessCommand): Promise<JsonValue> => ({ messageId: "exact-message" }));
   constructor(readonly harness: Harness, readonly cwd: string) {
+    this.copilotObservationDriver = harness === "copilot" ? new CopilotAttachmentDriver() : undefined;
     this.read = async () => ({ harness, vendorSessionId: this.vendorSessionId, payload: [], complete: true });
   }
   status() { return this.stopped ? "stopped" as const : "idle" as const; }
   subscribe(listener: (event: AdapterEvent) => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
-  emit(fact: LifecycleFact) { for (const listener of this.listeners) listener({ kind: "lifecycle", fact }); }
+  emit(fact: LifecycleFact) {
+    if (fact.type === "tasksInvalidated") this.copilotObservationDriver?.invalidate("tasks");
+    if (fact.type === "queueInvalidated") this.copilotObservationDriver?.invalidate("pendingMessages");
+    for (const listener of this.listeners) listener({ kind: "lifecycle", fact });
+  }
   readNativeHistory(request: NativeHistoryRequest) { return this.read(request); }
   async readNativeState(request: NativeStateRequest) {
-    return { harness: this.harness, vendorSessionId: this.vendorSessionId,
+    const result = { harness: this.harness, vendorSessionId: this.vendorSessionId,
       payload: request.view === "tasks" ? { tasks: [] } : { items: [], steeringMessages: [], inFlightSteeringCount: 0 } };
+    return this.copilotObservationDriver ? this.copilotObservationDriver.certify(
+      this.copilotObservationDriver.capture(request.view === "tasks" ? "tasks" : "pendingMessages"), result) : result;
   }
   async stop() { this.stopped = true; }
 }
@@ -49,7 +57,7 @@ async function fixture(harness: Harness) {
     harness, adapterScopeId: session.adapterScopeId,
     describe: async () => ({ harness, adapterScopeId: session.adapterScopeId, available: true, capabilities: [] }),
     listModels: async () => [], listSessions: async () => [],
-    spawn: async () => session, resume: async () => { session.stopped = false; session.runtimeEpoch = newRuntimeEpoch(); return session; },
+    spawn: async () => session, resume: async () => { session.stopped = false; session.runtimeEpoch = newRuntimeEpoch(); session.copilotObservationDriver = harness === "copilot" ? new CopilotAttachmentDriver() : undefined; return session; },
     close: async () => undefined,
   };
   const service = new RuntimeNodeService({ store, adapters: [adapter], runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(),
@@ -81,7 +89,7 @@ async function fixture(harness: Harness) {
       messageDeliveryFacts: harness === "copilot" ? copilotHistoryDeliveryFacts(events as JsonValue[])
         : codexHistoryDeliveryFacts(events, session.vendorSessionId) });
   };
-  return { store, service, session, journal, state, launch, history, deliveries, send, setPage };
+  return { store, service, session, adapter, journal, state, launch, history, deliveries, send, setPage };
 }
 
 const userEvent = (messageId = "exact-message", data: Record<string, JsonValue> = {}, extra: Record<string, JsonValue> = {}) => ({
@@ -93,6 +101,55 @@ const itemPage = (clientId = "exact-message", extra: Record<string, JsonValue> =
 const consumedPage = (harness: Harness) => harness === "copilot" ? [userEvent()] : itemPage();
 
 describe("exact delivery repair from native history", () => {
+  it("owns recovery after caller loss, deduplicates its original ID and retains genuine uncertainty", async () => {
+    const f = await fixture("copilot");
+    f.session.emit({ type: "gap" });
+    await f.service.readLifecycle(f.launch.sessionId);
+    const epoch = f.session.runtimeEpoch;
+    let release!: () => void;
+    const stopping = vi.spyOn(f.session, "stop").mockImplementationOnce(() => new Promise<void>(resolve => { release = () => { f.session.stopped = true; resolve(); }; }));
+    const resuming = vi.spyOn(f.adapter, "resume");
+    const command = { operation: "recover" as const, commandId: newCommandId(), payloadHash: "recover-original-fixture",
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1, expectedRuntimeEpoch: epoch };
+    // Discarding the original transport wait never cancels its admitted work.
+    const result = f.service.recover(command);
+    await vi.waitFor(() => expect(stopping).toHaveBeenCalledOnce());
+    expect(await f.service.recover(command)).toMatchObject({ state: "started", result: { json: { phase: "stopping" } } });
+    await expect(f.service.recover({ ...command, expectedRuntimeEpoch: newRuntimeEpoch() })).rejects.toMatchObject({ code: "PAYLOAD_MISMATCH" });
+    release();
+    expect(await result).toMatchObject({ state: "succeeded", result: { json: { phase: "complete", vendorSessionId: f.session.vendorSessionId } } });
+    expect(f.session.runtimeEpoch).not.toBe(epoch);
+    expect(resuming).toHaveBeenCalledOnce();
+    expect((await f.service.readLifecycle(f.launch.sessionId)).view.health.state).not.toBe("healthy");
+    expect(await f.service.recover(command)).toEqual(await result);
+  });
+
+  it("refuses a newly working attachment before recovery can stop it", async () => {
+    const f = await fixture("copilot");
+    f.session.emit({ type: "gap" });
+    f.session.emit({ type: "rootStarted", cycleId: "new-native-work" });
+    await f.service.readLifecycle(f.launch.sessionId);
+    const stopping = vi.spyOn(f.session, "stop");
+    const result = await f.service.recover({ operation: "recover", commandId: newCommandId(), payloadHash: "recover-working-fixture",
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1, expectedRuntimeEpoch: f.session.runtimeEpoch });
+    expect(result).toMatchObject({ state: "failed", error: { code: "CONFLICT" } });
+    expect(stopping).not.toHaveBeenCalled();
+  });
+
+  it("keeps an unacknowledged recovery Stop failed under its original ID without dispatching Resume", async () => {
+    const f = await fixture("copilot");
+    f.session.emit({ type: "gap" });
+    await f.service.readLifecycle(f.launch.sessionId);
+    vi.spyOn(f.session, "stop").mockRejectedValueOnce(new AdapterOutcomeUnknownError("fake native disconnect uncertain"));
+    const resuming = vi.spyOn(f.adapter, "resume");
+    const command = { operation: "recover" as const, commandId: newCommandId(), payloadHash: "recover-stop-failure",
+      sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1, expectedRuntimeEpoch: f.session.runtimeEpoch };
+    const result = await f.service.recover(command);
+    expect(result).toMatchObject({ state: "outcomeUnknown", result: { json: { phase: "stopping" } } });
+    expect(resuming).not.toHaveBeenCalled();
+    expect(await f.service.recover(command)).toEqual(result);
+  });
+
   it.each(["copilot", "codex"] as const)("repairs %s consumption once and retains immutable admission", async harness => {
     const f = await fixture(harness);
     const receipt = await f.send();
@@ -204,7 +261,8 @@ describe("exact delivery repair from native history", () => {
     await f.service.stop({ operation: "stop", commandId: newCommandId(), payloadHash: "temporary-history-stop",
       sessionId: f.launch.sessionId, runtimeNodeId: f.launch.runtimeNodeId, bindingRevision: 1 });
     f.setPage(consumedPage(harness));
-    const result = await f.history();
+    await expect(f.history()).rejects.toMatchObject({ code: "CONFLICT" });
+    const result = await f.service.inspectNativeHistory(f.launch.sessionId, { harness, includeTurns: true, limit: 100 });
     expect(result).not.toHaveProperty("messageDeliveryFacts");
     expect(f.store.getSession(f.launch.sessionId)).toMatchObject({ availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null });
     expect(f.store.getLifecycle(f.launch.sessionId)?.commands[0]?.consumed).toBe(false);

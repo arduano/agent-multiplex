@@ -22,6 +22,7 @@ export {
   archiveRequest,
   launchRequest,
   payloadHash,
+  recoverCommand,
   resumeCommand,
   sessionCommand,
   stopCommand,

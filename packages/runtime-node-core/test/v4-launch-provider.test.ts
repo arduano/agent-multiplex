@@ -607,7 +607,7 @@ describe("runtime v4 launch providers", () => {
       handle.readNativeHistory = async request => { attached(); await reading; return read(request); };
       return handle;
     };
-    const history = fixture.service.readNativeHistory(request.sessionId, { harness: "codex", limit: 20 });
+    const history = fixture.service.inspectNativeHistory(request.sessionId, { harness: "codex", limit: 20 });
     await attachedPromise;
     expect((await fixture.adapter.listSessions())[0]).toMatchObject({ availability: "active" });
     expect((await fixture.service.refreshInventory()).sessions[0]).toMatchObject({ availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null });

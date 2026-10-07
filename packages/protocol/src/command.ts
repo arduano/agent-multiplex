@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   commandIdSchema,
   runtimeNodeIdSchema,
+  runtimeEpochSchema,
   sessionIdSchema,
 } from "./ids.js";
 import { jsonObjectSchema, jsonValueSchema, jsonWireByteUpperBound } from "./json.js";
@@ -153,6 +154,14 @@ export const stopCommandSchema = z.object({
   bindingRevision: z.number().int().positive(),
 });
 export type StopCommand = z.infer<typeof stopCommandSchema>;
+
+/** Runtime-owned recovery of one observed attachment, under the original ID. */
+export const recoverCommandSchema = stopCommandSchema.extend({
+  operation: z.literal("recover"),
+  expectedRuntimeEpoch: runtimeEpochSchema,
+}).strict();
+export type RecoverCommand = z.infer<typeof recoverCommandSchema>;
+
 
 export const commandRecordSchema = z.object({
   commandId: commandIdSchema,
