@@ -8,12 +8,14 @@ export function codexConversationItemId(itemId: string, threadId?: string, turnI
  * completion; page position and the time of a read do not prove freshness. */
 export function codexConversationEvidence(payload: unknown, vendorSessionId: string, options: { history?: boolean; nativeType?: string; sortDirection?: "asc" | "desc"; view?: ConversationEvidence["view"] } = {}): ConversationEvidence {
   const root = object(payload), thread = object(root?.thread);
-  const threadId = text(root?.threadId) ?? text(thread?.id) ?? vendorSessionId;
+  const threadId = text(root?.threadId) ?? text(thread?.id) ?? text(vendorSessionId);
   const items: ConversationItemEvidence[] = [];
   const add = (raw: unknown, turnId: string | undefined, pointer: string, completion: ConversationItemEvidence["completion"]) => {
     const item = object(raw), id = text(item?.id);
-    if (!id) return;
-    items.push({ itemId: codexConversationItemId(id, threadId, turnId), threadId, pointer,
+    if (!id || !threadId) return;
+    const itemId = codexConversationItemId(id, threadId, turnId);
+    if (itemId.length > 4_096) return; // JSON escaping also counts toward the wire ID bound.
+    items.push({ itemId, threadId, pointer,
       position: { kind: "unknown" }, revision: { kind: "incomparable" }, completion,
       persistence: options.history || options.nativeType === "item/completed" ? "native" : "ephemeral" });
   };

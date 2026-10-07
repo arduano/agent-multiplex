@@ -16,7 +16,8 @@ export function copilotConversationEvidence(payload: unknown, vendorSessionId: s
       : type === "assistant.reasoning" || type === "assistant.reasoning_delta" ? `copilot:reasoning:${nativeId}` : `copilot:${nativeId}`;
     const settled = ["user.message", "assistant.message", "assistant.reasoning", "assistant.intent", "tool.execution_complete", "subagent.completed", "subagent.failed", "session.error", "session.binary_asset"].includes(type);
     const open = type.endsWith("_delta") || type === "tool.execution_start" || type === "subagent.started";
-    const threadId = text(event?.agentId) ?? text(data?.agentId) ?? text(data?.parentToolCallId) ?? vendorSessionId;
+    const threadId = text(event?.agentId) ?? text(data?.agentId) ?? text(data?.parentToolCallId) ?? text(vendorSessionId);
+    if (!threadId) continue;
     items.push({ itemId, threadId, pointer: options.history ? `/${index}` : "",
       position: { kind: "nativeEvent", eventId, ...(text(event?.parentId) ? { afterEventId: text(event?.parentId)! } : {}) },
       revision: { kind: "immutable", recordId: eventId },

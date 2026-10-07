@@ -66,5 +66,8 @@ describe("native conversation evidence", () => {
     expect(boundedConversationEvidence(evidence).coverage).toEqual({ kind: "unknown" });
     expect(JSON.stringify(native)).toBe(original);
     expect(conversationEvidenceSchema.safeParse(copilotConversationEvidence({ id: "event", type: "assistant.reasoning", data: { reasoningId: "r".repeat(4_096) } }, "thread")).success).toBe(true);
+    const escaped = codexConversationEvidence({ threadId: "\u0000".repeat(1_024), turnId: "\u0000".repeat(1_024), item: { id: "\u0000".repeat(1_024) } }, "thread");
+    expect(escaped.items).toEqual([]);
+    expect(conversationEvidenceSchema.safeParse(escaped).success).toBe(true);
   });
 });
