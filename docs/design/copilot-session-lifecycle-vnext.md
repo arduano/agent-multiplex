@@ -193,7 +193,13 @@ attachment's ordered native ingress, view versions and task/queue refresh
 schedule. Reentrant native callbacks cannot split one native envelope from its
 lifecycle facts. The bridge, native read result and installed Runtime binding
 share that exact driver; Runtime never constructs a replacement or maintains a
-second view-validity coordinator. It requests both dimensions every 60 seconds
+second view-validity coordinator. Before durable activation, returned-handle
+admission validates and atomically claims the live driver with a unique token
+for that admission. Returning the same handle or driver to another admission
+cannot reuse that token. A rejected unowned handle is stopped before provider
+compensation; a shared owner is never stopped, and unacknowledged cleanup stays
+`outcomeUnknown`. Temporary inspection and cancelled startup handles retire
+their driver only after acknowledged Stop. It requests both dimensions every 60 seconds
 without a client observer, serializes their observations and caps retry backoff
 at 30 seconds.
 

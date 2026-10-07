@@ -62,6 +62,7 @@ export class CopilotAttachmentDriver {
   #nativeOrdinal = 0;
   #currentOrdinal: number | undefined;
   #port: CopilotObservationPort | undefined;
+  #runtimeOwner: object | undefined;
   #running = false;
   #generation = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -70,6 +71,18 @@ export class CopilotAttachmentDriver {
   public get generation(): number { return this.#generation; }
   public get currentNativeEventOrdinal(): number | undefined { return this.#currentOrdinal; }
   public version(view: CopilotSnapshotView): number { return this.#versions[view]; }
+
+  /** Reserve the exact attachment before Runtime commits an active binding.
+   * Concurrent returned handles cannot both pass a read-only readiness check. */
+  public claimRuntime(owner: object): void {
+    this.#assertLive();
+    if (this.#port || this.claimedByAnother(owner)) throw new Error("Copilot attachment already has an observation owner");
+    this.#runtimeOwner = owner;
+  }
+
+  public claimedByAnother(owner: object): boolean {
+    return this.#runtimeOwner !== undefined && this.#runtimeOwner !== owner;
+  }
 
   /** Reentrant SDK callbacks wait until the preceding envelope and all of its
    * lifecycle facts have been emitted. No nested event can split that unit. */
@@ -134,9 +147,10 @@ export class CopilotAttachmentDriver {
     throw error;
   }
 
-  public observe(port: CopilotObservationPort): void {
+  public observe(port: CopilotObservationPort, owner: object = port): void {
     this.#assertLive();
-    if (this.#port) throw new Error("Copilot attachment already has a Runtime observer");
+    if (this.#port || this.claimedByAnother(owner)) throw new Error("Copilot attachment already has a Runtime observer");
+    this.#runtimeOwner = owner;
     this.#port = port;
     this.#refresh = setInterval(() => { this.request("tasks"); this.request("pendingMessages"); }, REPAIR_REFRESH_MS);
     this.#refresh.unref?.();

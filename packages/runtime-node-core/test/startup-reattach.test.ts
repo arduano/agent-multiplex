@@ -176,6 +176,7 @@ describe("per-binding Copilot startup containment", () => {
       await recovery;
       expect(await stopping).toMatchObject({ state: "succeeded" });
       expect(handle.status()).toBe("stopped");
+      expect(() => handle.copilotObservationDriver.capture("tasks")).toThrow("retired");
       expect(f.store.getSession(f.ids[0]!)).toMatchObject({ availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null });
       expect(f.store.prepareStartupBindings().pendingCopilot).toHaveLength(0);
     } finally {
@@ -304,8 +305,12 @@ describe("per-binding Copilot startup containment", () => {
       release(uncertain);
       expect(await recovery).toMatchObject({ reattached: 1, cancelled: 1, failures: [{ stage: "commitBinding", error: { certainty: "outcomeUnknown" } }] });
       expect(await stop).toMatchObject({ state: "outcomeUnknown" });
+      expect(uncertain.copilotObservationDriver.capture("tasks")).toBeDefined();
       expect(f.store.getStartupCopilotIntent(f.ids[0]!)).toBeUndefined();
       expect(f.store.getSession(f.ids[1]!)).toMatchObject({ availability: "active", runtimeStatus: "idle" });
+      uncertain.stop = async () => {};
+      expect(await f.service.stop(f.stop(0))).toMatchObject({ state: "succeeded" });
+      expect(() => uncertain.copilotObservationDriver.capture("tasks")).toThrow("retired");
     } finally { release?.(new CopilotSession(f.root, "native-0")); await recovery; await f.close(); }
   });
 

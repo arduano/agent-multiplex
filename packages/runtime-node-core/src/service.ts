@@ -233,6 +233,7 @@ export interface RuntimeNodeServiceOptions {
 interface ActiveBinding {
   sessionId: SessionId;
   session: AdapterSession;
+  observationOwner: object;
   unsubscribe: () => void;
   sequence: number;
   lastActivityPersistedAt: number;
@@ -399,6 +400,7 @@ export class RuntimeNodeService {
             }
             let stage: RuntimeCopilotStartupFailure["stage"] = "prepareResume";
             let session: AdapterSession | undefined;
+            let observationOwner: object | undefined;
             let failure: unknown;
             let failedNativeRecovery = false;
             try {
@@ -415,7 +417,7 @@ export class RuntimeNodeService {
               // This validator owns cleanup for rejected/mismatched handles.
               const returned = session;
               session = undefined;
-              await this.#validateResumedHandle(current, request, plan.backend, returned);
+              observationOwner = await this.#validateResumedHandle(current, request, plan.backend, returned);
               session = returned;
             } catch (cause) {
               if (cause instanceof RuntimeNodePersistenceError) throw cause;
@@ -447,7 +449,7 @@ export class RuntimeNodeService {
             if (!committed) {
               cancelled++;
               this.#retiringStartupHandles.set(persisted.sessionId, { record: current, session: session! });
-              try { await session!.stop(); }
+              try { await session!.stop(); session!.copilotObservationDriver?.retire(); }
               catch (cause) {
                 const receipt: RuntimeCopilotStartupFailure = {
                   binding: { sessionId: current.sessionId, runtimeNodeId: current.runtimeNodeId, harness: current.harness,
@@ -464,7 +466,7 @@ export class RuntimeNodeService {
               this.#retiringStartupHandles.delete(persisted.sessionId);
               return;
             }
-            this.#activate(persisted.sessionId, session!);
+            this.#activate(persisted.sessionId, session!, observationOwner!);
             this.#publishSession(committed);
             reattached++;
           });
@@ -1060,7 +1062,7 @@ export class RuntimeNodeService {
       const request = await this.#validateResumeOptions(existing, plan.resumeOptions);
       this.#assertOpen();
       const session = await plan.backend.adapter.resume(request);
-      await this.#validateResumedHandle(existing, request, plan.backend, session);
+      const observationOwner = await this.#validateResumedHandle(existing, request, plan.backend, session);
       if (
         existing.runtimeEpoch &&
         existing.runtimeEpoch !== session.runtimeEpoch
@@ -1074,7 +1076,7 @@ export class RuntimeNodeService {
       );
       if (record.harness === "copilot") record = this.#store.commitExplicitCopilotResume(record, existing, supersededStop);
       else this.#store.putSession(record);
-      this.#activate(input.sessionId, session);
+      this.#activate(input.sessionId, session, observationOwner);
       this.#publishSession(record);
       return { sessionId: input.sessionId, vendorSessionId: session.vendorSessionId };
   }
@@ -1108,6 +1110,7 @@ export class RuntimeNodeService {
         if (retiring && retiring.record.bindingRevision === record.bindingRevision &&
           nativeBindingKey(retiring.record) === nativeBindingKey(record)) {
           await retiring.session.stop();
+          retiring.session.copilotObservationDriver?.retire();
           this.#retiringStartupHandles.delete(input.sessionId);
         }
       } catch (error) {
@@ -1425,7 +1428,12 @@ export class RuntimeNodeService {
       } finally {
         // Temporary history handles are never installed in #active, and the
         // lock stays held until stop completes so a live resume cannot race it.
-        await temporary.stop();
+        try {
+          await temporary.stop();
+          temporary.copilotObservationDriver?.retire();
+        } catch (cause) {
+          throw new AdapterOutcomeUnknownError("temporary native inspection handle cleanup failed", { cause });
+        }
       }
     });
   }
@@ -2178,9 +2186,18 @@ export class RuntimeNodeService {
       }
       return;
     }
+    let observationOwner: object;
     try {
-      await this.#assertSpawnedSession(entry.request, options, backend, session);
-      this.#activate(entry.request.sessionId, session);
+      observationOwner = await this.#assertSpawnedSession(entry.request, options, backend, session);
+    } catch (error) {
+      // Definite admission refusal includes proven returned-handle cleanup.
+      // Provider compensation is safe only after that native owner is gone.
+      if (error instanceof AdapterOutcomeUnknownError) this.#settleLaunch(entry, "outcomeUnknown", errorText(error));
+      else await this.#compensateLaunch(entry, provider, error);
+      return;
+    }
+    try {
+      this.#activate(entry.request.sessionId, session, observationOwner);
       const installedActive = this.#active.get(entry.request.sessionId)?.session === session;
       const record = this.#recordForHandle(entry.request.sessionId, session, {
         ...(entry.request.metadata === undefined
@@ -2224,9 +2241,12 @@ export class RuntimeNodeService {
       this.#publishLaunch(succeeded.record);
     } catch (error) {
       const active = this.#active.get(entry.request.sessionId);
-      if (active) this.#retireLifecycleObservations(active);
-      active?.unsubscribe();
-      if (active) this.#active.delete(entry.request.sessionId);
+      if (active?.session === session) {
+        active.unsubscribe();
+        this.#active.delete(entry.request.sessionId);
+      }
+      try { await this.#cleanupReturnedHandle(session, observationOwner, error); }
+      catch (cleanupError) { error = cleanupError; }
       this.#settleLaunch(entry, "outcomeUnknown", errorText(error));
     }
   }
@@ -2654,34 +2674,73 @@ export class RuntimeNodeService {
     options: HarnessSpawnOptions,
     backend: RuntimeAgentBackend,
     session: AdapterSession,
-  ): Promise<void> {
-    if (
-      session.harness !== request.harness ||
-      session.adapterScopeId !== backend.adapter.adapterScopeId ||
-      backend.adapter.harness !== request.harness
-    ) {
-      throw new RuntimeNodeProtocolError(
-        "FENCED",
-        "native backend returned a session outside its registered scope",
-      );
+  ): Promise<object> {
+    return this.#validateReturnedHandle(session, async () => {
+      if (
+        session.harness !== request.harness ||
+        session.adapterScopeId !== backend.adapter.adapterScopeId ||
+        backend.adapter.harness !== request.harness
+      ) {
+        throw new RuntimeNodeProtocolError(
+          "FENCED",
+          "native backend returned a session outside its registered scope",
+        );
+      }
+      if (session.cwd === null) {
+        throw new RuntimeNodeProtocolError(
+          "FENCED",
+          "native backend returned a launched session without a workspace",
+        );
+      }
+      const cwd = await this.#pathPolicy.validate(session.cwd);
+      if (cwd !== options.cwd) {
+        throw new RuntimeNodeProtocolError(
+          "FENCED",
+          "native backend returned a launched session in another workspace",
+        );
+      }
+      if (this.#store.isNativeBindingArchived(session)) {
+        throw new RuntimeNodeProtocolError(
+          "FENCED",
+          `native backend reused archived session ${session.vendorSessionId}`,
+        );
+      }
+    });
+  }
+
+  /** Every admission gets a unique claim, including repeated returns of the
+   * exact same session object. Validation and claim precede durable activation. */
+  async #validateReturnedHandle(session: AdapterSession, validate: () => Promise<void>): Promise<object> {
+    const owner = {};
+    try {
+      await validate();
+      if (session.harness === "copilot") {
+        if (session.readNativeState && !session.copilotObservationDriver) {
+          throw new RuntimeNodeProtocolError("UNSUPPORTED", "Copilot native state requires its exact attachment observation driver");
+        }
+        session.copilotObservationDriver?.claimRuntime(owner);
+      }
+      return owner;
+    } catch (error) {
+      await this.#cleanupReturnedHandle(session, owner, error);
+      throw error;
     }
-    if (session.cwd === null) {
-      throw new RuntimeNodeProtocolError(
-        "FENCED",
-        "native backend returned a launched session without a workspace",
-      );
-    }
-    const cwd = await this.#pathPolicy.validate(session.cwd);
-    if (cwd !== options.cwd) {
-      throw new RuntimeNodeProtocolError(
-        "FENCED",
-        "native backend returned a launched session in another workspace",
-      );
-    }
-    if (this.#store.isNativeBindingArchived(session)) {
-      throw new RuntimeNodeProtocolError(
-        "FENCED",
-        `native backend reused archived session ${session.vendorSessionId}`,
+  }
+
+  async #cleanupReturnedHandle(session: AdapterSession, owner: object, cause: unknown): Promise<void> {
+    // A faulty adapter may return a sibling's handle, or a driver claimed by
+    // another pending admission/Runtime. Never stop that independent owner.
+    const occupied = [...this.#active.values()].some(binding =>
+      nativeInventoryKey(binding.session) === nativeInventoryKey(session)) ||
+      session.copilotObservationDriver?.claimedByAnother(owner);
+    if (occupied) throw new AdapterOutcomeUnknownError("returned handle belongs to another native observation owner", { cause });
+    try {
+      await session.stop();
+      session.copilotObservationDriver?.retire();
+    } catch (cleanupError) {
+      throw new AdapterOutcomeUnknownError(
+        `${errorText(cause)}; returned native handle cleanup failed: ${errorText(cleanupError)}`,
+        { cause: cleanupError },
       );
     }
   }
@@ -2710,8 +2769,8 @@ export class RuntimeNodeService {
     options: HarnessResumeOptions,
     backend: RuntimeAgentBackend,
     session: AdapterSession,
-  ): Promise<void> {
-    try {
+  ): Promise<object> {
+    return this.#validateReturnedHandle(session, async () => {
       this.#assertAdapterSession(record, backend, session);
       if (session.cwd === null) {
         throw new RuntimeNodeProtocolError(
@@ -2726,22 +2785,7 @@ export class RuntimeNodeService {
           "native backend resumed a session in another workspace",
         );
       }
-    } catch (error) {
-      // A faulty adapter may return a handle already installed for a sibling.
-      // Reject it without stopping that independently owned live session.
-      const occupied = [...this.#active.values()].some(binding =>
-        nativeInventoryKey(binding.session) === nativeInventoryKey(session));
-      if (occupied) throw new AdapterOutcomeUnknownError("resumed handle belongs to an already active native owner", { cause: error });
-      try {
-        await session.stop();
-      } catch (cleanupError) {
-        throw new AdapterOutcomeUnknownError(
-          `${errorText(error)}; mismatched native handle cleanup failed: ${errorText(cleanupError)}`,
-          { cause: cleanupError },
-        );
-      }
-      throw error;
-    }
+    });
   }
 
   #persistStopped(record: RuntimeNodeSessionRecord): RuntimeNodeSessionRecord {
@@ -2942,7 +2986,7 @@ export class RuntimeNodeService {
           this.#trace(binding, { kind: "recovery", outcome: "recovered", generation });
         }
       },
-    });
+    }, binding.observationOwner);
   }
 
   #retireLifecycleObservations(binding: ActiveBinding): void {
@@ -3185,10 +3229,7 @@ export class RuntimeNodeService {
     };
   }
 
-  #activate(sessionId: SessionId, session: AdapterSession): void {
-    if (session.harness === "copilot" && session.readNativeState && !session.copilotObservationDriver) {
-      throw new RuntimeNodeProtocolError("UNSUPPORTED", "Copilot native state requires its exact attachment observation driver");
-    }
+  #activate(sessionId: SessionId, session: AdapterSession, observationOwner: object): void {
     // A new epoch starts uncertified. Preserve the prior fixed diagnostic only
     // in the private trace before lifecycle.read replaces the old reduced row.
     let previousBindingGap: NativeGapDiagnostic | undefined;
@@ -3217,6 +3258,7 @@ export class RuntimeNodeService {
     const binding: ActiveBinding = {
       sessionId,
       session,
+      observationOwner,
       sequence: 0,
       lastActivityPersistedAt: Date.now(),
       events: Promise.resolve(),
