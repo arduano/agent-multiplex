@@ -1,5 +1,6 @@
 import {
   NATIVE_PAYLOAD_MAX_BYTES,
+  copilotEventNamesOwner,
   jsonWireByteUpperBound,
   type JsonValue,
   type NativeHistoryRequest,
@@ -119,9 +120,7 @@ async function readScopedHistory(
 }
 
 function belongsToAgent(value: unknown, agentId: string): boolean {
-  if (!object(value)) return false;
-  const data = object(value.data) ? value.data : undefined;
-  return value.agentId === agentId || data?.agentId === agentId || data?.parentToolCallId === agentId;
+  return copilotEventNamesOwner(value, agentId);
 }
 
 function object(value: unknown): value is Record<string, unknown> {

@@ -1,4 +1,4 @@
-import { boundedConversationEvidence, type ConversationEvidence, type ConversationItemEvidence } from "@arduano/agent-multiplex-protocol";
+import { boundedConversationEvidence, copilotObservedOwnerId, type ConversationEvidence, type ConversationItemEvidence } from "@arduano/agent-multiplex-protocol";
 
 /** Native IDs/parentId are event identity/chronology. parentId is never child
  * ownership. No observation counter is synthesized for a history read. */
@@ -16,7 +16,7 @@ export function copilotConversationEvidence(payload: unknown, vendorSessionId: s
       : type === "assistant.reasoning" || type === "assistant.reasoning_delta" ? `copilot:reasoning:${nativeId}` : `copilot:${nativeId}`;
     const settled = ["user.message", "assistant.message", "assistant.reasoning", "assistant.intent", "tool.execution_complete", "subagent.completed", "subagent.failed", "session.error", "session.binary_asset"].includes(type);
     const open = type.endsWith("_delta") || type === "tool.execution_start" || type === "subagent.started";
-    const threadId = text(event?.agentId) ?? text(data?.agentId) ?? text(data?.parentToolCallId) ?? text(vendorSessionId);
+    const threadId = text(copilotObservedOwnerId(event)) ?? text(vendorSessionId);
     if (!threadId) continue;
     items.push({ itemId, threadId, pointer: options.history ? `/${index}` : "",
       position: { kind: "nativeEvent", eventId, ...(text(event?.parentId) ? { afterEventId: text(event?.parentId)! } : {}) },

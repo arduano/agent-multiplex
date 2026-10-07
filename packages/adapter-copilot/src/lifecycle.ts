@@ -1,4 +1,4 @@
-import type { LifecycleFact } from "@arduano/agent-multiplex-protocol";
+import { describeCopilotEvent, type LifecycleFact } from "@arduano/agent-multiplex-protocol";
 
 /** Reduce native payloads only to facts that their exact identities support.
  * The original native envelope remains the transcript and detailed evidence.
@@ -7,8 +7,9 @@ import type { LifecycleFact } from "@arduano/agent-multiplex-protocol";
 export function copilotLifecycleFacts(nativeType: string, payload: unknown): LifecycleFact[] {
   if (!record(payload) || !record(payload.data)) return [];
   const data = payload.data;
-  const agentOwner = [payload.agentId, data.agentId].find(nonempty);
-  const toolOwner = nonempty(data.parentToolCallId) ? data.parentToolCallId : undefined;
+  const descriptor = describeCopilotEvent(payload);
+  const agentOwner = descriptor.agentId ?? descriptor.legacyAgentId;
+  const toolOwner = descriptor.parentToolCallId;
   if (nativeType === "session.background_tasks_changed") return [{ type: "tasksInvalidated" }];
   if (nativeType === "pending_messages.modified") return [{ type: "queueInvalidated" }];
   if (nativeType === "subagent.started" || nativeType === "subagent.completed" || nativeType === "subagent.failed") {
@@ -53,7 +54,7 @@ export function copilotLifecycleFacts(nativeType: string, payload: unknown): Lif
 export function copilotHistoryDeliveryFacts(events: unknown[]): Array<Extract<LifecycleFact, { type: "messageDisplayed" | "messageConsumed" }>> {
   return events.flatMap(event => {
     if (!record(event) || event.type !== "user.message" || event.ephemeral === true) return [];
-    if (!record(event.data) || [event.agentId, event.data.agentId, event.data.parentToolCallId].some(owner => owner !== undefined)) return [];
+    if (!record(event.data) || describeCopilotEvent(event).ownershipMarked) return [];
     if (!nonempty(event.data.messageId) || event.data.messageId.length > 4_096) return [];
     return copilotLifecycleFacts("user.message", event).filter(
       (fact): fact is Extract<LifecycleFact, { type: "messageDisplayed" | "messageConsumed" }> =>

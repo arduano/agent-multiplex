@@ -20,6 +20,7 @@ import {
 import {
   NATIVE_PAYLOAD_MAX_BYTES,
   copilotCommandSchema,
+  copilotObservedOwnerId as eventOwner,
   copilotPermissionsSettingsSchema,
   jsonWireByteUpperBound,
   type AdapterScopeId,
@@ -1255,12 +1256,6 @@ function statusForNativeEvent(nativeType: string): SessionRuntimeStatus | undefi
 
 function permissionIdentity(requestId: string, agentId: string | undefined): string {
   return agentId === undefined ? requestId : `copilot:child:${JSON.stringify([agentId, requestId])}`;
-}
-/** Older native events keep child provenance in data. parentId is the event
- * chain, so it must never be interpreted as ownership. */
-function eventOwner(event: SessionEvent): string | undefined {
-  const data: Record<string, unknown> = isObject(event.data) ? event.data : {};
-  return [event.agentId, data.agentId, data.parentToolCallId].find((value): value is string => typeof value === "string" && value.length > 0);
 }
 function acknowledgedMessageId(value: unknown): string {
   if (typeof value !== "string" || !value) throw new TypeError("Copilot send returned no acknowledged message identity");

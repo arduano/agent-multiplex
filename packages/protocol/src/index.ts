@@ -1,5 +1,6 @@
 export * from "./command.js";
 export * from "./conversation.js";
+export * from "./copilot-event.js";
 export * from "./command-observation.js";
 export * from "./command-error.js";
 export * from "./archive.js";
