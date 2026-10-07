@@ -67,6 +67,7 @@ export function createAccessGatewayRouter(
           componentKind: "access-gateway" as const,
           dataAuthority: "none" as const,
           capabilities: [
+            "catalog.coherent-view.v1",
             "sources.multi-control-node",
             "sources.ancestor-wins",
             "stream.synthetic-bounded",
@@ -76,6 +77,11 @@ export function createAccessGatewayRouter(
             "terminal.side-channel.v1",
           ],
         })),
+    }),
+    catalog: gatewayTrpc.router({
+      read: read.input(accessContract.catalog.read.input).output(accessContract.catalog.read.output).query(({ input }) => guarded(() => projection.readCatalog(input))),
+      get: read.input(accessContract.catalog.get.input).output(accessContract.catalog.get.output).query(({ input }) => guarded(() => projection.getCatalogSession(input))),
+      search: read.input(accessContract.catalog.search.input).output(accessContract.catalog.search.output).query(({ input }) => guarded(() => projection.searchCatalogSessions(input))),
     }),
     sources: gatewayTrpc.router({
       manifest: read

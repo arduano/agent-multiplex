@@ -3,6 +3,7 @@ export * from "./command-observation.js";
 export * from "./command-error.js";
 export * from "./archive.js";
 export * from "./access-snapshot.js";
+export * from "./gateway-catalog.js";
 export * from "./authority.js";
 export * from "./contracts.js";
 export * from "./control-node.js";

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { gatewayCatalogReadSchema, gatewayCatalogViewSchema, gatewayCatalogSessionSchema, gatewayCatalogPageSchema } from "./gateway-catalog.js";
 import { accessSnapshotSchema } from "./access-snapshot.js";
 import {
   runtimeLifecycleProjectionSchema,
@@ -166,6 +167,11 @@ export type AccessGatewayDescription = z.infer<
  */
 export const accessContract = {
   images: imageContract,
+  catalog: {
+    read: { input: gatewayCatalogReadSchema, output: gatewayCatalogViewSchema },
+    get: { input: sessionIdSchema, output: gatewayCatalogSessionSchema },
+    search: { input: sessionSearchInputSchema, output: gatewayCatalogPageSchema },
+  },
 
   system: {
     describe: { input: z.void(), output: systemDescriptionSchema },

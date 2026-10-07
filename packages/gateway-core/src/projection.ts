@@ -18,6 +18,12 @@ import { isDeepStrictEqual } from "node:util";
 
 import {
   accessSnapshotSchema,
+  GATEWAY_CATALOG_LIMITS,
+  gatewayCatalogReadSchema,
+  gatewayCatalogViewSchema,
+  type GatewayCatalogStamp,
+  type GatewayCatalogView,
+  type GatewayCatalogRead,
   commandObservationView,
   commandObservationViewSchema,
   offlineLifecycleView,
@@ -358,6 +364,8 @@ export class AccessGatewayProjection {
   readonly #journal: Array<Extract<AccessStreamItem, { kind: "control" }>> = [];
   #feedId = newFeedId();
   #controlCursor = 0;
+  readonly #catalogViewId = newFeedId();
+  #catalogRevision = 0;
 
   static readonly maximumJournalItems = 4_096;
   static readonly maximumNativeJournalItems = 4_096;
@@ -645,6 +653,53 @@ export class AccessGatewayProjection {
     const owner = this.#ownerForControlNode(input.controlNodeId);
     this.#assertAuthority(owner, input.expectedAuthority);
     return this.#mutate(owner, "authority promotion", () => owner.definition.client.promote(input));
+  }
+
+  public catalogStamp(): GatewayCatalogStamp {
+    return { viewId: this.#catalogViewId, revision: this.#catalogRevision, feedId: this.#feedId };
+  }
+
+  /** One synchronous accepted projection; no independent HTTP read completion
+   * participates in coherence. Bounds describe this selected projection only. */
+  public readCatalog(input: GatewayCatalogRead): GatewayCatalogView {
+    const query = gatewayCatalogReadSchema.parse(input);
+    const controls = this.listControlNodes(), runtimes = this.listRuntimeNodes();
+    const sessions = this.listSessions(), interactions = this.listInteractions();
+    return gatewayCatalogViewSchema.parse({
+      stamp: this.catalogStamp(), sources: this.diagnostics().slice(0, GATEWAY_CATALOG_LIMITS.sources),
+      coverage: [...this.#selected].sort().slice(0, GATEWAY_CATALOG_LIMITS.sources).map(sourceId => ({ sourceId, manifest: this.#source(sourceId).snapshot!.manifest })),
+      controlNodes: controls.slice(0, GATEWAY_CATALOG_LIMITS.controls),
+      runtimeNodes: runtimes.slice(0, GATEWAY_CATALOG_LIMITS.runtimes),
+      sessions: sessions.slice(0, query.sessionLimit),
+      pinnedSessions: [...new Set(query.sessionIds)].flatMap(id => { const value = this.#recordForOwner(this.#sessionOwners.get(id), "sessions", session => session.sessionId === id); return value ? [value] : []; }),
+      interactions: interactions.slice(0, GATEWAY_CATALOG_LIMITS.interactions),
+      complete: { sources: this.#sources.size <= GATEWAY_CATALOG_LIMITS.sources, controls: controls.length <= GATEWAY_CATALOG_LIMITS.controls,
+        runtimes: runtimes.length <= GATEWAY_CATALOG_LIMITS.runtimes,
+        sessions: sessions.length <= query.sessionLimit,
+        interactions: interactions.length <= GATEWAY_CATALOG_LIMITS.interactions },
+    });
+  }
+
+  public async getCatalogSession(id: SessionId) {
+    const local = this.#recordForOwner(this.#sessionOwners.get(id), "sessions", record => record.sessionId === id);
+    if (local) return { evidence: { kind: "projection" as const, stamp: this.catalogStamp() }, session: structuredClone(local) };
+    const stamp = this.catalogStamp();
+    const session = await this.getSession(id);
+    this.#assertCatalogReadCurrent(stamp);
+    return { evidence: { kind: "source-read" as const, stamp, orderedWithProjection: false as const }, session };
+  }
+
+  public async searchCatalogSessions(input: SessionSearchInput) {
+    const stamp = this.catalogStamp();
+    const page = await this.searchSessions(input);
+    this.#assertCatalogReadCurrent(stamp);
+    return { evidence: { kind: "source-read" as const, stamp, orderedWithProjection: false as const }, page };
+  }
+
+  #assertCatalogReadCurrent(stamp: GatewayCatalogStamp): void {
+    if (stamp.viewId !== this.#catalogViewId || stamp.revision !== this.#catalogRevision || stamp.feedId !== this.#feedId) {
+      throw new GatewayRoutingError("UNAVAILABLE", "catalog changed while source read was pending");
+    }
   }
 
   public listControlNodes(): ControlNodeDescriptor[] {
@@ -1265,6 +1320,7 @@ export class AccessGatewayProjection {
       return true;
     }
     if (item.kind === "control") {
+      this.#catalogRevision += 1;
       this.#controlCursor += 1;
       const projected = {
         ...item,
@@ -2476,6 +2532,7 @@ export class AccessGatewayProjection {
   }
 
   #broadcastDiagnostics(): void {
+    this.#catalogRevision += 1;
     for (const diagnostic of this.diagnostics()) {
       for (const subscriber of this.#sourceSubscribers) subscriber.push(diagnostic);
     }

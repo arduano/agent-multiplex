@@ -384,6 +384,55 @@ function nativeEvent(
   };
 }
 
+describe("coherent bounded Gateway catalog", () => {
+  it("captures source coverage and runtime/session records under one immutable stamp", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const definition = source("root", value), gateway = new AccessGatewayProjection([definition]);
+    await gateway.refreshAll();
+    const first = gateway.readCatalog({ sessionLimit: 1, sessionIds: [] });
+    const id = value.sessions[0]!.sessionId;
+    expect(first.coverage).toEqual([{ sourceId: "root", manifest: value.manifest }]);
+    expect(first.complete.sessions).toBe(true);
+    gateway.ingest("root" as SourceId, { kind: "control", eventId: crypto.randomUUID(), feedId: value.manifest.feedId, cursor: value.manifest.controlCursor + 1,
+      provenance: { originControlNodeId: root, authority: value.manifest.authority },
+      change: { type: "session.upsert", session: { ...value.sessions[0]!, runtimeStatus: "running" } } });
+    const next = gateway.readCatalog({ sessionLimit: 1, sessionIds: [id] });
+    expect(next.stamp.viewId).toBe(first.stamp.viewId);
+    expect(next.stamp.revision).toBeGreaterThan(first.stamp.revision);
+    expect(first.sessions[0]!.runtimeStatus).toBe("idle");
+    expect(next.pinnedSessions[0]!.runtimeStatus).toBe("running");
+    expect((await gateway.getCatalogSession(id)).evidence.kind).toBe("projection");
+    gateway.markUnavailable("root" as SourceId);
+    const unavailable = gateway.readCatalog({ sessionLimit: 1, sessionIds: [id] });
+    expect(unavailable.coverage).toEqual([]);
+    expect(unavailable.sessions).toEqual([]);
+    expect(unavailable.sources[0]!.state).toBe("unavailable");
+    expect(unavailable.stamp.revision).toBeGreaterThan(next.stamp.revision);
+  });
+  it("returns exact pins beyond a bounded list and never claims truncated completeness", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    value.sessions = Array.from({ length: 3 }, (_, i) => ({ ...value.sessions[0]!, sessionId: newSessionId(), vendorSessionId: `native-${i}` }));
+    const gateway = new AccessGatewayProjection([source("root", value)]);
+    await gateway.refreshAll();
+    const pin = value.sessions[2]!.sessionId;
+    const read = gateway.readCatalog({ sessionLimit: 1, sessionIds: [pin] });
+    expect(read.sessions).toHaveLength(1); expect(read.complete.sessions).toBe(false);
+    expect(read.pinnedSessions.map(record => record.sessionId)).toEqual([pin]);
+  });
+  it("rejects delayed source pages when source selection changes, without certifying remote content revisions", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const definition = source("root", value), gateway = new AccessGatewayProjection([definition]);
+    await gateway.refreshAll();
+    const first = await gateway.searchCatalogSessions({ states: ["running", "stopped"], metadata: [], limit: 10 });
+    expect(first.evidence).toMatchObject({ kind: "source-read", orderedWithProjection: false });
+    let release!: (value: { sessions: SessionRecord[]; nextCursor: null }) => void;
+    definition.client.searchSessions = () => new Promise(resolve => { release = resolve; });
+    const delayed = gateway.searchCatalogSessions({ states: ["running", "stopped"], metadata: [], limit: 10 });
+    gateway.markUnavailable("root" as SourceId); release({ sessions: value.sessions, nextCursor: null });
+    await expect(delayed).rejects.toBeInstanceOf(GatewayRoutingError);
+  });
+});
+
 describe("AccessGatewayProjection source selection", () => {
   it("selects the ancestor projection and keeps a descendant warm", async () => {
     const root = newControlNodeId();
