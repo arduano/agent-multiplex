@@ -82,6 +82,8 @@ export const launchProfileDescriptorSchema = launchProfileIdentitySchema
       }),
     available: z.boolean(),
     capabilities: z.array(capabilitySchema),
+    /** Canonical provider input schema, with the existing hash/identity fence. */
+    requestSchema: jsonObjectSchema.optional(),
     unavailableReason: z.string().min(1).max(4_096).optional(),
   })
   .superRefine((profile, ctx) => {

@@ -2,6 +2,9 @@ import { initTRPC, TRPCError } from "@trpc/server";
 
 import {
   accessContract,
+  GATEWAY_CATALOG_LIMITS,
+  gatewayCatalogViewSchema,
+  type GatewayCatalogRead,
   controlNodeIngressContract,
   controlNodeLinkContract,
   type ActionScope,
@@ -49,6 +52,26 @@ export function createAccessRouter(service: ControlNodeService) {
         .input(accessContract.system.describe.input)
         .output(accessContract.system.describe.output)
         .query(() => service.describe()),
+    }),
+    catalog: t.router({
+      read: scoped("read").input(accessContract.catalog.read.input).output(accessContract.catalog.read.output)
+        .query(({ input }) => ownCatalog(service, input)),
+      get: scoped("read").input(accessContract.catalog.get.input).output(accessContract.catalog.get.output)
+        .query(({ input }) => guarded(async () => {
+          const view = ownCatalog(service, { sessionLimit: 1, sessionIds: [input] });
+          const local = view.pinnedSessions[0];
+          if (local) return { evidence: { kind: "projection" as const, stamp: view.stamp }, session: local };
+          const session = await service.getSession(input);
+          assertOwnCatalogCurrent(service, view.stamp.revision, view.stamp.feedId);
+          return { evidence: { kind: "source-read" as const, stamp: view.stamp, orderedWithProjection: false as const }, session };
+        })),
+      search: scoped("read").input(accessContract.catalog.search.input).output(accessContract.catalog.search.output)
+        .query(({ input, signal }) => guarded(async () => {
+          const view = ownCatalog(service, { sessionLimit: 1, sessionIds: [] });
+          const page = await service.searchSessions(input, signal);
+          assertOwnCatalogCurrent(service, view.stamp.revision, view.stamp.feedId);
+          return { evidence: { kind: "source-read" as const, stamp: view.stamp, orderedWithProjection: false as const }, page };
+        })),
     }),
     sources: t.router({
       manifest: scoped("read")
@@ -642,4 +665,29 @@ async function* watchOwnSource(service: ControlNodeService, signal?: AbortSignal
     updatedAt: new Date().toISOString(),
   };
   if (!signal?.aborted) await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+}
+
+/** Direct access clients use the same atomic observation shape. This remains a
+ * Control-owned snapshot; it confers no authority on an observing Gateway. */
+function ownCatalog(service: ControlNodeService, query: GatewayCatalogRead) {
+  const snapshot = service.sourceSnapshot(), manifest = snapshot.source.manifest;
+  return gatewayCatalogViewSchema.parse({
+    stamp: { viewId: manifest.feedId, revision: manifest.controlCursor, feedId: manifest.feedId, controlCursor: manifest.controlCursor },
+    sources: [{ sourceId: "self", displayName: service.catalog.localControlNode().name,
+      endpointId: service.catalog.localControlNode().endpointId ?? manifest.sourceControlNodeId,
+      state: "selected", manifest, updatedAt: snapshot.capturedAt }],
+    coverage: [{ sourceId: "self", manifest }],
+    controlNodes: snapshot.controlNodes.slice(0, GATEWAY_CATALOG_LIMITS.controls),
+    runtimeNodes: snapshot.runtimeNodes.slice(0, GATEWAY_CATALOG_LIMITS.runtimes),
+    sessions: snapshot.sessions.slice(0, query.sessionLimit),
+    pinnedSessions: snapshot.sessions.filter(record => query.sessionIds.includes(record.sessionId)),
+    interactions: snapshot.interactions.slice(0, GATEWAY_CATALOG_LIMITS.interactions),
+    complete: { sources: true, controls: snapshot.controlNodes.length <= GATEWAY_CATALOG_LIMITS.controls,
+      runtimes: snapshot.runtimeNodes.length <= GATEWAY_CATALOG_LIMITS.runtimes,
+      sessions: snapshot.sessions.length <= query.sessionLimit, interactions: snapshot.interactions.length <= GATEWAY_CATALOG_LIMITS.interactions },
+  });
+}
+function assertOwnCatalogCurrent(service: ControlNodeService, revision: number, feedId: string): void {
+  const manifest = service.sourceManifest();
+  if (manifest.feedId !== feedId || manifest.controlCursor !== revision) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "catalog changed while source read was pending" });
 }

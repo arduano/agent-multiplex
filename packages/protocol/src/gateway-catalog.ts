@@ -12,6 +12,7 @@ export const gatewayCatalogStampSchema = z.object({
   viewId: feedIdSchema,
   revision: z.number().int().nonnegative().safe(),
   feedId: feedIdSchema,
+  controlCursor: z.number().int().nonnegative().safe(),
 }).strict();
 export type GatewayCatalogStamp = z.infer<typeof gatewayCatalogStampSchema>;
 export const gatewayCatalogReadSchema = z.object({
@@ -40,3 +41,13 @@ export const gatewayCatalogEvidenceSchema = z.discriminatedUnion("kind", [
 ]);
 export const gatewayCatalogSessionSchema = z.object({ evidence: gatewayCatalogEvidenceSchema, session: sessionRecordSchema.nullable() }).strict();
 export const gatewayCatalogPageSchema = z.object({ evidence: gatewayCatalogEvidenceSchema, page: sessionSearchPageSchema }).strict();
+
+export type GatewayCatalogSession = z.infer<typeof gatewayCatalogSessionSchema>;
+export type GatewayCatalogPage = z.infer<typeof gatewayCatalogPageSchema>;
+
+export const gatewayCatalogDeltaSchema = z.object({
+  stamp: gatewayCatalogStampSchema,
+  source: z.object({ sourceId: sourceIdSchema,
+    position: sourceManifestSchema.pick({ sourceControlNodeBootId: true, feedId: true, controlCursor: true }),
+  }).strict(),
+}).strict();

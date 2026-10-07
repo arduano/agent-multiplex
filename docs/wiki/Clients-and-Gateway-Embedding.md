@@ -80,6 +80,31 @@ is available and fall back to `@noble/hashes` when an HTTP origin or embedded
 browser withholds `SubtleCrypto`. Both paths hash the same canonical JSON bytes
 and have exact parity with the Node request builders.
 
+## Coherent catalog observations
+
+Use `catalog.read` when runtime, session, source and interaction records must be
+one accepted observation. The bounded view includes exact-ID pins, per-dataset
+completeness, selected source manifests and an observation stamp. Its revision
+belongs to the serving observation, never to native history or catalog authority.
+A direct Control serves the same shape from its atomic source snapshot.
+
+`GatewayCatalogController` retains an accepted view. Caller tokens reject retired
+reads; accepted control deltas require consecutive feed/cursor/revision and exact
+source boot/feed evidence. A skipped topology revision, reset or gap requires
+rebase while preserving stale rows. Different read bounds at one revision are
+explicit subsets; completeness is never inferred from arrival time.
+
+`catalog.get` and `catalog.search` return evidence. `source-read` results are
+routing-fenced but explicitly unordered relative to the projection. Do not merge
+their contents as newer catalog records. Pending source reads fail if committed
+routing changes. Optional workers can use `readCatalog` and `catalogEvent` from
+one Gateway ingestion owner instead of reconstructing cross-dataset coherence.
+
+Launch descriptors may advertise their exact validated `requestSchema`; check
+`requestSchemaHash` before convenience input construction. Default selection is
+declared by `launch.default`, not a profile-name suffix. Native enum values and
+immutable historical profile identities remain provider-owned.
+
 ## Access streams
 
 The access stream combines bounded control history and native events. Consumers

@@ -1,3 +1,4 @@
+import { GatewayCatalogController } from "@arduano/agent-multiplex-client";
 import { packNativePayload } from "@arduano/agent-multiplex-protocol";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -418,6 +419,37 @@ describe("coherent bounded Gateway catalog", () => {
     const read = gateway.readCatalog({ sessionLimit: 1, sessionIds: [pin] });
     expect(read.sessions).toHaveLength(1); expect(read.complete.sessions).toBe(false);
     expect(read.pinnedSessions.map(record => record.sessionId)).toEqual([pin]);
+  });
+  it("applies accepted deltas without letting late reads or reset-era callers roll them back", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const gateway = new AccessGatewayProjection([source("root", value)]); await gateway.refreshAll();
+    const controller = new GatewayCatalogController();
+    const staleToken = controller.beginRead(), token = controller.beginRead();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    expect(controller.accept(staleToken, before)).toBe(false); expect(controller.accept(token, before)).toBe(true);
+    const sourceCursor = value.manifest.controlCursor + 1;
+    const item = { kind: "control" as const, eventId: crypto.randomUUID(), feedId: value.manifest.feedId, cursor: sourceCursor,
+      provenance: { originControlNodeId: root, authority: value.manifest.authority },
+      change: { type: "session.upsert" as const, session: { ...value.sessions[0]!, runtimeStatus: "running" as const } } };
+    gateway.ingest("root" as SourceId, item);
+    const after = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    const delta = { ...item, feedId: after.stamp.feedId, cursor: after.stamp.controlCursor,
+      catalog: { stamp: after.stamp, source: { sourceId: "root", position: { sourceControlNodeBootId: value.manifest.sourceControlNodeBootId,
+        feedId: value.manifest.feedId, controlCursor: sourceCursor } } } };
+    expect(controller.apply(delta)).toBe(true); expect(controller.apply(delta)).toBe(true);
+    expect(controller.accept(token, before)).toBe(false);
+    expect(controller.snapshot().view!.sessions[0]!.runtimeStatus).toBe("running");
+    controller.invalidate(); expect(controller.accept(token, after)).toBe(false);
+    expect(controller.snapshot().state).toBe("stale");
+    expect(controller.accept(controller.beginRead(), after)).toBe(true);
+    expect(controller.apply({ ...delta, cursor: delta.cursor + 2, catalog: { ...delta.catalog, stamp: { ...after.stamp, revision: after.stamp.revision + 1, controlCursor: delta.cursor + 2 } } })).toBe(false);
+    expect(controller.snapshot().state).toBe("stale");
+    expect(controller.accept(controller.beginRead(), after)).toBe(true);
+    expect(controller.apply({...delta, cursor: after.stamp.controlCursor + 1, catalog: {...delta.catalog,
+      stamp: {...after.stamp, revision: after.stamp.revision + 2, controlCursor: after.stamp.controlCursor + 1}}})).toBe(false);
+    // A skipped selection revision cannot silently certify old diagnostics.
+    expect(controller.snapshot().state).toBe("stale");
+
   });
   it("rejects delayed source pages when source selection changes, without certifying remote content revisions", async () => {
     const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });

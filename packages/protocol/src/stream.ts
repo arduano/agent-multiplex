@@ -1,3 +1,4 @@
+import { gatewayCatalogDeltaSchema } from "./gateway-catalog.js";
 import { z } from "zod";
 
 import { archiveRecordSchema } from "./archive.js";
@@ -188,6 +189,8 @@ export const feedControlItemSchema = z.object({
   eventId: z.uuid(),
   feedId: feedIdSchema,
   cursor: z.number().int().nonnegative(),
+  /** Gateway accepted delta and exact source position, never native history. */
+  catalog: gatewayCatalogDeltaSchema.optional(),
   provenance: streamProvenanceSchema,
   change: controlChangeSchema,
 });

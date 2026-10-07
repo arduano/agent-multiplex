@@ -656,7 +656,22 @@ export class AccessGatewayProjection {
   }
 
   public catalogStamp(): GatewayCatalogStamp {
-    return { viewId: this.#catalogViewId, revision: this.#catalogRevision, feedId: this.#feedId };
+    return { viewId: this.#catalogViewId, revision: this.#catalogRevision, feedId: this.#feedId, controlCursor: this.#controlCursor };
+  }
+
+  /** Optional consumers receive exactly the same accepted observation as the
+   * public feed. Call immediately after successful ingest; source events cannot
+   * independently certify a Gateway cursor or selected coverage. */
+  public catalogEvent(sourceId: SourceId, item: AccessStreamItem): AccessStreamItem {
+    if (item.kind !== "control") return item;
+    const source = this.#source(sourceId), manifest = source.snapshot?.manifest;
+    if (!this.#selected.has(sourceId) || !manifest || manifest.feedId !== item.feedId || manifest.controlCursor !== item.cursor) {
+      throw new GatewayRoutingError("UNAVAILABLE", "source event is not the committed catalog observation");
+    }
+    return { ...item, feedId: this.#feedId, cursor: this.#controlCursor,
+      catalog: { stamp: this.catalogStamp(), source: { sourceId, position: {
+        sourceControlNodeBootId: manifest.sourceControlNodeBootId, feedId: manifest.feedId, controlCursor: manifest.controlCursor,
+      } } } };
   }
 
   /** One synchronous accepted projection; no independent HTTP read completion
@@ -1326,6 +1341,10 @@ export class AccessGatewayProjection {
         ...item,
         feedId: this.#feedId,
         cursor: this.#controlCursor,
+        catalog: { stamp: this.catalogStamp(), source: { sourceId, position: {
+          sourceControlNodeBootId: source.snapshot!.manifest.sourceControlNodeBootId,
+          feedId: source.snapshot!.manifest.feedId, controlCursor: source.snapshot!.manifest.controlCursor,
+        } } },
       } satisfies Extract<AccessStreamItem, { kind: "control" }>;
       this.#journal.push(projected);
       while (this.#journal.length > AccessGatewayProjection.maximumJournalItems) {

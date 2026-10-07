@@ -39,3 +39,5 @@ export {
   type TerminalWatchHandle,
   type TerminalWatchOptions,
 } from "./terminal.js";
+
+export { GatewayCatalogController, type GatewayCatalogObservation } from "./catalog.js";

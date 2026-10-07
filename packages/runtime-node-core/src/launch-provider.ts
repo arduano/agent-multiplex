@@ -128,7 +128,7 @@ export class LaunchProviderRegistry {
 
   public descriptors(): LaunchProfileDescriptor[] {
     return [...this.#providers.values()]
-      .map((provider) => provider.descriptor)
+      .map((provider) => ({ ...provider.descriptor, requestSchema: structuredClone(provider.requestSchema) }))
       .sort((left, right) => profileKey(left).localeCompare(profileKey(right)));
   }
 
