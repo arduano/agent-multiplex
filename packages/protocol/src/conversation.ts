@@ -16,7 +16,7 @@ export type ConversationPosition = z.infer<typeof conversationPositionSchema>;
 export const conversationRevisionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("incomparable") }),
   z.object({ kind: z.literal("immutable"), recordId: identity }),
-  z.object({ kind: z.literal("observation"), generation: identity, sequence: z.number().int().nonnegative() }),
+  z.object({ kind: z.literal("observation"), generation: identity, sequence: z.number().int().nonnegative(), recordId: identity.optional() }),
 ]);
 export type ConversationRevision = z.infer<typeof conversationRevisionSchema>;
 
@@ -68,7 +68,8 @@ export function stampConversationObservation(evidence: ConversationEvidence, gen
     ...evidence,
     items: evidence.items.map(item => ({ ...item,
       position: item.position.kind === "unknown" ? { kind: "observation", generation, sequence } : item.position,
-      revision: item.revision.kind === "incomparable" ? { kind: "observation", generation, sequence } : item.revision,
+      revision: { kind: "observation", generation, sequence,
+        ...(item.revision.kind === "immutable" ? { recordId: item.revision.recordId } : item.revision.kind === "observation" && item.revision.recordId ? { recordId: item.revision.recordId } : {}) },
     })),
   };
 }

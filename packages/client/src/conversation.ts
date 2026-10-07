@@ -5,6 +5,9 @@ export type ConversationComparison = "older" | "same" | "newer" | "incomparable"
 /** Comparing unrelated attachment counters or immutable native records would
  * manufacture evidence. Keep that uncertainty explicit for the caller. */
 export function compareConversationRevisions(current: ConversationRevision, incoming: ConversationRevision): ConversationComparison {
+  const currentId = current.kind !== "incomparable" ? current.recordId : undefined;
+  const incomingId = incoming.kind !== "incomparable" ? incoming.recordId : undefined;
+  if (currentId && currentId === incomingId) return "same";
   if (current.kind === "immutable" && incoming.kind === "immutable") return current.recordId === incoming.recordId ? "same" : "incomparable";
   if (current.kind !== "observation" || incoming.kind !== "observation" || current.generation !== incoming.generation) return "incomparable";
   return incoming.sequence === current.sequence ? "same" : incoming.sequence > current.sequence ? "newer" : "older";
@@ -19,6 +22,10 @@ export function compareConversationItems(current: ConversationItemEvidence, inco
   // between two conflicting terminal snapshots.
   if (current.completion === "settled" && incoming.completion !== "settled") return "older";
   if (incoming.completion === "settled" && current.completion !== "settled") return "newer";
+  if (current.position.kind === "nativeEvent" && incoming.position.kind === "nativeEvent") {
+    if (incoming.position.afterEventId === current.position.eventId) return "newer";
+    if (current.position.afterEventId === incoming.position.eventId) return "older";
+  }
   return revision;
 }
 
