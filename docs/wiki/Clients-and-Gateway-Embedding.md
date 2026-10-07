@@ -4,6 +4,13 @@ The reusable client boundary is the protocol-v6 access router. The same shape is
 served by a trusted-local control node and by the authenticated multi-source
 gateway; applications do not need separate data models for the two.
 
+Native conversation evidence keeps item identity, placement, revision, completion
+and coverage distinct. Use the client comparison/order helpers without inventing
+freshness from history arrival times or text prefixes. Raw native payloads and
+image sidecars remain unchanged. See
+[the conversation observation contract](../design/conversation-observations-v1.md)
+for bounded alternatives, generation fences and migration requirements.
+
 For an active Copilot session, `sessions.readNativeState` observes the native
 pending queue separately from transcript history. Gate UI controls using the
 `queue.pending` and `queue.sendNow` v1 harness capabilities; older peers can omit
