@@ -23,6 +23,7 @@ import {
 } from "./ids.js";
 import { interactionRecordSchema } from "./interaction.js";
 import { nativePayloadSchema } from "./image.js";
+import { conversationEvidenceSchema } from "./conversation.js";
 import { launchRecordSchema } from "./launch.js";
 import {
   metadataOperationRecordSchema,
@@ -137,6 +138,7 @@ const nativeEventCoreSchema = z.object({
   nativeType: z.string().min(1),
   payload: nativePayloadSchema,
   ephemeral: z.boolean(),
+  conversation: conversationEvidenceSchema.optional(),
 });
 
 export const nativeEventSchema = nativeEventCoreSchema.extend({

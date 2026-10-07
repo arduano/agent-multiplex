@@ -9,3 +9,4 @@ export * from "./terminal.js";
 export * from "./images.js";
 
 export { GatewayCatalogController, type GatewayCatalogObservation } from "./catalog.js";
+export * from "./conversation.js";

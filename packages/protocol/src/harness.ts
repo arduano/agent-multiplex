@@ -3,6 +3,7 @@ import { z } from "zod";
 import { adapterScopeIdSchema } from "./ids.js";
 import { jsonObjectSchema, jsonValueSchema } from "./json.js";
 import { nativePayloadSchema } from "./image.js";
+import { conversationEvidenceSchema } from "./conversation.js";
 
 export const harnessSchema = z.enum(["codex", "copilot"]);
 export type Harness = z.infer<typeof harnessSchema>;
@@ -149,6 +150,7 @@ export const nativeHistoryResultSchema = z.object({
   harness: harnessSchema,
   vendorSessionId: z.string().min(1),
   payload: nativePayloadSchema,
+  conversation: conversationEvidenceSchema.optional(),
   nextCursor: z.string().optional(),
   complete: z.boolean().optional(),
   sortDirection: z.enum(["asc", "desc"]).optional(),
