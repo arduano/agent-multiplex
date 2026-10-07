@@ -152,6 +152,9 @@ rotated during the coordinated maintenance window.
   too; restricting a parent does not remove a child's broader Windows access.
   Unsupported ACL inspection and unsafe restored state must fail closed. Do
   not bypass managed execution policy to run the ACL helper or native harness.
+  Native private-path failure provenance is diagnosis only: a timed-out check
+  does not grant admission even if the process later exits 0. Do not infer
+  security/refusal recovery from exception wording or execution duration.
 - Never store secrets, transcripts, terminal bytes, or provider checkpoints in
   session metadata.
 - Reconcile `outcomeUnknown` by its stable operation/resource identity; do not

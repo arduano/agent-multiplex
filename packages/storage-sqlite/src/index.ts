@@ -18,7 +18,8 @@ import { hostname } from "node:os";
 import { dirname, resolve } from "node:path";
 import { backup as sqliteBackup, DatabaseSync } from "node:sqlite";
 import { assertPrivateFilesSync, ensurePrivateDirectorySync, PrivatePathError } from "./private-path.js";
-export { assertPrivateFileSync, assertPrivateFilesSync, ensurePrivateDirectorySync, PrivatePathError } from "./private-path.js";
+export { assertPrivateFileSync, assertPrivateFilesSync, ensurePrivateDirectorySync, PrivatePathError, privatePathFailure } from "./private-path.js";
+export type { PrivatePathFailure, PrivatePathNativeException, PrivatePathNativeStage } from "./private-path.js";
 
 /**
  * Baseline used by the original protocol-v3 store migrations. The migration

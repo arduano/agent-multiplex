@@ -49,6 +49,24 @@ reports daemon connectivity independently of a stalled native harness; it does
 not prove that agent commands are responsive. Copilot read deadlines and recovery
 limits are described in the [adapter guide](Adapters-and-Terminals.md#stalled-copilot-reads).
 
+## Private-path failure provenance
+
+The storage package exports `privatePathFailure(error)` for a failed native
+Windows private-path check. It returns immutable, allowlisted operation, failure
+kind, elapsed time and available process/stage metadata associated with the
+original `PrivatePathError`. It never returns paths, subprocess output or
+exception text. A native `ETIMEDOUT` remains a timeout when the process later
+reports status 0 or a success marker; neither observation grants ACL admission.
+Exact nonzero refusal markers identify the failed guard. Malformed markers,
+missing provenance and generic exceptions remain unknown; error wording and
+elapsed duration cannot establish a retryable timeout.
+
+This accessor provides diagnosis, not permission to retry a write or alter
+security. Callers must preserve their original append/replacement outcome and
+native ownership fence. ACL, owner, reparse checks, batching and POSIX behavior
+remain unchanged. The original native process exception is retained as the
+private in-process cause; public diagnostic records use only the accessor.
+
 ## Bootstrap discipline
 
 Enrollment flags are temporary apertures. Open one role at a time, enroll and

@@ -2,8 +2,43 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
+export type PrivatePathNativeStage = "request" | "create" | "inspect" | "acl" | "rules" | "owner" | "inherited" | "untrusted" | "useraccess";
+export type PrivatePathNativeException = "UnauthorizedAccessException" | "DirectoryNotFoundException" | "FileNotFoundException" | "IOException"
+  | "ArgumentException" | "InvalidOperationException" | "SecurityException" | "NotSupportedException" | "RuntimeException" | "MethodInvocationException" | "otherException";
+
+/** Safe operation provenance; it never contains a path, subprocess output or
+ * exception message. Timeout is certified by spawn, never by elapsed time. */
+export interface PrivatePathFailure {
+  readonly operation: "directory" | "files";
+  readonly kind: "timeout" | "spawn" | "refused" | "unknown";
+  readonly elapsedMs: number;
+  readonly code?: string;
+  readonly stage?: PrivatePathNativeStage;
+  readonly exceptionClass?: PrivatePathNativeException;
+  readonly status?: number | null;
+  readonly signal?: string | null;
+  readonly timeoutMs?: number;
+}
+const privatePathFailures = new WeakMap<PrivatePathError, Readonly<PrivatePathFailure>>();
+const nativeCodes = new Set(["ETIMEDOUT", "ENOENT", "EACCES", "EPERM", "EPIPE", "EIO", "ENOSPC", "EMFILE", "ENFILE", "ENOBUFS", "EAGAIN", "EINVAL"]);
+const nativeSignals = new Set(["SIGTERM", "SIGKILL", "SIGINT", "SIGABRT"]);
+const nativeExceptions = new Set<PrivatePathNativeException>(["UnauthorizedAccessException", "DirectoryNotFoundException", "FileNotFoundException", "IOException",
+  "ArgumentException", "InvalidOperationException", "SecurityException", "NotSupportedException", "RuntimeException", "MethodInvocationException"]);
+
 export class PrivatePathError extends Error {
-  constructor(message: string) { super(message); this.name = "PrivatePathError"; }
+  constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "PrivatePathError"; }
+}
+
+/** Only framework-produced errors carry provenance. Error text, lookalike
+ * fields and unrelated causes cannot manufacture a private-path certificate. */
+export function privatePathFailure(error: unknown): Readonly<PrivatePathFailure> | undefined {
+  return error instanceof PrivatePathError ? privatePathFailures.get(error) : undefined;
+}
+
+function ownCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const property = Object.getOwnPropertyDescriptor(error, "code");
+  return property && "value" in property && typeof property.value === "string" ? property.value : undefined;
 }
 
 /** Create a private directory, or validate an existing one without widening access. */
@@ -108,13 +143,30 @@ function windowsPrivatePaths(operation: "directory" | "files", paths: readonly s
   if (!systemRoot || !isAbsolute(systemRoot)) {
     throw new PrivatePathError("Windows private state validation requires a valid SystemRoot");
   }
+  const began = performance.now();
   const result = spawnSync(join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
     ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", WINDOWS_PRIVATE_PATH_SCRIPT], {
       env: { ...process.env, AGENT_MULTIPLEX_PRIVATE_PATH_REQUEST: JSON.stringify({ operation, paths }) },
       encoding: "utf8", windowsHide: true, timeout: 30_000, maxBuffer: 16_384,
     });
-  if (result.error || result.status !== 0 || result.stdout !== "private-path-ok") {
-    const stage = /^private-path-failure:(request|create|inspect|acl|rules|owner|inherited|untrusted|useraccess):([A-Za-z]+Exception)$/.exec(result.stdout ?? "");
-    throw new PrivatePathError("Windows private state requires a regular path with access restricted to the current user, SYSTEM and Administrators; existing directory ACLs must be protected and inherit to children" + (stage ? ` (${stage[1]}: ${stage[2]})` : ""));
+  if (result.error || result.status !== 0 || result.signal !== null || result.stdout !== "private-path-ok") {
+    const code = ownCode(result.error);
+    // An error can coexist with status 0 and even a success marker after the
+    // deadline. Its original spawn outcome wins; late exit is not admission.
+    const marker = !result.error && result.signal === null && Number.isSafeInteger(result.status) && result.status !== 0
+      ? /^private-path-failure:(request|create|inspect|acl|rules|owner|inherited|untrusted|useraccess):([A-Za-z]+Exception)$/.exec(result.stdout ?? "") : null;
+    const stage = marker?.[1] as PrivatePathNativeStage | undefined;
+    const exceptionClass = marker ? nativeExceptions.has(marker[2] as PrivatePathNativeException)
+      ? marker[2] as PrivatePathNativeException : "otherException" : undefined;
+    const error = new PrivatePathError("Windows private state requires a regular path with access restricted to the current user, SYSTEM and Administrators; existing directory ACLs must be protected and inherit to children" + (marker ? ` (${marker[1]}: ${marker[2]})` : ""),
+      result.error ? { cause: result.error } : undefined);
+    privatePathFailures.set(error, Object.freeze({ operation,
+      kind: code === "ETIMEDOUT" ? "timeout" : result.error ? "spawn" : marker ? "refused" : "unknown",
+      elapsedMs: Math.max(0, Math.floor(performance.now() - began)), timeoutMs: 30_000,
+      ...(typeof code === "string" && nativeCodes.has(code) ? { code } : {}),
+      ...(result.status === null || Number.isSafeInteger(result.status) && result.status >= -0x80000000 && result.status <= 0xffffffff ? { status: result.status } : {}),
+      ...(result.signal === null || nativeSignals.has(result.signal) ? { signal: result.signal } : {}),
+      ...(stage ? { stage, exceptionClass: exceptionClass! } : {}) }));
+    throw error;
   }
 }
