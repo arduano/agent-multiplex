@@ -13,6 +13,7 @@ export class GatewayCatalogController {
   subscribe = (listener: () => void): (() => void) => { this.#listeners.add(listener); return () => this.#listeners.delete(listener); };
   beginRead(): number { return ++this.#read; }
   retireRead(token: number): void { if (token === this.#read) this.#read++; }
+  failRead(token: number): void { if (token === this.#read) this.invalidate(); }
   accept(token: number, view: GatewayCatalogView): boolean {
     if (token !== this.#read) return false;
     const current = this.#observation.view;

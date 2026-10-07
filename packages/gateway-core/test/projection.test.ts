@@ -427,6 +427,7 @@ describe("coherent bounded Gateway catalog", () => {
     const staleToken = controller.beginRead(), token = controller.beginRead();
     const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
     expect(controller.accept(staleToken, before)).toBe(false); expect(controller.accept(token, before)).toBe(true);
+    controller.failRead(staleToken); expect(controller.snapshot().state).toBe("current");
     const sourceCursor = value.manifest.controlCursor + 1;
     const item = { kind: "control" as const, eventId: crypto.randomUUID(), feedId: value.manifest.feedId, cursor: sourceCursor,
       provenance: { originControlNodeId: root, authority: value.manifest.authority },
