@@ -1467,3 +1467,15 @@ Nineteen public assets match; checksum inventory
 `c546f5963c229476898e3db2134bb20f52342b1dc319c230f11da8a17fbcfda0`.
 [Release evidence and limits](audits/hotfix25-release-qualification-20261002.md).
 No deployed role or real model action.
+
+## Architecture owner candidate `.36` — October 8, 2026
+
+Exact artifact source `7afde665801c5618f513757a804c614e654eb75d`, signed
+`owner-candidate-2026-10-08.1`; all19 anonymous public assets match. Final source
+passes1,614 tests/148 files,8 tests/1 file skipped, typecheck/build and maintained
+repository gates;16 packed consumers/publint/ATTW/SBOM pass. Direct-only topology
+and100-session scale pass;100 turns/3,600 events/zero gaps or duplicates, reconnect
+and owned cleanup. Original fixture failures remain failed receipts. The final
+reconnect change is test-only and all16 tarballs are byte-identical to qualified
+`03520ed2…`. Native/deployment/real-model acceptance is separate; official
+CI/main/registry promotion gates remain unchanged. [Evidence and limits](audits/architecture36-qualification-20261008.md).

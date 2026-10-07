@@ -5,7 +5,7 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-06 (same-parent bootstrap fallback hotfix.35 source/package/direct-Docker qualification; installed acceptance remains pending).
+Last reconciled: 2026-10-08 (architecture `.36` owner candidate source/package/direct-Docker qualification; consumer native/deployment acceptance remains separate).
 
 ## Architecture candidate `.36` — not deployed
 
@@ -21,7 +21,15 @@ published Iroh fork. The maintained release verifier uses that same URL/SRI
 contract rather than disposable registry substitutions. This is candidate asset
 distribution, not official semver/main/GitHub Packages promotion. Public CI remains
 blocked by the owner's billing decision; official promotion gates are unchanged.
-Combined qualification/publication and native consumer acceptance are pending.
+Exact artifact source `7afde665801c5618f513757a804c614e654eb75d` is published
+under SSH-signed `owner-candidate-2026-10-08.1`; all19 anonymous public assets
+match local bytes. Final source gates pass1,614 tests/148 files, eight tests/one
+file skipped, typecheck/build/checkpoint/docs/release/secrets, all16 packed
+consumers, publint/ATTW and release SBOM. Deterministic direct-only Docker tree
+and100-session scale pass with owned cleanup; original failed preparations and
+renewal-fixture diagnostic remain separately recorded. Native consumer and
+installed acceptance remain consumer-owned, not implied by this publication.
+[Exact candidate evidence and limits](../audits/architecture36-qualification-20261008.md).
 Installed personal roles remain unchanged on `.35`; no live/model action.
 
 ## Same-parent bootstrap fallback hotfix.35
