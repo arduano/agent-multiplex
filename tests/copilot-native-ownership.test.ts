@@ -66,7 +66,7 @@ describe("retained Copilot native ownership through Runtime", () => {
       expect(stopReceipt).toMatchObject({ state: "outcomeUnknown" });
       expect(store.getSession(sessionId)).toMatchObject({ availability: "resumable", runtimeStatus: "stopped", runtimeEpoch: null });
 
-      const history = service.readNativeHistory(sessionId, { harness: "copilot", includeTurns: true, limit: 25 });
+      const history = service.inspectNativeHistory(sessionId, { harness: "copilot", includeTurns: true, limit: 25 });
       const failedHistory = expect(history).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
       const resume = { operation: "resume" as const, commandId: newCommandId(), sessionId, runtimeNodeId,
         bindingRevision: before.bindingRevision, payloadHash: "ownership-resume-fixture" };
@@ -113,7 +113,7 @@ describe("retained Copilot native ownership through Runtime", () => {
         bindingRevision: 1, payloadHash: "close-stop-fixture" });
       client.resumeSession.mockImplementationOnce(() => new Promise<never>(() => {}));
       const nativeClose = vi.spyOn(client, "stop");
-      const history = service.readNativeHistory(sessionId, { harness: "copilot", includeTurns: true, limit: 25 });
+      const history = service.inspectNativeHistory(sessionId, { harness: "copilot", includeTurns: true, limit: 25 });
       const failedHistory = expect(history).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
       await vi.waitFor(() => expect(client.resumeSession).toHaveBeenCalledOnce());
       const closing = service.close();
@@ -122,6 +122,7 @@ describe("retained Copilot native ownership through Runtime", () => {
       await failedHistory;
       expect(nativeClose).toHaveBeenCalledOnce();
       await expect(service.readNativeHistory(sessionId, { harness: "copilot", includeTurns: true })).rejects.toMatchObject({ code: "FENCED" });
+      await expect(service.inspectNativeHistory(sessionId, { harness: "copilot", includeTurns: true })).rejects.toMatchObject({ code: "FENCED" });
       expect(store.getSession(sessionId)).toMatchObject({ availability: "resumable", runtimeEpoch: null });
     } finally {
       await service.close(); store.close(); rmSync(root, { recursive: true, force: true });

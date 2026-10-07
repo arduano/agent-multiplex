@@ -1752,7 +1752,7 @@ describe("RuntimeNodeService", () => {
     store.close();
   });
 
-  it("revalidates a stored cwd before attaching inactive native history", async () => {
+  it("revalidates a stored cwd before explicitly inspecting stopped native history", async () => {
     const base = mkdtempSync(join(tmpdir(), "agent-multiplex-history-cwd-"));
     const root = join(base, "root");
     const project = join(root, "project");
@@ -1792,7 +1792,7 @@ describe("RuntimeNodeService", () => {
     symlinkSync(outside, project, "dir");
 
     await expect(
-      service.readNativeHistory(sessionId, { harness: "codex", includeTurns: true }),
+      service.inspectNativeHistory(sessionId, { harness: "codex", includeTurns: true }),
     ).rejects.toMatchObject({ code: "FENCED" });
     expect(adapter.resumeCalls).toHaveLength(0);
 
@@ -1845,7 +1845,17 @@ describe("RuntimeNodeService", () => {
     const live = new FakeSession("fake-1", root, adapter.adapterScopeId);
     adapter.resumeFactory = (_options, call) => (call === 1 ? temporary : live);
 
-    const history = service.readNativeHistory(sessionId, {
+    // A query cannot acquire a native owner, even when an older caller sends
+    // the former opt-in flag. Only the explicit inspection mutation may attach.
+    for (const activeBindingOnly of [undefined, false, true]) {
+      await expect(service.readNativeHistory(sessionId, {
+        harness: "codex", includeTurns: true,
+        ...(activeBindingOnly === undefined ? {} : { native: { activeBindingOnly } }),
+      })).rejects.toMatchObject({ code: "CONFLICT" });
+    }
+    expect(adapter.resumeCalls).toHaveLength(0);
+
+    const history = service.inspectNativeHistory(sessionId, {
       harness: "codex",
       includeTurns: true,
     });
@@ -1877,7 +1887,7 @@ describe("RuntimeNodeService", () => {
     store.close();
   });
 
-  it("rechecks the active handle after waiting behind a resume", async () => {
+  it("refuses an ordinary history read during resume, then reads the installed active handle", async () => {
     const root = mkdtempSync(join(tmpdir(), "agent-multiplex-resume-history-race-"));
     const store = new RuntimeNodeStore(":memory:");
     const runtimeNodeId = newRuntimeNodeId();
@@ -1938,12 +1948,14 @@ describe("RuntimeNodeService", () => {
       harness: "codex",
       includeTurns: true,
     });
-    await Promise.resolve();
+    await expect(history).rejects.toMatchObject({ code: "CONFLICT" });
     expect(adapter.resumeCalls).toHaveLength(1);
+    expect(live.historyCalls).toBe(0);
 
     releaseResume();
     await expect(resumed).resolves.toMatchObject({ state: "succeeded" });
-    await expect(history).resolves.toMatchObject({ vendorSessionId: "fake-1" });
+    await expect(service.readNativeHistory(sessionId, { harness: "codex", includeTurns: true }))
+      .resolves.toMatchObject({ vendorSessionId: "fake-1" });
     expect(adapter.resumeCalls).toHaveLength(1);
     expect(live.historyCalls).toBe(1);
     expect(live.stopCalls).toBe(0);
@@ -1952,7 +1964,7 @@ describe("RuntimeNodeService", () => {
     store.close();
   });
 
-  it("serializes duplicate inactive history attachments", async () => {
+  it("serializes duplicate explicit stopped-history inspections", async () => {
     const root = mkdtempSync(join(tmpdir(), "agent-multiplex-history-duplicate-"));
     const store = new RuntimeNodeStore(":memory:");
     const runtimeNodeId = newRuntimeNodeId();
@@ -2002,12 +2014,12 @@ describe("RuntimeNodeService", () => {
       return temporary;
     };
 
-    const first = service.readNativeHistory(sessionId, {
+    const first = service.inspectNativeHistory(sessionId, {
       harness: "codex",
       includeTurns: true,
     });
     await firstStarted;
-    const second = service.readNativeHistory(sessionId, {
+    const second = service.inspectNativeHistory(sessionId, {
       harness: "codex",
       includeTurns: true,
     });

@@ -27,6 +27,7 @@ import { AdapterOutcomeUnknownError, runtimeBackendForAdapter, type AdapterEvent
 import { DirectWorkspaceLaunchProvider } from "../packages/runtime-node-core/src/launch-provider.js";
 import { RuntimeNodeService } from "../packages/runtime-node-core/src/service.js";
 import { RuntimeNodeStore } from "../packages/runtime-node-core/src/store.js";
+import { NativeOwnerTerminationError, isNativeOwnerTerminationError } from "../packages/runtime-node-core/src/native-owner.js";
 import { TerminalBroker, type TerminalProvider } from "../packages/runtime-node-core/src/terminal.js";
 
 const cleanup: (() => Promise<void>)[] = [];
@@ -55,7 +56,7 @@ describe("runtime node shutdown", () => {
         return session;
       });
     }
-    const history = service.readNativeHistory(resume.sessionId, { harness: "codex", request: {} });
+    const history = service.inspectNativeHistory(resume.sessionId, { harness: "codex", request: {} });
     const historyFailure = expect(history).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
     await started.promise;
     // A lifecycle mutation behind the history lock must also settle, without
@@ -88,6 +89,8 @@ describe("runtime node shutdown", () => {
     await expect(service.resume(resume)).rejects.toMatchObject({ code: "FENCED" });
     await expect(service.readNativeHistory(resume.sessionId, { harness: "codex", request: {} }))
       .rejects.toMatchObject({ code: "FENCED" });
+    await expect(service.inspectNativeHistory(resume.sessionId, { harness: "codex", request: {} }))
+      .rejects.toMatchObject({ code: "FENCED" });
     await expect(service.models("codex")).rejects.toMatchObject({ code: "FENCED" });
     expect(() => service.createLaunch(launch)).toThrow(expect.objectContaining({ code: "FENCED" }));
     expect(() => service.archive(fixture.archive)).toThrow(expect.objectContaining({ code: "FENCED" }));
@@ -117,7 +120,7 @@ describe("runtime node shutdown", () => {
       stopStarted.resolve();
       await stopGate.promise;
     });
-    const history = service.readNativeHistory(resume.sessionId, { harness: "codex", request: {} });
+    const history = service.inspectNativeHistory(resume.sessionId, { harness: "codex", request: {} });
     await started.promise;
     const closing = service.close();
     expect(adapter.close).not.toHaveBeenCalled();
@@ -242,7 +245,8 @@ describe("runtime node shutdown", () => {
     await service.resume(resume);
     unsubscribe.mockImplementation(() => { throw new Error("unsubscribe failed"); });
     session.stop.mockRejectedValue(new Error("session stop failed"));
-    adapter.close.mockImplementation(() => { throw new Error("adapter close failed"); });
+    const adapterFailure = new Error("adapter close failed");
+    adapter.close.mockImplementation(() => { throw adapterFailure; });
     provider.close.mockRejectedValue(new Error("provider close failed"));
     const started = deferred();
     const gate = deferred();
@@ -259,6 +263,11 @@ describe("runtime node shutdown", () => {
     gate.resolve();
     const error = await failure;
     expect(error).toBeInstanceOf(AggregateError);
+    expect(isNativeOwnerTerminationError(error)).toBe(true);
+    const ownerFailures = cleanupErrors(error).filter(value => value instanceof NativeOwnerTerminationError);
+    expect(ownerFailures).toHaveLength(1);
+    expect(ownerFailures[0]).toMatchObject({ termination: "unproved" });
+    expect(ownerFailures[0]!.cause).toBe(adapterFailure);
     expect(allErrors(error)).toEqual(expect.arrayContaining([
       "unsubscribe failed", "session stop failed", "adapter close failed", "provider close failed",
     ]));
@@ -395,6 +404,10 @@ function createFixture(additionalAdapters: ReturnType<typeof createAdapter>[] = 
 }
 
 function allErrors(error: unknown): string[] {
-  return error instanceof AggregateError ? error.errors.flatMap(allErrors)
-    : error instanceof Error ? [error.message] : [String(error)];
+  return cleanupErrors(error).map(value => value instanceof Error ? value.message : String(value));
+}
+
+function cleanupErrors(error: unknown): unknown[] {
+  return error instanceof AggregateError ? error.errors.flatMap(cleanupErrors)
+    : error instanceof NativeOwnerTerminationError ? [error, ...cleanupErrors(error.cause)] : [error];
 }
