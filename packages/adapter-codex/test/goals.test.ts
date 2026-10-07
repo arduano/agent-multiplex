@@ -30,7 +30,7 @@ async function fixture(resume = false) {
     throw new Error(`Unexpected native method ${method}`);
   });
   const rpc = {
-    start: vi.fn(async () => {}), close: vi.fn(async () => {}), request,
+    start: vi.fn(async () => {}), beginClose: vi.fn(() => {}), close: vi.fn(async () => {}), request,
     onNotification: (listener: typeof notify) => { notify = listener; return () => {}; },
     onServerRequest: () => () => {},
     onExit: (listener: typeof exit) => { exit = listener; return () => {}; },

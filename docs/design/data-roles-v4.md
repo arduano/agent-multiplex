@@ -773,7 +773,20 @@ The Codex RPC client separately gates ordinary requests on its complete
 initialization handshake. Closure fences unfinished preparation, retires the
 connection, and settles every pending request. Dispatched requests without a
 definitive response retain unknown-outcome semantics. Failed initialization
-cleans up its connection before a new startup attempt.
+cleans up its connection before a new startup attempt. `beginClose` retires
+admitted caller waits before the Runtime drain, including a native history read
+that never replies, while retaining the underlying startup/transport owner for
+backend cleanup. A failed write acknowledgement after dispatch is also unknown;
+no mutation is replayed. A transport whose cleanup failed remains retained and
+blocks a replacement connection.
+
+Native process release is exact-child evidence shared by the Codex stdio and
+shared-server owners. SIGTERM/SIGKILL requests do not prove release: cleanup must
+observe actual exit, a native exit/signal code, or the captured no-PID spawn
+failure. Bounded cleanup without that proof reports `NativeOwnerTerminationError`
+and retains the old owner and its socket resources. Supervisors inspect typed
+cleanup evidence through bounded cause/aggregate traversal, never error wording.
+Shutdown caller retirement cannot authorize a second native process.
 
 Gateway SQLite stores contain operational data only: source configuration,
 pinned locators, renewed tickets, independent upstream cursors, and health.

@@ -1,7 +1,12 @@
-import { AdapterOutcomeUnknownError } from "@arduano/agent-multiplex-runtime-node-core";
-import { describe, expect, it, vi } from "vitest";
+import { AdapterOutcomeUnknownError, isNativeOwnerTerminationError } from "@arduano/agent-multiplex-runtime-node-core";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CodexRpcClient, CodexRpcError, type CodexRpcConnection } from "../src/rpc.js";
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe("Codex RPC lifecycle", () => {
   it("holds concurrent callers until transport startup and the complete handshake finish", async () => {
@@ -106,6 +111,66 @@ describe("Codex RPC lifecycle", () => {
     expect(connection.closeCalls).toBe(1);
   });
 
+  it("preserves an unknown command outcome when its write callback fails after dispatch", async () => {
+    const connection = new FakeConnection({ autoInitialize: true });
+    connection.sendErrors.set("turn/start", new Error("write acknowledgement lost"));
+    const rpc = new CodexRpcClient({ createConnection: () => connection });
+    await expect(rpc.request("turn/start")).rejects.toMatchObject({
+      name: "AdapterOutcomeUnknownError", cause: expect.objectContaining({ message: "write acknowledgement lost" }),
+    });
+    expect(connection.methods().filter((method) => method === "turn/start")).toHaveLength(1);
+    await rpc.close();
+  });
+
+  it("retires a hung admitted history read before native transport cleanup starts", async () => {
+    const cleanup = deferred();
+    const connection = new FakeConnection({ autoInitialize: true, closeGate: cleanup.promise });
+    connection.unanswered.add("thread/read");
+    connection.unanswered.add("turn/start");
+    const rpc = new CodexRpcClient({ createConnection: () => connection });
+    const history = rpc.request("thread/read");
+    const mutation = rpc.request("turn/start");
+    const rejections = [
+      expect(history).rejects.toBeInstanceOf(AdapterOutcomeUnknownError),
+      expect(mutation).rejects.toBeInstanceOf(AdapterOutcomeUnknownError),
+    ];
+    await connection.waitForMethod("thread/read");
+    await connection.waitForMethod("turn/start");
+    rpc.beginClose();
+    await Promise.all(rejections);
+    expect(connection.closeCalls).toBe(0);
+    await expect(rpc.request("thread/read")).rejects.toBeInstanceOf(CodexRpcError);
+    const closing = rpc.close();
+    await connection.closing.promise;
+    connection.respond("thread/read", { obsolete: true });
+    connection.respond("turn/start", { obsolete: true });
+    cleanup.resolve();
+    await closing;
+    expect(connection.methods().filter((method) => method === "turn/start")).toHaveLength(1);
+  });
+
+  it("retires attachment callers while retaining an unfinished preparation until close", async () => {
+    const preparation = deferred();
+    const createConnection = vi.fn(() => new FakeConnection());
+    const prepareProcess = vi.fn(() => preparation.promise);
+    const rpc = new CodexRpcClient({ prepareProcess, createConnection });
+    const starting = rpc.start();
+    const queued = rpc.request("thread/start");
+    const rejections = [expect(starting).rejects.toThrow("closed"), expect(queued).rejects.toThrow("closed")];
+    await Promise.resolve();
+    expect(prepareProcess).toHaveBeenCalledTimes(1);
+    rpc.beginClose();
+    await Promise.all(rejections);
+    const closing = rpc.close();
+    let complete = false;
+    void closing.then(() => { complete = true; });
+    await Promise.resolve();
+    expect(complete).toBe(false);
+    preparation.resolve();
+    await closing;
+    expect(createConnection).not.toHaveBeenCalled();
+  });
+
   it("shares close completion and failure across callers", async () => {
     const cleanup = deferred();
     const connection = new FakeConnection({ autoInitialize: true, closeGate: cleanup.promise });
@@ -164,6 +229,75 @@ describe("Codex RPC lifecycle", () => {
     await rpc.start();
     expect(createConnection).toHaveBeenCalledTimes(1);
     await rpc.close();
+  });
+
+  it("retains a failed startup transport and refuses replacement if cleanup is unproved", async () => {
+    const connection = new FakeConnection({ startError: new Error("startup failed") });
+    const close = vi.spyOn(connection, "close").mockRejectedValue(new Error("native cleanup failed"));
+    const createConnection = vi.fn(() => connection);
+    const rpc = new CodexRpcClient({ createConnection });
+    const first = await rpc.start().catch((error: unknown) => error);
+    expect(isNativeOwnerTerminationError(first)).toBe(true);
+    await expect(rpc.start()).rejects.toMatchObject({ termination: "unproved" });
+    expect(createConnection).toHaveBeenCalledTimes(1);
+    const closing = await rpc.close().catch((error: unknown) => error);
+    expect(isNativeOwnerTerminationError(closing)).toBe(true);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("awaits disconnected transport cleanup before constructing a replacement", async () => {
+    const cleanup = deferred();
+    const old = new FakeConnection({ autoInitialize: true, closeGate: cleanup.promise });
+    const replacement = new FakeConnection({ autoInitialize: true });
+    const createConnection = vi.fn().mockReturnValueOnce(old).mockReturnValue(replacement);
+    const rpc = new CodexRpcClient({ createConnection });
+    await rpc.start();
+    old.exit(new Error("I/O failure"));
+    await old.closing.promise;
+    const starting = rpc.start();
+    await Promise.resolve();
+    expect(createConnection).toHaveBeenCalledTimes(1);
+    cleanup.resolve();
+    await starting;
+    expect(createConnection).toHaveBeenCalledTimes(2);
+    await rpc.close();
+  });
+
+  it("retains the stdio child until a delayed exit following SIGKILL", async () => {
+    vi.useFakeTimers();
+    const child = new FakeStdioChild();
+    const rpc = new CodexRpcClient({ spawnProcess: () => child.asChild() });
+    await rpc.start();
+    const closing = rpc.close();
+    let complete = false;
+    void closing.then(() => { complete = true; });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(complete).toBe(false);
+    child.exit(null, "SIGKILL");
+    await closing;
+    expect(complete).toBe(true);
+  });
+
+  it("does not lose a stdio child on an error event or replace it after failed termination", async () => {
+    vi.useFakeTimers();
+    const child = new FakeStdioChild();
+    child.kill.mockImplementation(() => false);
+    const spawnProcess = vi.fn(() => child.asChild());
+    const rpc = new CodexRpcClient({ spawnProcess });
+    await rpc.start();
+    child.emit("error", new Error("native transport failure"));
+    const replacement = rpc.start();
+    const rejection = expect(replacement).rejects.toMatchObject({ termination: "unproved" });
+    await vi.advanceTimersByTimeAsync(6_000);
+    await rejection;
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    const closing = await rpc.close().catch((error: unknown) => error);
+    expect(isNativeOwnerTerminationError(closing)).toBe(true);
+    // Preserve the failed original result even if this exact child exits later.
+    child.exit(null, "SIGKILL");
+    await expect(rpc.close()).rejects.toBe(closing);
   });
 });
 
@@ -233,6 +367,10 @@ class FakeConnection implements CodexRpcConnection {
     return this.sent.map(({ method }) => method);
   }
 
+  exit(error: Error): void {
+    for (const listener of this.#exits) listener(error);
+  }
+
   waitForMethod(method: string): Promise<void> {
     if (this.sent.some((message) => message.method === method)) return Promise.resolve();
     let waiting = this.#waiting.get(method);
@@ -266,4 +404,33 @@ function deferred() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+class FakeStdioChild extends EventEmitter {
+  readonly pid = 42;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  killed = false;
+  readonly stdin = new PassThrough();
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly kill = vi.fn((_signal: NodeJS.Signals): boolean => { this.killed = true; return true; });
+
+  constructor() {
+    super();
+    this.stdin.on("data", (chunk: Buffer) => {
+      for (const encoded of chunk.toString().trim().split("\n")) {
+        const message = JSON.parse(encoded) as Message;
+        if (message.id !== undefined) this.stdout.write(`${JSON.stringify({ id: message.id, result: {} })}\n`);
+      }
+    });
+  }
+
+  asChild(): ChildProcessWithoutNullStreams { return this as unknown as ChildProcessWithoutNullStreams; }
+
+  exit(code: number | null, signal: NodeJS.Signals | null): void {
+    this.exitCode = code;
+    this.signalCode = signal;
+    this.emit("exit", code, signal);
+  }
 }

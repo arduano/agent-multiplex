@@ -48,6 +48,7 @@ import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js"
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
 import { codexHistoryDeliveryFacts } from "./history-delivery.js";
+import { codexConversationEvidence } from "./conversation.js";
 import type { UserInput } from "./generated/v2/UserInput.js";
 import {
   CodexRpcClient,
@@ -215,6 +216,7 @@ export class CodexAdapter implements AgentAdapter {
   readonly #unsubscribeRequest: () => void;
   readonly #unsubscribeExit: () => void;
   readonly #closeRuntime: (() => Promise<void>) | undefined;
+  #closing: Promise<void> | undefined;
 
   public constructor(options: CodexAdapterOptions = {}) {
     this.adapterScopeId = adapterScopeIdSchema.parse(options.adapterScopeId ?? "codex:default");
@@ -423,7 +425,18 @@ export class CodexAdapter implements AgentAdapter {
     return session;
   }
 
-  public async close(): Promise<void> {
+  public beginClose(): void {
+    this.#rpc.beginClose();
+  }
+
+  public close(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    this.beginClose();
+    this.#closing = this.#close();
+    return this.#closing;
+  }
+
+  async #close(): Promise<void> {
     this.#unsubscribeNotification();
     this.#unsubscribeRequest();
     this.#unsubscribeExit();
@@ -431,8 +444,13 @@ export class CodexAdapter implements AgentAdapter {
     this.#sessions.clear();
     this.#childOwners.clear();
     this.#rejectEarly("Codex adapter closed before a session binding was attached");
-    await this.#rpc.close();
-    await this.#closeRuntime?.();
+    const cleanup = await Promise.allSettled([
+      this.#rpc.close(),
+      Promise.resolve().then(() => this.#closeRuntime?.()),
+    ]);
+    const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map(({ reason }) => reason);
+    if (failures.length > 0) throw new AggregateError(failures, "Codex adapter cleanup failed");
   }
 
   #register(thread: Thread, settings?: InitialThreadSettings): CodexSession {
@@ -878,11 +896,15 @@ class CodexSession implements AdapterSession {
         if (limit === 1) {
           if (request.native?.omitOversizedItems !== true) throw new Error("One native Codex history item exceeds the bounded wire envelope");
           const item = response.data[0]?.item;
+          const payload = json({ ...response, data: [], ...(childThreadId ? { threadId: childThreadId } : {}) });
           // Advance only with the real native single-item cursor, preserving a
           // visible omission instead of truncating or inventing native output.
           return {
             harness: "codex", vendorSessionId: this.vendorSessionId, sortDirection,
-            payload: json({ ...response, data: [], ...(childThreadId ? { threadId: childThreadId } : {}) }),
+            payload,
+            conversation: codexConversationEvidence(payload, this.vendorSessionId, {
+              history: true, sortDirection, view: childThreadId ? "child" : "primary",
+            }),
             complete: response.nextCursor === null,
             ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
             unavailableItem: { reason: "exceedsWireLimit",
@@ -896,9 +918,13 @@ class CodexSession implements AdapterSession {
         limit = Math.max(1, Math.floor(limit / 2));
       }
       const messageDeliveryFacts = !childThreadId ? codexHistoryDeliveryFacts(response, this.vendorSessionId) : [];
+      const payload = json({ ...response, ...(childThreadId ? { threadId: childThreadId } : {}) });
       return {
         harness: "codex", vendorSessionId: this.vendorSessionId,
-        payload: json({ ...response, ...(childThreadId ? { threadId: childThreadId } : {}) }), sortDirection,
+        payload, sortDirection,
+        conversation: codexConversationEvidence(payload, this.vendorSessionId, {
+          history: true, sortDirection, view: childThreadId ? "child" : "primary",
+        }),
         complete: response.nextCursor === null,
         ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
         ...(messageDeliveryFacts.length ? { messageDeliveryFacts } : {}),
@@ -914,6 +940,7 @@ class CodexSession implements AdapterSession {
       harness: "codex",
       vendorSessionId: this.vendorSessionId,
       payload: json(response),
+      conversation: codexConversationEvidence(response, this.vendorSessionId, { history: true }),
       complete: true,
     };
   }
@@ -962,6 +989,7 @@ class CodexSession implements AdapterSession {
       if (codexHistoryPageBytes(page) <= NATIVE_PAYLOAD_MAX_BYTES && codexImageLeaves(page).length <= 256) {
         return {
           harness: "codex", vendorSessionId: this.vendorSessionId, payload: page, sortDirection,
+          conversation: codexConversationEvidence(page, this.vendorSessionId, { history: true, sortDirection }),
           complete: response.nextCursor === null,
           ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
         };
@@ -983,6 +1011,7 @@ class CodexSession implements AdapterSession {
       const turn = response.data[0];
       return {
         harness: "codex", vendorSessionId: this.vendorSessionId, payload: omitted, sortDirection,
+        conversation: codexConversationEvidence(omitted, this.vendorSessionId, { history: true, sortDirection }),
         complete: response.nextCursor === null,
         ...(response.nextCursor ? { nextCursor: response.nextCursor } : {}),
         unavailableItem: { reason: "exceedsWireLimit",
@@ -1006,6 +1035,9 @@ class CodexSession implements AdapterSession {
   public async stop(): Promise<void> {
     this.#closed = true;
     try {
+      if (this.#rpc.closing) {
+        throw new AdapterOutcomeUnknownError("Codex binding retirement awaits app-server termination");
+      }
       await this.#rpc.request("thread/unsubscribe", { threadId: this.vendorSessionId });
     } finally {
       this.#setStatus("stopped");
@@ -1111,11 +1143,16 @@ class CodexSession implements AdapterSession {
       }
       this.#restoreStatusAfterInput();
     }
+    const conversation = codexConversationEvidence(notification.params, this.vendorSessionId, {
+      nativeType: notification.method,
+      view: isRootThread ? "primary" : "child",
+    });
     this.#emit({
       kind: "native",
       nativeType: notification.method,
       payload: notification.params,
       ephemeral: isEphemeral(notification.method),
+      ...(conversation.items.length ? { conversation } : {}),
     });
   }
 

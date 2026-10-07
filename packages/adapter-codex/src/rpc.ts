@@ -3,7 +3,11 @@ import { createInterface, type Interface } from "node:readline";
 import { createConnection } from "node:net";
 
 import { toJsonValue, type JsonValue } from "@arduano/agent-multiplex-protocol";
-import { AdapterOutcomeUnknownError } from "@arduano/agent-multiplex-runtime-node-core";
+import {
+  AdapterOutcomeUnknownError,
+  NativeChildProcessOwner,
+  NativeOwnerTerminationError,
+} from "@arduano/agent-multiplex-runtime-node-core";
 import WebSocket, { type RawData } from "ws";
 
 interface RpcResponse {
@@ -74,17 +78,26 @@ export class CodexRpcClient {
   readonly #exits = new Set<(error: Error) => void>();
   readonly #pending = new Map<number, Pending>();
   readonly #connectionClosures = new WeakMap<CodexRpcConnection, Promise<void>>();
+  readonly #retiringConnections = new Map<CodexRpcConnection, Promise<void>>();
+  readonly #retired: Promise<void>;
+  readonly #retire: () => void;
   #connection: CodexRpcConnection | undefined;
   #connectionDisposers: Array<() => void> = [];
   #nextId = 1;
-  #starting: Promise<void> | undefined;
+  #starting: { native: Promise<void>; caller: Promise<void> } | undefined;
   #closing: Promise<void> | undefined;
   #ready = false;
   #closed = false;
+  #retirementError: Error | undefined;
 
   public constructor(options: CodexRpcClientOptions = {}) {
     this.#options = options;
+    let retire!: () => void;
+    this.#retired = new Promise<void>((resolve) => { retire = resolve; });
+    this.#retire = retire;
   }
+
+  public get closing(): boolean { return this.#closed; }
 
   public onNotification(listener: (notification: CodexNotification) => void): () => void {
     this.#notifications.add(listener);
@@ -103,17 +116,29 @@ export class CodexRpcClient {
 
   public async start(): Promise<void> {
     this.#assertOpen();
-    if (this.#starting) return this.#starting;
     if (this.#ready) return;
-    this.#starting = this.#start();
-    try {
-      await this.#starting;
-    } finally {
-      this.#starting = undefined;
+    if (!this.#starting) {
+      const native = this.#start();
+      const caller = Promise.race([
+        native,
+        this.#retired.then(() => { throw this.#retirementError; }),
+      ]);
+      const starting = { native, caller };
+      this.#starting = starting;
+      // Caller retirement cannot release a still-pending startup owner.
+      void native.then(
+        () => { if (this.#starting === starting) this.#starting = undefined; },
+        () => { if (this.#starting === starting) this.#starting = undefined; },
+      );
     }
+    await this.#starting.caller;
   }
 
   async #start(): Promise<void> {
+    // A disconnected transport can still own a live app-server. Do not
+    // construct its replacement before that exact transport proves cleanup.
+    await Promise.all(this.#retiringConnections.values());
+    this.#assertOpen();
     await this.#options.prepareProcess?.();
     this.#assertOpen();
     const connection = this.#options.createConnection?.() ?? new StdioCodexRpcConnection(() =>
@@ -152,7 +177,11 @@ export class CodexRpcClient {
       this.#ready = true;
     } catch (error) {
       this.#disconnect(connection, asError(error));
-      await this.#closeConnection(connection).catch(() => undefined);
+      try {
+        await this.#closeConnection(connection);
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "Codex RPC startup cleanup failed");
+      }
       throw error;
     }
   }
@@ -194,7 +223,10 @@ export class CodexRpcClient {
     // that interval as dispatched rather than claiming the native effect failed.
     pending.dispatched = true;
     const failed = (error: unknown) => {
-      if (this.#pending.delete(id)) pending.reject(asError(error));
+      if (this.#pending.delete(id)) {
+        const cause = asError(error);
+        pending.reject(new AdapterOutcomeUnknownError("Codex RPC write failed after transport dispatch", { cause }));
+      }
     };
     try {
       void connection.send(message).catch(failed);
@@ -213,9 +245,21 @@ export class CodexRpcClient {
       .catch((error: unknown) => this.#didExit(connection, asError(error)));
   }
 
+  /** Retire admitted caller waits before Runtime drains them. The transport
+   * and its exact process owner remain retained for close() to release. */
+  public beginClose(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#retirementError = this.#starting && this.#pending.size > 0
+      ? new AdapterOutcomeUnknownError("Codex RPC initialization was retired after dispatch")
+      : new CodexRpcError("Codex RPC client is closed");
+    this.#retire();
+    this.#rejectPending(new CodexRpcError("Codex RPC client is closed"));
+  }
+
   public close(): Promise<void> {
     if (this.#closing) return this.#closing;
-    this.#closed = true;
+    this.beginClose();
     this.#closing = this.#close();
     return this.#closing;
   }
@@ -225,18 +269,29 @@ export class CodexRpcClient {
     if (connection) this.#disconnect(connection, new CodexRpcError("Codex RPC client is closed"));
     // Close the transport before waiting for startup: its initialize request
     // must be rejected so startup cannot deadlock shutdown.
-    const [closed] = await Promise.allSettled([
+    const results = await Promise.allSettled([
       connection ? this.#closeConnection(connection) : Promise.resolve(),
-      this.#starting,
+      this.#starting?.native,
     ]);
-    if (closed.status === "rejected") throw closed.reason;
+    const retirements = await Promise.allSettled(this.#retiringConnections.values());
+    const errors = [...results.slice(0, 1), ...retirements]
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map(({ reason }) => reason);
+    if (errors.length > 0) throw new AggregateError([...new Set(errors)], "Codex RPC cleanup failed");
   }
 
   #closeConnection(connection: CodexRpcConnection): Promise<void> {
     let closing = this.#connectionClosures.get(connection);
     if (!closing) {
-      closing = Promise.resolve().then(() => connection.close());
+      closing = Promise.resolve().then(() => connection.close()).catch((cause: unknown) => {
+        throw new NativeOwnerTerminationError("Codex RPC transport cleanup was not acknowledged", { cause });
+      });
       this.#connectionClosures.set(connection, closing);
+      this.#retiringConnections.set(connection, closing);
+      void closing.then(
+        () => this.#retiringConnections.delete(connection),
+        () => undefined,
+      );
     }
     return closing;
   }
@@ -325,6 +380,7 @@ export class CodexRpcClient {
 
   #didExit(connection: CodexRpcConnection, error: Error): void {
     if (!this.#disconnect(connection, error)) return;
+    void this.#closeConnection(connection).catch(() => undefined);
     for (const listener of this.#exits) listener(error);
   }
 
@@ -333,6 +389,11 @@ export class CodexRpcClient {
     this.#connection = undefined;
     this.#ready = false;
     this.#disposeConnectionListeners();
+    this.#rejectPending(error);
+    return true;
+  }
+
+  #rejectPending(error: Error): void {
     for (const pending of this.#pending.values()) {
       pending.reject(
         pending.dispatched
@@ -341,7 +402,6 @@ export class CodexRpcClient {
       );
     }
     this.#pending.clear();
-    return true;
   }
 
   #disposeConnectionListeners(): void {
@@ -355,8 +415,11 @@ class StdioCodexRpcConnection implements CodexRpcConnection {
   readonly #exits = new Set<(error: Error) => void>();
   readonly #diagnostics = new Set<(message: string) => void>();
   #process: ChildProcessWithoutNullStreams | undefined;
+  #owner: NativeChildProcessOwner | undefined;
   #readline: Interface | undefined;
   #closed = false;
+  #closing: Promise<void> | undefined;
+  #exitEmitted = false;
 
   public constructor(
     private readonly spawnProcess: () => ChildProcessWithoutNullStreams,
@@ -382,6 +445,7 @@ class StdioCodexRpcConnection implements CodexRpcConnection {
     if (this.#process) return;
     const child = this.spawnProcess();
     this.#process = child;
+    this.#owner = new NativeChildProcessOwner(child);
     this.#readline = createInterface({ input: child.stdout });
     this.#readline.on("line", (line) => {
       for (const listener of this.#messages) listener(line);
@@ -409,31 +473,24 @@ class StdioCodexRpcConnection implements CodexRpcConnection {
     });
   }
 
-  public async close(): Promise<void> {
-    if (this.#closed) return;
+  public close(): Promise<void> {
+    if (this.#closing) return this.#closing;
     this.#closed = true;
-    const child = this.#process;
-    this.#process = undefined;
+    this.#closing = this.#close();
+    return this.#closing;
+  }
+
+  async #close(): Promise<void> {
     this.#readline?.close();
     this.#readline = undefined;
-    if (!child || child.exitCode !== null) return;
-    child.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        if (child.exitCode === null) child.kill("SIGKILL");
-        resolve();
-      }, 3_000);
-      timer.unref();
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    await this.#owner?.terminate();
+    this.#process = undefined;
+    this.#owner = undefined;
   }
 
   #emitExit(error: Error): void {
-    if (!this.#process) return;
-    this.#process = undefined;
+    if (this.#exitEmitted) return;
+    this.#exitEmitted = true;
     this.#readline?.close();
     this.#readline = undefined;
     for (const listener of this.#exits) listener(error);

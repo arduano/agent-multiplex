@@ -15,7 +15,7 @@ async function fixture() {
     if (method === "thread/compact/start" || method === "thread/unsubscribe") return {};
     throw new Error(`Unexpected native method ${method}`);
   });
-  const rpc = { start: async () => {}, close: async () => {}, request,
+  const rpc = { start: async () => {}, beginClose: () => {}, close: async () => {}, request,
     onNotification: (listener: typeof notify) => { notify = listener; return () => {}; },
     onServerRequest: () => () => {}, onExit: () => () => {},
   } as unknown as CodexRpcClient;

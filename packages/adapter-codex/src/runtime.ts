@@ -7,6 +7,8 @@ import { join } from "node:path";
 import type { AdapterScopeId } from "@arduano/agent-multiplex-protocol";
 import {
   sanitizedTerminalEnvironment,
+  NativeChildProcessOwner,
+  NativeOwnerTerminationError,
   terminalProcessFromPty,
   type TerminalProcess,
   type TerminalProvider,
@@ -25,6 +27,8 @@ export interface CodexAppServerSupervisorOptions {
   environment?: NodeJS.ProcessEnv;
   cwd?: string;
   socketDirectory?: string;
+  /** Exact-child construction seam for disposable process-lifetime tests. */
+  spawnProcess?: () => ChildProcessWithoutNullStreams;
 }
 
 /** One worker-local Codex app server shared by the JSON-RPC adapter and TUIs. */
@@ -34,10 +38,13 @@ export class CodexAppServerSupervisor {
   readonly #environment: Record<string, string>;
   readonly #cwd: string | undefined;
   readonly #configuredSocketDirectory: string | undefined;
+  readonly #spawnProcess: (() => ChildProcessWithoutNullStreams) | undefined;
   #directory: string | undefined;
   #socketPath: string | undefined;
-  #server: ChildProcessWithoutNullStreams | undefined;
+  #server: NativeChildProcessOwner | undefined;
   #starting: Promise<void> | undefined;
+  #closing: Promise<void> | undefined;
+  #ready = false;
   #closed = false;
   #stderr = "";
 
@@ -47,6 +54,7 @@ export class CodexAppServerSupervisor {
     this.#environment = sanitizedTerminalEnvironment(options.environment);
     this.#cwd = options.cwd;
     this.#configuredSocketDirectory = options.socketDirectory;
+    this.#spawnProcess = options.spawnProcess;
   }
 
   public get binary(): string {
@@ -64,8 +72,13 @@ export class CodexAppServerSupervisor {
 
   public async start(): Promise<void> {
     if (this.#closed) throw new Error("Codex app server supervisor is closed");
-    if (this.#server && this.#server.exitCode === null && this.#socketPath) return;
     if (this.#starting) return this.#starting;
+    if (this.#server && !this.#server.terminated) {
+      if (this.#ready) return;
+      throw new NativeOwnerTerminationError("Previous Codex app-server owner has not terminated");
+    }
+    this.#server = undefined;
+    this.#ready = false;
     this.#starting = this.#start();
     try {
       await this.#starting;
@@ -99,12 +112,13 @@ export class CodexAppServerSupervisor {
     this.#directory = directory;
     this.#socketPath = socketPath;
     this.#stderr = "";
-    const child = spawn(this.#binary, serverArgs(this.#configuredArgs, socketPath), {
+    const child = this.#spawnProcess?.() ?? spawn(this.#binary, serverArgs(this.#configuredArgs, socketPath), {
       ...(this.#cwd === undefined ? {} : { cwd: this.#cwd }),
       env: this.#environment,
       stdio: ["pipe", "pipe", "pipe"],
     });
-    this.#server = child;
+    const owner = new NativeChildProcessOwner(child);
+    this.#server = owner;
     let startupError: Error | undefined;
     child.once("error", (error) => {
       startupError = error;
@@ -126,9 +140,15 @@ export class CodexAppServerSupervisor {
       if (this.#closed) {
         throw new Error("Codex app server supervisor closed during startup");
       }
+      this.#ready = true;
     } catch (error) {
-      if (child.exitCode === null) child.kill("SIGKILL");
-      if (this.#server === child) this.#server = undefined;
+      try {
+        // Startup failed; there is no attached session to drain gracefully.
+        await owner.terminate({ graceMs: 0 });
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], "Codex app-server startup cleanup failed");
+      }
+      if (this.#server === owner) this.#server = undefined;
       if (!this.#configuredSocketDirectory) {
         await rm(directory, { recursive: true, force: true });
         if (this.#directory === directory) {
@@ -150,10 +170,18 @@ export class CodexAppServerSupervisor {
     ];
   }
 
-  public async close(): Promise<void> {
-    if (this.#closed) return;
+  public close(): Promise<void> {
+    if (this.#closing) return this.#closing;
     this.#closed = true;
-    await this.#stopServer(this.#server);
+    this.#ready = false;
+    this.#closing = this.#close();
+    return this.#closing;
+  }
+
+  async #close(): Promise<void> {
+    // Startup cleanup and shutdown share the same exact-child capability.
+    // Preserve a failed owner until the final cleanup can prove its exit.
+    await this.#stopServer(this.#server).catch(() => undefined);
     await this.#starting?.catch(() => undefined);
     // Startup can cross the first read only between awaited filesystem calls.
     // Stop a child installed after that read as well.
@@ -165,13 +193,10 @@ export class CodexAppServerSupervisor {
     }
   }
 
-  async #stopServer(child: ChildProcessWithoutNullStreams | undefined): Promise<void> {
-    if (!child) return;
-    if (this.#server === child) this.#server = undefined;
-    if (child.exitCode === null) {
-      child.kill("SIGTERM");
-      await waitForExit(child, 3_000);
-    }
+  async #stopServer(owner: NativeChildProcessOwner | undefined): Promise<void> {
+    if (!owner) return;
+    await owner.terminate();
+    if (this.#server === owner) this.#server = undefined;
   }
 }
 
@@ -271,7 +296,7 @@ async function waitForSocket(
         cause: spawnFailure,
       });
     }
-    if (child.exitCode !== null) {
+    if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(
         `Codex app server exited with code ${child.exitCode}${stderr().trim() ? `: ${stderr().trim()}` : ""}`,
       );
@@ -326,21 +351,6 @@ async function unixSocketAcceptsConnections(socketPath: string): Promise<boolean
       socket.destroy();
       if (error.code === "ECONNREFUSED" || error.code === "ENOENT") resolve(false);
       else reject(error);
-    });
-  });
-}
-
-async function waitForExit(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null) return;
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      if (child.exitCode === null) child.kill("SIGKILL");
-      resolve();
-    }, timeoutMs);
-    timer.unref();
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
     });
   });
 }

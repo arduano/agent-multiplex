@@ -189,6 +189,20 @@ codex resume --remote unix://<private-runtime-socket> <vendor-session-id>
 Closing the TUI closes only its PTY. It does not close the structured session or
 shared app server. The socket is never published through p2prpc.
 
+Both the shared-server and stdio paths capture the exact child with
+`NativeChildProcessOwner`. Shutdown waits for actual child exit after SIGTERM
+and, when necessary, SIGKILL. A successful signal request is not termination.
+Unproved cleanup retains the process/socket owner and reports typed
+`NativeOwnerTerminationError`; no replacement may start over that owner.
+Concurrent startup callers wait for socket readiness, rather than child liveness.
+
+Codex implements `beginClose` to retire admitted RPC caller waits before Runtime
+drains operations. A dispatched request without its native response remains
+`outcomeUnknown`, including a failed write acknowledgement; it is never replayed.
+The transport and native startup owner remain retained until `close` proves
+cleanup. Failed transport retirement fences a new connection. Shared-owner and
+RPC cleanup are both attempted and failures are retained by the original close.
+
 Structured requests wait for the complete initialization handshake. Closing
 the RPC client fences delayed startup and settles outstanding requests;
 dispatched requests without a response report an unknown outcome and must be

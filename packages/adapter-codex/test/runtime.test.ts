@@ -1,4 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
 import {
   chmodSync,
   lstatSync,
@@ -13,13 +14,15 @@ import { createServer as createHttpServer } from "node:http";
 import { connect as connectSocket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import {
   adapterScopeIdSchema,
   newRuntimeNodeId,
   newSessionId,
 } from "@arduano/agent-multiplex-protocol";
-import { afterEach, describe, expect, it } from "vitest";
+import { isNativeOwnerTerminationError } from "@arduano/agent-multiplex-runtime-node-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 
 import { CodexUnixSocketRpcConnection } from "../src/rpc.js";
@@ -120,11 +123,60 @@ describe("Codex shared app-server runtime", () => {
     });
 
     const starting = supervisor.start();
+    const rejected = expect(starting).rejects.toThrow();
     await eventually(() => readOptional(pidFile) !== undefined);
+    let concurrentlyReady = false;
+    const concurrent = supervisor.start().then(() => { concurrentlyReady = true; });
+    const concurrentRejected = expect(concurrent).rejects.toThrow();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(concurrentlyReady).toBe(false);
     const pid = Number(readFileSync(pidFile, "utf8"));
-    await supervisor.close();
-    await expect(starting).rejects.toThrow();
+    const closing = supervisor.close();
+    expect(supervisor.close()).toBe(closing);
+    await closing;
+    await Promise.all([rejected, concurrentRejected]);
     await eventually(() => !processExists(pid));
+  });
+
+  it("proves exit when an app-server ignores SIGTERM and needs SIGKILL", async () => {
+    const fixture = fakeCodexFixture();
+    const pidFile = join(fixture.directory, "server.pid");
+    const supervisor = new CodexAppServerSupervisor({
+      binary: process.execPath,
+      args: [fixture.script, "app-server"],
+      socketDirectory: fixture.socketDirectory,
+      environment: { ...process.env, FAKE_CODEX_PID_FILE: pidFile, FAKE_CODEX_IGNORE_SIGTERM: "1" },
+    });
+    await supervisor.start();
+    const pid = Number(readFileSync(pidFile, "utf8"));
+    expect(processExists(pid)).toBe(true);
+    await supervisor.close();
+    expect(processExists(pid)).toBe(false);
+  });
+
+  it("does not replace an unproved failed-startup child, but permits retry after its exact late exit", async () => {
+    const fixture = fakeCodexFixture();
+    const failed = new FakeChild();
+    const spawnProcess = vi.fn()
+      .mockImplementationOnce(() => {
+        setImmediate(() => failed.emit("error", new Error("startup I/O failure")));
+        return failed.asChild();
+      })
+      .mockImplementation(() => spawn(process.execPath, [fixture.script, "app-server", "--listen",
+        `unix://${join(fixture.socketDirectory, "app-server.sock")}`], { stdio: "pipe" }));
+    const supervisor = new CodexAppServerSupervisor({ socketDirectory: fixture.socketDirectory, spawnProcess });
+    const failure = await supervisor.start().catch((error: unknown) => error);
+    expect(isNativeOwnerTerminationError(failure)).toBe(true);
+    expect(failed.kill).toHaveBeenCalledWith("SIGKILL");
+    await expect(supervisor.start()).rejects.toMatchObject({ termination: "unproved" });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    expect(statSync(fixture.socketDirectory).isDirectory()).toBe(true);
+
+    failed.exit(null, "SIGKILL");
+    await supervisor.start();
+    expect(spawnProcess).toHaveBeenCalledTimes(2);
+    await expect(canConnect(supervisor.socketPath)).resolves.toBe(true);
+    await supervisor.close();
   });
 
   it("keeps the shared app server alive when a remote TUI exits", async () => {
@@ -233,12 +285,33 @@ if (args.includes("resume")) {
   const schedule = () => setTimeout(listen, delay);
   if (stdoutBytes > 0) process.stdout.write("x".repeat(stdoutBytes), schedule);
   else schedule();
-  const stop = () => server.close(() => process.exit(0));
+  const stop = () => {
+    if (process.env.FAKE_CODEX_IGNORE_SIGTERM === "1") return;
+    server.close(() => process.exit(0));
+  };
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 }
 `, { mode: 0o700 });
   return { directory, socketDirectory, script };
+}
+
+class FakeChild extends EventEmitter {
+  readonly pid = 42;
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  readonly stdout = new PassThrough();
+  readonly stderr = new PassThrough();
+  readonly stdin = new PassThrough();
+  readonly kill = vi.fn((_signal: NodeJS.Signals): boolean => false);
+
+  asChild(): ChildProcessWithoutNullStreams { return this as unknown as ChildProcessWithoutNullStreams; }
+
+  exit(code: number | null, signal: NodeJS.Signals | null): void {
+    this.exitCode = code;
+    this.signalCode = signal;
+    this.emit("exit", code, signal);
+  }
 }
 
 function temporaryDirectory(): string {

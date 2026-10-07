@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CodexAdapter } from "../src/adapter.js";
+import { CodexRpcClient } from "../src/rpc.js";
 import {
   newCommandId,
   newLaunchId,
@@ -21,9 +22,23 @@ import {
   RuntimeNodeStore,
   type AdapterEvent,
 } from "@arduano/agent-multiplex-runtime-node-core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("CodexAdapter", () => {
+  it("attempts both RPC and shared-owner cleanup and retains their shared failure", async () => {
+    const rpc = new CodexRpcClient();
+    const rpcFailure = new Error("RPC cleanup failed");
+    const runtimeFailure = new Error("runtime cleanup failed");
+    const rpcClose = vi.spyOn(rpc, "close").mockRejectedValue(rpcFailure);
+    const closeRuntime = vi.fn((): Promise<void> => { throw runtimeFailure; });
+    const adapter = new CodexAdapter({ rpcClient: rpc, closeRuntime });
+    const closing = adapter.close();
+    expect(adapter.close()).toBe(closing);
+    await expect(closing).rejects.toMatchObject({ errors: [rpcFailure, runtimeFailure] });
+    expect(rpcClose).toHaveBeenCalledTimes(1);
+    expect(closeRuntime).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a missing app-server executable without an unhandled rejection", async () => {
     const adapter = new CodexAdapter({
       binary: `definitely-missing-codex-${process.pid}`,
@@ -215,6 +230,14 @@ describe("CodexAdapter", () => {
         data: [{ turnId: "turn-1", item: { type: "agentMessage" } }],
         nextCursor: null,
       },
+      conversation: {
+        version: "v1", view: "primary", coverage: { kind: "unknown" },
+        items: [{
+          itemId: 'codex:["thread-1","turn-1","history-1"]', threadId: "thread-1",
+          pointer: "/data/0/item", revision: { kind: "incomparable" },
+          position: { kind: "unknown" }, completion: "unverified", persistence: "native",
+        }],
+      },
     });
     expect(
       events.some(
@@ -227,6 +250,9 @@ describe("CodexAdapter", () => {
         kind: "native",
         nativeType: "item/started",
         payload: expect.objectContaining({ threadId: "child-thread-1" }),
+        conversation: expect.objectContaining({ view: "child", items: expect.arrayContaining([
+          expect.objectContaining({ threadId: "child-thread-1", completion: "open" }),
+        ]) }),
       }),
     ]));
 
@@ -458,6 +484,37 @@ describe("CodexAdapter", () => {
     }
   });
 
+  it("closes Runtime despite an admitted native history read that never responds", async () => {
+    const root = mkdtempSync(join(tmpdir(), "agent-multiplex-codex-hung-read-"));
+    const adapter = new CodexAdapter({ spawnProcess: () => spawnFakeCodex(false, root, false, false, true) });
+    const store = new RuntimeNodeStore(":memory:");
+    const runtimeNodeId = newRuntimeNodeId();
+    const service = new RuntimeNodeService({
+      store, runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(), name: "hung-read runtime",
+      allowedRoots: [root], adapters: [adapter],
+    });
+    const sessionId = newSessionId();
+    const reading: AdapterEvent[] = [];
+    try {
+      await expect(launchSession(service, {
+        launchId: newLaunchId(), payloadHash: "codex-hung-read-spawn", sessionId, runtimeNodeId,
+        request: { harness: "codex", cwd: root },
+      })).resolves.toMatchObject({ state: "succeeded" });
+      const session = await adapter.resume({ harness: "codex", vendorSessionId: "thread-1", cwd: root });
+      session.subscribe((event) => reading.push(event));
+      const history = service.readNativeHistory(sessionId, { harness: "codex", includeTurns: false });
+      const rejected = expect(history).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      await eventually(() => reading.find((event) => event.kind === "native" && event.nativeType === "fake/history-request-started"));
+      const closing = service.close();
+      expect(service.close()).toBe(closing);
+      await Promise.all([closing, rejected]);
+    } finally {
+      await service.close();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("releases runtime-node ownership and stales interactions when app-server exits", async () => {
     const root = mkdtempSync(join(tmpdir(), "agent-multiplex-codex-exit-"));
     let processEpoch = 0;
@@ -657,6 +714,7 @@ function spawnFakeCodex(
   cwd = "/work/project",
   transientNotLoadedOnResume = false,
   completeBeforeTurnStartResolves = false,
+  hangHistory = false,
 ) {
   const source = String.raw`
 const readline = require("node:readline");
@@ -664,6 +722,7 @@ const exitOnTurn = ${JSON.stringify(exitOnTurn)};
 const cwd = ${JSON.stringify(cwd)};
 const transientNotLoadedOnResume = ${JSON.stringify(transientNotLoadedOnResume)};
 const completeBeforeTurnStartResolves = ${JSON.stringify(completeBeforeTurnStartResolves)};
+const hangHistory = ${JSON.stringify(hangHistory)};
 let terminalRunning = false;
 const rl = readline.createInterface({ input: process.stdin });
 const send = (value) => process.stdout.write(JSON.stringify(value) + "\n");
@@ -767,7 +826,12 @@ rl.on("line", (line) => {
         questions: [], isBlocking: true, autoResolutionMs: null,
       }});
       break;
-    case "thread/read": send({ id: message.id, result: {
+    case "thread/read":
+      if (hangHistory) {
+        send({ method: "fake/history-request-started", params: { threadId: message.params.threadId } });
+        break;
+      }
+      send({ id: message.id, result: {
       thread: { ...thread([turn]), id: message.params.threadId },
       includeTurns: message.params.includeTurns,
     }}); break;

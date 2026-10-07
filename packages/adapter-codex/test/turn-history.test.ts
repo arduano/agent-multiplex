@@ -12,6 +12,7 @@ const failedTurn: Turn = {
   startedAt: 123, completedAt: 456, durationMs: 333_000,
 };
 const read = { harness: "codex", includeTurns: true, limit: 1, native: { view: "turns", sortDirection: "desc" } } as const;
+const emptyConversation = { version: "v1", view: "primary", items: [], order: [], coverage: { kind: "unknown" } };
 
 async function fixture(respond: (params: Record<string, unknown>) => unknown = () => ({ data: [failedTurn], nextCursor: "older", backwardsCursor: "newer" })) {
   const request = vi.fn(async (method: string, params?: Record<string, unknown>): Promise<unknown> => {
@@ -21,7 +22,7 @@ async function fixture(respond: (params: Record<string, unknown>) => unknown = (
     throw new Error(`Unexpected native method ${method}`);
   });
   const rpc = {
-    start: vi.fn(async () => {}), close: vi.fn(async () => {}), request,
+    start: vi.fn(async () => {}), beginClose: vi.fn(() => {}), close: vi.fn(async () => {}), request,
     onNotification: () => () => {}, onServerRequest: () => () => {}, onExit: () => () => {},
   } as unknown as CodexRpcClient;
   const adapter = new CodexAdapter({ rpcClient: rpc });
@@ -39,7 +40,7 @@ describe("Codex bounded native turn history", () => {
       ...read.native, threadId: "wrong", cursor: "wrong", limit: 5_000, turnId: "wrong", itemsView: "full", omitOversizedItems: true,
     } });
     expect(result).toEqual({ harness: "codex", vendorSessionId: "native-thread", sortDirection: "desc", complete: false, nextCursor: "older",
-      payload: { data: [failedTurn], nextCursor: "older", backwardsCursor: "newer" } });
+      conversation: emptyConversation, payload: { data: [failedTurn], nextCursor: "older", backwardsCursor: "newer" } });
     expect(f.request.mock.calls).toEqual([["thread/turns/list", {
       threadId: "native-thread", cursor: "original", limit: 1, sortDirection: "desc", itemsView: "summary",
     }]]);
@@ -50,7 +51,7 @@ describe("Codex bounded native turn history", () => {
     const page = await f.session.readNativeHistory({ harness: "codex", includeTurns: true, ...(limit === undefined ? {} : { limit }), native: { view: "turns" } });
     expect(f.request.mock.calls).toEqual([["thread/turns/list", { threadId: "native-thread", cursor: null, limit: 100, sortDirection: "asc", itemsView: "summary" }]]);
     expect(page).toEqual({ harness: "codex", vendorSessionId: "native-thread", sortDirection: "asc", complete: true,
-      payload: { data: [], nextCursor: null, backwardsCursor: null } });
+      conversation: emptyConversation, payload: { data: [], nextCursor: null, backwardsCursor: null } });
   });
 
   it("re-reads oversized batches at the same native cursor without losing turns", async () => {
@@ -82,7 +83,7 @@ describe("Codex bounded native turn history", () => {
     const f = await fixture(params => ({ data: [{ ...failedTurn, itemsView: params.itemsView, error: { ...failedTurn.error, additionalDetails: "x".repeat(2_000_000) } }], nextCursor: "older", backwardsCursor: "newer" }));
     const result = f.session.readNativeHistory({ ...read, native: { ...read.native, omitOversizedItems } });
     if (omitOversizedItems) await expect(result).resolves.toEqual({ harness: "codex", vendorSessionId: "native-thread", sortDirection: "desc", complete: false, nextCursor: "older",
-      payload: { data: [], nextCursor: "older", backwardsCursor: "newer" }, unavailableItem: { reason: "exceedsWireLimit", nativeItemId: "failed-turn" } });
+      conversation: emptyConversation, payload: { data: [], nextCursor: "older", backwardsCursor: "newer" }, unavailableItem: { reason: "exceedsWireLimit", nativeItemId: "failed-turn" } });
     else await expect(result).rejects.toThrow("exceeds the bounded wire envelope");
     expect(f.request.mock.calls).toHaveLength(2);
   });
