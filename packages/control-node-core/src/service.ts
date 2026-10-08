@@ -937,12 +937,24 @@ export class ControlNodeService {
           this.catalog.mergeRuntimeSession(event.change.session);
           break;
         case "interaction.changed": {
-          const session = this.catalog.getSession(event.change.interaction.sessionId);
+          const interaction = event.change.interaction;
+          const session = this.catalog.getSession(interaction.sessionId);
           // Runtime event delivery and inventory reconciliation are independent
           // streams. Do not acknowledge an interaction before its session bind.
           if (!session) return { accepted: false };
           this.#assertRuntimeEventOwner(input.runtimeNodeId, session.runtimeNodeId);
-          this.catalog.publishInteraction(event.change.interaction);
+          if (interaction.harness !== session.harness) {
+            throw new ControlNodeCoreError("FENCED", "interaction targets a different session harness");
+          }
+          if (interaction.runtimeEpoch !== session.runtimeEpoch && (
+            interaction.state === "stale" || interaction.state === "resolved" || interaction.state === "expired"
+          )) {
+            // Stop/replacement can precede this authenticated owner's terminal
+            // interaction replay. Consume the obsolete receipt without changing
+            // the canonical catalog or blocking unrelated runtime events.
+            return { accepted: true };
+          }
+          this.catalog.publishInteraction(interaction);
           break;
         }
         case "launch.changed":
