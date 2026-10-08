@@ -18,6 +18,12 @@ consumes obsolete terminal epoch records without catalog mutation, after boot,
 enrollment, runtime-owner and harness validation. Pending uncertainty, unknown
 session reconciliation and direct catalog publication remain strict.
 
+Published artifact source `a048171c590c503c957bce15f8812d4c3be1f65e` is under
+SSH-signed `owner-candidate-2026-10-08.2`; all19 anonymous assets, trusted tag/source
+and byte equality verify. Full source gates pass1,654 tests/150 files; all16 packed
+consumers, publint/ATTW and SBOM pass. Producer main and official promotion gates
+remain unchanged.
+
 All sixteen packages advance together to `.37`; independent transport remains
 exact `0.3.0-renewal.2`. Native SDK/CLI, wire/persisted schemas and migrations are
 unchanged. Focused before/after and real event-pump fixtures qualify both harnesses,
