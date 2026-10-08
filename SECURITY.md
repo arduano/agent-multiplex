@@ -1,5 +1,14 @@
 # Security policy
 
+Authenticated runtime event replay consumes an obsolete terminal interaction
+only after boot/enrollment, session-owner and harness checks. It publishes no
+catalog change. Unknown sessions retain a negative acknowledgement; pending
+epoch mismatches remain fenced, and direct catalog interaction publication
+continues to require the current epoch. Original-ID resolution receipts are
+retained separately from replay eligibility and cannot dispatch into a replacement
+native handle. This avoids feed starvation without weakening active interaction
+or peer admission fences.
+
 Agent Multiplex is intended for trusted personal and internal deployments. Its
 shared-secret node enrollment and bearer-authenticated gateway are not a public
 multi-tenant identity system. Deploy an identity-aware edge and normal network,

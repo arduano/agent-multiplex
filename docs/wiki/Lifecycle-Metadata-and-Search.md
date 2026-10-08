@@ -175,6 +175,15 @@ harness-native response shape and current session/binding route. Stop retires
 pending interactions for the old runtime handle so a late response cannot reach
 a replacement binding.
 
+Runtime replay advertises current session bindings before interactions. Terminal
+interaction receipts from retired epochs remain in the bounded original-ID
+resolution cache but are not part of that current-binding replay. At authenticated
+runtime ingestion, Control consumes an obsolete terminal interaction as a no-op
+only after validating the runtime boot/enrollment, session owner and harness.
+Unknown sessions still require reconciliation; pending epoch mismatches remain
+fenced. Direct catalog publication remains strict. This prevents an old terminal
+receipt from restarting the shared feed and starving unrelated native sessions.
+
 
 Committed runtime images survive stop, resume, and restart. Archive releases
 both uploaded images and output snapshots before reporting successful durable

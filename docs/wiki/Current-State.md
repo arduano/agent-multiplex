@@ -5,7 +5,25 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-08 (architecture `.36` owner candidate source/package/direct-Docker qualification; consumer native/deployment acceptance remains separate).
+Last reconciled: 2026-10-08 (terminal-interaction replay `.37` repair; consumer native/deployment acceptance remains separate).
+
+## Terminal-interaction replay repair candidate `.37` — not deployed
+
+The consumer reproduced shared runtime-feed starvation in published `.35` and
+`.36`: a stopped/replaced binding's cached terminal interaction fences Control
+ingress on every reconnect before healthy native replay. The runtime now filters
+terminal reconnect receipts against one captured current binding snapshot while
+retaining bounded original-ID resolution receipts. Authenticated Control ingress
+consumes obsolete terminal epoch records without catalog mutation, after boot,
+enrollment, runtime-owner and harness validation. Pending uncertainty, unknown
+session reconciliation and direct catalog publication remain strict.
+
+All sixteen packages advance together to `.37`; independent transport remains
+exact `0.3.0-renewal.2`. Native SDK/CLI, wire/persisted schemas and migrations are
+unchanged. Focused before/after and real event-pump fixtures qualify both harnesses,
+Stop/replacement/reconnect, healthy peer streaming and original-ID deduplication.
+[Repair qualification and acceptance boundary](../audits/hotfix37-terminal-interaction-replay-20261008.md).
+Existing `.36` payloads do not include the repair. No live/model action.
 
 ## Architecture candidate `.36` — not deployed
 

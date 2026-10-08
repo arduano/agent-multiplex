@@ -1499,31 +1499,21 @@ describe("RuntimeNodeService", () => {
       })],
     });
 
-    const replay = service.events({ native: {} })[Symbol.asyncIterator]();
+    const replayAbort = new AbortController();
+    const replay = service.events({ native: {} }, replayAbort.signal)[Symbol.asyncIterator]();
     await expect(replay.next()).resolves.toMatchObject({
       value: {
         kind: "control",
         change: {
           type: "session.upsert",
-          session: { sessionId, vendorSessionId: "fake-1" },
+          session: { sessionId, vendorSessionId: "fake-1", runtimeEpoch: null },
         },
       },
       done: false,
     });
-    const replayed = await replay.next();
-    expect(replayed).toMatchObject({
-      value: {
-        kind: "control",
-        change: {
-          type: "interaction.changed",
-          interaction: { sessionId, state: "stale" },
-        },
-      },
-    });
-    expect(replayed.value).not.toHaveProperty("eventId");
-    expect(replayed.value).not.toHaveProperty("provenance");
-    expect(replayed.value).not.toHaveProperty("feedId");
-    expect(replayed.value).not.toHaveProperty("cursor");
+    const replayed = replay.next();
+    replayAbort.abort();
+    await expect(replayed).resolves.toEqual({ value: undefined, done: true });
     await replay.return?.();
     await service.close();
     store.close();
@@ -1585,31 +1575,21 @@ describe("RuntimeNodeService", () => {
     releaseResolution();
     await fenced;
 
-    const replay = service.events({ native: {} })[Symbol.asyncIterator]();
+    const replayAbort = new AbortController();
+    const replay = service.events({ native: {} }, replayAbort.signal)[Symbol.asyncIterator]();
     await expect(replay.next()).resolves.toMatchObject({
       value: {
         kind: "control",
         change: {
           type: "session.upsert",
-          session: { sessionId, vendorSessionId: "fake-1" },
+          session: { sessionId, vendorSessionId: "fake-1", runtimeEpoch: null },
         },
       },
       done: false,
     });
-    await expect(replay.next()).resolves.toMatchObject({
-      value: {
-        kind: "control",
-        change: {
-          type: "interaction.changed",
-          interaction: {
-            interactionId: pending.interactionId,
-            sessionId,
-            state: "stale",
-          },
-        },
-      },
-      done: false,
-    });
+    const replayed = replay.next();
+    replayAbort.abort();
+    await expect(replayed).resolves.toEqual({ value: undefined, done: true });
     await replay.return?.();
 
     await service.close();
@@ -2259,7 +2239,292 @@ describe("RuntimeNodeService", () => {
     await service.close();
     store.close();
   });
+
+  it.each(["resolved", "expired", "stale"] as const)(
+    "replays a current-epoch %s interaction without feed provenance",
+    async (state) => {
+      const fixture = await createInteractionReplayRuntime();
+      try {
+        fixture.session.requestInteraction();
+        const [pending] = fixture.service.listInteractions(fixture.sessionId);
+        if (!pending) throw new Error("fake interaction was not recorded");
+        if (state === "resolved") {
+          await fixture.service.resolveInteraction({
+            interactionId: pending.interactionId, sessionId: fixture.sessionId,
+            harness: "codex", response: { approved: true },
+          });
+        } else {
+          fixture.session.emitRetired({ kind: "interactionSettled", nativeRequestId: pending.nativeRequestId!, state });
+        }
+
+        const replay = fixture.service.events({ native: {} })[Symbol.asyncIterator]();
+        await replay.next();
+        const replayed = await replay.next();
+        expect(replayed).toMatchObject({
+          value: {
+            kind: "control",
+            change: {
+              type: "interaction.changed",
+              interaction: {
+                interactionId: pending.interactionId, sessionId: pending.sessionId,
+                runtimeEpoch: pending.runtimeEpoch, harness: pending.harness, state,
+              },
+            },
+          },
+          done: false,
+        });
+        expect(replayed.value).not.toHaveProperty("eventId");
+        expect(replayed.value).not.toHaveProperty("provenance");
+        expect(replayed.value).not.toHaveProperty("feedId");
+        expect(replayed.value).not.toHaveProperty("cursor");
+        await replay.return?.();
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it.each(["resolved", "expired", "stale"] as const)(
+    "omits obsolete %s interactions from reconnect snapshots",
+    async (state) => {
+      const fixture = await createInteractionReplayRuntime();
+      try {
+        fixture.session.requestInteraction();
+        const [pending] = fixture.service.listInteractions(fixture.sessionId);
+        if (!pending) throw new Error("fake interaction was not recorded");
+        if (state === "resolved") {
+          await fixture.service.resolveInteraction({
+            interactionId: pending.interactionId, sessionId: fixture.sessionId,
+            harness: "codex", response: { approved: true },
+          });
+        } else {
+          fixture.session.emitRetired({ kind: "interactionSettled", nativeRequestId: pending.nativeRequestId!, state });
+        }
+        const current = fixture.store.getSession(fixture.sessionId)!;
+
+        for (const replacement of [
+          { ...current, runtimeEpoch: null, runtimeStatus: "stopped" as const, availability: "resumable" as const },
+          { ...current, runtimeEpoch: newRuntimeEpoch() },
+          { ...current, harness: "copilot" as const },
+        ]) {
+          fixture.store.putSession(replacement);
+          const replayAbort = new AbortController();
+          const replay = fixture.service.events({ native: {} }, replayAbort.signal)[Symbol.asyncIterator]();
+          await expect(replay.next()).resolves.toMatchObject({
+            value: { kind: "control", change: { type: "session.upsert", session: replacement } },
+          });
+          const next = replay.next();
+          replayAbort.abort();
+          await expect(next).resolves.toEqual({ value: undefined, done: true });
+          await replay.return?.();
+        }
+
+        fixture.store.deleteSession(fixture.sessionId);
+        const replayAbort = new AbortController();
+        const replay = fixture.service.events({ native: {} }, replayAbort.signal)[Symbol.asyncIterator]();
+        const next = replay.next();
+        replayAbort.abort();
+        await expect(next).resolves.toEqual({ value: undefined, done: true });
+        await replay.return?.();
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it.each(["epoch", "harness", "stopped"] as const)(
+    "keeps pending interactions visible when the durable binding has a mismatched %s",
+    async (mismatch) => {
+      const fixture = await createInteractionReplayRuntime();
+      try {
+        fixture.session.requestInteraction();
+        const [pending] = fixture.service.listInteractions(fixture.sessionId);
+        if (!pending) throw new Error("fake interaction was not recorded");
+        const current = fixture.store.getSession(fixture.sessionId)!;
+        fixture.store.putSession(mismatch === "epoch"
+          ? { ...current, runtimeEpoch: newRuntimeEpoch() }
+          : mismatch === "harness"
+            ? { ...current, harness: "copilot" }
+            : { ...current, runtimeEpoch: null, runtimeStatus: "stopped", availability: "resumable" });
+
+        expect(fixture.service.listInteractions(fixture.sessionId)).toEqual([pending]);
+        const replay = fixture.service.events({ native: {} })[Symbol.asyncIterator]();
+        await replay.next();
+        await expect(replay.next()).resolves.toMatchObject({
+          value: {
+            kind: "control",
+            change: { type: "interaction.changed", interaction: pending },
+          },
+          done: false,
+        });
+        expect(fixture.session.interactionResponses).toEqual([]);
+        await replay.return?.();
+      } finally {
+        await fixture.close();
+      }
+    },
+  );
+
+  it("retains original-ID resolution receipts after stop and a fresh resumed epoch", async () => {
+    const fixture = await createInteractionReplayRuntime();
+    try {
+      fixture.session.requestInteraction();
+      const [pending] = fixture.service.listInteractions(fixture.sessionId);
+      if (!pending) throw new Error("fake interaction was not recorded");
+      const input = {
+        interactionId: pending.interactionId,
+        sessionId: fixture.sessionId,
+        harness: "codex" as const,
+        response: { approved: true },
+      };
+      const resolved = await fixture.service.resolveInteraction(input);
+      fixture.session.requestInteraction();
+      const [retiredPending] = fixture.service.listInteractions(fixture.sessionId);
+      if (!retiredPending) throw new Error("second fake interaction was not recorded");
+      await expect(fixture.service.stop({
+        operation: "stop", commandId: newCommandId(), payloadHash: "receipt-stop",
+        sessionId: fixture.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      })).resolves.toMatchObject({ state: "succeeded" });
+
+      const stoppedAbort = new AbortController();
+      const stoppedReplay = fixture.service.events({ native: {} }, stoppedAbort.signal)[Symbol.asyncIterator]();
+      await expect(stoppedReplay.next()).resolves.toMatchObject({
+        value: { kind: "control", change: { type: "session.upsert", session: { runtimeEpoch: null, runtimeStatus: "stopped" } } },
+      });
+      const stoppedNext = stoppedReplay.next();
+      stoppedAbort.abort();
+      await expect(stoppedNext).resolves.toEqual({ value: undefined, done: true });
+      await stoppedReplay.return?.();
+      await expect(fixture.service.resolveInteraction(input)).resolves.toEqual(resolved);
+      await expect(fixture.service.resolveInteraction({ ...input, interactionId: retiredPending.interactionId })).rejects.toMatchObject({ code: "CONFLICT" });
+
+      const replacement = new FakeSession("fake-1", fixture.root, fixture.adapter.adapterScopeId);
+      fixture.adapter.resumeFactory = () => replacement;
+      await expect(fixture.service.resume({
+        operation: "resume", commandId: newCommandId(), payloadHash: "receipt-resume",
+        sessionId: fixture.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+      })).resolves.toMatchObject({ state: "succeeded" });
+      expect(replacement.runtimeEpoch).not.toBe(pending.runtimeEpoch);
+
+      const replayAbort = new AbortController();
+      const replay = fixture.service.events({ native: {} }, replayAbort.signal)[Symbol.asyncIterator]();
+      await expect(replay.next()).resolves.toMatchObject({
+        value: { kind: "control", change: { type: "session.upsert", session: { runtimeEpoch: replacement.runtimeEpoch } } },
+      });
+      const next = replay.next();
+      replayAbort.abort();
+      await expect(next).resolves.toEqual({ value: undefined, done: true });
+      await replay.return?.();
+
+      await expect(fixture.service.resolveInteraction(input)).resolves.toEqual(resolved);
+      await expect(fixture.service.resolveInteraction({ ...input, response: { approved: false } })).rejects.toMatchObject({ code: "CONFLICT" });
+      await expect(fixture.service.resolveInteraction({ ...input, sessionId: newSessionId() })).rejects.toMatchObject({ code: "FENCED" });
+      await expect(fixture.service.resolveInteraction({ ...input, harness: "copilot" })).rejects.toMatchObject({ code: "FENCED" });
+      await expect(fixture.service.resolveInteraction({ ...input, interactionId: retiredPending.interactionId })).rejects.toMatchObject({ code: "CONFLICT" });
+      expect(fixture.session.interactionResponses).toEqual([input.response]);
+      expect(replacement.interactionResponses).toEqual([]);
+      expect(fixture.service.listInteractions(fixture.sessionId)).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("bounds retained resolution receipts across retired epochs", async () => {
+    const fixture = await createInteractionReplayRuntime(2);
+    try {
+      const inputs = [];
+      const results = [];
+      const handles = [];
+      let session = fixture.session;
+      for (let epoch = 0; epoch < 3; epoch += 1) {
+        session.requestInteraction();
+        const [pending] = fixture.service.listInteractions(fixture.sessionId);
+        if (!pending) throw new Error("fake interaction was not recorded");
+        const input = {
+          interactionId: pending.interactionId, sessionId: fixture.sessionId,
+          harness: "codex" as const, response: { approved: true },
+        };
+        inputs.push(input);
+        results.push(await fixture.service.resolveInteraction(input));
+        handles.push(session);
+        await expect(fixture.service.stop({
+          operation: "stop", commandId: newCommandId(), payloadHash: `cache-stop-${epoch}`,
+          sessionId: fixture.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+        })).resolves.toMatchObject({ state: "succeeded" });
+        if (epoch < 2) {
+          session = new FakeSession("fake-1", fixture.root, fixture.adapter.adapterScopeId);
+          fixture.adapter.resumeFactory = () => session;
+          await expect(fixture.service.resume({
+            operation: "resume", commandId: newCommandId(), payloadHash: `cache-resume-${epoch}`,
+            sessionId: fixture.sessionId, runtimeNodeId: fixture.runtimeNodeId, bindingRevision: 1,
+          })).resolves.toMatchObject({ state: "succeeded" });
+        }
+      }
+      await expect(fixture.service.resolveInteraction(inputs[0]!)).rejects.toMatchObject({ code: "NOT_FOUND" });
+      await expect(fixture.service.resolveInteraction(inputs[1]!)).resolves.toEqual(results[1]);
+      await expect(fixture.service.resolveInteraction(inputs[2]!)).resolves.toEqual(results[2]);
+      expect(handles.map((handle) => handle.interactionResponses)).toEqual([
+        [{ approved: true }], [{ approved: true }], [{ approved: true }],
+      ]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps an interaction pending and replayable after an uncertain native resolution", async () => {
+    const fixture = await createInteractionReplayRuntime();
+    try {
+      fixture.session.emitRetired({
+        kind: "interaction", nativeRequestId: "uncertain-interaction", requestType: "approval",
+        payload: { command: "fake command" }, ephemeral: false,
+        resolve: async () => { throw new AdapterOutcomeUnknownError("fake native acknowledgement lost"); },
+      });
+      const [pending] = fixture.service.listInteractions(fixture.sessionId);
+      if (!pending) throw new Error("fake interaction was not recorded");
+      await expect(fixture.service.resolveInteraction({
+        interactionId: pending.interactionId, sessionId: fixture.sessionId,
+        harness: "codex", response: { approved: true },
+      })).rejects.toBeInstanceOf(AdapterOutcomeUnknownError);
+      expect(fixture.service.listInteractions(fixture.sessionId)).toEqual([pending]);
+      const replay = fixture.service.events({ native: {} })[Symbol.asyncIterator]();
+      await replay.next();
+      await expect(replay.next()).resolves.toMatchObject({
+        value: { kind: "control", change: { type: "interaction.changed", interaction: pending } },
+        done: false,
+      });
+      await replay.return?.();
+    } finally {
+      await fixture.close();
+    }
+  });
 });
+
+async function createInteractionReplayRuntime(resolvedInteractionCacheSize = 1_024) {
+  const root = mkdtempSync(join(tmpdir(), "agent-multiplex-interaction-snapshot-"));
+  const store = new RuntimeNodeStore(":memory:");
+  const runtimeNodeId = newRuntimeNodeId();
+  const adapter = new FakeAdapter();
+  const service = new RuntimeNodeService({
+    store, runtimeNodeId, runtimeNodeBootId: newRuntimeNodeBootId(),
+    name: "interaction snapshot runtime node", allowedRoots: [root], adapters: [adapter],
+    resolvedInteractionCacheSize,
+  });
+  const sessionId = newSessionId();
+  await launchDirectWorkspace(service, {
+    launchId: newLaunchId(), payloadHash: "interaction-snapshot", sessionId,
+    runtimeNodeId, harness: "codex", input: { cwd: root },
+  });
+  const session = adapter.sessions.get("fake-1");
+  if (!session) throw new Error("fake session was not spawned");
+  return {
+    root, store, runtimeNodeId, adapter, service, sessionId, session,
+    close: async () => {
+      await service.close();
+      store.close();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
 
 interface DirectWorkspaceLaunchInput {
   launchId: LaunchId;

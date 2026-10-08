@@ -627,23 +627,10 @@ describe("CodexAdapter", () => {
         },
         done: false,
       });
-      await expect(cold.next()).resolves.toMatchObject({
-        value: {
-          kind: "control",
-          change: {
-            type: "interaction.changed",
-            interaction: {
-              interactionId: interaction.interactionId,
-              sessionId,
-              runtimeEpoch: originalEpoch,
-              state: "stale",
-            },
-          },
-        },
-        done: false,
-      });
       // Resume supplies the next live control item. Any retired native replay
-      // would arrive before it and fail this assertion without a timed wait.
+      // or obsolete terminal receipt would arrive before it and fail this
+      // assertion without a timed wait. The live observer above still receives
+      // the exact original-epoch stale diagnostic.
       const afterColdReplay = cold.next();
 
       await expect(service.resume({

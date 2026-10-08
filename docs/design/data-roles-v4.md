@@ -5,6 +5,23 @@ The distinction is an invariant, not merely naming.
 
 ## Roles
 
+### Runtime interaction replay boundary
+
+Runtime reconnect publishes current durable bindings before pending interactions
+and eligible terminal interaction receipts. A terminal receipt whose session
+epoch or harness no longer matches that binding is retained only in the bounded
+resolution cache, not replayed as current state. It cannot answer a new native
+interaction or establish interaction completeness.
+
+Authenticated runtime event ingestion may consume terminal `stale`, `resolved`
+or `expired` records from another session epoch without publishing them or
+mutating catalog state. Boot/enrollment, runtime ownership and harness must be
+validated first. Unknown session bindings retain a negative acknowledgement;
+pending epoch mismatches and all foreign identity/harness events remain fenced.
+The strict catalog and direct interaction-publish interfaces do not change.
+This terminal replay disposition is local to the runtime feed and does not
+authorize a blind retry, downgrade or replacement of native interaction state.
+
 ### Control node
 
 A control node owns the durable catalog for its local runtime nodes and any

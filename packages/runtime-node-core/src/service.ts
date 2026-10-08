@@ -209,7 +209,7 @@ export interface RuntimeNodeServiceOptions {
   includeDirectWorkspaceProvider?: boolean;
   endpointId?: string;
   eventRingSize?: number;
-  /** Successful resolutions retained for RPC retries and control-stream replay. */
+  /** Bounded terminal receipts for RPC retries and current-binding control replay. */
   resolvedInteractionCacheSize?: number;
   /** Runtime-local native terminal providers; terminal bytes are never persisted. */
   terminalProviders?: readonly TerminalProvider[];
@@ -1793,7 +1793,9 @@ export class RuntimeNodeService {
   }
 
   public events(cursor: RuntimeNodeEventCursor, signal?: AbortSignal) {
-    const initialItems: RuntimeNodeEventItem[] = this.#store.listSessions().map(
+    const sessions = this.#store.listSessions();
+    const currentSessions = new Map(sessions.map((session) => [session.sessionId, session]));
+    const initialItems: RuntimeNodeEventItem[] = sessions.map(
       // Control-event cursors intentionally track only native byte/event
       // streams. Re-advertise every durable open binding before replaying
       // native rings so a control node which missed launch completion can
@@ -1805,7 +1807,13 @@ export class RuntimeNodeService {
     );
     const interactions = [
       ...[...this.#pendingInteractions.values()].map(({ record }) => record),
-      ...this.#resolvedInteractions.values(),
+      // Receipt retention serves original-ID resolution retries independently
+      // of replay. A retired terminal record cannot describe the advertised
+      // binding; pending mismatches remain visible for strict receiver fencing.
+      ...[...this.#resolvedInteractions.values()].filter((record) => {
+        const session = currentSessions.get(record.sessionId);
+        return session?.harness === record.harness && session.runtimeEpoch === record.runtimeEpoch;
+      }),
     ];
     initialItems.push(...interactions.map(
       (record) =>
@@ -3661,12 +3669,9 @@ export class RuntimeNodeService {
         }
       }
     }
-    if (replayStale) return;
-    for (const [interactionId, resolved] of this.#resolvedInteractions) {
-      if (resolved.sessionId === sessionId && resolved.runtimeEpoch === runtimeEpoch) {
-        this.#resolvedInteractions.delete(interactionId);
-      }
-    }
+    // Keep bounded original-ID receipts after binding replacement. events()
+    // filters their replay independently, and resolveInteraction() never
+    // dispatches native work for a retained terminal receipt.
   }
 
   async #journal(
