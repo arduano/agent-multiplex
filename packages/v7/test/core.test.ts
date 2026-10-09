@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { adapterScopeIdSchema, newRuntimeEpoch,
   type HarnessCommand, type JsonValue, type NativeHistoryRequest, type NativeStateRequest,
@@ -66,6 +67,14 @@ function rootFixture() {
 async function eventDrained() { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); }
 
 describe("V7 minimal durable request ownership", () => {
+  it("refuses V6 or unrelated databases without adding V7 schema tables", () => {
+    const dir = mkdtempSync(join(tmpdir(), "v7-foreign-")); cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+    const filename = join(dir, "state.sqlite"), database = new DatabaseSync(filename);
+    database.exec("CREATE TABLE vendor_state(value TEXT); INSERT INTO vendor_state VALUES('untouched');"); database.close();
+    expect(() => new V7Store({ filename, role: "host", instanceId: "host" })).toThrow("not fresh V7");
+    const check = new DatabaseSync(filename); expect(check.prepare("SELECT name FROM sqlite_master WHERE type='table'").all())
+      .toEqual([{ name: "vendor_state" }]); check.close();
+  });
   it("deduplicates concurrent and terminal native requests and refuses changed payloads", async () => {
     const f = fixture(); await f.host.create(create("one"));
     const native = f.handles[0]!, wait = deferred<JsonValue>(); native.execute.mockImplementationOnce(() => wait.promise);
@@ -136,6 +145,13 @@ describe("V7 minimal durable request ownership", () => {
 });
 
 describe("V7 independent native session coordination", () => {
+  it("explicit Resume replaces a natively stopped handle after proving local cleanup", async () => {
+    const f = fixture(); await f.host.create(create("one"));
+    f.handles[0]!.status.mockReturnValue("stopped" as "idle");
+    expect(await f.host.resume({ requestId: "resume", sessionId: "one" })).toMatchObject({ state: "succeeded" });
+    expect(f.handles[0]!.stop).toHaveBeenCalledOnce(); expect(f.port.resume).toHaveBeenCalledOnce();
+    expect(f.host.list()[0]!.status).toBe("idle");
+  });
   it("isolates malformed events, broken session observations and failing diagnostics", async () => {
     const f = fixture({ diagnostic: () => { throw Error("Log disk failed"); } });
     await f.host.create(create("poison")); await f.host.create(create("healthy"));

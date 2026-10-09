@@ -33,6 +33,12 @@ export class V7Store {
       enableDoubleQuotedStringLiterals: false, allowExtension: false });
     this.#db = db;
     try {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
+        .map(row => String(row.name));
+      const expected = ["identity", "requests", "receipt_events", this.role === "host" ? "bindings" : "registry"];
+      if (tables.length > 0 && (tables.length !== expected.length || tables.some(name => !expected.includes(name)))) {
+        throw new V7Error("STORE_SCHEMA", "Existing database is not fresh V7 role state; no import or migration was attempted");
+      }
       db.exec("PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; PRAGMA synchronous=FULL; BEGIN EXCLUSIVE;");
       db.exec(`CREATE TABLE IF NOT EXISTS identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL, role TEXT NOT NULL, instance_id TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, operation TEXT NOT NULL, payload_hash TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);

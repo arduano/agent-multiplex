@@ -80,7 +80,9 @@ export class HostService implements HostApi {
   public resume(input: RequestEnvelope): Promise<RequestReceipt> {
     return this.mutate(input, "resume", input, async dispatch => {
       const binding = this.requireBinding(input.sessionId);
-      if (this.#active.has(input.sessionId)) return jsonValueSchema.parse(this.view(binding));
+      const active = this.#active.get(input.sessionId);
+      if (active && active.native.status() !== "stopped") return jsonValueSchema.parse(this.view(binding));
+      if (active) { dispatch(); await active.native.stop(); this.retire(input.sessionId, active); }
       dispatch(); const native = await this.options.native.resume(binding); this.install(binding, native);
       return jsonValueSchema.parse(this.view(binding));
     });
@@ -268,6 +270,7 @@ export class HostService implements HostApi {
   }
   private gap(sessionId: string, active: Attachment, reason: string, uncertain: boolean): void {
     if (this.#active.get(sessionId) !== active) return;
+    if (uncertain && active.eventGap) return; // One attachment warning; no overflow/log storm.
     if (uncertain) { active.eventGap = true; active.recoveryRequired = true; }
     this.publish(sessionId, { kind: "gap", reason, recoveryRequired: active.recoveryRequired });
     this.publishSession(sessionId);
