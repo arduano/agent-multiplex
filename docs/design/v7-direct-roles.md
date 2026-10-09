@@ -45,6 +45,15 @@ list, open, reattach or continue native sessions. Bindings remain stopped until
 the owner chooses Resume. Stop retains native history; Archive stops/releases
 the local controller and marks its binding and Root registry archived.
 
+Codex live and detached reads use the same native history normalizer. Copilot
+detached reads use `sessions.readPersistedEvents` and its process-local,
+single-use native continuations. They request one event per native page because
+the SDK's batch byte budget exceeds the wire ceiling and consumed cursors cannot
+be retried. This trades stopped-history throughput for bounded, complete pages
+without a second history cache. Oversized singleton omission requires explicit
+caller consent and carries the exact native continuation. Live primary/child
+reads retain the native scoped event-log endpoint and its larger page batches.
+
 Each attachment owns its handle, callback map, bounded ordered event lane and
 bounded replay ring. History/state reads do not share its mutation admission
 slot or any global maintenance slot. A second simultaneous mutation fails
