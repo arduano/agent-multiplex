@@ -105,8 +105,8 @@ export class StoreDatabase {
     const row = this.#db.prepare("SELECT payload FROM requests WHERE request_id=?").get(requestId);
     return row ? unpack<JsonValue>(row.payload) : null;
   }
-  public receipts(): RequestReceipt[] {
-    return this.#db.prepare("SELECT request_id FROM requests ORDER BY created_at,request_id").all()
+  public receipts(sessionId?: string, operation?: string): RequestReceipt[] {
+    return this.#db.prepare("SELECT request_id FROM requests WHERE (? IS NULL OR session_id=?) AND (? IS NULL OR operation=?) ORDER BY created_at,request_id").all(sessionId ?? null, sessionId ?? null, operation ?? null, operation ?? null)
       .map(row => this.receipt(String(row.request_id))!);
   }
   public receiptEvents(requestId: string): Array<{ state: RequestState; at: string }> {

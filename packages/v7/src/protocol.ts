@@ -7,7 +7,7 @@ import {
   type ConversationEvidence, type Harness, type HarnessCommand, type HarnessSessionSettings,
   type HarnessSpawnOptions, type JsonValue, type NativeHistoryRequest, type NativeHistoryResult,
   type NativeModel, type NativePayload, type NativeStateRequest, type NativeStateResult,
-  type SessionRuntimeStatus,
+  type SessionRuntimeStatus, type HarnessCatalogEntry,
 } from "@arduano/agent-multiplex-protocol";
 
 /** V7 is a fresh generation. There is no V6 catalog/session negotiation. */
@@ -60,6 +60,7 @@ export interface SessionView extends SessionMetadata {
 }
 export interface HostDescriptor {
   protocolVersion: 7; hostId: string; name: string; harness: Harness; bootId: string;
+  capabilities?: HarnessCatalogEntry["capabilities"];
 }
 export interface HostView extends HostDescriptor { online: boolean }
 export interface RootSnapshot {

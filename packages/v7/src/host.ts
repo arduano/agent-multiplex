@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  jsonValueSchema, jsonWireByteUpperBound, nativePayloadSchema, harnessCommandSchema, type NativePayload,
+  jsonValueSchema, jsonWireByteUpperBound, nativePayloadSchema, harnessCommandSchema, capabilitySchema, type NativePayload,
 } from "@arduano/agent-multiplex-protocol";
 import type { NativePort, AdapterEvent, AdapterSession } from "./native-port.js";
 import { EventQueue, diagnose, type Diagnostic } from "./events.js";
@@ -16,6 +16,7 @@ import {
 
 export interface HostServiceOptions {
   store: V7Store; hostId: string; name: string; native: NativePort;
+  capabilities?: HostDescriptor["capabilities"];
   bootId?: string; eventBufferSize?: number; subscriberBufferSize?: number; pendingEventLimit?: number;
   eventBufferBytes?: number; pendingEventBytes?: number;
   externalize?: (binding: SessionBinding, payload: JsonValue) => Promise<NativePayload>;
@@ -50,7 +51,8 @@ export class HostService implements HostApi {
   public constructor(private readonly options: HostServiceOptions) {
     if (options.store.role !== "host" || options.store.instanceId !== options.hostId) throw new V7Error("STORE_ROLE", "Host needs its own V7 store");
     this.#descriptor = { protocolVersion: V7_PROTOCOL_VERSION, hostId: options.hostId,
-      name: options.name, harness: options.native.harness, bootId: options.bootId ?? randomUUID() };
+      name: options.name, harness: options.native.harness, bootId: options.bootId ?? randomUUID(),
+      ...(options.capabilities ? { capabilities: options.capabilities.map(value => capabilitySchema.parse(value)) } : {}) };
     this.#ringSize = options.eventBufferSize ?? 256;
     this.#subscriberSize = options.subscriberBufferSize ?? 512;
     this.#pendingLimit = options.pendingEventLimit ?? 256;
@@ -60,7 +62,7 @@ export class HostService implements HostApi {
       if (!Number.isSafeInteger(size) || size < 1) throw new RangeError("Event limits must be positive integers");
     }
   }
-  public descriptor(): HostDescriptor { return { ...this.#descriptor }; }
+  public descriptor(): HostDescriptor { return structuredClone(this.#descriptor); }
   public list(): HostSession[] { return this.options.store.bindings().map(binding => this.view(binding)); }
   public models() { this.assertOpen(); return this.options.native.models(); }
   public receipt(requestId: string): Promise<RequestReceipt | null> { return this.options.store.receipt(requestId); }
@@ -118,7 +120,14 @@ export class HostService implements HostApi {
   public archive(input: RequestEnvelope): Promise<RequestReceipt> {
     input = structuredClone(input);
     return this.mutate(input, "archive", input, async dispatch => {
-      const binding = this.requireBinding(input.sessionId, true);
+      const binding = this.options.store.binding(input.sessionId);
+      if (!binding) {
+        // A definitely rejected creation may have a Root-owned title but no
+        // native binding. An unknown native creation is not proof of absence.
+        const attempts = await this.options.store.receipts(input.sessionId, "create");
+        if (attempts.some(attempt => attempt.state !== "failed")) throw new NativeOperationError("CREATION_UNCERTAIN", "Inspect the original creation before archiving its reservation", "failed");
+        return null;
+      }
       if (binding.archived) return jsonValueSchema.parse(this.view(binding));
       const active = this.#active.get(input.sessionId);
       if (active) { await dispatch(); await active.native.stop(); this.retire(input.sessionId, active); }

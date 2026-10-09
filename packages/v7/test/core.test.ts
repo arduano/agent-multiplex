@@ -258,6 +258,31 @@ describe("V7 independent native session coordination", () => {
 });
 
 describe("V7 single Root authority", () => {
+  it("advertises only supplied Host capabilities and does not leak mutable descriptors", async () => {
+    const f = await fixture({ capabilities: [{ name: "terminal.side-channel", version: "v1", experimental: false }] });
+    const descriptor = f.host.descriptor(); descriptor.capabilities![0]!.name = "mutated";
+    expect(f.host.descriptor().capabilities?.[0]?.name).toBe("terminal.side-channel");
+    expect((await fixture()).host.descriptor().capabilities).toBeUndefined();
+  });
+  it("archives a definite failed creation reservation without replaying native create", async () => {
+    const f = await fixture(), { root } = await rootFixture();
+    (f.port.create as ReturnType<typeof vi.fn>).mockRejectedValue(new NativeOperationError("REJECTED", "Definitely not created", "failed"));
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    expect(await root.create({ ...create("one"), hostId: "host", title: "Failed creation" })).toMatchObject({ state: "failed" });
+    expect(root.snapshot().sessions[0]).toMatchObject({ native: null, archived: false });
+    expect(await root.archive({ requestId: "archive", sessionId: "one" })).toMatchObject({ state: "succeeded" });
+    expect(root.snapshot().sessions[0]).toMatchObject({ native: null, archived: true });
+    expect(f.port.create).toHaveBeenCalledOnce(); expect(f.port.resume).not.toHaveBeenCalled();
+  });
+  it("keeps an unknown native creation visible until its original outcome is inspected", async () => {
+    const f = await fixture(), { root } = await rootFixture();
+    (f.port.create as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("Disconnected after native dispatch"));
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    expect(await root.create({ ...create("one"), hostId: "host", title: "Unknown creation" })).toMatchObject({ state: "outcomeUnknown" });
+    expect(await root.archive({ requestId: "archive", sessionId: "one" })).toMatchObject({ state: "failed", error: { code: "CREATION_UNCERTAIN" } });
+    expect(root.snapshot().sessions[0]).toMatchObject({ native: null, archived: false });
+    expect(f.port.create).toHaveBeenCalledOnce();
+  });
   it("creates with Root metadata and never waits for native rename", async () => {
     const f = await fixture(), { root } = await rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     expect(await root.create({ ...create("one"), hostId: "host", title: "Exact title" })).toMatchObject({ state: "succeeded" });
