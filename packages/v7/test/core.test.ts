@@ -9,7 +9,7 @@ import { adapterScopeIdSchema, newRuntimeEpoch,
 } from "@arduano/agent-multiplex-protocol";
 import { AdapterPreparationError, type AgentAdapter } from "@arduano/agent-multiplex-runtime-node-core";
 import {
-  HostService, RootService, V7Store, NativeOperationError, nativePortForAdapter,
+  HostService, RootService, V7Store, NativeOperationError, nativePortForAdapter, V7_STORE_MAX_PENDING_CALLS,
   type AdapterEvent, type AdapterSession, type NativePort,
 } from "../dist/index.js";
 
@@ -340,6 +340,26 @@ describe("V7 single Root authority", () => {
 });
 
 describe("V7 durable writer and consumer integration", () => {
+  it("bounds stalled writer call count and admits close even at saturation", async () => {
+    const store = await V7Store.open({ filename: ":memory:", role: "host", instanceId: "bounded-count" });
+    const delayed = store.delayWriterForTest(200); await eventDrained();
+    const requests = Array.from({ length: V7_STORE_MAX_PENDING_CALLS - 1 }, (_, i) => store.receipt(`bounded-${i}`));
+    await expect(store.admit("rejected", "session", "execute", {})).rejects.toMatchObject({ code: "STORE_BUSY" });
+    await eventDrained(); // all reserved calls have now crossed postMessage.
+    const closed = store.close(); await Promise.all([delayed, ...requests, closed]);
+  });
+  it("bounds queued bytes and releases capacity after every acknowledged response", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    const delayed = f.store.delayWriterForTest(200); await eventDrained();
+    const payload = { text: "x".repeat(850_000) };
+    const requests = Array.from({ length: 9 }, (_, i) => f.store.admit(`large-${i}`, "one", "read-fixture", payload));
+    await expect(f.store.admit("byte-overflow", "one", "read-fixture", payload)).rejects.toMatchObject({ code: "STORE_BUSY" });
+    await expect(f.host.execute(send("no-native-on-overflow", "one", payload.text))).rejects.toMatchObject({ code: "STORE_BUSY" });
+    expect(f.handles[0]!.execute).not.toHaveBeenCalled();
+    await Promise.all([delayed, ...requests]);
+    expect(await f.host.execute(send("after-drain"))).toMatchObject({ state: "succeeded" });
+    expect(await f.store.receipt("byte-overflow")).toBeNull();
+  });
   it("does not dispatch through a Host replaced during the Root durable boundary", async () => {
     const f = await fixture(), { root, store } = await rootFixture();
     root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });

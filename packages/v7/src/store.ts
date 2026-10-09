@@ -1,8 +1,11 @@
 import { Worker } from "node:worker_threads";
+import { jsonWireByteUpperBound } from "@arduano/agent-multiplex-protocol";
 import { V7Error } from "./errors.js";
 import { canonicalJson, requestHash } from "./store-payload.js";
 import type { JsonValue, RequestReceipt, RequestState, SessionBinding, SessionMetadata, UpdateMetadataInput } from "./protocol.js";
 export { canonicalJson, requestHash };
+export const V7_STORE_MAX_PENDING_CALLS = 128;
+export const V7_STORE_MAX_PENDING_BYTES = 8 * 1024 * 1024;
 
 export interface V7StoreOptions { filename: string; role: "host" | "root"; instanceId: string; workerUrl?: URL }
 export type MetadataPatch = Pick<UpdateMetadataInput, "title" | "pinned" | "metadata" | "remove" | "expectedMetadataRevision"> & { archived?: boolean };
@@ -20,6 +23,7 @@ export class V7Store {
   readonly #registry = new Map<string, SessionMetadata>();
   readonly #pending = new Map<number, { resolve: (result: unknown) => void; reject: (error: unknown) => void }>();
   #serial = 0; #closed = false; #failure: V7Error | undefined; #closing: Promise<void> | undefined;
+  #queuedCalls = 0; #queuedBytes = 0;
   public constructor(options: V7StoreOptions) {
     this.role = options.role; this.instanceId = options.instanceId;
     this.#worker = new Worker(options.workerUrl ?? new URL("./store-worker.js", import.meta.url), {
@@ -60,15 +64,26 @@ export class V7Store {
   public ready(): Promise<void> { return this.#ready; }
   public now(): string { return new Date().toISOString(); }
   private async call<T>(method: string, ...args: unknown[]): Promise<T> {
-    const ownedArgs = structuredClone(args);
-    await this.#ready;
     if (this.#closed || (this.#closing && method !== "close") || this.#failure) throw this.#failure ?? new V7Error("CLOSED", "V7 store is closed");
-    return new Promise<T>((resolve, reject) => {
-      const id = ++this.#serial;
-      this.#pending.set(id, { resolve: value => resolve(value as T), reject });
-      try { this.#worker.postMessage({ id, method, args: ownedArgs }); }
-      catch (error) { this.#pending.delete(id); reject(error); }
-    });
+    // Reserve before cloning or awaiting initialization. A hung writer must not
+    // turn transport requests into an unbounded memory queue. Close has its own
+    // one control slot so a saturated writer can still be released.
+    const bounded = method !== "close", bytes = bounded ? jsonWireByteUpperBound({ method, args }) : 0;
+    if (bounded && (this.#queuedCalls >= V7_STORE_MAX_PENDING_CALLS || this.#queuedBytes + bytes > V7_STORE_MAX_PENDING_BYTES)) {
+      throw new V7Error("STORE_BUSY", "Durable writer capacity is occupied; this request was not submitted");
+    }
+    if (bounded) { this.#queuedCalls += 1; this.#queuedBytes += bytes; }
+    try {
+      const ownedArgs = structuredClone(args);
+      await this.#ready;
+      if (this.#closed || (this.#closing && method !== "close") || this.#failure) throw this.#failure ?? new V7Error("CLOSED", "V7 store is closed");
+      return await new Promise<T>((resolve, reject) => {
+        const id = ++this.#serial;
+        this.#pending.set(id, { resolve: value => resolve(value as T), reject });
+        try { this.#worker.postMessage({ id, method, args: ownedArgs }); }
+        catch (error) { this.#pending.delete(id); reject(error); }
+      });
+    } finally { if (bounded) { this.#queuedCalls -= 1; this.#queuedBytes -= bytes; } }
   }
   public admit(requestId: string, sessionId: string, operation: string, payload: unknown) {
     return this.call<{ receipt: RequestReceipt; fresh: boolean }>("admit", requestId, sessionId, operation, payload);

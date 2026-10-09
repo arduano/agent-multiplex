@@ -14,6 +14,10 @@ mutations await durable acknowledgement before native dispatch. The process can
 serve `ready:false` while opening its store. A bundled consumer copies the public
 `@arduano/agent-multiplex-v7/store-worker` resource beside its role bundle, or
 passes that copied resource as `workerUrl` to the store factory.
+At most 128 pending writer calls and 8 MiB of inputs are retained, including
+calls waiting for initialization. Overflow fails with `STORE_BUSY` before
+submission, without a native effect or automatic retry. Close has one reserved
+control slot and rejects further calls as soon as it starts.
 There are no persistent PID locks, installer tables, session snapshots, prompt
 queues, transcript copies, branch catalogs, or automatic session attachments.
 
