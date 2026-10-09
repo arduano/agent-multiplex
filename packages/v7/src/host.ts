@@ -272,10 +272,34 @@ export class HostService implements HostApi {
     const active: Attachment = { id: randomUUID(), native, unsubscribe: () => {}, pending: 0,
       pendingBytes: 0,
       tail: Promise.resolve(), recoveryRequired: false, eventGap: false, interactions: new Map() };
-    await this.options.store.putBinding(binding); this.#active.set(binding.sessionId, active);
-    this.#rings.set(binding.sessionId, { sequence: 0, events: [], bytes: 0 });
-    active.unsubscribe = native.subscribe(event => this.enqueue(binding.sessionId, active, event));
-    this.publishSession(binding.sessionId);
+    try {
+      await this.options.store.putBinding(binding); this.#active.set(binding.sessionId, active);
+      this.#rings.set(binding.sessionId, { sequence: 0, events: [], bytes: 0 });
+      active.unsubscribe = native.subscribe(event => this.enqueue(binding.sessionId, active, event));
+      this.publishSession(binding.sessionId);
+    } catch (error) {
+      // The returned handle belongs to this installation until it is attached.
+      // Failed persistence/subscription must not leave a hidden native owner.
+      if (this.#active.get(binding.sessionId) === active) {
+        this.#active.delete(binding.sessionId); active.interactions.clear();
+        this.#rings.set(binding.sessionId, { sequence: 0, events: [], bytes: 0 });
+      }
+      try { active.unsubscribe(); } catch (cleanupError) {
+        diagnose(this.options.diagnostic, { role: "host", sessionId: binding.sessionId,
+          operation: "install", code: "unsubscribeFailed", error: cleanupError });
+      }
+      try { await native.stop(); } catch (cleanupError) {
+        diagnose(this.options.diagnostic, { role: "host", sessionId: binding.sessionId,
+          operation: "install", code: "nativeCleanupFailed", error: cleanupError });
+      }
+      // Stop only releases the local controller; the native creation itself may
+      // have succeeded. Preserve its original uncertain receipt and history.
+      try { this.publishSession(binding.sessionId); } catch (cleanupError) {
+        diagnose(this.options.diagnostic, { role: "host", sessionId: binding.sessionId,
+          operation: "install", code: "cleanupObservationFailed", error: cleanupError });
+      }
+      throw error;
+    }
   }
   private retire(sessionId: string, active: Attachment): void {
     this.assertCurrent(sessionId, active); active.unsubscribe(); active.interactions.clear(); this.#active.delete(sessionId);
@@ -392,9 +416,14 @@ export class HostService implements HostApi {
   public async close(): Promise<void> {
     if (this.#closed) return; this.#closed = true;
     await Promise.allSettled([...this.#requests.values()].map(v => v.promise));
-    await this.options.native.close();
-    for (const active of this.#active.values()) active.unsubscribe(); this.#active.clear();
+    const failures: unknown[] = [];
+    try { await this.options.native.close(); } catch (error) { failures.push(error); }
+    for (const active of this.#active.values()) {
+      try { active.unsubscribe(); } catch (error) { failures.push(error); }
+    }
+    this.#active.clear();
     for (const watchers of this.#watchers.values()) for (const queue of watchers) queue.close();
-    await this.options.store.close();
+    try { await this.options.store.close(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new AggregateError(failures, "V7 Host cleanup failed");
   }
 }

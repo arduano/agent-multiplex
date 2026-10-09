@@ -33,6 +33,10 @@ Only explicit create/resume/recover creates native handles. Stop retains native
 history and bindings. Archive releases the local native attachment then marks
 the binding archived. Native app servers own queue, histories, tasks and reverse
 interaction callbacks; execute passes supported commands directly to that owner.
+The Host releases a returned controller if storing or subscribing its binding
+fails; that cleanup never certifies that native creation did not happen. A failed
+native shutdown still closes local observers and the application database, then
+reports the cleanup failure.
 Native queue views use nativeState. An unknown request is never a queued prompt.
 Stopped and archived history uses the optional detached native read hook without
 Resume. Image-bearing execute retains descriptor references in the receipt and

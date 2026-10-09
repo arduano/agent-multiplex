@@ -103,6 +103,40 @@ describe("V7 minimal durable request ownership", () => {
     expect(await f.host.execute(send("unknown"))).toMatchObject({ state: "outcomeUnknown" });
     expect(f.handles[0]!.execute).toHaveBeenCalledTimes(2);
   });
+  it("releases a returned native handle after a binding write fails without replaying its uncertain creation", async () => {
+    const diagnostics: Array<{ code: string }> = [], f = await fixture({ diagnostic: event => diagnostics.push(event) });
+    const native = new NativeFixture("returned-before-write");
+    native.stop.mockRejectedValueOnce(new Error("Native cleanup failed"));
+    vi.mocked(f.port.create).mockImplementationOnce(async () => { f.handles.push(native); return native; });
+    vi.spyOn(f.store, "putBinding").mockRejectedValueOnce(new Error("Binding write failed"));
+    const receipt = await f.host.create(create("one"));
+    expect(receipt).toMatchObject({ state: "outcomeUnknown", error: { message: "Binding write failed" } });
+    expect(native.stop).toHaveBeenCalledOnce(); expect(native.listeners.size).toBe(0);
+    expect(f.host.list()).toEqual([]); expect(diagnostics).toContainEqual(expect.objectContaining({ code: "nativeCleanupFailed" }));
+    expect(await f.host.create(create("one"))).toEqual(receipt);
+    expect(f.port.create).toHaveBeenCalledOnce(); expect(native.stop).toHaveBeenCalledOnce();
+  });
+  it("retires a partially installed attachment when native subscription fails", async () => {
+    const f = await fixture(); await f.host.create(create("one")); await f.host.stop({ requestId: "stop", sessionId: "one" });
+    const native = new NativeFixture(f.handles[0]!.vendorSessionId);
+    vi.spyOn(native, "subscribe").mockImplementationOnce(() => { throw new Error("Native subscription failed"); });
+    vi.mocked(f.port.resume).mockImplementationOnce(async () => { f.handles.push(native); return native; });
+    expect(await f.host.resume({ requestId: "resume", sessionId: "one" })).toMatchObject({ state: "outcomeUnknown" });
+    expect(native.stop).toHaveBeenCalledOnce();
+    expect(f.host.list()).toMatchObject([{ sessionId: "one", attachmentId: null, status: "stopped" }]);
+    expect(await f.host.execute(send("not-attached"))).toMatchObject({ state: "failed", error: { code: "SESSION_STOPPED" } });
+    expect(native.execute).not.toHaveBeenCalled();
+  });
+  it("closes observers and its durable writer even when native shutdown fails", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    const watcher = f.host.watchSession({ sessionId: "one" })[Symbol.asyncIterator](); await watcher.next();
+    const waiting = watcher.next(), closeStore = vi.spyOn(f.store, "close");
+    vi.mocked(f.port.close).mockRejectedValueOnce(new Error("Native shutdown failed"));
+    await expect(f.host.close()).rejects.toThrow("V7 Host cleanup failed");
+    expect(await waiting).toEqual({ done: true, value: undefined });
+    expect(f.handles[0]!.listeners.size).toBe(0); expect(closeStore).toHaveBeenCalledOnce();
+    await expect(f.store.receipt("create-one")).rejects.toMatchObject({ code: "CLOSED" });
+  });
   it("never runs a durable Host prompt queue; queue indicators come from native state", async () => {
     const f = await fixture(); await f.host.create(create("one"));
     await f.host.execute(send("sent"));
