@@ -93,8 +93,8 @@ export class RootService implements RootApi {
         pinned: false, metadata: {}, createdAt: this.options.store.now(), archived: false };
       this.options.store.putMetadata(metadata);
       this.publish({ kind: "session", session: this.sessionView(metadata) });
-      const nativeInput = { requestId: input.requestId, sessionId: input.sessionId, options: input.options };
-      if (input.context !== undefined) Object.assign(nativeInput, { context: input.context });
+      const nativeInput = { requestId: input.requestId, sessionId: input.sessionId, options: input.options,
+        ...(input.context === undefined ? {} : { context: input.context }) };
       dispatch(); const receipt = await host.api.create(nativeInput);
       this.assertCurrent(host); this.verifyReceipt(nativeInput, "create", receipt); await this.refreshHost(host); return this.remoteOutcome(receipt);
     });

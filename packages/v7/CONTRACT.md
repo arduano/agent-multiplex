@@ -32,6 +32,10 @@ The Root registry retains logical archive state while its Host is disconnected.
 `interactions(sessionId)` returns current native callbacks for a fresh client;
 they are never rebuilt from history or durable state. Every receipt includes its
 immutable request, allowing a Gateway restart without a second request journal.
+An optional opaque `context` is part of that immutable request and passes through
+the Root and Host; native adapters do not interpret it. `updateMetadata` merges
+the provided map, applies `remove` keys, and changes optional title/pin together
+at the Root. Removed keys win if also supplied in the same patch.
 Root does not maintain a second native state store. Its current Host views live
 in memory and disappear on restart/disconnect. `attachHost({descriptor, api,
 sessions})` supplies one complete Host snapshot and returns a connection token;
