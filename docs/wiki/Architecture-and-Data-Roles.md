@@ -1,5 +1,10 @@
 # Architecture and data roles
 
+The independent V7 candidate uses fresh state and direct Hosts → Root. Its
+[direct-role design](../design/v7-direct-roles.md) and
+[package contract](../../packages/v7/CONTRACT.md) apply only to V7. The maintained
+V6 architecture below remains unchanged.
+
 Agent Multiplex separates durable authority, native execution, and presentation.
 That separation is the architecture: process names and deployment locations are
 secondary.
