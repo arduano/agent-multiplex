@@ -68,6 +68,11 @@ function rootFixture() {
 async function eventDrained() { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); }
 
 describe("V7 minimal durable request ownership", () => {
+  it("treats omitted optional members consistently across direct and serialized requests", async () => {
+    const f = fixture(), input = create("one");
+    await f.host.create({ ...input, options: { ...input.options, model: undefined } } as unknown as typeof input);
+    expect(await f.host.create(input)).toMatchObject({ state: "succeeded" }); expect(f.port.create).toHaveBeenCalledOnce();
+  });
   it("refuses V6 or unrelated databases without adding V7 schema tables", () => {
     const dir = mkdtempSync(join(tmpdir(), "v7-foreign-")); cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const filename = join(dir, "state.sqlite"), database = new DatabaseSync(filename);
@@ -209,8 +214,9 @@ describe("V7 independent native session coordination", () => {
     wait.resolve({ harness: "copilot", vendorSessionId: f.handles[0]!.vendorSessionId, payload: {} }); await rejection;
     const resolve = vi.fn(async () => {});
     f.handles[1]!.emit({ kind: "interaction", nativeRequestId: "native-question", requestType: "userInput", payload: { question: "Fixture?" }, ephemeral: false, resolve });
-    await eventDrained(); expect(f.host.interactions("one")).toMatchObject([{ interactionId: "native-question" }]);
-    expect(await f.host.resolve({ requestId: "reply", sessionId: "one", interactionId: "native-question", response: "answer" })).toMatchObject({ state: "succeeded" });
+    await eventDrained(); const question = f.host.interactions("one")[0]!;
+    expect(question).toMatchObject({ nativeRequestId: "native-question" });
+    expect(await f.host.resolve({ requestId: "reply", sessionId: "one", interactionId: question.interactionId, response: "answer" })).toMatchObject({ state: "succeeded" });
     expect(resolve).toHaveBeenCalledExactlyOnceWith("answer"); expect(f.host.interactions("one")).toEqual([]);
   });
   it("requires recovery for native uncertainty but a missing observer replay is just a view gap", async () => {
@@ -224,6 +230,17 @@ describe("V7 independent native session coordination", () => {
     f.handles[0]!.emit({ kind: "lifecycle", fact: { type: "gap" } }); await eventDrained();
     expect(await f.host.execute(send("blocked"))).toMatchObject({ state: "failed", error: { code: "INTERACTION_UNCERTAIN" } });
     expect(await f.host.recover({ requestId: "recover", sessionId: "one" })).toMatchObject({ state: "succeeded" });
+  });
+  it("fences native request ID reuse across recovered attachments", async () => {
+    const f = fixture(); await f.host.create(create("one")); const first = vi.fn(async () => {}), second = vi.fn(async () => {});
+    f.handles[0]!.emit({ kind: "interaction", nativeRequestId: "1", requestType: "approval", payload: {}, ephemeral: false, resolve: first });
+    await eventDrained(); const retiredId = f.host.interactions("one")[0]!.interactionId;
+    await f.host.recover({ requestId: "recover", sessionId: "one" });
+    f.handles[1]!.emit({ kind: "interaction", nativeRequestId: "1", requestType: "approval", payload: {}, ephemeral: false, resolve: second });
+    await eventDrained(); expect(f.host.interactions("one")[0]!.interactionId).not.toBe(retiredId);
+    expect(await f.host.resolve({ requestId: "old-reply", sessionId: "one", interactionId: retiredId, response: "allow" }))
+      .toMatchObject({ state: "failed", error: { code: "INTERACTION_STALE" } });
+    expect(second).not.toHaveBeenCalled(); expect(first).not.toHaveBeenCalled();
   });
   it("preserves genuine partial interaction hydration and accepts an exact native certificate", async () => {
     const f = fixture(); await f.host.create(create("one")); const native = f.handles[0]!;

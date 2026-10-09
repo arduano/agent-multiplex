@@ -259,15 +259,20 @@ export class HostService implements HostApi {
         ...(event.conversation === undefined ? {} : { conversation: event.conversation }) });
     } else if (event.kind === "interaction") {
       const payload = await this.externalize(binding, event.payload); this.assertCurrent(sessionId, active);
-      const interactionId = event.nativeRequestId ?? randomUUID();
+      // Native numeric request IDs can restart at 1. A local callback capability
+      // is unique to this attachment, so stale browser replies cannot hit a new ask.
+      const interactionId = randomUUID();
       const wire: NativeInteraction = { interactionId, requestType: event.requestType, payload,
         ephemeral: event.ephemeral, expiresAt: event.expiresAt ?? null,
         ...(event.nativeRequestId === undefined ? {} : { nativeRequestId: event.nativeRequestId }) };
       active.interactions.set(interactionId, { wire, resolve: response => event.resolve(response) });
       this.publish(sessionId, { kind: "interaction", interaction: wire });
     } else if (event.kind === "interactionSettled") {
-      active.interactions.delete(event.nativeRequestId);
-      this.publish(sessionId, { kind: "interactionSettled", interactionId: event.nativeRequestId, state: event.state });
+      for (const [interactionId, interaction] of active.interactions) {
+        if (interaction.wire.nativeRequestId !== event.nativeRequestId) continue;
+        active.interactions.delete(interactionId);
+        this.publish(sessionId, { kind: "interactionSettled", interactionId, state: event.state });
+      }
     } else if (event.kind === "status" || event.kind === "settings") this.publishSession(sessionId);
     else if (event.kind === "lifecycle") {
       if (event.fact.type === "gap") this.gap(sessionId, active, "nativeContinuityGap", true);

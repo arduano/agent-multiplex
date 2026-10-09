@@ -2,16 +2,15 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { jsonValueSchema, jsonWireByteUpperBound, NATIVE_PAYLOAD_MAX_BYTES } from "@arduano/agent-multiplex-protocol";
+import { canonicalProtocolRecordJson, jsonWireByteUpperBound, NATIVE_PAYLOAD_MAX_BYTES } from "@arduano/agent-multiplex-protocol";
 import { V7Error } from "./errors.js";
 import type { JsonValue, RequestReceipt, RequestState, SessionBinding, SessionMetadata } from "./protocol.js";
 
 export interface V7StoreOptions { filename: string; role: "host" | "root"; instanceId: string; now?: () => Date }
 export function canonicalJson(input: unknown): string {
-  const value = jsonValueSchema.parse(input);
-  const normalize = (v: JsonValue): JsonValue => Array.isArray(v) ? v.map(normalize)
-    : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, normalize(v[k]!)])) : v;
-  return JSON.stringify(normalize(value));
+  // Optional object members match their wire/SQLite omission semantics. Arrays,
+  // non-JSON objects and non-finite values remain strict.
+  return canonicalProtocolRecordJson(input);
 }
 export function requestHash(input: unknown): string { return createHash("sha256").update(canonicalJson(input)).digest("hex"); }
 const unpack = <T>(value: unknown): T => JSON.parse(String(value)) as T;
