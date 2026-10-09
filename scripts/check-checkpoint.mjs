@@ -21,6 +21,7 @@ const expectedWorkspaces = [
   "packages/adapter-codex",
   "packages/adapter-copilot",
   "packages/adapter-mock",
+  "packages/v7",
   "apps/control-node",
   "apps/runtime-node",
   "apps/gateway",
@@ -158,7 +159,7 @@ assert(
 assertReviewedP2prpcLock(lockfile);
 
 console.log(
-  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active v6 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
+  `Checkpoint structure is coherent: ${expectedWorkspaces.length} active V6/V7 workspaces, 2 archived v2 workspaces, and no orphaned compiler output.`,
 );
 
 function assertNoOrphanedCompilerOutput(workspacePath) {

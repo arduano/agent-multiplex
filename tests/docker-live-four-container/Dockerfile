@@ -26,6 +26,7 @@ COPY packages/client-p2prpc/package.json packages/client-p2prpc/package.json
 COPY packages/adapter-codex/package.json packages/adapter-codex/package.json
 COPY packages/adapter-copilot/package.json packages/adapter-copilot/package.json
 COPY packages/adapter-mock/package.json packages/adapter-mock/package.json
+COPY packages/v7/package.json packages/v7/package.json
 COPY apps/control-node/package.json apps/control-node/package.json
 COPY apps/runtime-node/package.json apps/runtime-node/package.json
 COPY apps/gateway/package.json apps/gateway/package.json
