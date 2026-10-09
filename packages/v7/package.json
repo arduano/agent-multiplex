@@ -1,0 +1,45 @@
+{
+  "name": "@arduano/agent-multiplex-v7",
+  "version": "0.2.4-hotfix.39",
+  "description": "Standalone V7 direct Host/Root contracts, native session coordination and minimal role stores.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol.d.ts",
+      "import": "./dist/protocol.js"
+    }
+  },
+  "files": [
+    "dist",
+    "CONTRACT.md"
+  ],
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/arduano/agent-multiplex.git",
+    "directory": "packages/v7"
+  },
+  "homepage": "https://github.com/arduano/agent-multiplex#readme",
+  "bugs": {
+    "url": "https://github.com/arduano/agent-multiplex/issues"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "dependencies": {
+    "@arduano/agent-multiplex-protocol": "0.2.4-hotfix.39",
+    "@arduano/agent-multiplex-runtime-node-core": "0.2.4-hotfix.39",
+    "@types/node": "24.3.0",
+    "zod": "4.1.5"
+  }
+}

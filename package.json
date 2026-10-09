@@ -30,7 +30,8 @@
     "apps/runtime-node",
     "apps/gateway",
     "apps/cli",
-    "apps/web"
+    "apps/web",
+    "packages/v7"
   ],
   "engines": {
     "node": ">=24.0.0"
