@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { jsonValueSchema } from "@arduano/agent-multiplex-protocol";
 import { EventQueue, diagnose, type Diagnostic } from "./events.js";
 import { V7Error, errorDetails } from "./errors.js";
-import { V7Store } from "./store.js";
+import { V7Store, requestHash } from "./store.js";
 import {
   hostSessionSchema, type ExecuteInput, type HistoryInput, type HostApi, type HostDescriptor,
   type HostSession, type HostView, type JsonValue, type NativeStateInput, type RenameInput,
@@ -90,11 +90,12 @@ export class RootService implements RootApi {
       if (!input.title.trim()) throw new V7Error("TITLE", "Session title must not be blank");
       // Root rename is part of creation admission. Native rename is irrelevant.
       const metadata = { sessionId: input.sessionId, hostId: input.hostId, title: input.title,
-        pinned: false, metadata: {}, createdAt: this.options.store.now() };
+        pinned: false, metadata: {}, createdAt: this.options.store.now(), archived: false };
       this.options.store.putMetadata(metadata);
       this.publish({ kind: "session", session: this.sessionView(metadata) });
-      dispatch(); const receipt = await host.api.create({ requestId: input.requestId, sessionId: input.sessionId, options: input.options });
-      this.assertCurrent(host); await this.refreshHost(host); return this.remoteOutcome(receipt);
+      const nativeInput = { requestId: input.requestId, sessionId: input.sessionId, options: input.options };
+      dispatch(); const receipt = await host.api.create(nativeInput);
+      this.assertCurrent(host); this.verifyReceipt(nativeInput, "create", receipt); await this.refreshHost(host); return this.remoteOutcome(receipt);
     });
   }
   public rename(input: RenameInput): Promise<RequestReceipt> {
@@ -145,7 +146,12 @@ export class RootService implements RootApi {
       const remote = await host.api.receipt(requestId); this.assertCurrent(host);
       if (remote && remote.sessionId === current.sessionId && remote.operation === current.operation &&
         ["succeeded", "failed"].includes(remote.state)) {
+        const request = current.request as Record<string, JsonValue>;
+        const expected = current.operation === "create"
+          ? { requestId: request.requestId, sessionId: request.sessionId, options: request.options } : current.request;
+        this.verifyReceipt(expected as RequestEnvelope, current.operation, remote);
         await this.refreshHost(host);
+        if (current.operation === "archive" && remote.state === "succeeded") this.archiveMetadata(current.sessionId);
         return this.options.store.transition(requestId, remote.state as "succeeded" | "failed", {
           ...(remote.result === undefined ? {} : { result: remote.result }),
           ...(remote.error === undefined ? {} : { error: remote.error }),
@@ -157,7 +163,10 @@ export class RootService implements RootApi {
   private forward(input: RequestEnvelope, operation: string, action: (api: HostApi) => Promise<RequestReceipt>) {
     return this.request(input, operation, input, async dispatch => {
       const host = this.route(input.sessionId); dispatch();
-      const receipt = await action(host.api); this.assertCurrent(host); await this.refreshHost(host); return this.remoteOutcome(receipt);
+      const receipt = await action(host.api); this.assertCurrent(host); this.verifyReceipt(input, operation, receipt);
+      await this.refreshHost(host);
+      if (operation === "archive" && receipt.state === "succeeded") this.archiveMetadata(input.sessionId);
+      return this.remoteOutcome(receipt);
     });
   }
   private request(input: RequestEnvelope, operation: string, payload: unknown,
@@ -180,6 +189,16 @@ export class RootService implements RootApi {
   }
   private remoteOutcome(receipt: RequestReceipt): JsonValue {
     if (receipt.state !== "succeeded") throw new RemoteReceiptError(receipt); return receipt.result ?? null;
+  }
+  private verifyReceipt(input: RequestEnvelope, operation: string, receipt: RequestReceipt): void {
+    if (receipt.requestId !== input.requestId || receipt.sessionId !== input.sessionId ||
+      receipt.operation !== operation || receipt.payloadHash !== requestHash(input)) {
+      throw new V7Error("RECEIPT_IDENTITY", "Native response names a different immutable request");
+    }
+  }
+  private archiveMetadata(sessionId: string): void {
+    const metadata = { ...this.requireMetadata(sessionId), archived: true };
+    this.options.store.putMetadata(metadata); this.publish({ kind: "session", session: this.sessionView(metadata) });
   }
   private async refreshHost(host: HostConnection): Promise<void> {
     // Response to a mutation is authoritative; optional refresh failure cannot

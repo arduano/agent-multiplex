@@ -47,7 +47,7 @@ export interface RequestReceipt {
 }
 export interface SessionMetadata {
   sessionId: string; hostId: string; title: string; pinned: boolean;
-  metadata: Record<string, JsonValue>; createdAt: string;
+  metadata: Record<string, JsonValue>; createdAt: string; archived: boolean;
 }
 export interface SessionView extends SessionMetadata {
   native: HostSession | null;
