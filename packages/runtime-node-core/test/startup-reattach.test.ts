@@ -35,6 +35,7 @@ import {
   RuntimeNodeService,
   CopilotAttachmentDriver,
   RuntimeNodeStore,
+  AdapterPreparationError,
   AdapterOutcomeUnknownError,
   AdapterResumeFailureError,
   type AdapterEvent,
@@ -139,6 +140,17 @@ function retainedFixture(count = 3, filename = ":memory:") {
 }
 
 describe("per-binding Copilot startup containment", () => {
+  it("attributes a local preparation refusal before native attachment", async () => {
+    const f = retainedFixture(1);
+    f.adapter.resumeHook = async () => { throw new AdapterPreparationError("private preparation refused"); };
+    try {
+      const summary = await f.service.reattachPersistedCopilotSessions();
+      expect(summary).toMatchObject({ reattached: 0, failures: [{ stage: "prepareResume", reason: "preparationFailed", error: { certainty: "definiteFailure" } }] });
+      expect(f.adapter.handles).toHaveLength(0);
+      expect(f.store.getSession(f.ids[0]!)).toMatchObject({ availability: "resumable", runtimeEpoch: null });
+    } finally { await f.close(); }
+  });
+
   it.each([0, 1])("recovers healthy siblings when retained binding %i refuses native history", async failedIndex => {
     const f = retainedFixture();
     f.adapter.failResumeForVendorSessionId = f.originals[failedIndex]!.vendorSessionId;

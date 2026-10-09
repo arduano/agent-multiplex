@@ -41,8 +41,9 @@ import { agentsSnapshot } from "./agents.js";
 import { compactionResult } from "./compaction.js";
 import { copilotHistoryEventBytes, copilotImageLeaves } from "./images.js";
 import { readPrimaryHistory, readSubagentHistory, type CopilotEventLogReadRequest } from "./primary-history.js";
-import { COPILOT_READ_TIMEOUT_MS, CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
+import { CopilotReadBusyError, CopilotReadRequests } from "./reads.js";
 import { CopilotNativeOperations } from "./operations.js";
+import { resolveCopilotTimeouts, STANDARD_COPILOT_TIMEOUTS, type CopilotTimeoutPolicy } from "./timeouts.js";
 import { copilotHistoryDeliveryFacts, copilotLifecycleFacts } from "./lifecycle.js";
 
 export const COPILOT_SESSION_DISCONNECT_TIMEOUT_MS = 10_000;
@@ -129,7 +130,9 @@ interface PendingPermission {
  * inventing a second transcript representation.
  */
 export class CopilotSessionBridge {
-  constructor(private readonly vendorSessionId?: string) {}
+  constructor(private readonly vendorSessionId?: string, readTimeoutMs = 15_000) {
+    this.observationDriver = new CopilotAttachmentDriver({ readTimeoutMs });
+  }
   readonly #listeners = new Set<(event: AdapterEvent) => void>();
   readonly #buffer: AdapterEvent[] = [];
   readonly #pending = new Set<PendingBridgeInteraction>();
@@ -153,7 +156,7 @@ export class CopilotSessionBridge {
   #modeChanged: (() => void) | undefined;
   #closed = false;
   #status: SessionRuntimeStatus = "idle";
-  public readonly observationDriver = new CopilotAttachmentDriver();
+  public readonly observationDriver: CopilotAttachmentDriver;
   #awaitingResumeBoundary = false;
   #resumePositiveEvidenceObserved = false;
   #permissionMutation: ((lane: string, action: () => Promise<unknown>) => Promise<unknown>) | undefined;
@@ -611,6 +614,7 @@ export class CopilotAdapterSession implements AdapterSession {
   readonly #onStopped: () => void;
   readonly #reads: CopilotReadRequests;
   readonly #operations: CopilotNativeOperations;
+  readonly #timeouts: CopilotTimeoutPolicy;
   readonly #ownershipDiagnostic: ((record: CopilotOwnershipDiagnostic) => void) | undefined;
   #settings: HarnessSessionSettings;
   #stopped = false;
@@ -626,6 +630,7 @@ export class CopilotAdapterSession implements AdapterSession {
     settings: HarnessSessionSettings;
     reads?: CopilotReadRequests;
     operations?: CopilotNativeOperations;
+    timeouts?: CopilotTimeoutPolicy;
     onOwnershipDiagnostic?(record: CopilotOwnershipDiagnostic): void;
     onStopped(): void;
   }) {
@@ -637,8 +642,9 @@ export class CopilotAdapterSession implements AdapterSession {
     this.copilotObservationDriver = options.bridge.observationDriver;
     this.#settings = options.settings;
     this.#onStopped = options.onStopped;
-    this.#reads = options.reads ?? new CopilotReadRequests();
-    this.#operations = options.operations ?? new CopilotNativeOperations();
+    this.#timeouts = resolveCopilotTimeouts(options.timeouts ?? STANDARD_COPILOT_TIMEOUTS);
+    this.#reads = options.reads ?? new CopilotReadRequests(this.#timeouts);
+    this.#operations = options.operations ?? new CopilotNativeOperations(this.#timeouts);
     this.#ownershipDiagnostic = options.onOwnershipDiagnostic;
     this.vendorSessionId = options.native.sessionId;
     const ordinal = options.native.incidentTraceAttachmentId;
@@ -903,7 +909,7 @@ export class CopilotAdapterSession implements AdapterSession {
     if (request.native?.view === "primary" || request.native?.view === "subagent") {
       const eventLog = this.#native.rpc.eventLog;
       if (typeof eventLog?.read !== "function") throw new Error(`Copilot ${request.native.view === "primary" ? "primary" : "subagent"} history is unavailable on this native session`);
-      const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
+      const deadlineAt = Date.now() + this.#timeouts.readMs;
       const readScoped = request.native.view === "subagent" ? readSubagentHistory : readPrimaryHistory;
       const result = await readScoped(this.vendorSessionId, request, async input => {
         const lane = input.agentIds ? `subagentHistory:${input.agentIds[0]}` : "primaryHistory";
@@ -991,7 +997,7 @@ export class CopilotAdapterSession implements AdapterSession {
       switch (request.view) {
         case "tasks": {
           if (typeof tasks?.list !== "function" || typeof tasks.refresh !== "function") throw new AdapterNativeStateReadError("nativeReadUnavailable", "Copilot task observation is unavailable");
-          const deadlineAt = Date.now() + COPILOT_READ_TIMEOUT_MS;
+          const deadlineAt = Date.now() + this.#timeouts.readMs;
           const observation = await this.read("tasks", String(this.copilotObservationDriver.version("tasks")), async () => {
             await tasks.refresh();
             this.assertActive();
@@ -1071,7 +1077,7 @@ export class CopilotAdapterSession implements AdapterSession {
           `Copilot session ${this.vendorSessionId} may not have disconnected cleanly`, { cause },
         ));
       };
-      const timer = setTimeout(() => fail(new Error("Copilot native disconnect timed out; native ownership remains pending")), COPILOT_SESSION_DISCONNECT_TIMEOUT_MS);
+      const timer = setTimeout(() => fail(new Error("Copilot native disconnect timed out; native ownership remains pending")), this.#timeouts.cleanupMs);
       timer.unref?.();
       // Caller deadlines do not cancel disconnect or release native ownership.
       // A late acknowledgement releases the fence without rewriting the first
@@ -1127,8 +1133,10 @@ export interface CopilotOwnershipDiagnostic {
   vendorSessionId?: string;
   runtimeEpoch?: RuntimeEpoch;
   attachmentId?: number;
-  stage: "startup" | "attachment" | "attachmentMode" | "mutation" | "detach" | "shutdown";
+  stage: "startup" | "attachmentPreparation" | "attachment" | "attachmentMode" | "mutation" | "detach" | "shutdown";
   outcome: "dispatched" | "acknowledged" | "lateAcknowledged" | "timedOut" | "unacknowledged" | "retired" | "closed";
+  elapsedMs?: number;
+  deadlineMs?: number;
 }
 
 export function permissionResponse(value: JsonValue): PermissionRequestResult {

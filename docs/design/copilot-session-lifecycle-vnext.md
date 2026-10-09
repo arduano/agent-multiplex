@@ -706,14 +706,37 @@ retired binding may finish their durable original receipts, but they must not
 advance the replacement lifecycle. Disconnect never moves authority or starts a
 second native agent.
 
-Copilot SDK create/resume caller waits are bounded to 15 seconds. A deadline or
+Copilot observation uses one immutable policy selected at the adapter boundary.
+Standard/Linux budgets remain startup 60 seconds, attachment/read/mutation 15
+seconds and cleanup 10 seconds. Windows defaults are startup 180 seconds,
+attachment 120 seconds and read/mutation/cleanup 60 seconds. A complete explicit
+policy may override these values without changing ownership contracts. Read
+budgets are validated at no more than 600s, matching the driver; other timers
+retain Node's exact timer cap.
+
+The optional typed preparation hook reserves the same native ID before private
+configuration admission and SDK create/resume. Preparation and attachment share
+the attachment observer budget. Preparation diagnostics precede actual SDK
+dispatch diagnostics; neither contains configuration. A refused, expired or
+retired preparation is a definite non-native failure. The original local work
+retains its reservation until settlement, and retirement prevents its late
+result from dispatching any SDK mutation. Embedding configuration checks must
+run in that preparation hook rather than inside an SDK mutation wrapper.
+
+The shared preparation-error base crosses the adapter-to-Runtime boundary.
+Command journaling records its refusal as definite admission failure; startup
+records `prepareResume` / `preparationFailed` within the existing recovery-error
+envelope. These durable receipts retain the original identity after reopen.
+Post-dispatch native failure attribution and uncertainty remain unchanged.
+
+After actual SDK create/resume dispatch, a deadline or
 ambiguous refusal retains the exact native-ID attachment fence. A second
 attachment fails before SDK dispatch. A returned late handle is never published
 to Runtime; it is disconnected, and only acknowledgement releases the fence.
 The original unknown command receipt remains unknown after late cleanup.
 
 Stop retires the local bridge immediately but retains SDK ownership until its
-exact disconnect acknowledges. The 10-second caller deadline does not cancel
+exact disconnect acknowledges. The policy's cleanup caller deadline does not cancel
 disconnect. Repeated Stop shares that pending outcome; a following history or
 resume cannot create another native owner. A late acknowledgement may permit
 future attachment without rewriting the original unknown receipt. Inventory
@@ -725,8 +748,8 @@ the backend's existing graceful/verified-force termination completes. This
 prevents a stalled temporary history attachment from postponing owner shutdown
 indefinitely without unlocking the session merely on a client timeout.
 
-Initial SDK cold startup caller waits are bounded to 60 seconds and native
-mutation caller waits to 15 seconds in the source candidate. Native requests retain their lanes until settlement;
+Initial SDK cold startup, reads and native mutations each use their policy
+budget. Native requests retain their lanes until settlement;
 timeouts and shutdown retire only caller waits. Mutations in an occupied lane
 fail before native dispatch. Late mutation acknowledgements cannot publish
 settings, settle the original receipt or resolve an uncertain interaction.
@@ -735,6 +758,19 @@ Disconnect acknowledgement alone cannot release a native-ID fence while an
 admitted mutation remains pending. Exact late settlement may release that fence
 without changing the earlier unknown Stop or mutation receipt. Whole-backend
 termination must retain the existing actual child-exit proof.
+
+Cleanup budgets apply to individual graceful/verified-force observation phases;
+they do not promise a single overall shutdown deadline. Shorter transport or
+browser observers may expire while the original durable operation continues.
+Such expiry cannot change its receipt or authorize a replay.
+
+The driver receives the policy's read budget. Its no-success watchdog permits
+two full serialized view observations and one retry, retaining 45s for standard
+15s reads and 180s for Windows 60s reads. Periodic requests never renew it.
+The reference authority's outer router and reverse-child IPC hops allow 600s
+only for enumerated durable native mutations; ordinary catalog, health,
+enrollment, receipt and other storage calls retain 30s. These are observation
+limits, not changes to transport authentication or mutation ownership.
 
 An adapter never retries SDK startup internally. Pending startup cannot establish
 safe owner cleanup even if a currently visible child exited, since the SDK
@@ -825,7 +861,7 @@ The optional experimental `agents.list` v1 capability adds a live
 `{ harness: "copilot", view: "agents" }` observation through the existing managed
 session. The adapter invokes `rpc.agent.list` with built-ins and prompts disabled,
 projects only bounded registration fields, and rejects malformed, built-in or
-oversized results. It uses the same 15-second retained read lane and Runtime
+oversized results. It uses the same policy-bounded retained read lane and Runtime
 native-identity/binding checks; it never attaches another owner or starts a child.
 Root `session.custom_agents_updated` events invalidate an in-flight snapshot on
 an independent adapter revision. Child events and task/queue revisions cannot

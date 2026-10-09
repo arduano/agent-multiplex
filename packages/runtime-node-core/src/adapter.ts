@@ -189,6 +189,14 @@ export function runtimeBackendForAdapter(
   };
 }
 
+/** Preparation failed before dispatching a native mutation. */
+export class AdapterPreparationError extends Error {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "AdapterPreparationError";
+  }
+}
+
 /** Signals that a native side effect may have occurred and must not be retried. */
 export class AdapterOutcomeUnknownError extends Error {
   public constructor(message: string, options?: ErrorOptions) {

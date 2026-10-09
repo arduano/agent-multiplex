@@ -1495,3 +1495,32 @@ All16 packed consumers/publint/ATTW/SBOM pass from artifact source
 `18a55b5decdb12a703011658b060595527729820`; separate packed bounded/parity fixtures
 pass. Source/disposable qualification does not publish/deploy a role or make a
 model call.
+
+## Windows observation and authority IPC candidate `.39` — October 9, 2026
+
+Based on frozen `.38` plus IPC correction
+`050a82be1159876d205489c6bc75a4a6e20961cd`, all 16 maintained package
+versions/internal edges/lockfile entries advance together to `.39`. Windows
+uses explicit startup 180s, attachment 120s and read/mutation/cleanup 60s budgets;
+Linux retains its existing defaults. Typed private preparation precedes SDK
+dispatch under one retained native-ID reservation. Shared preparation errors
+retain definite admission/startup attribution; original receipts survive reopen
+and deduplicate without another preparation or SDK call. Genuine post-dispatch
+uncertainty, late cleanup, exact child exit proofs and interaction fences remain.
+The observation watchdog follows the explicit read budget without periodic
+request renewal; both authority IPC hops permit 600s only for enumerated durable
+native mutations, leaving ordinary catalog/health/enrollment/receipt/storage at 30s.
+
+Final source passes typecheck, **1,688 tests/152 passing files** (eight tests/one
+file skipped), build and checkpoint/docs/release/secrets/whitespace checks.
+Combined focused qualification passes 229 tests/ten files, including actual
+adapter-to-Runtime durable preparation-refusal, wider watchdog and both IPC
+hop regressions. Prior overlapping 154-test and 77-test gates remain separate.
+The typecheck/test/build inventory is unchanged. The full suite uses a fresh
+private 0700 `/dev/shm` fixture root and two workers; it does not claim native
+Windows or physical-disk durability acceptance. Frozen `.38` assets, native
+SDK/CLI, transport, wire/store schemas and migrations are unchanged. No live
+role, owner session, authentication, model call or publication belongs to this
+source pass; packed qualification, consumer integration and installed recovery
+remain coordinator-owned. Original failed/unknown receipts remain retained.
+[Contract, evidence and acceptance limits](audits/windows-copilot-observation-policy-20261009.md).

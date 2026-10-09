@@ -48,6 +48,17 @@ const REPAIR_REFRESH_MS = 60_000;
  * refresh owner. Native request slots remain owned by the adapter read lanes;
  * retiring this driver never cancels or replays a native request. */
 export class CopilotAttachmentDriver {
+  readonly #noSuccessMs: number;
+  public constructor(options: { readTimeoutMs?: number } = {}) {
+    const readTimeoutMs = options.readTimeoutMs ?? 15_000;
+    if (!Number.isSafeInteger(readTimeoutMs) || readTimeoutMs <= 0 || readTimeoutMs > 600_000) {
+      throw new Error("Invalid Copilot observation read budget");
+    }
+    // Both views share one refresh owner. Permit two full read observations
+    // and one retry within the no-success window; periodic requests never
+    // renew it. Standard 15s reads retain the existing 45s watchdog.
+    this.#noSuccessMs = Math.max(NO_SUCCESS_MS, 3 * readTimeoutMs);
+  }
   readonly #versions: Record<CopilotSnapshotView, number> = { tasks: 0, pendingMessages: 0, agents: 0, activity: 0 };
   readonly #tickets = new WeakSet<CopilotSnapshotTicket>();
   readonly #snapshots = new WeakMap<object, CopilotSnapshotTicket>();
@@ -181,7 +192,7 @@ export class CopilotAttachmentDriver {
           ...(lane.attempted?.version === this.version(view) && lane.lastFailure?.version === this.version(view)
             ? { failureReason: lane.lastFailure.reason } : {}) });
         port.failed({ view, revision, failures: Math.max(1, lane.failures + 1), diagnosticId, stalled: true });
-      }, NO_SUCCESS_MS);
+      }, this.#noSuccessMs);
       lane.deadline.unref?.();
     }
     this.#pump();
@@ -296,7 +307,7 @@ export class CopilotAttachmentDriver {
       lane.attempted = { version, revision: currentRevision };
       const diagnosticId = newOperationId();
       reportFailure = { view, revision: currentRevision, failures: lane.failures, diagnosticId,
-        stalled: deadlineAgeMs >= NO_SUCCESS_MS };
+        stalled: deadlineAgeMs >= this.#noSuccessMs };
       lane.pending = true;
       lane.dueAt = Date.now() + Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.min(30, lane.failures - 1));
     } else {

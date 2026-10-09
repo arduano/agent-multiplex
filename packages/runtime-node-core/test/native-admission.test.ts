@@ -9,7 +9,7 @@ import {
   type RuntimeNodeSessionRecord,
 } from "@arduano/agent-multiplex-protocol";
 import {
-  CopilotAttachmentDriver, DirectWorkspaceLaunchProvider, runtimeBackendForAdapter, RuntimeNodeService, RuntimeNodeStore,
+  AdapterPreparationError, CopilotAttachmentDriver, DirectWorkspaceLaunchProvider, runtimeBackendForAdapter, RuntimeNodeService, RuntimeNodeStore,
   type AdapterEvent, type AdapterSession, type AgentAdapter,
 } from "../src/index.js";
 
@@ -107,6 +107,17 @@ async function refusalFixture(operation: Operation, kind: "missing" | "retired",
 }
 
 describe("native attachment prerequisites before durable admission", () => {
+  it("records a pre-dispatch refusal as definite admission failure without activating a handle", async () => {
+    const f = fixture();
+    vi.mocked(f.adapter.resume).mockRejectedValue(new AdapterPreparationError("private preparation refused"));
+    const receipt = await f.resume();
+    expect(receipt).toMatchObject({ state: "failed", error: { stage: "admission", certainty: "definiteFailure" } });
+    expect(await f.resume()).toEqual(receipt);
+    expect(f.adapter.resume).toHaveBeenCalledOnce();
+    expect(f.handle.subscribe).not.toHaveBeenCalled();
+    expect(f.store.getSession(f.sessionId)).toMatchObject({ availability: "resumable", runtimeEpoch: null });
+  });
+
   it.each(["startup", "resume", "recover", "inspect", "spawn"] as const)("refuses a missing driver during %s, releases the handle and never creates a phantom activation", async operation => {
     const f = await refusalFixture(operation, "missing");
     if (operation === "inspect") await expect(f.act()).rejects.toMatchObject({ code: "UNSUPPORTED" });

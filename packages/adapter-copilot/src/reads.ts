@@ -1,4 +1,5 @@
 import { AdapterNativeStateReadError } from "@arduano/agent-multiplex-runtime-node-core";
+import { STANDARD_COPILOT_TIMEOUTS, type CopilotTimeoutPolicy } from "./timeouts.js";
 
 export const COPILOT_READ_TIMEOUT_MS = 15_000;
 const MAX_PENDING_READS = 256;
@@ -23,6 +24,8 @@ export class CopilotReadRequests {
   readonly #pending = new Map<string, PendingRead>();
   #closed = false;
 
+  public constructor(private readonly timeouts: CopilotTimeoutPolicy = STANDARD_COPILOT_TIMEOUTS) {}
+
   /** Retire caller waits during owner shutdown, without claiming cancellation. */
   public close(): void {
     this.#closed = true;
@@ -31,7 +34,7 @@ export class CopilotReadRequests {
 
   public read<T>(lane: string, identity: string, action: () => Promise<T>, deadlineAt?: number): Promise<T> {
     if (this.#closed) return Promise.reject(new AdapterNativeStateReadError("nativeOwnerRetired", "Copilot native reads are closing"));
-    const timeoutMs = Math.min(COPILOT_READ_TIMEOUT_MS, deadlineAt === undefined ? COPILOT_READ_TIMEOUT_MS : deadlineAt - Date.now());
+    const timeoutMs = Math.min(this.timeouts.readMs, deadlineAt === undefined ? this.timeouts.readMs : deadlineAt - Date.now());
     if (timeoutMs <= 0) return Promise.reject(new AdapterNativeStateReadError("nativeReadTimedOut", "Copilot native read timed out before its next page request"));
     const pending = this.#pending.get(lane);
     if (pending) {

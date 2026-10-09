@@ -32,6 +32,7 @@ import {
   type RuntimeNodeSessionRecord,
 } from "@arduano/agent-multiplex-protocol";
 import {
+  AdapterPreparationError,
   AdapterOutcomeUnknownError,
   AdapterResumeFailureError,
   NativeOwnerTerminationError,
@@ -44,8 +45,9 @@ import { observeCopilotNativeOwner, type CopilotNativeOwner } from "./native-own
 import { copilotJson } from "./json.js";
 import { copilotOptionalNativeTelemetry } from "./native-event-policy.js";
 import { COPILOT_READ_TIMEOUT_MS, CopilotReadRequests } from "./reads.js";
-import { CopilotNativeOperations, COPILOT_STARTUP_TIMEOUT_MS } from "./operations.js";
+import { CopilotNativeOperations } from "./operations.js";
 import { startupCauses, type CopilotStartupDiagnostic } from "./startup-diagnostics.js";
+import { resolveCopilotTimeouts, type CopilotTimeoutPolicy } from "./timeouts.js";
 export { COPILOT_STARTUP_TIMEOUT_MS } from "./operations.js";
 export type { CopilotStartupDiagnostic, CopilotStartupCause } from "./startup-diagnostics.js";
 import {
@@ -85,8 +87,20 @@ export interface CopilotAdapterClient {
   getStatus(): Promise<CopilotRuntimeStatus>;
   listModels(): Promise<ModelInfo[]>;
   listSessions(): Promise<SessionMetadata[]>;
+  /** Private configuration admission before an SDK mutation. The adapter owns
+   * the reservation and signal; a late preparation cannot dispatch native work. */
+  prepareSession?<T extends SessionConfig | ResumeSessionConfig>(config: T, signal: AbortSignal): Promise<T>;
   createSession(config: SessionConfig): Promise<CopilotNativeSession>;
   resumeSession(sessionId: string, config: ResumeSessionConfig): Promise<CopilotNativeSession>;
+}
+
+/** No create/resume request was sent to the SDK. A timed-out preparation still
+ * owns its configuration reservation until it settles, but not a native effect. */
+export class CopilotAttachmentPreparationError extends AdapterPreparationError {
+  public constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CopilotAttachmentPreparationError";
+  }
 }
 
 export interface CopilotAdapterOptions {
@@ -106,6 +120,9 @@ export interface CopilotAdapterOptions {
   clientFactory?: (options: CopilotClientOptions) => CopilotAdapterClient;
   /** Test seam for deterministic runtime epochs. */
   runtimeEpochFactory?: () => RuntimeEpoch;
+  /** Immutable caller budgets. Defaults to the Windows policy on win32 and
+   * the standard policy elsewhere; expiration never releases native ownership. */
+  timeouts?: CopilotTimeoutPolicy;
   /** Private ownership-stage diagnostics; a sink failure cannot change native results. */
   onOwnershipDiagnostic?(record: CopilotOwnershipDiagnostic): void;
   /** Private bounded startup progress/cause metadata; no native payload or error text. */
@@ -128,8 +145,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
   readonly #active = new Map<string, CopilotAdapterSession>();
   readonly #nativeOwners = new WeakSet<CopilotNativeSession>();
   readonly #attachments = new Map<string, PendingAttachment>();
-  readonly #reads = new CopilotReadRequests();
-  readonly #operations = new CopilotNativeOperations();
+  readonly #timeouts: CopilotTimeoutPolicy;
+  readonly #reads: CopilotReadRequests;
+  readonly #operations: CopilotNativeOperations;
   readonly #nativeOwner: CopilotNativeOwner;
   #startPromise: Promise<void> | undefined;
   #closePromise: Promise<void> | undefined;
@@ -137,6 +155,9 @@ export class CopilotAgentAdapter implements AgentAdapter {
   #closed = false;
 
   public constructor(options: CopilotAdapterOptions = {}) {
+    this.#timeouts = resolveCopilotTimeouts(options.timeouts);
+    this.#reads = new CopilotReadRequests(this.#timeouts);
+    this.#operations = new CopilotNativeOperations(this.#timeouts);
     this.adapterScopeId = adapterScopeIdSchema.parse(options.adapterScopeId ?? "copilot:default");
     this.#provider = options.provider;
     this.#defaultModel = nonempty(options.defaultModel, "defaultModel");
@@ -267,7 +288,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.assertOpen();
 
     const vendorSessionId = nativeSessionId(options.native) ?? randomUUID();
-    const bridge = new CopilotSessionBridge(vendorSessionId);
+    const bridge = new CopilotSessionBridge(vendorSessionId, this.#timeouts.readMs);
     // This baseline must precede any callback or event that createSession can
     // synchronously buffer. Later positive interaction facts then extend it.
     bridge.interactionHydration(true);
@@ -296,9 +317,10 @@ export class CopilotAgentAdapter implements AgentAdapter {
 
     let native: CopilotNativeSession;
     try {
-      native = await this.requestAttachment(vendorSessionId, bridge, () => this.#client.createSession(config));
+      native = await this.requestAttachment(vendorSessionId, bridge, config, prepared => this.#client.createSession(prepared));
     } catch (cause) {
       bridge.close();
+      if (cause instanceof CopilotAttachmentPreparationError) throw cause;
       throw new AdapterOutcomeUnknownError(
         `Copilot session ${vendorSessionId} may have been created, but creation was not acknowledged`,
         { cause },
@@ -344,7 +366,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     this.assertOpen();
     this.assertAttachmentAvailable(options.vendorSessionId);
 
-    const bridge = new CopilotSessionBridge(options.vendorSessionId);
+    const bridge = new CopilotSessionBridge(options.vendorSessionId, this.#timeouts.readMs);
     // Resume cannot prove absence because pending callbacks are ephemeral, but
     // its partial baseline must still precede any callback replay.
     bridge.interactionHydration(false);
@@ -373,10 +395,11 @@ export class CopilotAgentAdapter implements AgentAdapter {
 
     let native: CopilotNativeSession;
     try {
-      native = await this.requestAttachment(options.vendorSessionId, bridge,
-        () => this.#client.resumeSession(options.vendorSessionId, config));
+      native = await this.requestAttachment(options.vendorSessionId, bridge, config,
+        prepared => this.#client.resumeSession(options.vendorSessionId, prepared));
     } catch (cause) {
       bridge.close();
+      if (cause instanceof CopilotAttachmentPreparationError) throw cause;
       // Copilot can keep a never-used session in memory only.
       // Its explicit load refusal means no resume effect occurred; retaining
       // outcomeUnknown here would unnecessarily wedge the durable lifecycle.
@@ -462,12 +485,11 @@ export class CopilotAgentAdapter implements AgentAdapter {
 
   private async closeNativeRuntime(): Promise<void> {
     const errors: unknown[] = [];
-    const gracefulDeadline = Date.now() + COPILOT_GRACEFUL_SHUTDOWN_MS;
     const stopped = await settleWithin(
       Promise.allSettled(
       [...this.#active.values()].map((session) => session.stop()),
       ),
-      COPILOT_GRACEFUL_SHUTDOWN_MS,
+      this.#timeouts.cleanupMs,
     );
     let force = stopped.status !== "fulfilled";
     if (stopped.status === "fulfilled") {
@@ -484,7 +506,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
     // Session detach and whole-process ownership have different proofs. The
     // explicit SDK seam alone closes the process, including pending startup.
     try {
-      await this.#nativeOwner.close({ force, timeoutMs: Math.max(0, gracefulDeadline - Date.now()) || COPILOT_GRACEFUL_SHUTDOWN_MS });
+      await this.#nativeOwner.close({ force, timeoutMs: this.#timeouts.cleanupMs });
       errors.length = 0;
     } catch (cause) { errors.push(cause); }
     this.ownershipDiagnostic({ stage: "shutdown", outcome: errors.length > 0 ? "unacknowledged" : "closed" });
@@ -513,6 +535,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       settings,
       reads: this.#reads,
       operations: this.#operations,
+      timeouts: this.#timeouts,
       onOwnershipDiagnostic: record => this.ownershipDiagnostic(record),
       onStopped: () => {
         this.#nativeOwners.delete(native);
@@ -533,34 +556,58 @@ export class CopilotAgentAdapter implements AgentAdapter {
     }
   }
 
-  private requestAttachment(
+  private requestAttachment<Config extends SessionConfig | ResumeSessionConfig>(
     sessionId: string,
     bridge: CopilotSessionBridge,
-    action: () => Promise<CopilotNativeSession>,
+    config: Config,
+    action: (prepared: Config) => Promise<CopilotNativeSession>,
   ): Promise<CopilotNativeSession> {
     this.assertAttachmentAvailable(sessionId);
     let finish!: (native: CopilotNativeSession) => void;
     let fail!: (cause: unknown) => void;
     let settled = false;
     let dispatched = false;
+    const preparation = new AbortController();
+    const startedAt = Date.now();
+    const trace = (stage: "attachmentPreparation" | "attachment", outcome: CopilotOwnershipDiagnostic["outcome"], attachmentId?: number): void => {
+      this.ownershipDiagnostic({ vendorSessionId: sessionId, stage, outcome,
+        elapsedMs: Math.max(0, Date.now() - startedAt), deadlineMs: this.#timeouts.attachmentMs,
+        ...(attachmentId === undefined ? {} : { attachmentId }) });
+    };
     const result = new Promise<CopilotNativeSession>((resolve, reject) => { finish = resolve; fail = reject; });
     const abandon = (cause: unknown, outcome: "retired" | "timedOut" | "unacknowledged"): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      preparation.abort();
       bridge.close();
-      this.ownershipDiagnostic({ vendorSessionId: sessionId, stage: "attachment", outcome });
-      fail(new AdapterOutcomeUnknownError("Copilot native attachment was not acknowledged; native ownership remains pending", { cause }));
+      trace(dispatched ? "attachment" : "attachmentPreparation", outcome);
+      fail(dispatched
+        ? new AdapterOutcomeUnknownError("Copilot native attachment was not acknowledged; native ownership remains pending", { cause })
+        : new CopilotAttachmentPreparationError("Copilot attachment preparation did not complete; no native request was dispatched", { cause }));
     };
     const entry: PendingAttachment = { bridge, cancel: () => abandon(new Error("Copilot adapter is closing"), "retired") };
     this.#attachments.set(sessionId, entry);
-    const timer = setTimeout(() => abandon(new Error("Copilot native attachment timed out"), "timedOut"), COPILOT_ATTACHMENT_TIMEOUT_MS);
+    const timer = setTimeout(() => abandon(new Error("Copilot native attachment timed out"), "timedOut"), this.#timeouts.attachmentMs);
     timer.unref?.();
-    void Promise.resolve().then(() => {
+    void Promise.resolve().then(async () => {
       this.assertOpen();
+      let prepared = config;
+      if (this.#client.prepareSession) {
+        trace("attachmentPreparation", "dispatched");
+        this.assertOpen();
+        prepared = await this.#client.prepareSession(config, preparation.signal);
+        trace("attachmentPreparation", settled ? "lateAcknowledged" : "acknowledged");
+      }
+      // The preparation may ignore abort while finishing protected local I/O.
+      // Its original settlement releases the reservation but never starts a
+      // native mutation after its observer or adapter lifetime retired.
+      this.assertOpen();
+      if (settled || preparation.signal.aborted) throw new CopilotAttachmentPreparationError("Copilot attachment preparation was retired before native dispatch");
       dispatched = true;
-      this.ownershipDiagnostic({ vendorSessionId: sessionId, stage: "attachment", outcome: "dispatched" });
-      return action();
+      trace("attachment", "dispatched");
+      this.assertOpen();
+      return action(prepared);
     }).then(native => {
       if (native.sessionId !== sessionId) {
         entry.native = native;
@@ -573,8 +620,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         void this.detachLateAttachment(native, bridge, sessionId).catch(() => undefined);
         return;
       }
-      this.ownershipDiagnostic({ vendorSessionId: sessionId, stage: "attachment", outcome: settled ? "lateAcknowledged" : "acknowledged",
-        ...(native.incidentTraceAttachmentId === undefined ? {} : { attachmentId: native.incidentTraceAttachmentId }) });
+      trace("attachment", settled ? "lateAcknowledged" : "acknowledged", native.incidentTraceAttachmentId);
       if (settled || this.#closed) {
         // This handle was never handed to Runtime. Do not publish late events
         // or admit another SDK owner until its exact disconnect acknowledges.
@@ -585,7 +631,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       clearTimeout(timer);
       finish(native);
     }, cause => {
-      this.ownershipDiagnostic({ vendorSessionId: sessionId, stage: "attachment", outcome: "unacknowledged" });
+      trace(dispatched ? "attachment" : "attachmentPreparation", "unacknowledged");
       if ((!dispatched || isMissingNativeSession(cause, sessionId)) && this.#attachments.get(sessionId) === entry) {
         this.#attachments.delete(sessionId);
       }
@@ -593,7 +639,8 @@ export class CopilotAgentAdapter implements AgentAdapter {
       settled = true;
       clearTimeout(timer);
       bridge.close();
-      fail(cause);
+      fail(dispatched || cause instanceof CopilotAttachmentPreparationError ? cause
+        : new CopilotAttachmentPreparationError("Copilot attachment preparation failed; no native request was dispatched", { cause }));
     });
     return result;
   }
@@ -616,7 +663,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
         if (this.#attachments.get(key)?.bridge === bridge) this.#attachments.delete(key);
       }
     });
-    const result = await settleWithin(released, COPILOT_SESSION_DISCONNECT_TIMEOUT_MS);
+    const result = await settleWithin(released, this.#timeouts.cleanupMs);
     if (result.status !== "fulfilled") {
       this.ownershipDiagnostic({ vendorSessionId: native.sessionId, stage: "detach", outcome: result.status === "timedOut" ? "timedOut" : "unacknowledged" });
       throw new AdapterOutcomeUnknownError("Late Copilot attachment native release remains unacknowledged",
@@ -701,7 +748,7 @@ export class CopilotAgentAdapter implements AgentAdapter {
       try {
         const { startupPending: _pending, ...child } = this.#nativeOwner.snapshot();
         this.#startupDiagnostic?.({
-          startupId, stage, outcome, elapsedMs: Math.max(0, Date.now() - startedAt), deadlineMs: COPILOT_STARTUP_TIMEOUT_MS,
+          startupId, stage, outcome, elapsedMs: Math.max(0, Date.now() - startedAt), deadlineMs: this.#timeouts.startupMs,
           ...child,
           ...(stage === "nativeTermination" && outcome === "unacknowledged" ? { failureReason: "nativeTerminationUnproved" as const }
             : outcome === "timedOut" ? { failureReason: "nativeStartTimedOut" as const }

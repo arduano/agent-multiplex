@@ -1,4 +1,5 @@
 import { AdapterOutcomeUnknownError, RuntimeNodeProtocolError } from "@arduano/agent-multiplex-runtime-node-core";
+import { STANDARD_COPILOT_TIMEOUTS, type CopilotTimeoutPolicy } from "./timeouts.js";
 
 export const COPILOT_NATIVE_OPERATION_TIMEOUT_MS = 15_000;
 /** Starting the shared CLI also includes process creation and its first protocol
@@ -22,6 +23,8 @@ export class CopilotNativeOperations {
   readonly #pending = new Map<string, PendingOperation>();
   #closed = false;
 
+  public constructor(private readonly timeouts: CopilotTimeoutPolicy = STANDARD_COPILOT_TIMEOUTS) {}
+
   public close(): void {
     this.#closed = true;
     for (const entry of this.#pending.values()) entry.retire();
@@ -43,11 +46,11 @@ export class CopilotNativeOperations {
   }
 
   public run<T>(group: string, lane: string, action: () => Promise<T>, diagnostic?: (outcome: Outcome) => void): Promise<T> {
-    return this.runWithin(group, lane, action, COPILOT_NATIVE_OPERATION_TIMEOUT_MS, diagnostic);
+    return this.runWithin(group, lane, action, this.timeouts.operationMs, diagnostic);
   }
 
   public start(action: () => Promise<void>, diagnostic?: (outcome: Outcome) => void): Promise<void> {
-    return this.runWithin("adapter:startup", "start", action, COPILOT_STARTUP_TIMEOUT_MS, diagnostic);
+    return this.runWithin("adapter:startup", "start", action, this.timeouts.startupMs, diagnostic);
   }
 
   private runWithin<T>(group: string, lane: string, action: () => Promise<T>, timeoutMs: number, diagnostic?: (outcome: Outcome) => void): Promise<T> {

@@ -6,8 +6,14 @@ payloads into one invented schema.
 
 ## Common adapter contract
 
-Copilot native-ID ownership survives a caller timeout. SDK attachment waits
-are bounded to 15 seconds, and native disconnect waits to 10 seconds. A timed
+Copilot native-ID ownership survives a caller timeout. One immutable
+[`CopilotTimeoutPolicy`](../../packages/adapter-copilot/src/timeouts.ts) is selected
+at the adapter boundary. Standard budgets remain startup 60s, attachment/read/
+mutation 15s and cleanup 10s. Windows defaults are startup 180s, attachment 120s
+and read/mutation/cleanup 60s; embedders may inject a complete explicit policy.
+Explicit read budgets are validated at no more than 600s, matching the driver;
+other timer budgets retain Node's timer cap. Shared owners never independently
+infer their operating system. A timed
 out attachment or detach prevents another SDK owner until exact release
 acknowledgement or verified backend termination. Late SDK handles are cleaned
 up without publishing their events. Recovering the Host never changes an old
@@ -15,8 +21,8 @@ unknown operation receipt into success. An optional process-local `beginClose`
 adapter hook retires read/attachment caller waits before Runtime drains them;
 backend `close` still owns and proves native cleanup.
 
-SDK cold startup has a separate bounded 60-second caller wait, with five-second
-private progress reports. Native mutation caller waits remain 15 seconds. An expired send, setting, interrupt, task control or
+SDK cold startup has its separate policy budget, with five-second
+private progress reports. An expired send, setting, interrupt, task control or
 permission decision retains its native request lane; it is never cancelled or
 replayed. Another mutation in that lane fails before native dispatch. Stop
 retires the local bridge immediately but releases its native-ID fence only after
@@ -31,6 +37,35 @@ An unresolved startup cannot certify cleanup: it could acquire a late process.
 If failed SDK startup clears its child getter, only exit acknowledgement from the
 exact child captured before that failure can establish native termination.
 No package publication or installed acceptance is implied by this candidate.
+
+An optional typed client `prepareSession(config, signal)` admits private
+configuration before SDK create/resume. One native-ID reservation covers
+preparation and attachment under the attachment budget. Private diagnostics
+distinguish preparation from actual SDK dispatch, with elapsed/deadline metadata
+and no configuration contents. Refused or retired preparation is a definite
+`CopilotAttachmentPreparationError`, never a claim that a native mutation ran.
+A timed-out preparation retains its reservation until its original local work
+settles; its late result cannot dispatch SDK work. After SDK dispatch, uncertain
+native ownership and exact late-handle cleanup remain unchanged. Embedders must
+keep preprocessing out of create/resume wrappers to use this distinction.
+
+These are per-phase observation budgets, not an overall shutdown guarantee.
+Transport and browser waits may expire earlier while the original durable
+operation continues. Retain its original ID and inspect its receipt; never
+dispatch a replacement because an observer timed out.
+
+Runtime journals a shared `AdapterPreparationError` as definite admission
+failure before native dispatch. Startup recovery retains the existing recovery
+envelope and records `prepareResume` / `preparationFailed`; genuine SDK
+uncertainty retains its native attribution. Original-ID replay reads the original
+receipt rather than preparing or dispatching again.
+
+The attachment driver receives the explicit read budget: its no-success
+watchdog is 45s for standard 15s reads and 180s for Windows 60s reads. Repeated
+refresh requests do not extend it. The reference Control's two authority IPC
+hops allow 600s for enumerated durable native mutations, retaining 30s for
+catalog, health, enrollment, receipt reads and other storage calls. This changes
+neither transport authentication nor the native request's ownership.
 
 Runtime startup registers the recovery router before reattaching the previous
 boot's retained Copilot bindings. Discovery waits for that once-per-boot recovery

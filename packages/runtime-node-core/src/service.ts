@@ -101,6 +101,7 @@ import {
 
 import {
   AdapterNativeStateValidationError,
+  AdapterPreparationError,
   AdapterOutcomeUnknownError,
   AdapterResumeFailureError,
   type AdapterEvent,
@@ -422,6 +423,7 @@ export class RuntimeNodeService {
             } catch (cause) {
               if (cause instanceof RuntimeNodePersistenceError) throw cause;
               failure = cause; failedNativeRecovery = true;
+              if (cause instanceof AdapterPreparationError) stage = "prepareResume";
             }
             if (failedNativeRecovery) {
               const uncertain = failure instanceof AdapterOutcomeUnknownError || failure instanceof LaunchProviderOutcomeUnknownError;
@@ -3751,7 +3753,7 @@ export class RuntimeNodeService {
         ...(this.#store.getCommand(commandId)?.result ? { result: this.#store.getCommand(commandId)!.result! } : {}),
         state: uncertain ? "outcomeUnknown" : "failed",
         error: safeCommandError(error, {
-          stage: failureStage === "native" && (error instanceof PathPolicyError || error instanceof RuntimeNodeProtocolError || error instanceof RuntimeImageError)
+          stage: failureStage === "native" && (error instanceof AdapterPreparationError || error instanceof PathPolicyError || error instanceof RuntimeNodeProtocolError || error instanceof RuntimeImageError)
             ? "admission" : failureStage,
           certainty: uncertain ? "outcomeUnknown" : "definiteFailure",
           ...(error instanceof PathPolicyError ? { code: "FENCED" } : {}),

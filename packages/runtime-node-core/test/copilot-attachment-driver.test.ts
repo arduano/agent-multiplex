@@ -25,6 +25,53 @@ function deferred<T>() {
 }
 
 describe("exact Copilot attachment observation ownership", () => {
+  it("allows two slow Windows views to share the read lane without premature degradation", async () => {
+    vi.useFakeTimers();
+    const driver = new CopilotSessionBridge("windows-budget", 60_000).observationDriver;
+    const tasks = deferred<object>();
+    const queue = deferred<object>();
+    const failed = vi.fn();
+    const recovered = vi.fn();
+    const read = vi.fn((view: "tasks" | "pendingMessages") => {
+      const ticket = driver.capture(view);
+      return (view === "tasks" ? tasks : queue).promise.then(value => driver.certify(ticket, value));
+    });
+    try {
+      driver.observe({ active: () => true, revision: () => 0, read, trace: () => {}, failed, recovered });
+      driver.request("tasks"); driver.request("pendingMessages");
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(failed).not.toHaveBeenCalled();
+      expect(read).toHaveBeenCalledOnce();
+      tasks.resolve({}); await vi.advanceTimersByTimeAsync(0);
+      expect(read).toHaveBeenCalledWith("pendingMessages");
+      await vi.advanceTimersByTimeAsync(50_000);
+      expect(failed).not.toHaveBeenCalled();
+      queue.resolve({}); await vi.advanceTimersByTimeAsync(0);
+      expect(recovered.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally { driver.retire(); vi.useRealTimers(); }
+  });
+
+  it.each([[15_000, 45_000], [60_000, 180_000]])(
+    "keeps the read-budget %i no-success watchdog bounded at %i despite periodic requests", async (readTimeoutMs, noSuccessMs) => {
+      vi.useFakeTimers();
+      const driver = new CopilotAttachmentDriver({ readTimeoutMs });
+      const failed = vi.fn();
+      try {
+        driver.observe({ active: () => true, revision: () => 0, read: () => new Promise<object>(() => {}),
+          trace: () => {}, failed, recovered: () => {} });
+        driver.request("tasks");
+        await vi.advanceTimersByTimeAsync(noSuccessMs - 1);
+        driver.request("tasks");
+        expect(failed).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(failed).toHaveBeenCalledTimes(1);
+        expect(failed).toHaveBeenCalledWith(expect.objectContaining({ view: "tasks", stalled: true }));
+        driver.retire();
+        await vi.advanceTimersByTimeAsync(noSuccessMs);
+        expect(failed).toHaveBeenCalledTimes(1);
+      } finally { driver.retire(); vi.useRealTimers(); }
+    });
+
   it("rejects forged, copied, cross-attachment and gap-invalidated snapshot evidence", () => {
     const driver = new CopilotAttachmentDriver();
     const other = new CopilotAttachmentDriver();

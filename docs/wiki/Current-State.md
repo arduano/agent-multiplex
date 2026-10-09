@@ -5,7 +5,31 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-09 (Gateway diagnostic catalog `.38` source repair; consumer deployment acceptance remains separate).
+Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `.39` candidate; consumer deployment acceptance remains separate).
+
+## Windows Copilot observation and authority IPC candidate `.39` — not deployed
+
+An isolated source candidate based on frozen `.38` introduces an explicit
+immutable timeout policy: Windows startup 180s, attachment 120s and reads,
+mutations and cleanup 60s. Linux defaults remain unchanged. One typed private
+preparation hook reserves the native ID before SDK create/resume and reports
+preparation separately from actual dispatch. A refused or retired preparation
+cannot send a native mutation; post-dispatch unknowns, late cleanup, original
+receipts and exact child exit proofs remain strict.
+
+The exact durable native mutation paths through both authority IPC hops receive
+a 600s observer budget; ordinary catalog/health/receipt/storage calls retain 30s.
+The driver's no-success watchdog follows its explicit read budget without being
+renewed by periodic requests. Shared preparation attribution is durable before
+native dispatch. All sixteen package versions and internal edges advance to
+`.39`; frozen `.38` assets and native/transport/durable schemas remain unchanged.
+
+The combined focused gate passes 229 tests/ten files using disposable SDK
+fixtures and fake timers. Final source passes typecheck/build, 1,688 tests/152
+passing files (eight tests/one file skipped) and maintained repository checks. No live Host/session, native model, authentication or
+publication belongs to this source pass. Consumer preprocessing integration,
+shorter transport/browser observers and installed acceptance remain separate. See the [adapter guide](Adapters-and-Terminals.md)
+and [qualification scope and integration limits](../audits/windows-copilot-observation-policy-20261009.md).
 
 ## Gateway diagnostic catalog repair candidate `.38` — not deployed
 
