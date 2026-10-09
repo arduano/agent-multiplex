@@ -1491,4 +1491,7 @@ skipped) and checkpoint/docs/release/secrets. All16 internal package versions
 advance together; independent transport.2,
 native pins, domain authority and durable schemas are unchanged.
 [Contract, qualification and acceptance boundary](audits/hotfix38-catalog-diagnostics-20261009.md).
-Source/disposable qualification does not deploy a role or make a model call.
+All16 packed consumers/publint/ATTW/SBOM pass from artifact source
+`18a55b5decdb12a703011658b060595527729820`; separate packed bounded/parity fixtures
+pass. Source/disposable qualification does not publish/deploy a role or make a
+model call.

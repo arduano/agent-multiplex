@@ -25,8 +25,11 @@ cannot originate Gateway observation commits. Private consumer mirrors must
 subscribe to the ordered projection feed, including its internal commits.
 [Contract, evidence and acceptance limits](../audits/hotfix38-catalog-diagnostics-20261009.md).
 Final source passes typecheck/build,1,663 tests/150 files (eight tests/one file
-skipped) and maintained repository checks. No live role, owner session, model
-call or public publication belongs to this source repair.
+skipped) and maintained repository checks. All16 packed consumers/publint/ATTW
+and the release-build SBOM pass from exact artifact source
+`18a55b5decdb12a703011658b060595527729820`; public publication and installed
+consumer acceptance remain separate. No live role, owner session, model call or
+public publication belongs to this source repair.
 
 ## Terminal-interaction replay repair candidate `.37` — not deployed
 

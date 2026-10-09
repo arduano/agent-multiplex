@@ -69,6 +69,22 @@ qualification and publication remain separately recorded below.
 Receipt directory: `receipts/catalog-diagnostic-order-20261009/` in isolated
 producer checkout `catalog-diagnostic-order-20261009`.
 
+All **16** packed packages pass role-isolated consumers, publint/ATTW and the
+release-build SBOM (**498 components**,125 web identities). Separate packed
+fixtures assert unavailable/archive exact-view parity and both65-source bounded
+coverage cases; all remain current/equal. Source, failed diagnostics and packed
+logs are retained with checksums in `qualification.json`.
+
+| Candidate identity | Value |
+| --- | --- |
+| Exact artifact source | `18a55b5decdb12a703011658b060595527729820` |
+| Framework lockstep | `0.2.4-hotfix.38`, all16 packages |
+| Pack manifest SHA256 | `77898dceac97742c75f05dd6e92165ee9e4148a6bffb78774ba4bc75473c4a99` |
+| Independent transport | `0.3.0-renewal.2`, unchanged published URL/SRI |
+
+This documentation followup does not repack or advance the artifact source.
+Public distribution and installed acceptance remain consumer-coordinated.
+
 ## Compatibility and deployment boundary
 
 All16 framework package versions/internal edges advance to `0.2.4-hotfix.38`.
