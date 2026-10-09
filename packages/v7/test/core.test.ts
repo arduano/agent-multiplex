@@ -270,6 +270,26 @@ describe("V7 single Root authority", () => {
     await root.execute(send("same")); expect((await root.receipt("same"))?.request).toEqual(send("same"));
     expect(() => root.execute(send("same", "one", "changed"))).toThrow("different immutable operation");
   });
+  it("retains opaque caller context through both admission edges without native interpretation", async () => {
+    const f = fixture(), { root } = rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    const context = { browserOperation: "launch", callerId: "original-browser-request" };
+    await root.create({ ...create("one"), hostId: "host", title: "One", context });
+    expect((await root.receipt("create-one"))?.request).toMatchObject({ context });
+    expect(f.host.receipt("create-one")?.request).toMatchObject({ context });
+    expect(f.port.create).toHaveBeenCalledExactlyOnceWith(create("one").options);
+  });
+  it("applies concurrent metadata patches and naming changes atomically at the Root", async () => {
+    const f = fixture(), { root } = rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("one"), hostId: "host", title: "One" });
+    await root.updateMetadata({ requestId: "base", sessionId: "one", metadata: { keep: 1, remove: true } });
+    await Promise.all([
+      root.updateMetadata({ requestId: "first", sessionId: "one", title: "Renamed", pinned: true, metadata: { first: 2 }, remove: ["remove"] }),
+      root.updateMetadata({ requestId: "second", sessionId: "one", metadata: { second: 3 } }),
+    ]);
+    expect(root.snapshot().sessions[0]).toMatchObject({ title: "Renamed", pinned: true, metadata: { keep: 1, first: 2, second: 3 } });
+    expect(root.snapshot().sessions[0]!.metadata).not.toHaveProperty("remove");
+    expect(f.handles[0]!.execute).not.toHaveBeenCalled();
+  });
   it("rejects wrong generations and discards only malformed session rows", async () => {
     const f = fixture(), { root, store } = rootFixture();
     expect(() => root.attachHost({ descriptor: { ...f.host.descriptor(), protocolVersion: 6 as 7 }, api: f.host, sessions: [] })).toThrow("other wire generations");

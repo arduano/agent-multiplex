@@ -14,7 +14,7 @@ export const V7_PROTOCOL_VERSION = 7 as const;
 const id = z.string().min(1).max(4_096);
 export const requestStateSchema = z.enum(["admitted", "dispatched", "succeeded", "failed", "outcomeUnknown"]);
 export type RequestState = z.infer<typeof requestStateSchema>;
-export const requestEnvelopeSchema = z.object({ requestId: id, sessionId: id }).strict();
+export const requestEnvelopeSchema = z.object({ requestId: id, sessionId: id, context: jsonValueSchema.optional() }).strict();
 export type RequestEnvelope = z.infer<typeof requestEnvelopeSchema>;
 export const createSessionInputSchema = requestEnvelopeSchema.extend({ options: harnessSpawnOptionsSchema }).strict();
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
@@ -26,7 +26,8 @@ export const historyInputSchema = z.object({ sessionId: id, request: nativeHisto
 export const nativeStateInputSchema = z.object({ sessionId: id, request: nativeStateRequestSchema }).strict();
 export const rootCreateInputSchema = createSessionInputSchema.extend({ hostId: id, title: z.string().min(1).max(4_096) }).strict();
 export const renameInputSchema = requestEnvelopeSchema.extend({ title: z.string().min(1).max(4_096) }).strict();
-export const updateMetadataInputSchema = requestEnvelopeSchema.extend({ pinned: z.boolean().optional(), metadata: z.record(z.string(), jsonValueSchema).optional() }).strict();
+export const updateMetadataInputSchema = requestEnvelopeSchema.extend({ pinned: z.boolean().optional(), metadata: z.record(z.string(), jsonValueSchema).optional(),
+  title: z.string().min(1).max(4_096).optional(), remove: z.array(z.string().min(1)).max(256).optional() }).strict();
 
 export const sessionBindingSchema = z.object({
   sessionId: id, hostId: id, harness: harnessSchema, adapterScopeId: id,
@@ -108,7 +109,7 @@ export interface HostApi {
 }
 export interface RootCreateInput extends CreateSessionInput { hostId: string; title: string }
 export interface RenameInput extends RequestEnvelope { title: string }
-export interface UpdateMetadataInput extends RequestEnvelope { pinned?: boolean; metadata?: Record<string, JsonValue> }
+export interface UpdateMetadataInput extends RequestEnvelope { pinned?: boolean; metadata?: Record<string, JsonValue>; title?: string; remove?: string[] }
 export interface RootApi {
   snapshot(): RootSnapshot | Promise<RootSnapshot>;
   watch(signal?: AbortSignal): AsyncIterable<RootWatchItem>;

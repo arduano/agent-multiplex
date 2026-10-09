@@ -94,6 +94,7 @@ export class RootService implements RootApi {
       this.options.store.putMetadata(metadata);
       this.publish({ kind: "session", session: this.sessionView(metadata) });
       const nativeInput = { requestId: input.requestId, sessionId: input.sessionId, options: input.options };
+      if (input.context !== undefined) Object.assign(nativeInput, { context: input.context });
       dispatch(); const receipt = await host.api.create(nativeInput);
       this.assertCurrent(host); this.verifyReceipt(nativeInput, "create", receipt); await this.refreshHost(host); return this.remoteOutcome(receipt);
     });
@@ -109,8 +110,11 @@ export class RootService implements RootApi {
   public updateMetadata(input: UpdateMetadataInput): Promise<RequestReceipt> {
     return this.request(input, "updateMetadata", input, async dispatch => {
       const current = this.requireMetadata(input.sessionId);
+      if (input.title !== undefined && !input.title.trim()) throw new V7Error("TITLE", "Session title must not be blank");
+      const values = { ...current.metadata, ...input.metadata };
+      for (const key of input.remove ?? []) delete values[key];
       const metadata = { ...current, ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
-        ...(input.metadata === undefined ? {} : { metadata: input.metadata }) };
+        ...(input.title === undefined ? {} : { title: input.title }), metadata: values };
       dispatch(); this.options.store.putMetadata(metadata); this.publish({ kind: "session", session: this.sessionView(metadata) });
       return jsonValueSchema.parse(metadata);
     });
@@ -148,7 +152,8 @@ export class RootService implements RootApi {
         ["succeeded", "failed"].includes(remote.state)) {
         const request = current.request as Record<string, JsonValue>;
         const expected = current.operation === "create"
-          ? { requestId: request.requestId, sessionId: request.sessionId, options: request.options } : current.request;
+          ? { requestId: request.requestId, sessionId: request.sessionId, options: request.options,
+            ...(request.context === undefined ? {} : { context: request.context }) } : current.request;
         this.verifyReceipt(expected as RequestEnvelope, current.operation, remote);
         await this.refreshHost(host);
         if (current.operation === "archive" && remote.state === "succeeded") this.archiveMetadata(current.sessionId);
