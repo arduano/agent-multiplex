@@ -3,6 +3,7 @@ import {
   createCompositeControlNodeRouter, asTrpcError, isolatedStream,
   type CompositeControlNodeRouter, type AccessRouter, type ControlNodeService, type ControlNodeRouterContext, type IsolatedRpc,
 } from "@arduano/agent-multiplex-control-node-core";
+import { isolatedNativeObserver } from "./isolated-native-observer.js";
 
 /** The worker executes the original router, including all input/output schemas
  * and scope/fence checks. This transport facade has no catalog or mutation logic. */
@@ -24,7 +25,7 @@ function forwardedControlRouter(rpc: IsolatedRpc, prefix = "", ready: () => bool
     const procedure = t.procedure.input((value: unknown) => value);
     const invoke = async (input: unknown, ctx: ControlNodeRouterContext) => {
       if (!ready()) throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: "control storage is starting" });
-      try { return await rpc.call("router", [path, input, context(ctx)], { mutation: original._def.type === "mutation" }); }
+      try { return await rpc.call("router", [path, input, context(ctx)], { mutation: original._def.type === "mutation", ...isolatedNativeObserver(path) }); }
       catch (error) { throw error instanceof TRPCError ? error : asTrpcError(error); }
     };
     const forwarded = original._def.type === "query" ? procedure.query(({ input, ctx }) => invoke(input, ctx))

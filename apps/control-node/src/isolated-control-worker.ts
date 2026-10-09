@@ -6,6 +6,13 @@ import {
 } from "@arduano/agent-multiplex-control-node-core";
 import type { ActionScope, ControlNodeId, ControlNodeBootId } from "@arduano/agent-multiplex-protocol";
 
+// The owner supports both built workers and Node's source .ts worker entry;
+// native TypeScript execution does not rewrite relative .js imports.
+const { isolatedNativeObserver } = await import(new URL(
+  import.meta.url.endsWith(".ts") ? "./isolated-native-observer.ts" : "./isolated-native-observer.js",
+  import.meta.url,
+).href) as typeof import("./isolated-native-observer.js");
+
 const port = parentPort!;
 const data = workerData as { statePath: string; name: string; instanceId: string; scopes: ActionScope[]; childStaleMs: number };
 const streams = new IsolatedStreams();
@@ -102,6 +109,6 @@ function childConnection(controlNodeId: ControlNodeId, controlNodeBootId: Contro
     if (Object.hasOwn(target, key)) return Reflect.get(target, key);
     if (typeof key !== "string" || !connectionMethods.has(key as keyof ChildControlNodeConnection)) return undefined;
     if (key === "subscribeAggregate" || key === "attachTerminal") return (input: unknown, signal?: AbortSignal) => isolatedStream(rpc, "reverse", [descriptor(), key, [input]], signal);
-    return (...args: unknown[]) => rpc.call("reverse.call", [descriptor(), key, args], { mutation: !["readSubtreeSnapshot", "listModels", "listLaunchProfileModels", "refreshInventory", "getLaunch", "listLaunches", "searchSessions", "getSession", "getArchive", "readLifecycle", "readNativeState", "readNativeHistory", "readImage", "imageLimits", "getTerminal", "getCommand", "observeCommand"].includes(key) });
+    return (...args: unknown[]) => rpc.call("reverse.call", [descriptor(), key, args], { mutation: !["readSubtreeSnapshot", "listModels", "listLaunchProfileModels", "refreshInventory", "getLaunch", "listLaunches", "searchSessions", "getSession", "getArchive", "readLifecycle", "readNativeState", "readNativeHistory", "readImage", "imageLimits", "getTerminal", "getCommand", "observeCommand"].includes(key), ...isolatedNativeObserver(key) });
   } }) as ChildControlNodeConnection;
 }
