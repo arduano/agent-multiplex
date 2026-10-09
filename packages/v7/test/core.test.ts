@@ -258,6 +258,22 @@ describe("V7 independent native session coordination", () => {
 });
 
 describe("V7 single Root authority", () => {
+  it("owns full Host descriptors at attachment and across public snapshots", async () => {
+    const f = await fixture({ capabilities: [{ name: "terminal.side-channel", version: "v1", experimental: false }] }), { root } = await rootFixture();
+    const descriptor = f.host.descriptor();
+    expect(() => root.attachHost({ descriptor: { ...descriptor, capabilities: [] }, api: f.host, sessions: [] })).toThrow("differs");
+    root.attachHost({ descriptor, api: f.host, sessions: [] });
+    descriptor.capabilities![0]!.name = "mutated-input";
+    const snapshot = root.snapshot(); snapshot.hosts[0]!.capabilities![0]!.name = "mutated-output";
+    expect(root.snapshot().hosts[0]!.capabilities![0]!.name).toBe("terminal.side-channel");
+  });
+  it("reads original receipts without optional filters and rejects a foreign native state owner", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    expect(await f.store.receipts()).toHaveLength(1);
+    expect(await f.store.receipts("one")).toHaveLength(1);
+    f.handles[0]!.readNativeState.mockImplementationOnce(async () => ({ harness: "copilot", vendorSessionId: "another-native-session", payload: {} }));
+    await expect(f.host.nativeState({ sessionId: "one", request: { harness: "copilot", kind: "queue" } })).rejects.toMatchObject({ code: "STATE_OWNER" });
+  });
   it("advertises only supplied Host capabilities and does not leak mutable descriptors", async () => {
     const f = await fixture({ capabilities: [{ name: "terminal.side-channel", version: "v1", experimental: false }] });
     const descriptor = f.host.descriptor(); descriptor.capabilities![0]!.name = "mutated";

@@ -197,7 +197,9 @@ export class HostService implements HostApi {
     if (!active.native.readNativeState) throw new V7Error("UNSUPPORTED", "Native owner does not offer this state view");
     const result = await active.native.readNativeState(input.request);
     this.assertCurrent(input.sessionId, active);
-    const payload = await this.externalize(this.requireBinding(input.sessionId), result.payload);
+    const binding = this.requireBinding(input.sessionId);
+    if (result.harness !== binding.harness || result.vendorSessionId !== binding.vendorSessionId) throw new V7Error("STATE_OWNER", "State response belongs to another native session");
+    const payload = await this.externalize(binding, result.payload);
     this.assertCurrent(input.sessionId, active);
     return { harness: result.harness, vendorSessionId: result.vendorSessionId, payload };
   }

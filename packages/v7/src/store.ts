@@ -92,7 +92,7 @@ export class V7Store {
     return this.call<RequestReceipt>("transition", requestId, state, outcome);
   }
   public receipt(requestId: string) { return this.call<RequestReceipt | null>("receipt", requestId); }
-  public receipts(sessionId?: string, operation?: string) { return this.call<RequestReceipt[]>("receipts", sessionId, operation); }
+  public receipts(sessionId?: string, operation?: string) { return this.call<RequestReceipt[]>("receipts", sessionId ?? null, operation ?? null); }
   public receiptEvents(requestId: string) { return this.call<Array<{ state: RequestState; at: string }>>("receiptEvents", requestId); }
   public requestPayload(requestId: string) { return this.call<JsonValue | null>("requestPayload", requestId); }
   public binding(sessionId: string): SessionBinding | null { return structuredClone(this.#bindings.get(sessionId) ?? null); }

@@ -37,15 +37,14 @@ export class RootService implements RootApi {
     this.assertOpen();
     if (input.descriptor.protocolVersion !== 7) throw new V7Error("PROTOCOL_VERSION", "V7 Root rejects other wire generations");
     const advertised = input.api.descriptor();
-    if (advertised.hostId !== input.descriptor.hostId || advertised.bootId !== input.descriptor.bootId ||
-      advertised.harness !== input.descriptor.harness || advertised.protocolVersion !== 7) {
+    if (canonicalJson(advertised) !== canonicalJson(input.descriptor)) {
       throw new V7Error("HOST_IDENTITY", "Host port descriptor differs from authenticated attachment");
     }
     const previous = this.#knownHosts.get(input.descriptor.hostId);
     if (previous && previous.harness !== input.descriptor.harness) throw new V7Error("HOST_IDENTITY", "Host harness identity changed");
     const sessions = this.acceptSessions(input.descriptor, input.sessions);
-    const token = randomUUID(), connection = { token, descriptor: { ...input.descriptor }, api: input.api, sessions };
-    this.#hosts.set(input.descriptor.hostId, connection); this.#knownHosts.set(input.descriptor.hostId, { ...input.descriptor });
+    const token = randomUUID(), connection = { token, descriptor: structuredClone(input.descriptor), api: input.api, sessions };
+    this.#hosts.set(input.descriptor.hostId, connection); this.#knownHosts.set(input.descriptor.hostId, structuredClone(input.descriptor));
     this.publish({ kind: "host", host: this.hostView(input.descriptor) });
     for (const metadata of this.options.store.registry()) if (metadata.hostId === input.descriptor.hostId) {
       this.publish({ kind: "session", session: this.sessionView(metadata) });
@@ -246,7 +245,7 @@ export class RootService implements RootApi {
   private sessionView(metadata: SessionMetadata): SessionView {
     return structuredClone({ ...metadata, native: this.#hosts.get(metadata.hostId)?.sessions.get(metadata.sessionId) ?? null });
   }
-  private hostView(host: HostDescriptor): HostView { return { ...host, online: this.#hosts.has(host.hostId) }; }
+  private hostView(host: HostDescriptor): HostView { return structuredClone({ ...host, online: this.#hosts.has(host.hostId) }); }
   private route(sessionId: string): HostConnection { return this.requireHost(this.requireMetadata(sessionId).hostId); }
   private requireHost(hostId: string): HostConnection {
     this.assertOpen(); const host = this.#hosts.get(hostId); if (!host) throw new V7Error("HOST_OFFLINE", "Host is not connected"); return host;
