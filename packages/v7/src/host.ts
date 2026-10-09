@@ -23,6 +23,7 @@ export interface HostServiceOptions {
 interface Attachment {
   id: string; native: AdapterSession; unsubscribe: () => void; pending: number;
   tail: Promise<void>; recoveryRequired: boolean;
+  eventGap: boolean;
   interactions: Map<string, { wire: NativeInteraction; resolve: (response: JsonValue) => Promise<void> }>;
 }
 interface Ring { sequence: number; events: SessionEvent[] }
@@ -212,7 +213,7 @@ export class HostService implements HostApi {
     if (native.harness !== this.options.native.harness || native.adapterScopeId !== this.options.native.adapterScopeId ||
       native.vendorSessionId !== binding.vendorSessionId) throw new NativeOperationError("BINDING_CONFLICT", "Native returned a different session owner", "outcomeUnknown");
     const active: Attachment = { id: randomUUID(), native, unsubscribe: () => {}, pending: 0,
-      tail: Promise.resolve(), recoveryRequired: false, interactions: new Map() };
+      tail: Promise.resolve(), recoveryRequired: false, eventGap: false, interactions: new Map() };
     this.options.store.putBinding(binding); this.#active.set(binding.sessionId, active);
     this.#rings.set(binding.sessionId, { sequence: 0, events: [] });
     active.unsubscribe = native.subscribe(event => this.enqueue(binding.sessionId, active, event));
@@ -253,12 +254,21 @@ export class HostService implements HostApi {
     } else if (event.kind === "status" || event.kind === "settings") this.publishSession(sessionId);
     else if (event.kind === "lifecycle") {
       if (event.fact.type === "gap") this.gap(sessionId, active, "nativeContinuityGap", true);
-      else this.publish(sessionId, { kind: "lifecycle", fact: jsonValueSchema.parse(event.fact) });
+      else {
+        if (event.fact.type === "interactionsHydrated") {
+          // Honor native evidence, without importing the V6 lifecycle reducer.
+          // A native cold-resume certificate may resolve its partial baseline;
+          // it cannot erase an actual lost native event on this attachment.
+          active.recoveryRequired = active.eventGap || !event.fact.complete;
+          this.publishSession(sessionId);
+        }
+        this.publish(sessionId, { kind: "lifecycle", fact: jsonValueSchema.parse(event.fact) });
+      }
     }
   }
   private gap(sessionId: string, active: Attachment, reason: string, uncertain: boolean): void {
     if (this.#active.get(sessionId) !== active) return;
-    if (uncertain) active.recoveryRequired = true;
+    if (uncertain) { active.eventGap = true; active.recoveryRequired = true; }
     this.publish(sessionId, { kind: "gap", reason, recoveryRequired: active.recoveryRequired });
     this.publishSession(sessionId);
   }

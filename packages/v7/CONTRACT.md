@@ -28,6 +28,10 @@ Native queue views use nativeState. An unknown request is never a queued prompt.
 Root owns session title/pinning/metadata; `RootCreateInput` adds `hostId,title`.
 Native creation does not wait for rename. `RootApi` adds snapshot/watch/rename/
 updateMetadata and routes the remaining operations to the session's exact Host.
+The Root registry retains logical archive state while its Host is disconnected.
+`interactions(sessionId)` returns current native callbacks for a fresh client;
+they are never rebuilt from history or durable state. Every receipt includes its
+immutable request, allowing a Gateway restart without a second request journal.
 Root does not maintain a second native state store. Its current Host views live
 in memory and disappear on restart/disconnect. `attachHost({descriptor, api,
 sessions})` supplies one complete Host snapshot and returns a connection token;

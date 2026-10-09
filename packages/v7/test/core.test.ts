@@ -182,6 +182,18 @@ describe("V7 independent native session coordination", () => {
     expect(await f.host.execute(send("blocked"))).toMatchObject({ state: "failed", error: { code: "INTERACTION_UNCERTAIN" } });
     expect(await f.host.recover({ requestId: "recover", sessionId: "one" })).toMatchObject({ state: "succeeded" });
   });
+  it("preserves genuine partial interaction hydration and accepts an exact native certificate", async () => {
+    const f = fixture(); await f.host.create(create("one")); const native = f.handles[0]!;
+    native.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: false } });
+    await eventDrained(); expect(f.host.list()[0]!.recoveryRequired).toBe(true);
+    native.emit({ kind: "status", status: "idle" }); await eventDrained();
+    expect(f.host.list()[0]!.recoveryRequired).toBe(true);
+    native.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    await eventDrained(); expect(f.host.list()[0]!.recoveryRequired).toBe(false);
+    native.emit({ kind: "lifecycle", fact: { type: "gap" } });
+    native.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    await eventDrained(); expect(f.host.list()[0]!.recoveryRequired).toBe(true);
+  });
 });
 
 describe("V7 single Root authority", () => {
@@ -234,5 +246,12 @@ describe("V7 single Root authority", () => {
     await root.create({ ...create("one"), hostId: "host", title: "One" }); root.detachHost(token);
     const events = []; for (let i = 0; i < 5; i++) events.push((await iterator.next()).value);
     expect(events.map(event => event.delta.revision)).toEqual([1, 2, 3, 4, 5]); await iterator.return?.();
+  });
+  it("retains archived Root registry state when the Host disconnects", async () => {
+    const f = fixture(), { root } = rootFixture();
+    const token = root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("one"), hostId: "host", title: "One" });
+    expect(await root.archive({ requestId: "archive", sessionId: "one" })).toMatchObject({ state: "succeeded" });
+    root.detachHost(token); expect(root.snapshot().sessions[0]).toMatchObject({ archived: true, native: null });
   });
 });

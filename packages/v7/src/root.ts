@@ -227,7 +227,7 @@ export class RootService implements RootApi {
     return result;
   }
   private sessionView(metadata: SessionMetadata): SessionView {
-    return { ...metadata, native: this.#hosts.get(metadata.hostId)?.sessions.get(metadata.sessionId) ?? null };
+    return structuredClone({ ...metadata, native: this.#hosts.get(metadata.hostId)?.sessions.get(metadata.sessionId) ?? null });
   }
   private hostView(host: HostDescriptor): HostView { return { ...host, online: this.#hosts.has(host.hostId) }; }
   private route(sessionId: string): HostConnection { return this.requireHost(this.requireMetadata(sessionId).hostId); }
