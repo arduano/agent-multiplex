@@ -57,14 +57,14 @@ export class V7Store {
       const unfinished = db.prepare(`SELECT e.request_id,e.state FROM receipt_events e
         JOIN (SELECT request_id,MAX(ordinal) ordinal FROM receipt_events GROUP BY request_id) last
         USING(request_id,ordinal) WHERE e.state IN ('admitted','dispatched')`).all();
-      for (const request of unfinished) {
+      if (unfinished.length) this.transaction(() => { for (const request of unfinished) {
         if (request.state === "admitted") this.transition(String(request.request_id), "failed", {
           error: { code: "PROCESS_RESTART", message: "Process ended before dispatch; request was not replayed" },
         });
         if (request.state === "dispatched") this.transition(String(request.request_id), "outcomeUnknown", {
           error: { code: "PROCESS_RESTART", message: "Process ended after dispatch; check the original native operation" },
         });
-      }
+      } });
     } catch (error) {
       try { db.exec("ROLLBACK"); } catch { /* Initialization may already have committed. */ }
       db.close();
