@@ -7,7 +7,7 @@ import { EventQueue, diagnose, type Diagnostic } from "./events.js";
 import { NativeOperationError, V7Error, errorDetails } from "./errors.js";
 import { V7Store } from "./store.js";
 import {
-  V7_PROTOCOL_VERSION, createSessionInputSchema, executeInputSchema, resolveInputSchema,
+  V7_PROTOCOL_VERSION, createSessionInputSchema, executeInputSchema, resolveInputSchema, requestEnvelopeSchema,
   type CreateSessionInput, type ExecuteInput, type HistoryInput, type HostApi, type HostDescriptor,
   type HostEvent, type HostSession, type JsonValue, type NativeInteraction, type NativeStateInput,
   type RequestEnvelope, type RequestReceipt, type ResolveInput, type SessionBinding,
@@ -191,6 +191,7 @@ export class HostService implements HostApi {
   private mutate(input: RequestEnvelope, operation: string, payload: unknown,
     action: (dispatch: () => void) => Promise<JsonValue>): Promise<RequestReceipt> {
     this.assertOpen();
+    requestEnvelopeSchema.parse({ requestId: input.requestId, sessionId: input.sessionId });
     const admitted = this.options.store.admit(input.requestId, input.sessionId, operation, payload);
     const pending = this.#requests.get(input.requestId);
     if (!admitted.fresh) return pending ?? Promise.resolve(admitted.receipt);

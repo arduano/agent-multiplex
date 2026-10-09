@@ -4,7 +4,7 @@ import { EventQueue, diagnose, type Diagnostic } from "./events.js";
 import { V7Error, errorDetails } from "./errors.js";
 import { V7Store, requestHash } from "./store.js";
 import {
-  hostSessionSchema, type ExecuteInput, type HistoryInput, type HostApi, type HostDescriptor,
+  hostSessionSchema, requestEnvelopeSchema, type ExecuteInput, type HistoryInput, type HostApi, type HostDescriptor,
   type HostSession, type HostView, type JsonValue, type NativeStateInput, type RenameInput,
   type RequestEnvelope, type RequestReceipt, type ResolveInput, type RootApi, type RootCreateInput,
   type RootDelta, type RootSnapshot, type RootWatchItem, type SessionMetadata,
@@ -171,7 +171,8 @@ export class RootService implements RootApi {
   }
   private request(input: RequestEnvelope, operation: string, payload: unknown,
     action: (dispatch: () => void) => Promise<JsonValue>): Promise<RequestReceipt> {
-    this.assertOpen(); const admitted = this.options.store.admit(input.requestId, input.sessionId, operation, payload);
+    this.assertOpen(); requestEnvelopeSchema.parse({ requestId: input.requestId, sessionId: input.sessionId });
+    const admitted = this.options.store.admit(input.requestId, input.sessionId, operation, payload);
     if (!admitted.fresh) return this.#requests.get(input.requestId) ?? Promise.resolve(admitted.receipt);
     const work = (async () => {
       let dispatched = false;
