@@ -221,6 +221,16 @@ more control nodes and exposes the selected projection over HTTP/WebSocket. It
 may propose metadata mutations and route agent controls, but it never commits
 domain state.
 
+Its observation revision commits every stamped catalog change, including source
+diagnostics and suppressed source cursors. Gateway-owned `catalog` access items
+carry these bounded observation-only changes on the same replayable cursor as
+selected Control deltas. They carry no authority provenance and cannot originate
+at a Control source. A client requires consecutive revision/cursor and unchanged
+selected identity, boot, feed and coverage; a gap preserves stale rows and requires
+a new atomic read. Selected snapshot dataset replacement resets the feed even
+when its source boot/feed identity is unchanged. Equal source refreshes may update
+the snapshot timestamp through a diagnostic commit without discarding the feed.
+
 For `sessions.readLifecycle`, the gateway holds the selected source generation
 across the read and rejects a reply if selection changed. It validates the
 returned runtime/binding fence against the selected projection but does not

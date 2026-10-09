@@ -386,6 +386,198 @@ function nativeEvent(
 }
 
 describe("coherent bounded Gateway catalog", () => {
+  it("accepts independently bounded diagnostic and coverage windows with mixed-case selected source IDs", async () => {
+    const definitions = ["Zroot", ...Array.from({ length: 64 }, (_, i) => `a${String(i).padStart(2, "0")}`)].map(name => {
+      const root = newControlNodeId(); return source(name, snapshot(authority(root), [root], { withSession: true }));
+    });
+    const gateway = new AccessGatewayProjection(definitions); await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    expect(before.sources).toHaveLength(64); expect(before.coverage).toHaveLength(64); expect(before.complete.sources).toBe(false);
+    expect(before.sources.some(source => !before.coverage.some(covered => covered.sourceId === source.sourceId))).toBe(true);
+    const controller = new GatewayCatalogController(); controller.accept(controller.beginRead(), before);
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value!.kind).toBe("heartbeat");
+    expect(gateway.activateSource("a00" as SourceId)).toBe(true);
+    expect(gateway.feedId()).toBe(before.stamp.feedId);
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] }));
+    expect(controller.snapshot().state).toBe("current");
+    await iterator.return?.();
+  });
+
+  it("retains exact selected coverage when its diagnostic is outside the source display bound", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const rootSource = source("zzroot", value);
+    const coldSources = Array.from({ length: 64 }, (_, i) => {
+      const id = newControlNodeId(), definition = source(`a${String(i).padStart(2, "0")}`, snapshot(authority(id), [id]));
+      definition.client.loadError = new Error("fixture unavailable"); return definition;
+    });
+    const gateway = new AccessGatewayProjection([...coldSources, rootSource]); await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    expect(before.complete.sources).toBe(false); expect(before.sources.some(source => source.sourceId === "zzroot")).toBe(false);
+    expect(before.coverage[0]!.sourceId).toBe("zzroot");
+    const controller = new GatewayCatalogController(); controller.accept(controller.beginRead(), before);
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value!.kind).toBe("heartbeat");
+    gateway.markUnavailable("a00" as SourceId);
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    rootSource.client.snapshot = { ...value, manifest: { ...value.manifest, generatedAt: "2026-10-09T03:00:00.000Z" } };
+    await gateway.refreshSource("zzroot" as SourceId);
+    expect(gateway.feedId()).toBe(before.stamp.feedId);
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] }));
+    expect(controller.snapshot().state).toBe("current");
+    await iterator.return?.();
+  });
+
+  it("keeps unavailable and archived session deltas equal to the accepted stamped projection", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const gateway = new AccessGatewayProjection([source("root", value)]); await gateway.refreshAll();
+    const session = value.sessions[0]!, query = { sessionLimit: 100, sessionIds: [session.sessionId] };
+    const before = gateway.readCatalog(query), controller = new GatewayCatalogController(); controller.accept(controller.beginRead(), before);
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value!.kind).toBe("heartbeat");
+    gateway.ingest("root" as SourceId, { kind: "control", eventId: crypto.randomUUID(), feedId: value.manifest.feedId,
+      cursor: value.manifest.controlCursor + 1, provenance: { originControlNodeId: root, authority: value.manifest.authority },
+      change: { type: "session.unavailable", sessionId: session.sessionId } });
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog(query));
+    gateway.ingest("root" as SourceId, { kind: "control", eventId: crypto.randomUUID(), feedId: value.manifest.feedId,
+      cursor: value.manifest.controlCursor + 2, provenance: { originControlNodeId: root, authority: value.manifest.authority },
+      change: { type: "session.upsert", session: { ...session, catalogState: "archived", archivedAt: timestamp, availability: "resumable", runtimeStatus: "stopped" } } });
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog(query));
+    expect(controller.snapshot().view!.sessions).toEqual([]); expect(controller.snapshot().view!.pinnedSessions).toEqual([]);
+    await iterator.return?.();
+  });
+
+  it("publishes suppressed failures, retries and recovered admission before the next selected delta", async () => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const definitions = [source("root", views.ancestor), source("child", views.descendant)];
+    const gateway = new AccessGatewayProjection(definitions);
+    await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    const controller = new GatewayCatalogController();
+    controller.accept(controller.beginRead(), before);
+    gateway.markUnavailable("child" as SourceId, new Error("fixture disconnected"));
+    gateway.markUnavailable("child" as SourceId, new Error("fixture retry failed"));
+    await gateway.refreshSource("child" as SourceId, { deferSelection: true });
+    expect(gateway.activateSource("child" as SourceId)).toBe(true);
+    expect(gateway.feedId()).toBe(before.stamp.feedId);
+    const item: AccessStreamItem = { kind: "control", eventId: crypto.randomUUID(), feedId: views.ancestor.manifest.feedId,
+      cursor: views.ancestor.manifest.controlCursor + 1, provenance: { originControlNodeId: child, authority: views.ancestor.manifest.authority },
+      change: { type: "session.upsert", session: { ...views.ancestor.sessions[0]!, runtimeStatus: "running" } } };
+    gateway.ingest("root" as SourceId, item);
+    const replay = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    const commits: AccessStreamItem[] = [];
+    for (;;) {
+      const next = (await replay.next()).value!;
+      if (next.kind === "heartbeat") break;
+      commits.push(next);
+      expect(controller.apply(next)).toBe(true);
+      expect(controller.snapshot().state).toBe("current");
+    }
+    await replay.return?.();
+    expect(commits.map(item => item.kind)).toEqual(["catalog", "catalog", "catalog", "catalog", "catalog", "control"]);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] }));
+    expect(controller.snapshot().view!.sessions[0]!.runtimeStatus).toBe("running");
+  });
+
+  it("commits an unselected cold source failure without taking reachable sessions stale", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const coldRoot = newControlNodeId(), cold = source("cold", snapshot(authority(coldRoot), [coldRoot]));
+    cold.client.loadError = new Error("fixture unavailable");
+    const gateway = new AccessGatewayProjection([source("root", value), cold]);
+    await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    const controller = new GatewayCatalogController(); controller.accept(controller.beginRead(), before);
+    gateway.markUnavailable("cold" as SourceId, new Error("fixture retry"));
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    const commit = (await iterator.next()).value!;
+    expect(commit.kind).toBe("catalog"); expect(controller.apply(commit)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] }));
+    expect(controller.snapshot().view!.runtimeNodes[0]!.reachability).toBe("reachable");
+    await iterator.return?.();
+  });
+
+  it("commits suppressed source cursor observations while keeping selected coverage unchanged", async () => {
+    const root = newControlNodeId(), child = newControlNodeId();
+    const views = overlappingSnapshots(authority(root), root, child, { withSession: true });
+    const gateway = new AccessGatewayProjection([source("root", views.ancestor), source("child", views.descendant)]);
+    await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    const controller = new GatewayCatalogController(); controller.accept(controller.beginRead(), before);
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value!.kind).toBe("heartbeat");
+    expect(gateway.ingest("child" as SourceId, { kind: "control", eventId: crypto.randomUUID(), feedId: views.descendant.manifest.feedId,
+      cursor: views.descendant.manifest.controlCursor + 1, provenance: { originControlNodeId: child, authority: views.descendant.manifest.authority },
+      change: { type: "session.upsert", session: { ...views.descendant.sessions[0]!, runtimeStatus: "running" } } })).toBe(false);
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] }));
+    expect(controller.snapshot().view!.sessions[0]!.runtimeStatus).toBe("idle");
+    expect(controller.snapshot().view!.coverage).toEqual(before.coverage);
+    await iterator.return?.();
+  });
+
+  it("orders synchronizing diagnostics and fences a refreshed selected snapshot even at the same source feed", async () => {
+    const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
+    const definition = source("root", value), gateway = new AccessGatewayProjection([definition]);
+    await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    const controller = new GatewayCatalogController(); controller.accept(controller.beginRead(), before);
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value!.kind).toBe("heartbeat");
+    let release!: (snapshot: GatewaySourceSnapshot) => void;
+    definition.client.loadSnapshot = () => new Promise(resolve => { release = resolve; });
+    const refresh = gateway.refreshSource("root" as SourceId);
+    const syncing = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    expect(syncing.stamp.revision).toBe(before.stamp.revision + 1);
+    expect(controller.apply((await iterator.next()).value!)).toBe(true);
+    expect(controller.snapshot().view).toEqual(syncing);
+    await Promise.resolve();
+    release({ ...value, sessions: [{ ...value.sessions[0]!, runtimeStatus: "running" }] }); await refresh;
+    const reset = (await iterator.next()).value!;
+    expect(reset.kind).toBe("streamReset"); expect(controller.apply(reset)).toBe(false);
+    expect(controller.snapshot().state).toBe("stale");
+    const refreshed = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    expect(refreshed.stamp.feedId).not.toBe(before.stamp.feedId);
+    expect(controller.accept(controller.beginRead(), refreshed)).toBe(true);
+    expect(controller.snapshot().view!.sessions[0]!.runtimeStatus).toBe("running");
+    await iterator.return?.();
+  });
+
+  it("rejects missing, reordered and forged diagnostic commits and stale source generations", async () => {
+    const root = newControlNodeId(), coldRoot = newControlNodeId();
+    const cold = source("cold", snapshot(authority(coldRoot), [coldRoot])); cold.client.loadError = new Error("fixture unavailable");
+    const gateway = new AccessGatewayProjection([source("root", snapshot(authority(root), [root], { withSession: true })), cold]);
+    await gateway.refreshAll();
+    const before = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    const iterator = gateway.watchControl({ feedId: before.stamp.feedId, controlCursor: before.stamp.controlCursor, native: {} })[Symbol.asyncIterator]();
+    expect((await iterator.next()).value!.kind).toBe("heartbeat");
+    gateway.markUnavailable("cold" as SourceId); gateway.markUnavailable("cold" as SourceId);
+    const first = (await iterator.next()).value as Extract<AccessStreamItem, { kind: "catalog" }>;
+    const second = (await iterator.next()).value as Extract<AccessStreamItem, { kind: "catalog" }>;
+    expect(first.kind).toBe("catalog"); expect(second.kind).toBe("catalog");
+    const committed = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
+    expect(() => gateway.ingest("root" as SourceId, first)).toThrow("Control source cannot originate Gateway catalog observations");
+    expect(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] })).toEqual(committed);
+    const controller = new GatewayCatalogController();
+    const rebase = () => controller.accept(controller.beginRead(), before);
+    rebase(); expect(controller.apply(second)).toBe(false); expect(controller.snapshot().state).toBe("stale");
+    rebase(); expect(controller.apply({ ...first, stamp: { ...first.stamp, revision: first.stamp.revision + 1 } })).toBe(false);
+    rebase(); expect(controller.apply({ ...first, stamp: { ...first.stamp, viewId: newFeedId() } })).toBe(false);
+    rebase(); expect(controller.apply({ ...first, sources: first.sources.map(source => source.sourceId === "root" ? { ...source, manifest: { ...source.manifest!, sourceControlNodeBootId: newControlNodeBootId() } } : source) })).toBe(false);
+    rebase(); expect(controller.apply(first)).toBe(true); expect(controller.apply(first)).toBe(true); expect(controller.apply(second)).toBe(true);
+    expect(controller.snapshot().view).toEqual(gateway.readCatalog({ sessionLimit: 100, sessionIds: [] }));
+    gateway.markUnavailable("root" as SourceId);
+    const reset = (await iterator.next()).value!; expect(reset.kind).toBe("streamReset");
+    expect(controller.apply(reset)).toBe(false); expect(controller.apply(first)).toBe(false);
+    expect(controller.snapshot().state).toBe("stale");
+    await iterator.return?.();
+  });
+
   it("captures source coverage and runtime/session records under one immutable stamp", async () => {
     const root = newControlNodeId(), value = snapshot(authority(root), [root], { withSession: true });
     const definition = source("root", value), gateway = new AccessGatewayProjection([definition]);
@@ -436,7 +628,7 @@ describe("coherent bounded Gateway catalog", () => {
     const after = gateway.readCatalog({ sessionLimit: 100, sessionIds: [] });
     const delta = { ...item, feedId: after.stamp.feedId, cursor: after.stamp.controlCursor,
       catalog: { stamp: after.stamp, source: { sourceId: "root", position: { sourceControlNodeBootId: value.manifest.sourceControlNodeBootId,
-        feedId: value.manifest.feedId, controlCursor: sourceCursor } } } };
+        feedId: value.manifest.feedId, controlCursor: sourceCursor, generatedAt: after.coverage[0]!.manifest.generatedAt } } } };
     expect(controller.apply(delta)).toBe(true); expect(controller.apply(delta)).toBe(true);
     expect(controller.accept(token, before)).toBe(false);
     expect(controller.snapshot().view!.sessions[0]!.runtimeStatus).toBe("running");
@@ -1316,7 +1508,9 @@ describe("AccessGatewayProjection routing and feed", () => {
     await consume;
     expect(events.map(({ kind }) => kind)).toEqual([
       "heartbeat",
+      "catalog",
       "streamReset",
+      "catalog",
       "native",
     ]);
   });
@@ -1338,7 +1532,7 @@ describe("AccessGatewayProjection routing and feed", () => {
       includeNative: true,
       cursor: {
         feedId: gateway.feedId(),
-        controlCursor: 0,
+        controlCursor: gateway.catalogStamp().controlCursor,
         native: {
           [session.sessionId]: { runtimeEpoch, sequence: 0 },
         },
@@ -1386,7 +1580,7 @@ describe("AccessGatewayProjection routing and feed", () => {
       includeNative: true,
       cursor: {
         feedId: gateway.feedId(),
-        controlCursor: 0,
+        controlCursor: gateway.catalogStamp().controlCursor,
         native: {
           [session.sessionId]: { runtimeEpoch, sequence: 0 },
         },
@@ -1430,7 +1624,7 @@ describe("AccessGatewayProjection routing and feed", () => {
       includeNative: true,
       cursor: {
         feedId: gateway.feedId(),
-        controlCursor: 0,
+        controlCursor: gateway.catalogStamp().controlCursor,
         native: {
           [session.sessionId]: { runtimeEpoch: oldEpoch, sequence: 0 },
         },
@@ -1449,7 +1643,7 @@ describe("AccessGatewayProjection routing and feed", () => {
       includeNative: true,
       cursor: {
         feedId: gateway.feedId(),
-        controlCursor: 0,
+        controlCursor: gateway.catalogStamp().controlCursor,
         native: {},
       },
     })[Symbol.asyncIterator]();

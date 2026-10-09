@@ -20,10 +20,11 @@ export const gatewayCatalogReadSchema = z.object({
   sessionIds: z.array(sessionIdSchema).max(GATEWAY_CATALOG_LIMITS.pins).default([]),
 }).strict();
 export type GatewayCatalogRead = z.infer<typeof gatewayCatalogReadSchema>;
+export const gatewayCatalogCoverageSchema = z.array(z.object({ sourceId: sourceIdSchema, manifest: sourceManifestSchema }).strict()).max(GATEWAY_CATALOG_LIMITS.sources);
 export const gatewayCatalogViewSchema = z.object({
   stamp: gatewayCatalogStampSchema,
   sources: z.array(sourceDiagnosticSchema).max(GATEWAY_CATALOG_LIMITS.sources),
-  coverage: z.array(z.object({ sourceId: sourceIdSchema, manifest: sourceManifestSchema }).strict()).max(GATEWAY_CATALOG_LIMITS.sources),
+  coverage: gatewayCatalogCoverageSchema,
   controlNodes: z.array(controlNodeDescriptorSchema).max(GATEWAY_CATALOG_LIMITS.controls),
   runtimeNodes: z.array(runtimeNodeDescriptorSchema).max(GATEWAY_CATALOG_LIMITS.runtimes),
   sessions: z.array(sessionRecordSchema).max(GATEWAY_CATALOG_LIMITS.sessions),
@@ -48,6 +49,6 @@ export type GatewayCatalogPage = z.infer<typeof gatewayCatalogPageSchema>;
 export const gatewayCatalogDeltaSchema = z.object({
   stamp: gatewayCatalogStampSchema,
   source: z.object({ sourceId: sourceIdSchema,
-    position: sourceManifestSchema.pick({ sourceControlNodeBootId: true, feedId: true, controlCursor: true }),
+    position: sourceManifestSchema.pick({ sourceControlNodeBootId: true, feedId: true, controlCursor: true, generatedAt: true }),
   }).strict(),
 }).strict();

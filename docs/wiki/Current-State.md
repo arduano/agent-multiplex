@@ -5,7 +5,28 @@ coding-agent session. It is the single current-state summary. Follow only the
 links for the role being changed; the rest of the wiki is topical guidance, and
 the design documents are the deeper normative contracts.
 
-Last reconciled: 2026-10-08 (terminal-interaction replay `.37` repair; consumer native/deployment acceptance remains separate).
+Last reconciled: 2026-10-09 (Gateway diagnostic catalog `.38` source repair; consumer deployment acceptance remains separate).
+
+## Gateway diagnostic catalog repair candidate `.38` — not deployed
+
+An operational source change advanced the catalog revision while publishing only
+unversioned `sources.watch` values. The next consecutive selected Control event
+therefore carried a skipped observation revision, invalidating every retained
+browser row despite reachable runtimes. Source diagnostics now publish explicit
+bounded `catalog` commits through the same ordered/replayable access stream.
+The client retains strict revision/cursor/selected-source fences; selected
+snapshot dataset replacement still resets, including unchanged source boot/feed.
+
+All sixteen package versions and internal edges advance to `.38`; independent
+transport `0.3.0-renewal.2`, native SDK/CLI, storage and migrations are unchanged.
+This additive Gateway access-item/manifest-position contract requires coordinated
+Gateway/client package use. Original Control sources remain authoritative and
+cannot originate Gateway observation commits. Private consumer mirrors must
+subscribe to the ordered projection feed, including its internal commits.
+[Contract, evidence and acceptance limits](../audits/hotfix38-catalog-diagnostics-20261009.md).
+Final source passes typecheck/build,1,663 tests/150 files (eight tests/one file
+skipped) and maintained repository checks. No live role, owner session, model
+call or public publication belongs to this source repair.
 
 ## Terminal-interaction replay repair candidate `.37` — not deployed
 

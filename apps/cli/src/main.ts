@@ -1797,6 +1797,10 @@ function printArchiveRecord(record: ArchiveRecord, json: boolean): void {
 }
 
 function printWatchItem(item: AccessStreamItem): void {
+  if (item.kind === "catalog") {
+    console.log(`[catalog feed=${shortId(item.feedId)} control=${item.cursor} revision=${item.stamp.revision}]`);
+    return;
+  }
   if (item.kind === "heartbeat") {
     console.log(`[heartbeat feed=${shortId(item.feedId)} control=${item.controlCursor}]`);
     return;

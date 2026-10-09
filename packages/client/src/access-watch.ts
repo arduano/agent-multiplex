@@ -51,7 +51,8 @@ export function advanceAccessCursor(
   item: AccessStreamItem,
 ): AccessWatchCursor | undefined {
   switch (item.kind) {
-    case "control": {
+    case "control":
+    case "catalog": {
       if (!cursor || cursor.feedId !== item.feedId) {
         return { feedId: item.feedId, controlCursor: item.cursor, native: {} };
       }
@@ -175,7 +176,7 @@ function alreadyCommitted(
   seenNative: NativeSeenSet,
   item: AccessStreamItem,
 ): boolean {
-  if (item.kind === "control") {
+  if (item.kind === "control" || item.kind === "catalog") {
     return cursor?.feedId === item.feedId && item.cursor <= cursor.controlCursor;
   }
   if (item.kind === "native") return seenNative.has(item);

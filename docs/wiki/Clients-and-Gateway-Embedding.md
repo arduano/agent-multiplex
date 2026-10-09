@@ -101,6 +101,22 @@ source boot/feed evidence. A skipped topology revision, reset or gap requires
 rebase while preserving stale rows. Different read bounds at one revision are
 explicit subsets; completeness is never inferred from arrival time.
 
+Gateway source diagnostics participate in this same observation. Every change,
+including a suppressed source's retry/cursor, is an explicit `catalog` item on
+the ordered access stream. It advances both the Gateway observation revision and
+the replay cursor; it carries bounded source diagnostics without Control
+provenance or domain mutation. Clients apply it only at the exact next revision
+and cursor while retaining the selected source identity, boot, feed and coverage.
+The source manifest's snapshot timestamp is carried with accepted observations.
+An actual selected snapshot replacement resets the stream before its new rows can
+be accepted; an equal refreshed dataset needs only a diagnostic commit.
+
+Private observer mirrors must consume `projection.watchControl()` alongside an
+atomic `readCatalog` baseline. Forwarding only source Control items via
+`catalogEvent` omits internal Gateway diagnostic commits and violates the ordered
+observation contract. Unversioned `sources.watch` remains an operational display
+surface, not a substitute for the coherent catalog stream.
+
 `catalog.get` and `catalog.search` return evidence. `source-read` results are
 routing-fenced but explicitly unordered relative to the projection. Do not merge
 their contents as newer catalog records. Pending source reads fail if committed

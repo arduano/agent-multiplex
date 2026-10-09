@@ -366,7 +366,7 @@ export class AccessGatewayProjection {
   readonly #sourceSubscribers = new Set<AsyncQueue<SourceDiagnostic>>();
   readonly #nativeSeen = new Map<SessionId, { runtimeEpoch: string; sequence: number }>();
   readonly #nativeJournal: Array<Extract<AccessStreamItem, { kind: "native" }>> = [];
-  readonly #journal: Array<Extract<AccessStreamItem, { kind: "control" }>> = [];
+  readonly #journal: Array<Extract<AccessStreamItem, { kind: "control" | "catalog" }>> = [];
   #feedId = newFeedId();
   #controlCursor = 0;
   readonly #catalogViewId = newFeedId();
@@ -486,13 +486,18 @@ export class AccessGatewayProjection {
         // Other sources may have changed selection while this read was pending.
         // Compare against current routing, immediately before replacing this view.
         const previousSelection = this.#selectionSignature();
+        const replacesSelectedSnapshot = this.#selected.has(sourceId) && source.snapshot !== null &&
+          !isDeepStrictEqual(
+            { ...source.snapshot, manifest: { ...source.snapshot.manifest, generatedAt: null } },
+            { ...snapshot, manifest: { ...manifest, generatedAt: null } },
+          );
         source.snapshot = Object.freeze({ ...snapshot, manifest }); source.generation += 1;
         source.lastError = undefined; source.reason = undefined;
         if (options.deferSelection) source.eligible = false;
         else source.eligible = !this.#wouldReplaceHealthyChild(source);
         source.automaticAdmission = !options.deferSelection && !source.eligible;
         if (!source.eligible) source.reason = "recovery snapshot awaiting routing admission";
-        this.#reselect(previousSelection);
+        this.#reselect(previousSelection, null, replacesSelectedSnapshot);
         active = false; cleanup(); resolve();
       }).catch(cause => {
         if (source.refreshLane?.cancel === cancel) source.refreshLane = undefined;
@@ -500,6 +505,7 @@ export class AccessGatewayProjection {
       });
     });
     source.refreshLane = { cancel };
+    this.#broadcastDiagnostics();
     return result;
   }
 
@@ -675,7 +681,7 @@ export class AccessGatewayProjection {
     }
     return { ...item, feedId: this.#feedId, cursor: this.#controlCursor,
       catalog: { stamp: this.catalogStamp(), source: { sourceId, position: {
-        sourceControlNodeBootId: manifest.sourceControlNodeBootId, feedId: manifest.feedId, controlCursor: manifest.controlCursor,
+        sourceControlNodeBootId: manifest.sourceControlNodeBootId, feedId: manifest.feedId, controlCursor: manifest.controlCursor, generatedAt: manifest.generatedAt,
       } } } };
   }
 
@@ -1321,7 +1327,12 @@ export class AccessGatewayProjection {
     }
     if (item.kind === "streamReset") return false;
     if (item.kind === "control" && item.cursor <= previousControlCursor) return false;
-    if (!this.#selected.has(sourceId)) return false;
+    if (!this.#selected.has(sourceId)) {
+      // A warm source's cursor is exposed in catalog diagnostics even though
+      // its domain rows are suppressed. Commit that observation explicitly.
+      if (item.kind === "control") this.#broadcastDiagnostics();
+      return false;
+    }
     if (item.kind === "native" || item.kind === "nativeGap") {
       if (this.#sessionOwners.get(item.sessionId) !== sourceId) return false;
     }
@@ -1361,7 +1372,7 @@ export class AccessGatewayProjection {
         cursor: this.#controlCursor,
         catalog: { stamp: this.catalogStamp(), source: { sourceId, position: {
           sourceControlNodeBootId: source.snapshot!.manifest.sourceControlNodeBootId,
-          feedId: source.snapshot!.manifest.feedId, controlCursor: source.snapshot!.manifest.controlCursor,
+          feedId: source.snapshot!.manifest.feedId, controlCursor: source.snapshot!.manifest.controlCursor, generatedAt: source.snapshot!.manifest.generatedAt,
         } } },
       } satisfies Extract<AccessStreamItem, { kind: "control" }>;
       this.#journal.push(projected);
@@ -1512,6 +1523,7 @@ export class AccessGatewayProjection {
   #reselect(
     previous = this.#selectionSignature(),
     failoverReference: GatewaySourceSnapshot | null = null,
+    replacesSelectedSnapshot = false,
   ): void {
     this.#selected.clear();
     for (const source of this.#sources.values()) {
@@ -1629,7 +1641,7 @@ export class AccessGatewayProjection {
     }
     this.#rebuildOwners();
     const current = this.#selectionSignature();
-    if (current !== previous) this.#rotateFeed();
+    if (current !== previous || replacesSelectedSnapshot) this.#rotateFeed();
     this.#broadcastDiagnostics();
   }
 
@@ -1740,6 +1752,9 @@ export class AccessGatewayProjection {
 
   #validateSourceItem(source: SourceState, item: AccessStreamItem): void {
     const manifest = source.snapshot!.manifest;
+    if (item.kind === "catalog") {
+      throw new GatewayRoutingError("CONFLICT", "Control source cannot originate Gateway catalog observations");
+    }
     if (
       (item.kind === "control" || item.kind === "heartbeat") &&
       item.feedId !== manifest.feedId
@@ -2570,7 +2585,18 @@ export class AccessGatewayProjection {
 
   #broadcastDiagnostics(): void {
     this.#catalogRevision += 1;
-    for (const diagnostic of this.diagnostics()) {
+    this.#controlCursor += 1;
+    const diagnostics = this.diagnostics();
+    const item = {
+      kind: "catalog", feedId: this.#feedId, cursor: this.#controlCursor,
+      stamp: this.catalogStamp(), sources: diagnostics.slice(0, GATEWAY_CATALOG_LIMITS.sources),
+      coverage: [...this.#selected].sort().slice(0, GATEWAY_CATALOG_LIMITS.sources).map(sourceId => ({ sourceId, manifest: this.#source(sourceId).snapshot!.manifest })),
+      complete: this.#sources.size <= GATEWAY_CATALOG_LIMITS.sources,
+    } satisfies Extract<AccessStreamItem, { kind: "catalog" }>;
+    this.#journal.push(item);
+    while (this.#journal.length > AccessGatewayProjection.maximumJournalItems) this.#journal.shift();
+    this.#broadcast(item);
+    for (const diagnostic of diagnostics) {
       for (const subscriber of this.#sourceSubscribers) subscriber.push(diagnostic);
     }
   }

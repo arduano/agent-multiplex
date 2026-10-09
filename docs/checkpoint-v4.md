@@ -1479,3 +1479,16 @@ and owned cleanup. Original fixture failures remain failed receipts. The final
 reconnect change is test-only and all16 tarballs are byte-identical to qualified
 `03520ed2…`. Native/deployment/real-model acceptance is separate; official
 CI/main/registry promotion gates remain unchanged. [Evidence and limits](audits/architecture36-qualification-20261008.md).
+
+## Gateway diagnostic catalog candidate `.38` — October 9, 2026
+
+Gateway diagnostics now commit on its ordered, bounded access replay stream.
+Clients retain exact successor cursor/revision/source fences; suppressed source
+failures no longer cause an invisible revision gap. Selected snapshot replacement
+still resets. The before-source regression fails and focused65 tests pass.
+Final source passes typecheck/build,1,663 tests/150 files (eight tests/one file
+skipped) and checkpoint/docs/release/secrets. All16 internal package versions
+advance together; independent transport.2,
+native pins, domain authority and durable schemas are unchanged.
+[Contract, qualification and acceptance boundary](audits/hotfix38-catalog-diagnostics-20261009.md).
+Source/disposable qualification does not deploy a role or make a model call.

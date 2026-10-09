@@ -33,6 +33,25 @@ const authority = {
 };
 
 describe("access cursors", () => {
+  it("commits and resumes diagnostic catalog items on the same ordered access cursor", async () => {
+    const feedId = newFeedId(), viewId = newFeedId();
+    const item = accessStreamItemSchema.parse({ kind: "catalog", feedId, cursor: 4,
+      stamp: { viewId, feedId, revision: 7, controlCursor: 4 }, sources: [], coverage: [], complete: true });
+    const cursor = new AccessCursor({ feedId, controlCursor: 3, native: {} });
+    cursor.observe(item);
+    expect(cursor.snapshot()).toEqual({ feedId, controlCursor: 4, native: {} });
+    expect(advanceAccessCursor({ feedId, controlCursor: 3, native: {} }, item)).toEqual(cursor.snapshot());
+    const procedure = new FakeSubscription(), received: AccessStreamItem[] = [];
+    const watcher = watchAccess(procedure, { cursor: { feedId, controlCursor: 3, native: {} },
+      onItem: item => { received.push(item); }, initialRetryDelayMs: 0, maxRetryDelayMs: 0, retryJitter: 0 });
+    procedure.emit(item); await tick();
+    procedure.fail(new Error("fixture reconnect")); await tick(); await tick();
+    expect(procedure.inputs[1]!.cursor!.controlCursor).toBe(4);
+    procedure.emit(item); await tick();
+    expect(received).toEqual([item]);
+    watcher.stop(); await watcher.done;
+  });
+
   it("uses one monotonic cursor transition for duplicate and out-of-order same-epoch events", () => {
     const initial = { feedId: newFeedId(), controlCursor: 3, native: {} };
     const mutable = new AccessCursor(initial);

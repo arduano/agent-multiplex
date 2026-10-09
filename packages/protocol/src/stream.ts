@@ -1,4 +1,5 @@
-import { gatewayCatalogDeltaSchema } from "./gateway-catalog.js";
+import { GATEWAY_CATALOG_LIMITS, gatewayCatalogCoverageSchema, gatewayCatalogDeltaSchema, gatewayCatalogStampSchema } from "./gateway-catalog.js";
+import { sourceDiagnosticSchema } from "./source.js";
 import { z } from "zod";
 
 import { archiveRecordSchema } from "./archive.js";
@@ -198,6 +199,19 @@ export const feedControlItemSchema = z.object({
 });
 export type FeedControlItem = z.infer<typeof feedControlItemSchema>;
 
+/** Gateway-owned observation commit. It carries no Control authority or domain
+ * mutation, but shares the ordered/replayable access cursor with Control items. */
+export const gatewayCatalogItemSchema = z.object({
+  kind: z.literal("catalog"),
+  feedId: feedIdSchema,
+  cursor: z.number().int().nonnegative().safe(),
+  stamp: gatewayCatalogStampSchema,
+  sources: z.array(sourceDiagnosticSchema).max(GATEWAY_CATALOG_LIMITS.sources),
+  coverage: gatewayCatalogCoverageSchema,
+  complete: z.boolean(),
+}).strict();
+export type GatewayCatalogItem = z.infer<typeof gatewayCatalogItemSchema>;
+
 /** Signals that the requested feed/cursor cannot be resumed incrementally. */
 export const streamResetSchema = z.object({
   kind: z.literal("streamReset"),
@@ -227,6 +241,7 @@ export type AccessHeartbeat = z.infer<typeof accessHeartbeatSchema>;
 
 export const accessStreamItemSchema = z.discriminatedUnion("kind", [
   feedControlItemSchema,
+  gatewayCatalogItemSchema,
   nativeEventSchema,
   nativeGapSchema,
   accessHeartbeatSchema,
