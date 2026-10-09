@@ -12,7 +12,9 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 The new `@arduano/agent-multiplex-v7` workspace uses wire generation 7 and shares
 the current `.39` package release discipline. It supplies standalone Host/Root
 coordinators, a browser-safe protocol entry and one bare application database
-per role with an OS-released exclusive writer connection. It does not instantiate
+per role with a worker-owned OS-released exclusive writer connection. Full
+durability stays off the transport event loop; synchronous lists/snapshots use
+committed memory views and native effects wait for durable acknowledgement. It does not instantiate
 the V6 Runtime/Control/Gateway services. Native adapters remain reusable through
 a thin port; histories, queues and callback ownership stay native.
 

@@ -8,7 +8,12 @@ not a compatibility layer or a V7 implementation.
 
 ## Durable state
 
-Each Host and Root has one SQLite application database and one owner connection.
+Each Host and Root has one SQLite application database and one worker-owned
+connection. `await V7Store.open(...)` completes initialization before service
+construction. Every database operation runs in that worker, while committed
+bindings/metadata remain available to synchronous lists and snapshots in memory.
+A slow fsync delays its own durable acknowledgement, never the transport loop.
+Native dispatch waits for that acknowledgement; durability stays FULL.
 `locking_mode=EXCLUSIVE` keeps its OS-released lease across committed writes.
 A second process refuses immediately; killing the owner releases the lease
 without inspecting PIDs or deleting lock files. The database records its schema,
@@ -17,7 +22,10 @@ new V7 locations; no V6 migration or session adoption occurs.
 
 The Host database contains native binding references and an immutable request
 ledger. The Root database contains session title/pinning/metadata, logical
-archive state, and the same generic request ledger for its own admission edge.
+archive state, one metadata revision per document, and the same generic request
+ledger for its own admission edge. Metadata set/remove/title/pin/archive patches
+merge atomically at the writer. Optional expected revision is a whole-document
+compare-and-set; native status changes do not advance it.
 Neither database contains transcripts, native queue copies, online state,
 interaction callbacks, boot recovery intents or installation transactions.
 
@@ -29,7 +37,10 @@ accept a proved terminal Host result without repeating its effect.
 
 ## Native sessions
 
-Only create, Resume and Recover obtain native handles. Starting a Host does not
+Only create, Resume and Recover obtain native handles. Stopped/archived history
+uses an explicit side-effect-free native read hook, never vendor file parsing or
+a hidden Resume. Image preparation retains descriptor references in the request
+and must succeed before any native effect. Starting a Host does not
 list, open, reattach or continue native sessions. Bindings remain stopped until
 the owner chooses Resume. Stop retains native history; Archive stops/releases
 the local controller and marks its binding and Root registry archived.
@@ -43,7 +54,8 @@ and Codex retains its native send/steer semantics.
 Interaction callbacks stay attached to their native owner. A fresh client reads
 current callbacks directly; it never reconstructs them from history. A native
 partial interaction baseline stays uncertain until that attachment supplies
-positive completeness evidence. A real lost native event stays uncertain until
+positive completeness evidence. Safety facts apply immediately at native ingress,
+independent of a pending presentation/image transfer. A real lost native event stays uncertain until
 explicit recovery; an expired observer replay only asks the view to refresh.
 
 Malformed native payloads, overflowing subscribers, failed history reads and
@@ -70,7 +82,10 @@ dispatch, process-killed writer leases, zero startup attachment, native queue
 consumption, busy-session admission, slow history, stale attachment responses,
 native callback resolution, partial interaction hydration, native/replay gaps,
 poisoned-session isolation, Root-owned rename/archive, stale connection tokens,
-original-ID reconciliation and ordered snapshots/deltas.
+original-ID reconciliation and ordered snapshots/deltas. Worker stalls additionally
+qualify presence, committed views, healthy peer streams and durable-before-native
+dispatch; consumer regressions cover images, detached history, atomic archive
+patches, metadata compare-and-set and exact attachment fences.
 
 These tests make no model calls, touch no installed state and establish no live
 fleet or Windows native acceptance. Personal application composition, service

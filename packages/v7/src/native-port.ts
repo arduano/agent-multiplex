@@ -1,8 +1,8 @@
 import {
   AdapterPreparationError, AdapterResumeFailureError,
-  type AgentAdapter, type AdapterEvent, type AdapterSession,
+  type AgentAdapter, type AdapterEvent, type AdapterSession, type AdapterNativeHistoryResult,
 } from "@arduano/agent-multiplex-runtime-node-core";
-import type { Harness, HarnessSpawnOptions, NativeModel, SessionBinding } from "./protocol.js";
+import type { Harness, HarnessSpawnOptions, NativeHistoryRequest, NativeModel, SessionBinding } from "./protocol.js";
 import { NativeOperationError } from "./errors.js";
 
 /** The port owns no binding map, recovery loop, catalog, queue or event reducer. */
@@ -12,6 +12,7 @@ export interface NativePort {
   create(options: HarnessSpawnOptions): Promise<AdapterSession>;
   resume(binding: SessionBinding): Promise<AdapterSession>;
   models(): Promise<NativeModel[]>;
+  history?(binding: SessionBinding, request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult>;
   release?(binding: SessionBinding): Promise<void>;
   close(): Promise<void>;
 }

@@ -6,8 +6,14 @@ The wire generation is exactly `7`; reject other generations rather than negotia
 
 Host construction: `new HostService({ store, hostId, name, native, ... })`.
 Root construction: `new RootService({ store, rootId, ... })`.
-Each store: `new V7Store({ filename, role: "host" | "root", instanceId })`.
-The application database takes an OS-released SQLite exclusive connection lease.
+Each store: `await V7Store.open({ filename, role: "host" | "root", instanceId })`.
+One worker owns the application database and its OS-released SQLite exclusive
+connection lease. SQLite reads, FULL durable writes and initialization stay off
+the transport event loop. Lists and snapshots use the last committed memory view;
+mutations await durable acknowledgement before native dispatch. The process can
+serve `ready:false` while opening its store. A bundled consumer copies the public
+`@arduano/agent-multiplex-v7/store-worker` resource beside its role bundle, or
+passes that copied resource as `workerUrl` to the store factory.
 There are no persistent PID locks, installer tables, session snapshots, prompt
 queues, transcript copies, branch catalogs, or automatic session attachments.
 
@@ -24,6 +30,9 @@ history and bindings. Archive releases the local native attachment then marks
 the binding archived. Native app servers own queue, histories, tasks and reverse
 interaction callbacks; execute passes supported commands directly to that owner.
 Native queue views use nativeState. An unknown request is never a queued prompt.
+Stopped and archived history uses the optional detached native read hook without
+Resume. Image-bearing execute retains descriptor references in the receipt and
+requires a Host preparation hook before dispatch; image bytes stay at their owner.
 
 Root owns session title/pinning/metadata; `RootCreateInput` adds `hostId,title`.
 Native creation does not wait for rename. `RootApi` adds snapshot/watch/rename/
@@ -36,6 +45,11 @@ An optional opaque `context` is part of that immutable request and passes throug
 the Root and Host; native adapters do not interpret it. `updateMetadata` merges
 the provided map, applies `remove` keys, and changes optional title/pin together
 at the Root. Removed keys win if also supplied in the same patch.
+Each session has one `metadataRevision`, advanced only when its metadata changes.
+Optional `expectedMetadataRevision` atomically rejects a stale patch. Browser
+mutations carry `expectedAttachmentId` to reject a retired attachment before
+dispatch, in addition to unique callback capabilities. Native gap facts take
+effect at ingress even when image presentation is pending.
 Root does not maintain a second native state store. Its current Host views live
 in memory and disappear on restart/disconnect. `attachHost({descriptor, api,
 sessions})` supplies one complete Host snapshot and returns a connection token;

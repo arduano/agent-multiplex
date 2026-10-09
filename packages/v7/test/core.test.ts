@@ -11,7 +11,7 @@ import { AdapterPreparationError, type AgentAdapter } from "@arduano/agent-multi
 import {
   HostService, RootService, V7Store, NativeOperationError, nativePortForAdapter,
   type AdapterEvent, type AdapterSession, type NativePort,
-} from "../src/index.js";
+} from "../dist/index.js";
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const f of cleanup.splice(0).reverse()) await f(); });
@@ -46,14 +46,14 @@ class NativeFixture implements AdapterSession {
   public subscribe(listener: (event: AdapterEvent) => void) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   public emit(event: AdapterEvent) { for (const listener of this.listeners) listener(event); }
 }
-function fixture(options: Partial<ConstructorParameters<typeof HostService>[0]> = {}) {
+async function fixture(options: Partial<ConstructorParameters<typeof HostService>[0]> = {}) {
   const handles: NativeFixture[] = [];
   const port: NativePort = {
     harness: "copilot", adapterScopeId: "fixture", models: vi.fn(async () => []), close: vi.fn(async () => {}),
     create: vi.fn(async () => { const h = new NativeFixture(`native-${handles.length}`); handles.push(h); return h; }),
     resume: vi.fn(async binding => { const h = new NativeFixture(binding.vendorSessionId); handles.push(h); return h; }),
   };
-  const store = new V7Store({ filename: ":memory:", role: "host", instanceId: "host" });
+  const store = options.store ?? await V7Store.open({ filename: ":memory:", role: "host", instanceId: "host" });
   const host = new HostService({ store, hostId: "host", name: "Fixture", native: port, ...options });
   cleanup.push(() => host.close());
   return { handles, port, store, host };
@@ -61,40 +61,41 @@ function fixture(options: Partial<ConstructorParameters<typeof HostService>[0]> 
 const create = (sessionId: string) => ({ requestId: `create-${sessionId}`, sessionId, options: { harness: "copilot" as const, cwd: "/disposable" } });
 const send = (requestId: string, sessionId = "one", prompt = "fixture") => ({ requestId, sessionId,
   command: { harness: "copilot" as const, command: { type: "send" as const, prompt, mode: "enqueue" as const } } });
-function rootFixture() {
-  const store = new V7Store({ filename: ":memory:", role: "root", instanceId: "root" });
+async function rootFixture() {
+  const store = await V7Store.open({ filename: ":memory:", role: "root", instanceId: "root" });
   const root = new RootService({ store, rootId: "root" }); cleanup.push(() => root.close()); return { root, store };
 }
 async function eventDrained() { await new Promise(resolve => setImmediate(resolve)); await new Promise(resolve => setImmediate(resolve)); }
 
 describe("V7 minimal durable request ownership", () => {
   it("treats omitted optional members consistently across direct and serialized requests", async () => {
-    const f = fixture(), input = create("one");
+    const f = await fixture(), input = create("one");
     await f.host.create({ ...input, options: { ...input.options, model: undefined } } as unknown as typeof input);
     expect(await f.host.create(input)).toMatchObject({ state: "succeeded" }); expect(f.port.create).toHaveBeenCalledOnce();
   });
-  it("refuses V6 or unrelated databases without adding V7 schema tables", () => {
+  it("refuses V6 or unrelated databases without adding V7 schema tables", async () => {
     const dir = mkdtempSync(join(tmpdir(), "v7-foreign-")); cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const filename = join(dir, "state.sqlite"), database = new DatabaseSync(filename);
     database.exec("CREATE TABLE vendor_state(value TEXT); INSERT INTO vendor_state VALUES('untouched');"); database.close();
-    expect(() => new V7Store({ filename, role: "host", instanceId: "host" })).toThrow("not fresh V7");
+    await expect(V7Store.open({ filename, role: "host", instanceId: "host" })).rejects.toThrow("not fresh V7");
     const check = new DatabaseSync(filename); expect(check.prepare("SELECT name FROM sqlite_master WHERE type='table'").all())
       .toEqual([{ name: "vendor_state" }]); check.close();
   });
   it("deduplicates concurrent and terminal native requests and refuses changed payloads", async () => {
-    const f = fixture(); await f.host.create(create("one"));
+    const f = await fixture(); await f.host.create(create("one"));
     const native = f.handles[0]!, wait = deferred<JsonValue>(); native.execute.mockImplementationOnce(() => wait.promise);
     const request = send("input"); const first = f.host.execute(request), second = f.host.execute(request);
-    expect(f.host.receipt("input")?.state).toBe("dispatched");
+    await vi.waitFor(() => expect(native.execute).toHaveBeenCalledOnce());
+    expect((await f.host.receipt("input"))?.state).toBe("dispatched");
     expect(native.execute).toHaveBeenCalledOnce(); wait.resolve({ accepted: true });
     expect(await first).toEqual(await second);
     expect(await f.host.execute(request)).toMatchObject({ state: "succeeded", request });
-    expect(() => f.host.execute(send("input", "one", "different"))).toThrow("different immutable operation");
+    await expect(f.host.execute(send("input", "one", "different"))).rejects.toThrow("different immutable operation");
     expect(native.execute).toHaveBeenCalledOnce();
-    expect(f.store.receiptEvents("input").map(row => row.state)).toEqual(["admitted", "dispatched", "succeeded"]);
+    expect((await f.store.receiptEvents("input")).map(row => row.state)).toEqual(["admitted", "dispatched", "succeeded"]);
   });
   it("classifies explicit native failures and uncertain dispatch without retry", async () => {
-    const f = fixture(); await f.host.create(create("one"));
+    const f = await fixture(); await f.host.create(create("one"));
     f.handles[0]!.execute.mockRejectedValueOnce(new NativeOperationError("REFUSED", "refused", "failed"));
     expect(await f.host.execute(send("failed"))).toMatchObject({ state: "failed", error: { code: "REFUSED" } });
     f.handles[0]!.execute.mockRejectedValueOnce(new Error("Disconnected after dispatch"));
@@ -103,17 +104,17 @@ describe("V7 minimal durable request ownership", () => {
     expect(f.handles[0]!.execute).toHaveBeenCalledTimes(2);
   });
   it("never runs a durable Host prompt queue; queue indicators come from native state", async () => {
-    const f = fixture(); await f.host.create(create("one"));
+    const f = await fixture(); await f.host.create(create("one"));
     await f.host.execute(send("sent"));
     expect((await f.host.nativeState({ sessionId: "one", request: { harness: "copilot", view: "pendingMessages" } })).payload.json)
       .toEqual({ pendingMessages: [{ id: "native-0", prompt: "fixture" }] });
     f.handles[0]!.pendingMessages.length = 0;
     expect((await f.host.nativeState({ sessionId: "one", request: { harness: "copilot", view: "pendingMessages" } })).payload.json)
       .toEqual({ pendingMessages: [] });
-    expect(f.host.receipt("sent")?.state).toBe("succeeded");
+    expect((await f.host.receipt("sent"))?.state).toBe("succeeded");
   });
   it("fails busy session mutations immediately instead of keeping a second queued prompt", async () => {
-    const f = fixture(); await f.host.create(create("one")); const wait = deferred<JsonValue>();
+    const f = await fixture(); await f.host.create(create("one")); const wait = deferred<JsonValue>();
     f.handles[0]!.execute.mockImplementationOnce(() => wait.promise);
     const first = f.host.execute(send("first"));
     expect(await f.host.execute(send("second"))).toMatchObject({ state: "failed", error: { code: "SESSION_BUSY" } });
@@ -122,17 +123,17 @@ describe("V7 minimal durable request ownership", () => {
   it("restarts into stopped bindings without attaching, inventory, history or prompts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "v7-restart-")); cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const filename = join(dir, "state.sqlite");
-    let store = new V7Store({ filename, role: "host", instanceId: "host" });
-    store.putBinding({ sessionId: "old", hostId: "host", harness: "copilot", adapterScopeId: "fixture",
+    let store = await V7Store.open({ filename, role: "host", instanceId: "host" });
+    await store.putBinding({ sessionId: "old", hostId: "host", harness: "copilot", adapterScopeId: "fixture",
       vendorSessionId: "original-native", cwd: "/disposable", createdAt: store.now(), archived: false });
-    store.admit("before-dispatch", "old", "execute", { input: "never sent" });
-    store.admit("after-dispatch", "old", "execute", { input: "may have sent" }); store.transition("after-dispatch", "dispatched"); store.close();
-    store = new V7Store({ filename, role: "host", instanceId: "host" });
-    const f = fixture({ store });
+    await store.admit("before-dispatch", "old", "execute", { input: "never sent" });
+    await store.admit("after-dispatch", "old", "execute", { input: "may have sent" }); await store.transition("after-dispatch", "dispatched"); await store.close();
+    store = await V7Store.open({ filename, role: "host", instanceId: "host" });
+    const f = await fixture({ store });
     expect(f.host.list()).toMatchObject([{ sessionId: "old", status: "stopped", attachmentId: null }]);
     expect(f.port.resume).not.toHaveBeenCalled(); expect(f.port.create).not.toHaveBeenCalled();
-    expect(f.host.receipt("before-dispatch")?.state).toBe("failed");
-    expect(f.host.receipt("after-dispatch")?.state).toBe("outcomeUnknown");
+    expect((await f.host.receipt("before-dispatch"))?.state).toBe("failed");
+    expect((await f.host.receipt("after-dispatch"))?.state).toBe("outcomeUnknown");
     await f.host.resume({ requestId: "explicit", sessionId: "old" });
     expect(f.port.resume).toHaveBeenCalledOnce(); expect(f.handles[0]!.execute).not.toHaveBeenCalled();
   }, 60_000);
@@ -140,13 +141,13 @@ describe("V7 minimal durable request ownership", () => {
     const dir = mkdtempSync(join(tmpdir(), "v7-death-")); cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const filename = join(dir, "state.sqlite"), module = new URL("../dist/store.js", import.meta.url).href;
     const child = spawn(process.execPath, ["--input-type=module", "-e",
-      `import { V7Store } from ${JSON.stringify(module)}; const s=new V7Store({filename:${JSON.stringify(filename)},role:'host',instanceId:'host'}); s.admit('crash','session','send',{});s.transition('crash','dispatched');process.stdout.write('ready\\n');setInterval(()=>{},1000);`], { stdio: ["ignore", "pipe", "pipe"] });
+      `import { V7Store } from ${JSON.stringify(module)}; const s=await V7Store.open({filename:${JSON.stringify(filename)},role:'host',instanceId:'host'}); await s.admit('crash','session','send',{});await s.transition('crash','dispatched');process.stdout.write('ready\\n');setInterval(()=>{},1000);`], { stdio: ["ignore", "pipe", "pipe"] });
     cleanup.push(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
     await new Promise<void>((resolve, reject) => { child.stdout.once("data", () => resolve()); child.once("error", reject); child.once("exit", () => reject(Error("Fixture exited early"))); });
-    expect(() => new V7Store({ filename, role: "host", instanceId: "host" })).toThrow("already owned");
+    await expect(V7Store.open({ filename, role: "host", instanceId: "host" })).rejects.toThrow("already owned");
     const exited = new Promise(resolve => child.once("exit", resolve)); child.kill("SIGKILL"); await exited;
-    const store = new V7Store({ filename, role: "host", instanceId: "host" }); cleanup.push(() => store.close());
-    expect(store.receipt("crash")?.state).toBe("outcomeUnknown");
+    const store = await V7Store.open({ filename, role: "host", instanceId: "host" }); cleanup.push(() => store.close());
+    expect((await store.receipt("crash"))?.state).toBe("outcomeUnknown");
   }, 60_000);
 });
 
@@ -167,7 +168,7 @@ describe("V7 independent native session coordination", () => {
   });
   it("bounds a blocked event lane by bytes while peer native streams continue", async () => {
     const wait = deferred<import("../src/protocol.js").NativePayload>();
-    const f = fixture({ pendingEventBytes: 1024, externalize: async (binding, payload) => binding.sessionId === "blocked"
+    const f = await fixture({ pendingEventBytes: 1024, externalize: async (binding, payload) => binding.sessionId === "blocked"
       ? wait.promise : { encoding: "native-json-images-v1", json: payload, images: [] } });
     await f.host.create(create("blocked")); await f.host.create(create("peer"));
     for (let i = 0; i < 12; i++) f.handles[0]!.emit({ kind: "native", nativeType: "chunk", payload: { text: "x".repeat(300) }, ephemeral: true });
@@ -178,14 +179,14 @@ describe("V7 independent native session coordination", () => {
     wait.resolve({ encoding: "native-json-images-v1", json: {}, images: [] }); await eventDrained();
   });
   it("explicit Resume replaces a natively stopped handle after proving local cleanup", async () => {
-    const f = fixture(); await f.host.create(create("one"));
+    const f = await fixture(); await f.host.create(create("one"));
     f.handles[0]!.status.mockReturnValue("stopped" as "idle");
     expect(await f.host.resume({ requestId: "resume", sessionId: "one" })).toMatchObject({ state: "succeeded" });
     expect(f.handles[0]!.stop).toHaveBeenCalledOnce(); expect(f.port.resume).toHaveBeenCalledOnce();
     expect(f.host.list()[0]!.status).toBe("idle");
   });
   it("isolates malformed events, broken session observations and failing diagnostics", async () => {
-    const f = fixture({ diagnostic: () => { throw Error("Log disk failed"); } });
+    const f = await fixture({ diagnostic: () => { throw Error("Log disk failed"); } });
     await f.host.create(create("poison")); await f.host.create(create("healthy"));
     f.handles[0]!.emit({ kind: "native", nativeType: "bad", payload: { invalid: undefined } as unknown as JsonValue, ephemeral: false });
     f.handles[0]!.status.mockImplementation(() => { throw Error("Broken session"); });
@@ -196,7 +197,7 @@ describe("V7 independent native session coordination", () => {
     expect(await f.host.execute(send("healthy-command", "healthy"))).toMatchObject({ state: "succeeded" });
   });
   it("does not serialize a slow history read with peer mutations or Host snapshots", async () => {
-    const f = fixture(); await f.host.create(create("slow")); await f.host.create(create("peer"));
+    const f = await fixture(); await f.host.create(create("slow")); await f.host.create(create("peer"));
     const wait = deferred<Awaited<ReturnType<NativeFixture["readNativeHistory"]>>>();
     f.handles[0]!.readNativeHistory.mockImplementationOnce(() => wait.promise);
     const pending = f.host.history({ sessionId: "slow", request: { harness: "copilot", limit: 10 } });
@@ -205,7 +206,7 @@ describe("V7 independent native session coordination", () => {
     wait.resolve({ harness: "copilot", vendorSessionId: f.handles[0]!.vendorSessionId, payload: { history: [] } }); await pending;
   });
   it("fences late history against replacement and never replaces native callbacks", async () => {
-    const f = fixture(); await f.host.create(create("one"));
+    const f = await fixture(); await f.host.create(create("one"));
     const wait = deferred<Awaited<ReturnType<NativeFixture["readNativeHistory"]>>>();
     f.handles[0]!.readNativeHistory.mockImplementationOnce(() => wait.promise);
     const old = f.host.history({ sessionId: "one", request: { harness: "copilot", limit: 10 } });
@@ -220,7 +221,7 @@ describe("V7 independent native session coordination", () => {
     expect(resolve).toHaveBeenCalledExactlyOnceWith("answer"); expect(f.host.interactions("one")).toEqual([]);
   });
   it("requires recovery for native uncertainty but a missing observer replay is just a view gap", async () => {
-    const f = fixture({ eventBufferSize: 2 }); await f.host.create(create("one"));
+    const f = await fixture({ eventBufferSize: 2 }); await f.host.create(create("one"));
     const attached = f.host.list()[0]!;
     for (let i = 0; i < 4; i++) f.handles[0]!.emit({ kind: "native", nativeType: "message", payload: { i }, ephemeral: false });
     await eventDrained();
@@ -232,7 +233,7 @@ describe("V7 independent native session coordination", () => {
     expect(await f.host.recover({ requestId: "recover", sessionId: "one" })).toMatchObject({ state: "succeeded" });
   });
   it("fences native request ID reuse across recovered attachments", async () => {
-    const f = fixture(); await f.host.create(create("one")); const first = vi.fn(async () => {}), second = vi.fn(async () => {});
+    const f = await fixture(); await f.host.create(create("one")); const first = vi.fn(async () => {}), second = vi.fn(async () => {});
     f.handles[0]!.emit({ kind: "interaction", nativeRequestId: "1", requestType: "approval", payload: {}, ephemeral: false, resolve: first });
     await eventDrained(); const retiredId = f.host.interactions("one")[0]!.interactionId;
     await f.host.recover({ requestId: "recover", sessionId: "one" });
@@ -243,7 +244,7 @@ describe("V7 independent native session coordination", () => {
     expect(second).not.toHaveBeenCalled(); expect(first).not.toHaveBeenCalled();
   });
   it("preserves genuine partial interaction hydration and accepts an exact native certificate", async () => {
-    const f = fixture(); await f.host.create(create("one")); const native = f.handles[0]!;
+    const f = await fixture(); await f.host.create(create("one")); const native = f.handles[0]!;
     native.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: false } });
     await eventDrained(); expect(f.host.list()[0]!.recoveryRequired).toBe(true);
     native.emit({ kind: "status", status: "idle" }); await eventDrained();
@@ -258,28 +259,28 @@ describe("V7 independent native session coordination", () => {
 
 describe("V7 single Root authority", () => {
   it("creates with Root metadata and never waits for native rename", async () => {
-    const f = fixture(), { root } = rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    const f = await fixture(), { root } = await rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     expect(await root.create({ ...create("one"), hostId: "host", title: "Exact title" })).toMatchObject({ state: "succeeded" });
     expect(root.snapshot().sessions[0]).toMatchObject({ title: "Exact title", native: { sessionId: "one", status: "idle" } });
     expect(f.handles[0]!.execute).not.toHaveBeenCalled();
     await root.rename({ requestId: "rename", sessionId: "one", title: "Changed" }); expect(root.snapshot().sessions[0]!.title).toBe("Changed");
   });
   it("preserves full immutable execute payloads and rejects accidental request reuse", async () => {
-    const f = fixture(), { root } = rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    const f = await fixture(), { root } = await rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     await root.create({ ...create("one"), hostId: "host", title: "One" });
     await root.execute(send("same")); expect((await root.receipt("same"))?.request).toEqual(send("same"));
-    expect(() => root.execute(send("same", "one", "changed"))).toThrow("different immutable operation");
+    await expect(root.execute(send("same", "one", "changed"))).rejects.toThrow("different immutable operation");
   });
   it("retains opaque caller context through both admission edges without native interpretation", async () => {
-    const f = fixture(), { root } = rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    const f = await fixture(), { root } = await rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     const context = { browserOperation: "launch", callerId: "original-browser-request" };
     await root.create({ ...create("one"), hostId: "host", title: "One", context });
     expect((await root.receipt("create-one"))?.request).toMatchObject({ context });
-    expect(f.host.receipt("create-one")?.request).toMatchObject({ context });
+    expect((await f.host.receipt("create-one"))?.request).toMatchObject({ context });
     expect(f.port.create).toHaveBeenCalledExactlyOnceWith(create("one").options);
   });
   it("applies concurrent metadata patches and naming changes atomically at the Root", async () => {
-    const f = fixture(), { root } = rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    const f = await fixture(), { root } = await rootFixture(); root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     await root.create({ ...create("one"), hostId: "host", title: "One" });
     await root.updateMetadata({ requestId: "base", sessionId: "one", metadata: { keep: 1, remove: true } });
     await Promise.all([
@@ -291,11 +292,11 @@ describe("V7 single Root authority", () => {
     expect(f.handles[0]!.execute).not.toHaveBeenCalled();
   });
   it("rejects wrong generations and discards only malformed session rows", async () => {
-    const f = fixture(), { root, store } = rootFixture();
+    const f = await fixture(), { root, store } = await rootFixture();
     expect(() => root.attachHost({ descriptor: { ...f.host.descriptor(), protocolVersion: 6 as 7 }, api: f.host, sessions: [] })).toThrow("other wire generations");
     const first = root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     await root.create({ ...create("one"), hostId: "host", title: "One" });
-    store.putMetadata({ sessionId: "bad", hostId: "host", title: "Bad", pinned: false, metadata: {}, createdAt: store.now(), archived: false });
+    await store.putMetadata({ sessionId: "bad", hostId: "host", title: "Bad", pinned: false, metadata: {}, createdAt: store.now(), archived: false, metadataRevision: 0 });
     expect(root.updateHost(first, [...f.host.list(), { ...f.host.list()[0]!, sessionId: "bad", status: "invalid" as "idle" }])).toBe(true);
     expect(root.snapshot()).toMatchObject({ hosts: [{ online: true }], sessions: [{ native: null }, { native: { sessionId: "one" } }] });
     const next = root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: f.host.list() });
@@ -303,7 +304,7 @@ describe("V7 single Root authority", () => {
     expect(root.snapshot().sessions.every(session => session.native === null)).toBe(true);
   });
   it("reconciles the original Host receipt after a lost response without a second native send", async () => {
-    const f = fixture(), { root } = rootFixture();
+    const f = await fixture(), { root } = await rootFixture();
     const api = Object.create(f.host) as HostService;
     // Bind concrete methods because Host private slots require its real receiver.
     const port = {
@@ -316,11 +317,13 @@ describe("V7 single Root authority", () => {
     void api; root.attachHost({ descriptor: f.host.descriptor(), api: port, sessions: [] });
     await root.create({ ...create("one"), hostId: "host", title: "One" });
     expect(await root.execute(send("lost"))).toMatchObject({ state: "outcomeUnknown" });
-    expect(await root.receipt("lost")).toMatchObject({ state: "succeeded" });
+    expect(await root.execute(send("lost"))).toMatchObject({ state: "outcomeUnknown" });
+    expect(await Promise.all([root.receipt("lost"), root.receipt("lost")])).toMatchObject([{ state: "succeeded" }, { state: "succeeded" }]);
+    expect(await root.execute(send("lost"))).toMatchObject({ state: "succeeded" });
     expect(f.handles[0]!.execute).toHaveBeenCalledOnce();
   });
   it("publishes one contiguous snapshot/delta stream with metadata and presence changes", async () => {
-    const f = fixture(), { root } = rootFixture(), iterator = root.watch()[Symbol.asyncIterator]();
+    const f = await fixture(), { root } = await rootFixture(), iterator = root.watch()[Symbol.asyncIterator]();
     expect((await iterator.next()).value).toMatchObject({ kind: "snapshot", snapshot: { revision: 0 } });
     const token = root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     await root.create({ ...create("one"), hostId: "host", title: "One" }); root.detachHost(token);
@@ -328,10 +331,164 @@ describe("V7 single Root authority", () => {
     expect(events.map(event => event.delta.revision)).toEqual([1, 2, 3, 4, 5]); await iterator.return?.();
   });
   it("retains archived Root registry state when the Host disconnects", async () => {
-    const f = fixture(), { root } = rootFixture();
+    const f = await fixture(), { root } = await rootFixture();
     const token = root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
     await root.create({ ...create("one"), hostId: "host", title: "One" });
     expect(await root.archive({ requestId: "archive", sessionId: "one" })).toMatchObject({ state: "succeeded" });
     root.detachHost(token); expect(root.snapshot().sessions[0]).toMatchObject({ archived: true, native: null });
+  });
+});
+
+describe("V7 durable writer and consumer integration", () => {
+  it("does not dispatch through a Host replaced during the Root durable boundary", async () => {
+    const f = await fixture(), { root, store } = await rootFixture();
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("one"), hostId: "host", title: "One" });
+    const transition = store.transition.bind(store), blocked = deferred<import("../src/protocol.js").RequestReceipt>();
+    const reached = deferred<void>();
+    vi.spyOn(store, "transition").mockImplementation(async (requestId, state, outcome) => {
+      const receipt = await transition(requestId, state, outcome);
+      if (requestId === "stale-route" && state === "dispatched") { reached.resolve(); return blocked.promise; }
+      return receipt;
+    });
+    const pending = root.execute(send("stale-route")); await reached.promise;
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: f.host.list() });
+    blocked.resolve((await store.receipt("stale-route"))!);
+    expect(await pending).toMatchObject({ state: "failed", error: { code: "HOST_REPLACED_BEFORE_DISPATCH" } });
+    expect(f.handles[0]!.execute).not.toHaveBeenCalled();
+  });
+  it("rejects same-ID operation changes while an identical envelope is in flight", async () => {
+    const f = await fixture(), { root } = await rootFixture();
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("one"), hostId: "host", title: "One" });
+    const stopped = deferred<void>(); f.handles[0]!.stop.mockImplementationOnce(() => stopped.promise);
+    const input = { requestId: "shared-id", sessionId: "one" }, pending = root.stop(input);
+    await vi.waitFor(() => expect(f.handles[0]!.stop).toHaveBeenCalledOnce());
+    await expect(root.archive(input)).rejects.toMatchObject({ code: "REQUEST_CONFLICT" });
+    await expect(f.host.archive(input)).rejects.toMatchObject({ code: "REQUEST_CONFLICT" });
+    stopped.resolve(); expect(await pending).toMatchObject({ state: "succeeded", operation: "stop" });
+    expect(root.snapshot().sessions[0]!.archived).toBe(false);
+  });
+  it("closes its writer once and rejects new operations without leaving pending promises", async () => {
+    const store = await V7Store.open({ filename: ":memory:", role: "host", instanceId: "closing" });
+    cleanup.push(() => store.close()); const delayed = store.delayWriterForTest(100); await eventDrained();
+    const first = store.close(), second = store.close(); expect(second).toBe(first);
+    await expect(store.receipt("later")).rejects.toMatchObject({ code: "CLOSED" });
+    await Promise.all([delayed, first, second]);
+  });
+  it("snapshots caller input before an asynchronous durability boundary", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    const delayed = f.store.delayWriterForTest(100); await eventDrained();
+    const input = send("owned-input"), pending = f.host.execute(input);
+    input.command.command.prompt = "caller changed this";
+    expect(await pending).toMatchObject({ state: "succeeded", request: send("owned-input") });
+    expect(f.handles[0]!.execute).toHaveBeenCalledExactlyOnceWith(send("owned-input").command); await delayed;
+    const binding = f.store.binding("one")!, write = f.store.putBinding(binding); binding.archived = true;
+    await write; expect(f.store.binding("one")!.archived).toBe(false);
+  });
+  it("keeps presence, committed views and healthy native streams responsive while both writers stall", async () => {
+    const f = await fixture(), { root, store } = await rootFixture();
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("blocked"), hostId: "host", title: "Blocked" });
+    await root.create({ ...create("peer"), hostId: "host", title: "Peer" });
+    const events: import("../src/protocol.js").HostEvent[] = [];
+    const unsubscribe = f.host.subscribe(event => events.push(event)); cleanup.push(unsubscribe);
+    let heartbeats = 0;
+    const timer = setInterval(() => {
+      expect(f.host.list()).toHaveLength(2); expect(root.snapshot().hosts[0]!.online).toBe(true); heartbeats += 1;
+    }, 5); cleanup.push(() => clearInterval(timer));
+    const hostBlocked = f.store.delayWriterForTest(250), rootBlocked = store.delayWriterForTest(250);
+    f.handles[0]!.execute.mockImplementationOnce(async () => {
+      expect(heartbeats).toBeGreaterThan(0);
+      expect((await f.store.receipt("durable"))?.state).toBe("dispatched");
+      return { accepted: true };
+    });
+    const request = root.execute(send("durable", "blocked"));
+    f.handles[1]!.emit({ kind: "native", nativeType: "message", payload: { text: "healthy" }, ephemeral: false });
+    await eventDrained();
+    expect(events.some(event => event.kind === "event" && event.event.kind === "native" && event.event.sessionId === "peer")).toBe(true);
+    expect(await root.history({ sessionId: "peer", request: { harness: "copilot", limit: 10 } })).toMatchObject({ payload: { json: { history: [] } } });
+    expect(await request).toMatchObject({ state: "succeeded" }); await Promise.all([hostBlocked, rootBlocked]);
+  });
+  it("retains image descriptors at both receipt edges and refuses preparation before any native dispatch", async () => {
+    const prepareCommand = vi.fn(async (input: import("../src/protocol.js").ExecuteInput) => input.command);
+    const f = await fixture({ prepareCommand }), { root } = await rootFixture();
+    root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("one"), hostId: "host", title: "One" });
+    const images: import("@arduano/agent-multiplex-protocol").CommandImageBinding[] = [{ pointer: "/command/image", representation: "base64", image: {
+      imageId: "11111111-1111-4111-8111-111111111111", sessionId: "22222222-2222-4222-8222-222222222222",
+      runtimeNodeId: "33333333-3333-4333-8333-333333333333", bindingRevision: 1, sha256: "a".repeat(64), byteLength: 32, mediaType: "image/png",
+    } }];
+    const input = { ...send("image-send"), images };
+    expect(await root.execute(input)).toMatchObject({ state: "succeeded", request: input });
+    expect((await f.host.receipt(input.requestId))?.request).toEqual(input);
+    expect(prepareCommand).toHaveBeenCalledExactlyOnceWith(input);
+    prepareCommand.mockRejectedValueOnce(Error("immutable image missing"));
+    const refused = { ...input, requestId: "image-refused" };
+    expect(await root.execute(refused)).toMatchObject({ state: "failed", request: refused });
+    expect((await f.store.receiptEvents(refused.requestId)).map(row => row.state)).toEqual(["admitted", "failed"]);
+    expect(f.handles[0]!.execute).toHaveBeenCalledOnce();
+  });
+  it("reads stopped and archived native histories without resume and fences late binding responses", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    f.port.history = vi.fn(async binding => ({ harness: "copilot", vendorSessionId: binding.vendorSessionId, payload: { persisted: true } }));
+    await f.host.stop({ requestId: "stop", sessionId: "one" });
+    expect(await f.host.history({ sessionId: "one", request: { harness: "copilot", limit: 10 } }))
+      .toMatchObject({ payload: { json: { persisted: true } } });
+    const delayed = deferred<Awaited<ReturnType<NonNullable<NativePort["history"]>>>>();
+    vi.mocked(f.port.history).mockImplementationOnce(() => delayed.promise);
+    const pending = f.host.history({ sessionId: "one", request: { harness: "copilot", limit: 10 } });
+    const rejected = expect(pending).rejects.toMatchObject({ code: "STALE_ATTACHMENT" });
+    await f.host.archive({ requestId: "archive", sessionId: "one" });
+    delayed.resolve({ harness: "copilot", vendorSessionId: "native-0", payload: { stale: true } }); await rejected;
+    expect(await f.host.history({ sessionId: "one", request: { harness: "copilot", limit: 10 } })).toMatchObject({ payload: { json: { persisted: true } } });
+    expect(f.port.resume).not.toHaveBeenCalled(); expect(f.handles[0]!.readNativeHistory).not.toHaveBeenCalled();
+  });
+  it("applies native uncertainty immediately when image presentation is blocked", async () => {
+    const delayed = deferred<import("../src/protocol.js").NativePayload>();
+    const f = await fixture({ externalize: () => delayed.promise }); await f.host.create(create("one"));
+    f.handles[0]!.emit({ kind: "native", nativeType: "image", payload: {}, ephemeral: false });
+    f.handles[0]!.emit({ kind: "lifecycle", fact: { type: "gap" } });
+    expect(f.host.list()[0]!.recoveryRequired).toBe(true);
+    f.handles[0]!.emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    expect(await f.host.execute(send("unsafe"))).toMatchObject({ state: "failed", error: { code: "INTERACTION_UNCERTAIN" } });
+    expect(f.handles[0]!.execute).not.toHaveBeenCalled();
+    delayed.resolve({ encoding: "native-json-images-v1", json: {}, images: [] }); await eventDrained();
+    expect(f.host.list()[0]!.recoveryRequired).toBe(true);
+  });
+  it("rejects a native gap arriving during image preparation before any native effect", async () => {
+    const prepared = deferred<HarnessCommand>(), f = await fixture({ prepareCommand: () => prepared.promise });
+    await f.host.create(create("one")); const input = send("preparing");
+    const request = f.host.execute(input); await eventDrained();
+    f.handles[0]!.emit({ kind: "lifecycle", fact: { type: "gap" } }); prepared.resolve(input.command);
+    expect(await request).toMatchObject({ state: "failed", error: { code: "INTERACTION_UNCERTAIN" } });
+    expect(f.handles[0]!.execute).not.toHaveBeenCalled();
+  });
+  it("uses metadata-only revisions and atomic compare-and-set without heartbeat churn", async () => {
+    const f = await fixture(), { root } = await rootFixture();
+    const token = root.attachHost({ descriptor: f.host.descriptor(), api: f.host, sessions: [] });
+    await root.create({ ...create("one"), hostId: "host", title: "One" });
+    const revision = root.snapshot().revision;
+    for (let i = 0; i < 10; i++) expect(root.updateHost(token, f.host.list())).toBe(true);
+    expect(root.snapshot().revision).toBe(revision); expect(root.snapshot().sessions[0]!.metadataRevision).toBe(0);
+    const results = await Promise.all([
+      root.updateMetadata({ requestId: "first-cas", sessionId: "one", expectedMetadataRevision: 0, title: "First" }),
+      root.updateMetadata({ requestId: "second-cas", sessionId: "one", expectedMetadataRevision: 0, title: "Second" }),
+    ]);
+    expect(results.map(receipt => receipt.state).sort()).toEqual(["failed", "succeeded"]);
+    expect(results.find(receipt => receipt.state === "failed")?.error?.code).toBe("METADATA_CONFLICT");
+    expect(root.snapshot().sessions[0]!.metadataRevision).toBe(1);
+    await Promise.all([
+      root.archive({ requestId: "archive", sessionId: "one" }),
+      root.updateMetadata({ requestId: "patch", sessionId: "one", metadata: { concurrent: true }, pinned: true }),
+    ]);
+    expect(root.snapshot().sessions[0]).toMatchObject({ archived: true, metadata: { concurrent: true }, pinned: true, metadataRevision: 3 });
+  });
+  it("fences browser mutations to the exact observed attachment", async () => {
+    const f = await fixture(); await f.host.create(create("one")); const attachment = f.host.list()[0]!.attachmentId;
+    await f.host.recover({ requestId: "recover", sessionId: "one", expectedAttachmentId: attachment });
+    expect(await f.host.execute({ ...send("old-browser"), expectedAttachmentId: attachment }))
+      .toMatchObject({ state: "failed", error: { code: "STALE_ATTACHMENT" } });
+    expect(f.handles[1]!.execute).not.toHaveBeenCalled();
   });
 });

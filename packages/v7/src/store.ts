@@ -1,177 +1,111 @@
-import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { canonicalProtocolRecordJson, jsonWireByteUpperBound, NATIVE_PAYLOAD_MAX_BYTES } from "@arduano/agent-multiplex-protocol";
+import { Worker } from "node:worker_threads";
 import { V7Error } from "./errors.js";
-import type { JsonValue, RequestReceipt, RequestState, SessionBinding, SessionMetadata } from "./protocol.js";
+import { canonicalJson, requestHash } from "./store-payload.js";
+import type { JsonValue, RequestReceipt, RequestState, SessionBinding, SessionMetadata, UpdateMetadataInput } from "./protocol.js";
+export { canonicalJson, requestHash };
 
-export interface V7StoreOptions { filename: string; role: "host" | "root"; instanceId: string; now?: () => Date }
-export function canonicalJson(input: unknown): string {
-  // Optional object members match their wire/SQLite omission semantics. Arrays,
-  // non-JSON objects and non-finite values remain strict.
-  const value = JSON.parse(canonicalProtocolRecordJson(input)) as JsonValue;
-  const normalize = (v: JsonValue): JsonValue => Array.isArray(v) ? v.map(normalize)
-    : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, normalize(v[k]!)])) : v;
-  // Codepoint ordering makes hashes independent of the Windows/Linux locale.
-  return JSON.stringify(normalize(value));
-}
-export function requestHash(input: unknown): string { return createHash("sha256").update(canonicalJson(input)).digest("hex"); }
-const unpack = <T>(value: unknown): T => JSON.parse(String(value)) as T;
+export interface V7StoreOptions { filename: string; role: "host" | "root"; instanceId: string; workerUrl?: URL }
+export type MetadataPatch = Pick<UpdateMetadataInput, "title" | "pinned" | "metadata" | "remove" | "expectedMetadataRevision"> & { archived?: boolean };
+interface WriterReply { id?: number; result?: unknown; error?: { code: string; message: string };
+  ready?: boolean; bindings?: SessionBinding[]; registry?: SessionMetadata[] }
 
-/** One application database, one connection, one OS-released exclusive lease.
- * No ACL probes, lock files, repair policies, persisted online state or migrations.
- * V7's clean break intentionally refuses another role/identity/schema. */
+/** One writer thread owns SQLite. Lists/catalogs read the committed memory view.
+ * No fsync, ACL operation or database lookup runs on the transport event loop. */
 export class V7Store {
-  readonly #db: DatabaseSync;
-  readonly #now: () => Date;
-  #closed = false;
   public readonly role: "host" | "root";
   public readonly instanceId: string;
+  readonly #worker: Worker;
+  readonly #ready: Promise<void>;
+  readonly #bindings = new Map<string, SessionBinding>();
+  readonly #registry = new Map<string, SessionMetadata>();
+  readonly #pending = new Map<number, { resolve: (result: unknown) => void; reject: (error: unknown) => void }>();
+  #serial = 0; #closed = false; #failure: V7Error | undefined; #closing: Promise<void> | undefined;
   public constructor(options: V7StoreOptions) {
     this.role = options.role; this.instanceId = options.instanceId;
-    this.#now = options.now ?? (() => new Date());
-    if (options.filename !== ":memory:") mkdirSync(dirname(options.filename), { recursive: true, mode: 0o700 });
-    const db = new DatabaseSync(options.filename, { timeout: 0, enableForeignKeyConstraints: true,
-      enableDoubleQuotedStringLiterals: false, allowExtension: false });
-    this.#db = db;
-    try {
-      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
-        .map(row => String(row.name));
-      const expected = ["identity", "requests", "receipt_events", this.role === "host" ? "bindings" : "registry"];
-      if (tables.length > 0 && (tables.length !== expected.length || tables.some(name => !expected.includes(name)))) {
-        throw new V7Error("STORE_SCHEMA", "Existing database is not fresh V7 role state; no import or migration was attempted");
-      }
-      db.exec("PRAGMA journal_mode=DELETE; PRAGMA locking_mode=EXCLUSIVE; PRAGMA synchronous=FULL; BEGIN EXCLUSIVE;");
-      db.exec(`CREATE TABLE IF NOT EXISTS identity (singleton INTEGER PRIMARY KEY CHECK(singleton=1), version INTEGER NOT NULL, role TEXT NOT NULL, instance_id TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS requests (request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, operation TEXT NOT NULL, payload_hash TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS receipt_events (request_id TEXT NOT NULL REFERENCES requests(request_id), ordinal INTEGER NOT NULL, state TEXT NOT NULL, result TEXT, error TEXT, at TEXT NOT NULL, PRIMARY KEY(request_id,ordinal));`);
-      db.prepare("INSERT OR IGNORE INTO identity VALUES(1,7,?,?)").run(this.role, this.instanceId);
-      const identity = db.prepare("SELECT * FROM identity WHERE singleton=1").get()!;
-      if (identity.version !== 7 || identity.role !== this.role || identity.instance_id !== this.instanceId) {
-        throw new V7Error("STORE_IDENTITY", "V7 state belongs to another schema, role or identity");
-      }
-      db.exec(this.role === "host"
-        ? "CREATE TABLE IF NOT EXISTS bindings (session_id TEXT PRIMARY KEY, vendor_session_id TEXT NOT NULL UNIQUE, value TEXT NOT NULL);"
-        : "CREATE TABLE IF NOT EXISTS registry (session_id TEXT PRIMARY KEY, host_id TEXT NOT NULL, value TEXT NOT NULL);");
-      db.exec("COMMIT");
-      // EXCLUSIVE locking_mode retains this connection's OS lock after commit.
-      // Process death releases it automatically. There is no stale-lock recovery.
-      const unfinished = db.prepare(`SELECT e.request_id,e.state FROM receipt_events e
-        JOIN (SELECT request_id,MAX(ordinal) ordinal FROM receipt_events GROUP BY request_id) last
-        USING(request_id,ordinal) WHERE e.state IN ('admitted','dispatched')`).all();
-      if (unfinished.length) this.transaction(() => { for (const request of unfinished) {
-        if (request.state === "admitted") this.transition(String(request.request_id), "failed", {
-          error: { code: "PROCESS_RESTART", message: "Process ended before dispatch; request was not replayed" },
-        });
-        if (request.state === "dispatched") this.transition(String(request.request_id), "outcomeUnknown", {
-          error: { code: "PROCESS_RESTART", message: "Process ended after dispatch; check the original native operation" },
-        });
-      } });
-    } catch (error) {
-      try { db.exec("ROLLBACK"); } catch { /* Initialization may already have committed. */ }
-      db.close();
-      if (error instanceof Error && "errcode" in error && error.errcode === 5) {
-        throw new V7Error("WRITER_LOCKED", "V7 state is already owned by another process", { cause: error });
-      }
-      throw error;
-    }
-  }
-  public now(): string { return this.#now().toISOString(); }
-  public transaction<T>(action: () => T): T {
-    this.#db.exec("BEGIN IMMEDIATE");
-    try { const result = action(); this.#db.exec("COMMIT"); return result; }
-    catch (error) { this.#db.exec("ROLLBACK"); throw error; }
-  }
-  public admit(requestId: string, sessionId: string, operation: string, payload: unknown): { receipt: RequestReceipt; fresh: boolean } {
-    if (jsonWireByteUpperBound(payload) > NATIVE_PAYLOAD_MAX_BYTES) throw new V7Error("REQUEST_TOO_LARGE", "Request exceeds the bounded native wire envelope");
-    const text = canonicalJson(payload), hash = requestHash(payload);
-    const existing = this.receipt(requestId);
-    if (existing) {
-      if (existing.sessionId !== sessionId || existing.operation !== operation || existing.payloadHash !== hash) {
-        throw new V7Error("REQUEST_CONFLICT", "Request ID already names a different immutable operation");
-      }
-      return { receipt: existing, fresh: false };
-    }
-    const at = this.now();
-    this.transaction(() => {
-      this.#db.prepare("INSERT INTO requests VALUES(?,?,?,?,?,?)").run(requestId, sessionId, operation, hash, text, at);
-      this.#db.prepare("INSERT INTO receipt_events VALUES(?,0,'admitted',NULL,NULL,?)").run(requestId, at);
+    this.#worker = new Worker(options.workerUrl ?? new URL("./store-worker.js", import.meta.url), {
+      workerData: { filename: options.filename, role: options.role, instanceId: options.instanceId },
+      // --input-type applies to eval/stdin entrypoints, never a file worker.
+      // Preserve production loaders/preloads and other inherited Node flags.
+      execArgv: process.execArgv.filter((argument, index, arguments_) => !argument.startsWith("--input-type") && arguments_[index - 1] !== "--input-type"),
     });
-    return { receipt: this.receipt(requestId)!, fresh: true };
+    let readyResolve!: () => void, readyReject!: (error: unknown) => void;
+    this.#ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+    void this.#ready.catch(() => {});
+    this.#worker.on("message", (reply: WriterReply) => {
+      if (reply.ready) {
+        if (reply.error) { this.#failure = new V7Error(reply.error.code, reply.error.message); readyReject(this.#failure); return; }
+        for (const binding of reply.bindings ?? []) this.#bindings.set(binding.sessionId, binding);
+        for (const metadata of reply.registry ?? []) this.#registry.set(metadata.sessionId, metadata);
+        readyResolve(); return;
+      }
+      const pending = reply.id === undefined ? undefined : this.#pending.get(reply.id); if (!pending) return;
+      this.#pending.delete(reply.id!);
+      if (reply.error) pending.reject(new V7Error(reply.error.code, reply.error.message)); else pending.resolve(reply.result);
+    });
+    const failed = (error: unknown) => {
+      this.#failure = new V7Error("WRITER_UNAVAILABLE", "V7 durable writer is unavailable", { cause: error });
+      readyReject(this.#failure);
+      for (const pending of this.#pending.values()) pending.reject(this.#failure); this.#pending.clear();
+    };
+    this.#worker.on("error", failed);
+    this.#worker.on("exit", code => {
+      if (!this.#closed) failed(new Error(`Writer exited (${code})`));
+      else { for (const pending of this.#pending.values()) pending.reject(new V7Error("CLOSED", "V7 store is closed")); this.#pending.clear(); }
+    });
   }
-  public receipt(requestId: string): RequestReceipt | null {
-    const row = this.#db.prepare(`SELECT r.*, e.state,e.result,e.error,e.at FROM requests r JOIN receipt_events e USING(request_id)
-      WHERE r.request_id=? ORDER BY e.ordinal DESC LIMIT 1`).get(requestId);
-    if (!row) return null;
-    return { requestId: String(row.request_id), sessionId: String(row.session_id), operation: String(row.operation),
-      payloadHash: String(row.payload_hash), state: String(row.state) as RequestState,
-      request: unpack<JsonValue>(row.payload),
-      createdAt: String(row.created_at), updatedAt: String(row.at),
-      ...(row.result === null ? {} : { result: unpack<JsonValue>(row.result) }),
-      ...(row.error === null ? {} : { error: unpack<{ code: string; message: string }>(row.error) }) };
+  public static async open(options: V7StoreOptions): Promise<V7Store> {
+    const store = new V7Store(options);
+    try { await store.ready(); return store; } catch (error) { await store.#worker.terminate(); throw error; }
   }
-  public requestPayload(requestId: string): JsonValue | null {
-    const row = this.#db.prepare("SELECT payload FROM requests WHERE request_id=?").get(requestId);
-    return row ? unpack<JsonValue>(row.payload) : null;
+  public ready(): Promise<void> { return this.#ready; }
+  public now(): string { return new Date().toISOString(); }
+  private async call<T>(method: string, ...args: unknown[]): Promise<T> {
+    const ownedArgs = structuredClone(args);
+    await this.#ready;
+    if (this.#closed || (this.#closing && method !== "close") || this.#failure) throw this.#failure ?? new V7Error("CLOSED", "V7 store is closed");
+    return new Promise<T>((resolve, reject) => {
+      const id = ++this.#serial;
+      this.#pending.set(id, { resolve: value => resolve(value as T), reject });
+      try { this.#worker.postMessage({ id, method, args: ownedArgs }); }
+      catch (error) { this.#pending.delete(id); reject(error); }
+    });
   }
-  public receipts(): RequestReceipt[] {
-    return this.#db.prepare("SELECT request_id FROM requests ORDER BY created_at,request_id").all()
-      .map(row => this.receipt(String(row.request_id))!);
+  public admit(requestId: string, sessionId: string, operation: string, payload: unknown) {
+    return this.call<{ receipt: RequestReceipt; fresh: boolean }>("admit", requestId, sessionId, operation, payload);
   }
-  public receiptEvents(requestId: string): Array<{ state: RequestState; at: string }> {
-    return this.#db.prepare("SELECT state,at FROM receipt_events WHERE request_id=? ORDER BY ordinal").all(requestId)
-      .map(row => ({ state: String(row.state) as RequestState, at: String(row.at) }));
+  public transition(requestId: string, state: RequestState, outcome: { result?: JsonValue; error?: { code: string; message: string } } = {}) {
+    return this.call<RequestReceipt>("transition", requestId, state, outcome);
   }
-  public transition(requestId: string, state: RequestState, outcome: {
-    result?: JsonValue; error?: { code: string; message: string };
-  } = {}): RequestReceipt {
-    const current = this.receipt(requestId);
-    if (!current) throw new V7Error("REQUEST_MISSING", "Request is not admitted");
-    const permitted = current.state === "admitted" ? ["dispatched", "failed"]
-      : current.state === "dispatched" ? ["succeeded", "failed", "outcomeUnknown"]
-      : current.state === "outcomeUnknown" ? ["succeeded", "failed"] : [];
-    if (!permitted.includes(state)) throw new V7Error("REQUEST_TERMINAL", "Request receipt cannot take this transition");
-    this.#db.prepare(`INSERT INTO receipt_events SELECT ?,COALESCE(MAX(ordinal),-1)+1,?,?,?,?
-      FROM receipt_events WHERE request_id=?`).run(requestId, state,
-      outcome.result === undefined ? null : canonicalJson(outcome.result),
-      outcome.error === undefined ? null : canonicalJson(outcome.error), this.now(), requestId);
-    return this.receipt(requestId)!;
+  public receipt(requestId: string) { return this.call<RequestReceipt | null>("receipt", requestId); }
+  public receipts() { return this.call<RequestReceipt[]>("receipts"); }
+  public receiptEvents(requestId: string) { return this.call<Array<{ state: RequestState; at: string }>>("receiptEvents", requestId); }
+  public requestPayload(requestId: string) { return this.call<JsonValue | null>("requestPayload", requestId); }
+  public binding(sessionId: string): SessionBinding | null { return structuredClone(this.#bindings.get(sessionId) ?? null); }
+  public bindings(): SessionBinding[] { return [...this.#bindings.values()].map(v => structuredClone(v)).sort((a, b) => a.sessionId.localeCompare(b.sessionId)); }
+  public async putBinding(binding: SessionBinding): Promise<void> {
+    const committed = structuredClone(binding);
+    await this.call("putBinding", committed); this.#bindings.set(committed.sessionId, committed);
   }
-  public binding(sessionId: string): SessionBinding | null {
-    this.assertRole("host");
-    const row = this.#db.prepare("SELECT value FROM bindings WHERE session_id=?").get(sessionId);
-    return row ? unpack<SessionBinding>(row.value) : null;
+  public metadata(sessionId: string): SessionMetadata | null { return structuredClone(this.#registry.get(sessionId) ?? null); }
+  public registry(): SessionMetadata[] { return [...this.#registry.values()].map(v => structuredClone(v)).sort((a, b) => a.sessionId.localeCompare(b.sessionId)); }
+  public async putMetadata(metadata: SessionMetadata): Promise<void> {
+    const committed = structuredClone(metadata);
+    await this.call("putMetadata", committed); this.#registry.set(committed.sessionId, committed);
   }
-  public bindings(): SessionBinding[] {
-    this.assertRole("host"); return this.#db.prepare("SELECT value FROM bindings ORDER BY session_id").all().map(row => unpack<SessionBinding>(row.value));
+  public async reserveMetadata(metadata: SessionMetadata): Promise<SessionMetadata> {
+    const result = await this.call<SessionMetadata>("reserveMetadata", metadata); this.#registry.set(result.sessionId, structuredClone(result)); return result;
   }
-  public putBinding(binding: SessionBinding): void {
-    this.assertRole("host");
-    const previous = this.binding(binding.sessionId);
-    if (previous && (previous.hostId !== binding.hostId || previous.harness !== binding.harness ||
-      previous.vendorSessionId !== binding.vendorSessionId || previous.adapterScopeId !== binding.adapterScopeId)) {
-      throw new V7Error("BINDING_CONFLICT", "Native binding identity is immutable");
-    }
-    this.#db.prepare("INSERT INTO bindings VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET value=excluded.value")
-      .run(binding.sessionId, binding.vendorSessionId, canonicalJson(binding));
+  public async patchMetadata(sessionId: string, patch: MetadataPatch): Promise<SessionMetadata> {
+    const result = await this.call<SessionMetadata>("patchMetadata", sessionId, patch); this.#registry.set(result.sessionId, structuredClone(result)); return result;
   }
-  public metadata(sessionId: string): SessionMetadata | null {
-    this.assertRole("root"); const row = this.#db.prepare("SELECT value FROM registry WHERE session_id=?").get(sessionId);
-    return row ? unpack<SessionMetadata>(row.value) : null;
+  /** Disposable qualification only; never selected by a normal service. */
+  public delayWriterForTest(ms: number): Promise<void> { return this.call("delay", ms); }
+  public close(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    if (this.#closed) return Promise.resolve();
+    this.#closing = (async () => {
+      try { await this.call("close"); } finally { this.#closed = true; await this.#worker.terminate(); }
+    })();
+    return this.#closing;
   }
-  public registry(): SessionMetadata[] {
-    this.assertRole("root"); return this.#db.prepare("SELECT value FROM registry ORDER BY session_id").all().map(row => unpack<SessionMetadata>(row.value));
-  }
-  public putMetadata(metadata: SessionMetadata): void {
-    this.assertRole("root");
-    const previous = this.metadata(metadata.sessionId);
-    if (previous && previous.hostId !== metadata.hostId) throw new V7Error("SESSION_OWNER", "Session belongs to another Host");
-    this.#db.prepare("INSERT INTO registry VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET value=excluded.value")
-      .run(metadata.sessionId, metadata.hostId, canonicalJson(metadata));
-  }
-  private assertRole(role: "host" | "root"): void {
-    if (this.role !== role) throw new V7Error("STORE_ROLE", "Store operation belongs to another role");
-  }
-  public close(): void { if (!this.#closed) { this.#closed = true; this.#db.close(); } }
 }

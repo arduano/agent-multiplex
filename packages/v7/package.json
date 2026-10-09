@@ -13,6 +13,10 @@
     "./protocol": {
       "types": "./dist/protocol.d.ts",
       "import": "./dist/protocol.js"
+    },
+    "./store-worker": {
+      "types": "./dist/store-worker.d.ts",
+      "import": "./dist/store-worker.js"
     }
   },
   "files": [

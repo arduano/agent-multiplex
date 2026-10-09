@@ -3,6 +3,7 @@ import {
   harnessSchema, harnessSessionSettingsSchema, jsonValueSchema, sessionRuntimeStatusSchema,
   harnessCommandSchema, harnessSpawnOptionsSchema, nativeHistoryRequestSchema,
   nativeStateRequestSchema,
+  commandImageBindingSchema, IMAGE_MAX_COMMAND_IMAGES,
   type ConversationEvidence, type Harness, type HarnessCommand, type HarnessSessionSettings,
   type HarnessSpawnOptions, type JsonValue, type NativeHistoryRequest, type NativeHistoryResult,
   type NativeModel, type NativePayload, type NativeStateRequest, type NativeStateResult,
@@ -14,11 +15,13 @@ export const V7_PROTOCOL_VERSION = 7 as const;
 const id = z.string().min(1).max(4_096);
 export const requestStateSchema = z.enum(["admitted", "dispatched", "succeeded", "failed", "outcomeUnknown"]);
 export type RequestState = z.infer<typeof requestStateSchema>;
-export const requestEnvelopeSchema = z.object({ requestId: id, sessionId: id, context: jsonValueSchema.optional() }).strict();
+export const requestEnvelopeSchema = z.object({ requestId: id, sessionId: id, context: jsonValueSchema.optional(),
+  expectedAttachmentId: id.nullable().optional() }).strict();
 export type RequestEnvelope = z.infer<typeof requestEnvelopeSchema>;
 export const createSessionInputSchema = requestEnvelopeSchema.extend({ options: harnessSpawnOptionsSchema }).strict();
 export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
-export const executeInputSchema = requestEnvelopeSchema.extend({ command: harnessCommandSchema }).strict();
+export const executeInputSchema = requestEnvelopeSchema.extend({ command: harnessCommandSchema,
+  images: z.array(commandImageBindingSchema).max(IMAGE_MAX_COMMAND_IMAGES).optional() }).strict();
 export type ExecuteInput = z.infer<typeof executeInputSchema>;
 export const resolveInputSchema = requestEnvelopeSchema.extend({ interactionId: id, response: jsonValueSchema }).strict();
 export type ResolveInput = z.infer<typeof resolveInputSchema>;
@@ -27,7 +30,8 @@ export const nativeStateInputSchema = z.object({ sessionId: id, request: nativeS
 export const rootCreateInputSchema = createSessionInputSchema.extend({ hostId: id, title: z.string().min(1).max(4_096) }).strict();
 export const renameInputSchema = requestEnvelopeSchema.extend({ title: z.string().min(1).max(4_096) }).strict();
 export const updateMetadataInputSchema = requestEnvelopeSchema.extend({ pinned: z.boolean().optional(), metadata: z.record(z.string(), jsonValueSchema).optional(),
-  title: z.string().min(1).max(4_096).optional(), remove: z.array(z.string().min(1)).max(256).optional() }).strict();
+  title: z.string().min(1).max(4_096).optional(), remove: z.array(z.string().min(1)).max(256).optional(),
+  expectedMetadataRevision: z.number().int().nonnegative().optional() }).strict();
 
 export const sessionBindingSchema = z.object({
   sessionId: id, hostId: id, harness: harnessSchema, adapterScopeId: id,
@@ -49,6 +53,7 @@ export interface RequestReceipt {
 export interface SessionMetadata {
   sessionId: string; hostId: string; title: string; pinned: boolean;
   metadata: Record<string, JsonValue>; createdAt: string; archived: boolean;
+  metadataRevision: number;
 }
 export interface SessionView extends SessionMetadata {
   native: HostSession | null;
@@ -109,7 +114,7 @@ export interface HostApi {
 }
 export interface RootCreateInput extends CreateSessionInput { hostId: string; title: string }
 export interface RenameInput extends RequestEnvelope { title: string }
-export interface UpdateMetadataInput extends RequestEnvelope { pinned?: boolean; metadata?: Record<string, JsonValue>; title?: string; remove?: string[] }
+export interface UpdateMetadataInput extends RequestEnvelope { pinned?: boolean; metadata?: Record<string, JsonValue>; title?: string; remove?: string[]; expectedMetadataRevision?: number }
 export interface RootApi {
   snapshot(): RootSnapshot | Promise<RootSnapshot>;
   watch(signal?: AbortSignal): AsyncIterable<RootWatchItem>;

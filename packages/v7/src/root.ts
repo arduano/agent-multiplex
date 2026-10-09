@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { jsonValueSchema } from "@arduano/agent-multiplex-protocol";
 import { EventQueue, diagnose, type Diagnostic } from "./events.js";
 import { V7Error, errorDetails } from "./errors.js";
-import { V7Store, requestHash } from "./store.js";
+import { V7Store, requestHash, canonicalJson } from "./store.js";
 import {
   hostSessionSchema, requestEnvelopeSchema, type ExecuteInput, type HistoryInput, type HostApi, type HostDescriptor,
   type HostSession, type HostView, type JsonValue, type NativeStateInput, type RenameInput,
@@ -24,7 +24,7 @@ export class RootService implements RootApi {
   readonly #hosts = new Map<string, HostConnection>();
   readonly #knownHosts = new Map<string, HostDescriptor>();
   readonly #watchers = new Set<EventQueue<RootWatchItem>>();
-  readonly #requests = new Map<string, Promise<RequestReceipt>>();
+  readonly #requests = new Map<string, { hash: string; operation: string; promise: Promise<RequestReceipt> }>();
   readonly #bootId: string;
   #revision = 0;
   #closed = false;
@@ -56,8 +56,11 @@ export class RootService implements RootApi {
     const connection = [...this.#hosts.values()].find(host => host.token === token); if (!connection) return false;
     const next = this.acceptSessions(connection.descriptor, sessions);
     const affected = new Set([...connection.sessions.keys(), ...next.keys()]);
+    const previous = connection.sessions;
     connection.sessions = next;
-    for (const id of affected) { const metadata = this.options.store.metadata(id);
+    for (const id of affected) {
+      if (canonicalJson(previous.get(id) ?? null) === canonicalJson(next.get(id) ?? null)) continue;
+      const metadata = this.options.store.metadata(id);
       if (metadata) this.publish({ kind: "session", session: this.sessionView(metadata) }); }
     return true;
   }
@@ -83,6 +86,7 @@ export class RootService implements RootApi {
     signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) queue.close(); return queue;
   }
   public create(input: RootCreateInput): Promise<RequestReceipt> {
+    input = structuredClone(input);
     return this.request(input, "create", input, async dispatch => {
       const host = this.requireHost(input.hostId);
       const prior = this.options.store.metadata(input.sessionId);
@@ -90,42 +94,42 @@ export class RootService implements RootApi {
       if (!input.title.trim()) throw new V7Error("TITLE", "Session title must not be blank");
       // Root rename is part of creation admission. Native rename is irrelevant.
       const metadata = { sessionId: input.sessionId, hostId: input.hostId, title: input.title,
-        pinned: false, metadata: {}, createdAt: this.options.store.now(), archived: false };
-      this.options.store.putMetadata(metadata);
+        pinned: false, metadata: {}, createdAt: this.options.store.now(), archived: false, metadataRevision: 0 };
+      await this.options.store.reserveMetadata(metadata);
       this.publish({ kind: "session", session: this.sessionView(metadata) });
       const nativeInput = { requestId: input.requestId, sessionId: input.sessionId, options: input.options,
-        ...(input.context === undefined ? {} : { context: input.context }) };
-      dispatch(); const receipt = await host.api.create(nativeInput);
+        ...(input.context === undefined ? {} : { context: input.context }),
+        ...(input.expectedAttachmentId === undefined ? {} : { expectedAttachmentId: input.expectedAttachmentId }) };
+      await dispatch(); this.assertDispatchCurrent(host); const receipt = await host.api.create(nativeInput);
       this.assertCurrent(host); this.verifyReceipt(nativeInput, "create", receipt); await this.refreshHost(host); return this.remoteOutcome(receipt);
     });
   }
   public rename(input: RenameInput): Promise<RequestReceipt> {
+    input = structuredClone(input);
     return this.request(input, "rename", input, async dispatch => {
       if (!input.title.trim()) throw new V7Error("TITLE", "Session title must not be blank");
-      const metadata = { ...this.requireMetadata(input.sessionId), title: input.title };
-      dispatch(); this.options.store.putMetadata(metadata); this.publish({ kind: "session", session: this.sessionView(metadata) });
+      this.requireMetadata(input.sessionId);
+      await dispatch(); const metadata = await this.options.store.patchMetadata(input.sessionId, { title: input.title }); this.publish({ kind: "session", session: this.sessionView(metadata) });
       return jsonValueSchema.parse(metadata);
     });
   }
   public updateMetadata(input: UpdateMetadataInput): Promise<RequestReceipt> {
+    input = structuredClone(input);
     return this.request(input, "updateMetadata", input, async dispatch => {
-      const current = this.requireMetadata(input.sessionId);
+      this.requireMetadata(input.sessionId);
       if (input.title !== undefined && !input.title.trim()) throw new V7Error("TITLE", "Session title must not be blank");
-      const values = { ...current.metadata, ...input.metadata };
-      for (const key of input.remove ?? []) delete values[key];
-      const metadata = { ...current, ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
-        ...(input.title === undefined ? {} : { title: input.title }), metadata: values };
-      dispatch(); this.options.store.putMetadata(metadata); this.publish({ kind: "session", session: this.sessionView(metadata) });
+      await dispatch(); const metadata = await this.options.store.patchMetadata(input.sessionId, input);
+      this.publish({ kind: "session", session: this.sessionView(metadata) });
       return jsonValueSchema.parse(metadata);
     });
   }
   public models(hostId: string) { return this.requireHost(hostId).api.models(); }
-  public resume(input: RequestEnvelope) { return this.forward(input, "resume", api => api.resume(input)); }
-  public stop(input: RequestEnvelope) { return this.forward(input, "stop", api => api.stop(input)); }
-  public recover(input: RequestEnvelope) { return this.forward(input, "recover", api => api.recover(input)); }
-  public archive(input: RequestEnvelope) { return this.forward(input, "archive", api => api.archive(input)); }
-  public execute(input: ExecuteInput) { return this.forward(input, "execute", api => api.execute(input)); }
-  public resolve(input: ResolveInput) { return this.forward(input, "resolve", api => api.resolve(input)); }
+  public resume(input: RequestEnvelope) { input = structuredClone(input); return this.forward(input, "resume", api => api.resume(input)); }
+  public stop(input: RequestEnvelope) { input = structuredClone(input); return this.forward(input, "stop", api => api.stop(input)); }
+  public recover(input: RequestEnvelope) { input = structuredClone(input); return this.forward(input, "recover", api => api.recover(input)); }
+  public archive(input: RequestEnvelope) { input = structuredClone(input); return this.forward(input, "archive", api => api.archive(input)); }
+  public execute(input: ExecuteInput) { input = structuredClone(input); return this.forward(input, "execute", api => api.execute(input)); }
+  public resolve(input: ResolveInput) { input = structuredClone(input); return this.forward(input, "resolve", api => api.resolve(input)); }
   public async history(input: HistoryInput) {
     const host = this.route(input.sessionId); const result = await host.api.history(input); this.assertCurrent(host); return result;
   }
@@ -141,7 +145,7 @@ export class RootService implements RootApi {
     return (async function* () { for await (const event of stream) { root.assertCurrent(host); yield event; } })();
   }
   public async receipt(requestId: string): Promise<RequestReceipt | null> {
-    const current = this.options.store.receipt(requestId);
+    const current = await this.options.store.receipt(requestId);
     if (!current || current.state !== "outcomeUnknown") return current;
     // Explicit original-ID reconciliation only. Never dispatch a native call.
     const metadata = this.options.store.metadata(current.sessionId), host = metadata && this.#hosts.get(metadata.hostId);
@@ -153,45 +157,52 @@ export class RootService implements RootApi {
         const request = current.request as Record<string, JsonValue>;
         const expected = current.operation === "create"
           ? { requestId: request.requestId, sessionId: request.sessionId, options: request.options,
-            ...(request.context === undefined ? {} : { context: request.context }) } : current.request;
+            ...(request.context === undefined ? {} : { context: request.context }),
+            ...(request.expectedAttachmentId === undefined ? {} : { expectedAttachmentId: request.expectedAttachmentId }) } : current.request;
         this.verifyReceipt(expected as RequestEnvelope, current.operation, remote);
         await this.refreshHost(host);
-        if (current.operation === "archive" && remote.state === "succeeded") this.archiveMetadata(current.sessionId);
-        return this.options.store.transition(requestId, remote.state as "succeeded" | "failed", {
+        if (current.operation === "archive" && remote.state === "succeeded") await this.archiveMetadata(current.sessionId);
+        return await this.options.store.transition(requestId, remote.state as "succeeded" | "failed", {
           ...(remote.result === undefined ? {} : { result: remote.result }),
           ...(remote.error === undefined ? {} : { error: remote.error }),
         });
       }
     } catch (error) { diagnose(this.options.diagnostic, { role: "root", requestId, operation: "receipt", code: "reconciliationUnavailable", error }); }
-    return current;
+    return await this.options.store.receipt(requestId) ?? current;
   }
   private forward(input: RequestEnvelope, operation: string, action: (api: HostApi) => Promise<RequestReceipt>) {
     return this.request(input, operation, input, async dispatch => {
-      const host = this.route(input.sessionId); dispatch();
+      const host = this.route(input.sessionId); await dispatch(); this.assertDispatchCurrent(host);
       const receipt = await action(host.api); this.assertCurrent(host); this.verifyReceipt(input, operation, receipt);
       await this.refreshHost(host);
-      if (operation === "archive" && receipt.state === "succeeded") this.archiveMetadata(input.sessionId);
+      if (operation === "archive" && receipt.state === "succeeded") await this.archiveMetadata(input.sessionId);
       return this.remoteOutcome(receipt);
     });
   }
-  private request(input: RequestEnvelope, operation: string, payload: unknown,
-    action: (dispatch: () => void) => Promise<JsonValue>): Promise<RequestReceipt> {
+  private async request(input: RequestEnvelope, operation: string, payload: unknown,
+    action: (dispatch: () => Promise<void>) => Promise<JsonValue>): Promise<RequestReceipt> {
     this.assertOpen(); requestEnvelopeSchema.parse({ requestId: input.requestId, sessionId: input.sessionId });
-    const admitted = this.options.store.admit(input.requestId, input.sessionId, operation, payload);
-    if (!admitted.fresh) return this.#requests.get(input.requestId) ?? Promise.resolve(admitted.receipt);
+    const previous = this.#requests.get(input.requestId);
+    if (previous) {
+      if (previous.operation !== operation || previous.hash !== requestHash(payload)) throw new V7Error("REQUEST_CONFLICT", "Request ID already names a different immutable operation");
+      return previous.promise;
+    }
     const work = (async () => {
+      const admitted = await this.options.store.admit(input.requestId, input.sessionId, operation, payload);
+      if (!admitted.fresh) return admitted.receipt;
       let dispatched = false;
-      const dispatch = () => { if (!dispatched) { dispatched = true; this.options.store.transition(input.requestId, "dispatched"); } };
-      try { const result = await action(dispatch); if (!dispatched) dispatch();
-        return this.options.store.transition(input.requestId, "succeeded", { result }); }
+      const dispatch = async () => { if (!dispatched) { await this.options.store.transition(input.requestId, "dispatched"); dispatched = true; } };
+      try { const result = await action(dispatch); if (!dispatched) await dispatch();
+        return await this.options.store.transition(input.requestId, "succeeded", { result }); }
       catch (error) {
         const remote = error instanceof RemoteReceiptError ? error.receipt : undefined;
-        const state = remote?.state === "failed" || !dispatched ? "failed" : "outcomeUnknown";
+        const state = remote?.state === "failed" || !dispatched ||
+          (error instanceof V7Error && ["METADATA_CONFLICT", "HOST_REPLACED_BEFORE_DISPATCH"].includes(error.code)) ? "failed" : "outcomeUnknown";
         diagnose(this.options.diagnostic, { role: "root", operation, requestId: input.requestId, sessionId: input.sessionId, code: state, error });
-        return this.options.store.transition(input.requestId, state, { error: remote?.error ?? errorDetails(error) });
-      } finally { this.#requests.delete(input.requestId); }
-    })();
-    this.#requests.set(input.requestId, work); return work;
+        return await this.options.store.transition(input.requestId, state, { error: remote?.error ?? errorDetails(error) });
+      }
+    })().finally(() => { this.#requests.delete(input.requestId); });
+    this.#requests.set(input.requestId, { operation, hash: requestHash(payload), promise: work }); return work;
   }
   private remoteOutcome(receipt: RequestReceipt): JsonValue {
     if (receipt.state !== "succeeded") throw new RemoteReceiptError(receipt); return receipt.result ?? null;
@@ -202,9 +213,9 @@ export class RootService implements RootApi {
       throw new V7Error("RECEIPT_IDENTITY", "Native response names a different immutable request");
     }
   }
-  private archiveMetadata(sessionId: string): void {
-    const metadata = { ...this.requireMetadata(sessionId), archived: true };
-    this.options.store.putMetadata(metadata); this.publish({ kind: "session", session: this.sessionView(metadata) });
+  private async archiveMetadata(sessionId: string): Promise<void> {
+    const metadata = await this.options.store.patchMetadata(sessionId, { archived: true });
+    this.publish({ kind: "session", session: this.sessionView(metadata) });
   }
   private async refreshHost(host: HostConnection): Promise<void> {
     // Response to a mutation is authoritative; optional refresh failure cannot
@@ -246,6 +257,11 @@ export class RootService implements RootApi {
   private assertCurrent(host: HostConnection): void {
     if (this.#hosts.get(host.descriptor.hostId) !== host) throw new V7Error("STALE_HOST", "Response belongs to a retired Host connection");
   }
+  private assertDispatchCurrent(host: HostConnection): void {
+    if (this.#hosts.get(host.descriptor.hostId) !== host) {
+      throw new V7Error("HOST_REPLACED_BEFORE_DISPATCH", "Host connection changed before this native call was dispatched");
+    }
+  }
   private publish(value: RootDelta extends infer E ? E extends RootDelta
     ? Omit<E, "protocolVersion" | "rootId" | "bootId" | "revision"> : never : never): void {
     const delta = { ...value, protocolVersion: 7, rootId: this.options.rootId, bootId: this.#bootId, revision: ++this.#revision } as RootDelta;
@@ -253,8 +269,8 @@ export class RootService implements RootApi {
   }
   private assertOpen(): void { if (this.#closed) throw new V7Error("CLOSED", "Root is closed"); }
   public async close(): Promise<void> {
-    if (this.#closed) return; this.#closed = true; await Promise.allSettled([...this.#requests.values()]);
-    for (const queue of this.#watchers) queue.close(); this.options.store.close(); this.#hosts.clear();
+    if (this.#closed) return; this.#closed = true; await Promise.allSettled([...this.#requests.values()].map(v => v.promise));
+    for (const queue of this.#watchers) queue.close(); await this.options.store.close(); this.#hosts.clear();
   }
 }
 class RemoteReceiptError extends Error {
