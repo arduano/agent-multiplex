@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { adapterScopeIdSchema, newRuntimeEpoch,
   type HarnessCommand, type JsonValue, type NativeHistoryRequest, type NativeStateRequest,
 } from "@arduano/agent-multiplex-protocol";
+import { AdapterPreparationError, type AgentAdapter } from "@arduano/agent-multiplex-runtime-node-core";
 import {
   HostService, RootService, V7Store, NativeOperationError, nativePortForAdapter,
   type AdapterEvent, type AdapterSession, type NativePort,
@@ -145,6 +146,32 @@ describe("V7 minimal durable request ownership", () => {
 });
 
 describe("V7 independent native session coordination", () => {
+  it("keeps the adapter port thin and uses noncontinuing Copilot resume", async () => {
+    const native = new NativeFixture("original"), resume = vi.fn(async () => native);
+    const adapter: AgentAdapter = { harness: "copilot", adapterScopeId: native.adapterScopeId,
+      describe: vi.fn(async () => ({ harness: "copilot", adapterScopeId: native.adapterScopeId, available: true, capabilities: [] })),
+      listModels: vi.fn(async () => []), listSessions: vi.fn(async () => []), spawn: vi.fn(async () => native), resume, close: vi.fn(async () => {}) };
+    const port = nativePortForAdapter(adapter);
+    await port.resume({ sessionId: "logical", hostId: "host", harness: "copilot", adapterScopeId: "fixture", vendorSessionId: "original",
+      cwd: null, createdAt: "fixture", archived: false });
+    expect(resume).toHaveBeenCalledExactlyOnceWith({ harness: "copilot", vendorSessionId: "original", continuePendingWork: false });
+    expect(adapter.listSessions).not.toHaveBeenCalled(); expect(adapter.listModels).not.toHaveBeenCalled();
+    resume.mockRejectedValueOnce(new AdapterPreparationError("Preparation refused before native dispatch"));
+    await expect(port.resume({ sessionId: "logical", hostId: "host", harness: "copilot", adapterScopeId: "fixture", vendorSessionId: "original",
+      cwd: null, createdAt: "fixture", archived: false })).rejects.toMatchObject({ certainty: "failed" });
+  });
+  it("bounds a blocked event lane by bytes while peer native streams continue", async () => {
+    const wait = deferred<import("../src/protocol.js").NativePayload>();
+    const f = fixture({ pendingEventBytes: 1024, externalize: async (binding, payload) => binding.sessionId === "blocked"
+      ? wait.promise : { encoding: "native-json-images-v1", json: payload, images: [] } });
+    await f.host.create(create("blocked")); await f.host.create(create("peer"));
+    for (let i = 0; i < 12; i++) f.handles[0]!.emit({ kind: "native", nativeType: "chunk", payload: { text: "x".repeat(300) }, ephemeral: true });
+    f.handles[1]!.emit({ kind: "native", nativeType: "chunk", payload: { text: "peer" }, ephemeral: true });
+    await eventDrained(); expect(f.host.list().find(s => s.sessionId === "blocked")?.recoveryRequired).toBe(true);
+    expect(f.host.list().find(s => s.sessionId === "peer")?.recoveryRequired).toBe(false);
+    expect(await f.host.execute(send("peer", "peer"))).toMatchObject({ state: "succeeded" });
+    wait.resolve({ encoding: "native-json-images-v1", json: {}, images: [] }); await eventDrained();
+  });
   it("explicit Resume replaces a natively stopped handle after proving local cleanup", async () => {
     const f = fixture(); await f.host.create(create("one"));
     f.handles[0]!.status.mockReturnValue("stopped" as "idle");

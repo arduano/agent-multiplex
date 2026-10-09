@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  jsonValueSchema, nativePayloadSchema, type NativePayload,
+  jsonValueSchema, jsonWireByteUpperBound, nativePayloadSchema, type NativePayload,
 } from "@arduano/agent-multiplex-protocol";
 import type { NativePort, AdapterEvent, AdapterSession } from "./native-port.js";
 import { EventQueue, diagnose, type Diagnostic } from "./events.js";
@@ -17,16 +17,18 @@ import {
 export interface HostServiceOptions {
   store: V7Store; hostId: string; name: string; native: NativePort;
   bootId?: string; eventBufferSize?: number; subscriberBufferSize?: number; pendingEventLimit?: number;
+  eventBufferBytes?: number; pendingEventBytes?: number;
   externalize?: (binding: SessionBinding, payload: JsonValue) => Promise<NativePayload>;
   diagnostic?: (event: Diagnostic) => void;
 }
 interface Attachment {
   id: string; native: AdapterSession; unsubscribe: () => void; pending: number;
+  pendingBytes: number;
   tail: Promise<void>; recoveryRequired: boolean;
   eventGap: boolean;
   interactions: Map<string, { wire: NativeInteraction; resolve: (response: JsonValue) => Promise<void> }>;
 }
-interface Ring { sequence: number; events: SessionEvent[] }
+interface Ring { sequence: number; events: SessionEvent[]; bytes: number }
 
 /** One coordinator per attached native session. No global lifecycle reducer,
  * persistent native observations, prompt queue or startup attachment job. */
@@ -41,6 +43,8 @@ export class HostService implements HostApi {
   readonly #ringSize: number;
   readonly #subscriberSize: number;
   readonly #pendingLimit: number;
+  readonly #ringBytes: number;
+  readonly #pendingBytes: number;
   #closed = false;
   public constructor(private readonly options: HostServiceOptions) {
     if (options.store.role !== "host" || options.store.instanceId !== options.hostId) throw new V7Error("STORE_ROLE", "Host needs its own V7 store");
@@ -49,7 +53,9 @@ export class HostService implements HostApi {
     this.#ringSize = options.eventBufferSize ?? 256;
     this.#subscriberSize = options.subscriberBufferSize ?? 512;
     this.#pendingLimit = options.pendingEventLimit ?? 256;
-    for (const size of [this.#ringSize, this.#subscriberSize, this.#pendingLimit]) {
+    this.#ringBytes = options.eventBufferBytes ?? 8 * 1024 * 1024;
+    this.#pendingBytes = options.pendingEventBytes ?? 32 * 1024 * 1024;
+    for (const size of [this.#ringSize, this.#subscriberSize, this.#pendingLimit, this.#ringBytes, this.#pendingBytes]) {
       if (!Number.isSafeInteger(size) || size < 1) throw new RangeError("Event limits must be positive integers");
     }
   }
@@ -166,7 +172,8 @@ export class HostService implements HostApi {
     const watchers = this.#watchers.get(input.sessionId) ?? new Set<EventQueue<SessionEvent>>();
     this.#watchers.set(input.sessionId, watchers);
     const abort = () => queue.close();
-    const queue = new EventQueue<SessionEvent>(this.#subscriberSize, () => { watchers.delete(queue); input.signal?.removeEventListener("abort", abort); });
+    const queue = new EventQueue<SessionEvent>(this.#subscriberSize, () => { watchers.delete(queue); input.signal?.removeEventListener("abort", abort); },
+      this.#ringBytes, jsonWireByteUpperBound);
     watchers.add(queue);
     const ring = this.ring(input.sessionId), active = this.#active.get(input.sessionId);
     if (input.afterSequence !== undefined) {
@@ -215,26 +222,33 @@ export class HostService implements HostApi {
     if (native.harness !== this.options.native.harness || native.adapterScopeId !== this.options.native.adapterScopeId ||
       native.vendorSessionId !== binding.vendorSessionId) throw new NativeOperationError("BINDING_CONFLICT", "Native returned a different session owner", "outcomeUnknown");
     const active: Attachment = { id: randomUUID(), native, unsubscribe: () => {}, pending: 0,
+      pendingBytes: 0,
       tail: Promise.resolve(), recoveryRequired: false, eventGap: false, interactions: new Map() };
     this.options.store.putBinding(binding); this.#active.set(binding.sessionId, active);
-    this.#rings.set(binding.sessionId, { sequence: 0, events: [] });
+    this.#rings.set(binding.sessionId, { sequence: 0, events: [], bytes: 0 });
     active.unsubscribe = native.subscribe(event => this.enqueue(binding.sessionId, active, event));
     this.publishSession(binding.sessionId);
   }
   private retire(sessionId: string, active: Attachment): void {
     this.assertCurrent(sessionId, active); active.unsubscribe(); active.interactions.clear(); this.#active.delete(sessionId);
-    this.#rings.set(sessionId, { sequence: 0, events: [] }); this.publishSession(sessionId);
+    this.#rings.set(sessionId, { sequence: 0, events: [], bytes: 0 }); this.publishSession(sessionId);
   }
   private enqueue(sessionId: string, active: Attachment, event: AdapterEvent): void {
     if (this.#active.get(sessionId) !== active) return;
-    if (active.pending >= this.#pendingLimit) { this.gap(sessionId, active, "eventOverflow", true); return; }
-    active.pending += 1;
+    let bytes: number;
+    try { bytes = event.kind === "native" || event.kind === "interaction" ? jsonWireByteUpperBound(event.payload) : 512; }
+    catch (error) { this.gap(sessionId, active, "nativeEventRejected", true);
+      diagnose(this.options.diagnostic, { role: "host", sessionId, operation: "event", code: "nativeEventRejected", error }); return; }
+    if (active.pending >= this.#pendingLimit || active.pendingBytes + bytes > this.#pendingBytes) {
+      this.gap(sessionId, active, "eventOverflow", true); return;
+    }
+    active.pending += 1; active.pendingBytes += bytes;
     active.tail = active.tail.then(async () => {
       if (this.#active.get(sessionId) !== active) return;
       try { await this.onNativeEvent(sessionId, active, event); }
       catch (error) { this.gap(sessionId, active, "nativeEventRejected", true);
         diagnose(this.options.diagnostic, { role: "host", sessionId, operation: "event", code: "nativeEventRejected", error }); }
-    }).finally(() => { active.pending -= 1; });
+    }).finally(() => { active.pending -= 1; active.pendingBytes -= bytes; });
   }
   private async onNativeEvent(sessionId: string, active: Attachment, event: AdapterEvent): Promise<void> {
     const binding = this.requireBinding(sessionId);
@@ -294,14 +308,17 @@ export class HostService implements HostApi {
     const session = this.view(binding); this.emit({ kind: "session", session }); this.publish(sessionId, { kind: "session", session });
   }
   private ring(sessionId: string): Ring {
-    const ring = this.#rings.get(sessionId) ?? { sequence: 0, events: [] }; this.#rings.set(sessionId, ring); return ring;
+    const ring = this.#rings.get(sessionId) ?? { sequence: 0, events: [], bytes: 0 }; this.#rings.set(sessionId, ring); return ring;
   }
   private publish(sessionId: string, payload: SessionEvent extends infer E ? E extends SessionEvent
     ? Omit<E, "protocolVersion" | "sessionId" | "attachmentId" | "sequence"> : never : never): void {
     const ring = this.ring(sessionId);
     const event = { ...payload, protocolVersion: 7, sessionId, attachmentId: this.#active.get(sessionId)?.id ?? null,
       sequence: ++ring.sequence } as SessionEvent;
-    ring.events.push(event); if (ring.events.length > this.#ringSize) ring.events.shift();
+    ring.events.push(event); ring.bytes += jsonWireByteUpperBound(event);
+    while (ring.events.length > this.#ringSize || ring.bytes > this.#ringBytes) {
+      const retired = ring.events.shift(); if (retired) ring.bytes -= jsonWireByteUpperBound(retired); else break;
+    }
     for (const queue of this.#watchers.get(sessionId) ?? []) queue.push(event);
     this.emit({ kind: "event", event });
   }

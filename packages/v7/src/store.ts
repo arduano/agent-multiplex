@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { jsonValueSchema } from "@arduano/agent-multiplex-protocol";
+import { jsonValueSchema, jsonWireByteUpperBound, NATIVE_PAYLOAD_MAX_BYTES } from "@arduano/agent-multiplex-protocol";
 import { V7Error } from "./errors.js";
 import type { JsonValue, RequestReceipt, RequestState, SessionBinding, SessionMetadata } from "./protocol.js";
 
@@ -54,11 +54,14 @@ export class V7Store {
       db.exec("COMMIT");
       // EXCLUSIVE locking_mode retains this connection's OS lock after commit.
       // Process death releases it automatically. There is no stale-lock recovery.
-      for (const request of this.receipts()) {
-        if (request.state === "admitted") this.transition(request.requestId, "failed", {
+      const unfinished = db.prepare(`SELECT e.request_id,e.state FROM receipt_events e
+        JOIN (SELECT request_id,MAX(ordinal) ordinal FROM receipt_events GROUP BY request_id) last
+        USING(request_id,ordinal) WHERE e.state IN ('admitted','dispatched')`).all();
+      for (const request of unfinished) {
+        if (request.state === "admitted") this.transition(String(request.request_id), "failed", {
           error: { code: "PROCESS_RESTART", message: "Process ended before dispatch; request was not replayed" },
         });
-        if (request.state === "dispatched") this.transition(request.requestId, "outcomeUnknown", {
+        if (request.state === "dispatched") this.transition(String(request.request_id), "outcomeUnknown", {
           error: { code: "PROCESS_RESTART", message: "Process ended after dispatch; check the original native operation" },
         });
       }
@@ -78,6 +81,7 @@ export class V7Store {
     catch (error) { this.#db.exec("ROLLBACK"); throw error; }
   }
   public admit(requestId: string, sessionId: string, operation: string, payload: unknown): { receipt: RequestReceipt; fresh: boolean } {
+    if (jsonWireByteUpperBound(payload) > NATIVE_PAYLOAD_MAX_BYTES) throw new V7Error("REQUEST_TOO_LARGE", "Request exceeds the bounded native wire envelope");
     const text = canonicalJson(payload), hash = requestHash(payload);
     const existing = this.receipt(requestId);
     if (existing) {

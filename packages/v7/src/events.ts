@@ -2,28 +2,34 @@ import { V7Error } from "./errors.js";
 
 /** A subscriber's own bound; overflow never blocks a publisher or its peers. */
 export class EventQueue<T> implements AsyncIterableIterator<T> {
-  readonly #values: T[] = [];
+  readonly #values: Array<{ value: T; bytes: number }> = [];
+  #bytes = 0;
   readonly #waiting: Array<{ resolve: (v: IteratorResult<T>) => void; reject: (error: unknown) => void }> = [];
   #closed = false;
   #failure: unknown;
-  public constructor(private readonly capacity: number, private readonly cleanup: () => void) {}
+  public constructor(private readonly capacity: number, private readonly cleanup: () => void,
+    private readonly byteLimit = Infinity, private readonly measure: (value: T) => number = () => 1) {}
   public push(value: T): void {
     if (this.#closed) return;
     const waiter = this.#waiting.shift();
     if (waiter) waiter.resolve({ value, done: false });
-    else if (this.#values.length >= this.capacity) this.close(new V7Error("OBSERVER_OVERFLOW", "Observer must obtain a fresh snapshot"));
-    else this.#values.push(value);
+    else {
+      const bytes = this.measure(value);
+      if (this.#values.length >= this.capacity || this.#bytes + bytes > this.byteLimit) {
+        this.close(new V7Error("OBSERVER_OVERFLOW", "Observer must obtain a fresh snapshot"));
+      } else { this.#values.push({ value, bytes }); this.#bytes += bytes; }
+    }
   }
   public close(error?: unknown): void {
     if (this.#closed) return;
-    this.#closed = true; this.#failure = error; this.#values.length = 0; this.cleanup();
+    this.#closed = true; this.#failure = error; this.#values.length = 0; this.#bytes = 0; this.cleanup();
     for (const waiter of this.#waiting.splice(0)) {
       if (error === undefined) waiter.resolve({ value: undefined, done: true }); else waiter.reject(error);
     }
   }
   public async next(): Promise<IteratorResult<T>> {
-    const value = this.#values.shift();
-    if (value !== undefined) return { value, done: false };
+    const item = this.#values.shift();
+    if (item !== undefined) { this.#bytes -= item.bytes; return { value: item.value, done: false }; }
     if (this.#closed) { if (this.#failure !== undefined) throw this.#failure; return { value: undefined, done: true }; }
     return new Promise((resolve, reject) => this.#waiting.push({ resolve, reject }));
   }
