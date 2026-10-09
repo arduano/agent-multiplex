@@ -137,6 +137,33 @@ describe("V7 minimal durable request ownership", () => {
     expect(f.handles[0]!.listeners.size).toBe(0); expect(closeStore).toHaveBeenCalledOnce();
     await expect(f.store.receipt("create-one")).rejects.toMatchObject({ code: "CLOSED" });
   });
+  it("closes the native owner to settle an in-flight command before draining receipts", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    const response = deferred<JsonValue>(); f.handles[0]!.execute.mockImplementationOnce(() => response.promise);
+    vi.mocked(f.port.close).mockImplementationOnce(async () => { response.reject(new Error("Native owner closed")); });
+    const request = f.host.execute(send("pending-at-close"));
+    await vi.waitFor(() => expect(f.handles[0]!.execute).toHaveBeenCalledOnce());
+    await f.host.close();
+    expect(f.port.close).toHaveBeenCalledOnce();
+    expect(await request).toMatchObject({ state: "outcomeUnknown", error: { message: "Native owner closed" } });
+  });
+  it("rejects a mutation waiting for durability when Host shutdown begins without dispatching native work", async () => {
+    const f = await fixture(); await f.host.create(create("one"));
+    const writer = f.store.delayWriterForTest(100), request = f.host.execute(send("waiting-at-close"));
+    await f.host.close(); await writer;
+    expect(await request).toMatchObject({ state: "failed", error: { code: "CLOSED" } });
+    expect(f.handles[0]!.execute).not.toHaveBeenCalled(); expect(f.port.close).toHaveBeenCalledOnce();
+  });
+  it("releases a native handle returned after shutdown without installing or replaying it", async () => {
+    const f = await fixture(), returned = deferred<AdapterSession>(), native = new NativeFixture("late-native");
+    vi.mocked(f.port.create).mockImplementationOnce(() => returned.promise);
+    vi.mocked(f.port.close).mockImplementationOnce(async () => { returned.resolve(native); });
+    const request = f.host.create(create("late"));
+    await vi.waitFor(() => expect(f.port.create).toHaveBeenCalledOnce()); await f.host.close();
+    expect(await request).toMatchObject({ state: "outcomeUnknown" });
+    expect(native.stop).toHaveBeenCalledOnce(); expect(native.listeners.size).toBe(0);
+    expect(f.host.list()).toEqual([]); expect(f.port.create).toHaveBeenCalledOnce();
+  });
   it("never runs a durable Host prompt queue; queue indicators come from native state", async () => {
     const f = await fixture(); await f.host.create(create("one"));
     await f.host.execute(send("sent"));

@@ -14,6 +14,7 @@ export interface NativePort {
   models(): Promise<NativeModel[]>;
   history?(binding: SessionBinding, request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult>;
   release?(binding: SessionBinding): Promise<void>;
+  /** Release native ownership and settle outstanding calls to that owner. */
   close(): Promise<void>;
 }
 function normalize(error: unknown): never {

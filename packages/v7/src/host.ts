@@ -247,9 +247,15 @@ export class HostService implements HostApi {
           throw new NativeOperationError("STALE_ATTACHMENT", "Request targets a retired native attachment", "failed");
         }
       };
-      const dispatch = async () => { if (!dispatched) {
-        checkAttachment(); await this.options.store.transition(input.requestId, "dispatched"); dispatched = true; checkAttachment();
-      } };
+      const checkDispatch = () => {
+        if (this.#closed) throw new NativeOperationError("CLOSED", "Host closed before this native call was dispatched", "failed");
+        checkAttachment();
+      };
+      const dispatch = async () => {
+        checkDispatch();
+        if (!dispatched) { await this.options.store.transition(input.requestId, "dispatched"); dispatched = true; }
+        checkDispatch();
+      };
       try {
         checkAttachment();
         const result = await action(dispatch);
@@ -273,7 +279,8 @@ export class HostService implements HostApi {
       pendingBytes: 0,
       tail: Promise.resolve(), recoveryRequired: false, eventGap: false, interactions: new Map() };
     try {
-      await this.options.store.putBinding(binding); this.#active.set(binding.sessionId, active);
+      this.assertOpen(); await this.options.store.putBinding(binding); this.assertOpen();
+      this.#active.set(binding.sessionId, active);
       this.#rings.set(binding.sessionId, { sequence: 0, events: [], bytes: 0 });
       active.unsubscribe = native.subscribe(event => this.enqueue(binding.sessionId, active, event));
       this.publishSession(binding.sessionId);
@@ -415,9 +422,11 @@ export class HostService implements HostApi {
   private assertOpen(): void { if (this.#closed) throw new V7Error("CLOSED", "Host is closed"); }
   public async close(): Promise<void> {
     if (this.#closed) return; this.#closed = true;
-    await Promise.allSettled([...this.#requests.values()].map(v => v.promise));
     const failures: unknown[] = [];
     try { await this.options.native.close(); } catch (error) { failures.push(error); }
+    // Native shutdown settles its outstanding requests. Waiting for those
+    // requests before closing their owner would wait on our own cancellation.
+    await Promise.allSettled([...this.#requests.values()].map(v => v.promise));
     for (const active of this.#active.values()) {
       try { active.unsubscribe(); } catch (error) { failures.push(error); }
     }

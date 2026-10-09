@@ -37,6 +37,9 @@ The Host releases a returned controller if storing or subscribing its binding
 fails; that cleanup never certifies that native creation did not happen. A failed
 native shutdown still closes local observers and the application database, then
 reports the cleanup failure.
+Shutdown closes the native owner before draining its outstanding request
+receipts. Mutations awaiting durability cannot dispatch after shutdown begins;
+a late returned native handle is released without attachment or replay.
 Native queue views use nativeState. An unknown request is never a queued prompt.
 Stopped and archived history uses the optional detached native read hook without
 Resume. Image-bearing execute retains descriptor references in the receipt and
