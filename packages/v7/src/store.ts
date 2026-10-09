@@ -10,7 +10,11 @@ export interface V7StoreOptions { filename: string; role: "host" | "root"; insta
 export function canonicalJson(input: unknown): string {
   // Optional object members match their wire/SQLite omission semantics. Arrays,
   // non-JSON objects and non-finite values remain strict.
-  return canonicalProtocolRecordJson(input);
+  const value = JSON.parse(canonicalProtocolRecordJson(input)) as JsonValue;
+  const normalize = (v: JsonValue): JsonValue => Array.isArray(v) ? v.map(normalize)
+    : v !== null && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map(k => [k, normalize(v[k]!)])) : v;
+  // Codepoint ordering makes hashes independent of the Windows/Linux locale.
+  return JSON.stringify(normalize(value));
 }
 export function requestHash(input: unknown): string { return createHash("sha256").update(canonicalJson(input)).digest("hex"); }
 const unpack = <T>(value: unknown): T => JSON.parse(String(value)) as T;
