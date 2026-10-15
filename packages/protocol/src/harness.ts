@@ -134,6 +134,8 @@ export const nativeStateRequestSchema = z.discriminatedUnion("harness", [
   ]),
   z.discriminatedUnion("view", [
     z.object({ harness: z.literal("codex"), view: z.literal("goal") }).strict(),
+    /** Tiny native control observation; no transcript materialization. */
+    z.object({ harness: z.literal("codex"), view: z.literal("input") }).strict(),
     z.object({ harness: z.literal("codex"), view: z.literal("messageDeliveries") }).strict(),
   ]),
 ]);

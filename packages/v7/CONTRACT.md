@@ -35,10 +35,13 @@ the binding archived. Native app servers own queue, histories, tasks and reverse
 interaction callbacks; execute passes supported commands directly to that owner.
 The Host releases a returned controller if storing or subscribing its binding
 fails; that cleanup never certifies that native creation did not happen. A failed
-native shutdown still closes local observers and the application database, then
-reports the cleanup failure.
-Shutdown closes the native owner before draining its outstanding request
-receipts. Mutations awaiting durability cannot dispatch after shutdown begins;
+native shutdown still closes local observers and reports the cleanup failure.
+The writer closes only when no outstanding receipt owner can still write; a
+failed native cleanup with pending owners retains it and reports
+`CLEANUP_UNPROVED`. Shutdown has a bounded caller observation, but its exact
+cleanup owner survives a `CLEANUP_PENDING` deadline. A late acknowledged native
+shutdown drains actual operation completions before the application writer.
+Mutations awaiting durability cannot dispatch after shutdown begins;
 a late returned native handle is released without attachment or replay.
 Native queue views use nativeState. An unknown request is never a queued prompt.
 Stopped and archived history uses the optional detached native read hook without
@@ -66,6 +69,69 @@ in memory and disappear on restart/disconnect. `attachHost({descriptor, api,
 sessions})` supplies one complete Host snapshot and returns a connection token;
 `updateHost(token,sessions)` and `detachHost(token)` ignore obsolete connections.
 Transport authenticates Host identity and private relay policy before attachment.
+
+## Input acknowledgement and control ownership
+
+Host acknowledgement observation defaults to 15 seconds; Root forwarding to
+20 seconds, original-ID receipt observation to 5 seconds and Host/Root cleanup
+observation to 5 seconds. Injectable positive bounds qualify deterministic
+fixtures. These bounds do not promise storage latency or cancel native work.
+After dispatch, elapsed observation yields `outcomeUnknown` and retains the
+native operation/its late settlement. A normal mutation lane stays owned until
+the actual operation settles, including a typed adapter pending promise.
+Before dispatch, expiry fences late preparation and a delayed dispatch-record
+acknowledgement so neither can execute later. Every later lifecycle step is
+fenced again; an operation may advance its fence only across its own attachment
+retirement. An earlier native effect keeps the overall outcome uncertain if a
+later stage expires or is rejected.
+Only explicit adapter `AdapterInputNotSubmittedError` proof becomes definite
+failure; generic native/transport failures retain uncertainty.
+
+An exact current attachment plus explicit valid Codex turn ID admits urgent
+Interrupt through a separately serialized control lane. Exact attached
+interaction capabilities may reply through that lane. Unfenced controls remain
+ordinary mutations; stale attachments fail before dispatch. Explicit Stop or
+Recover may retire an expired owned attachment, but reattachment keeps a
+separate pending-operation guard until the original owner settles. Old callbacks
+and late acknowledgements cannot mutate the replacement attachment. Codex
+requires an explicit positive interaction hydration baseline; idle appearance or
+an empty callback list cannot erase uncertainty. Native input capabilities are
+static adapter opt-ins and are advertised without starting/describing a model.
+The original request ID passes to execute out of band for native queue identity;
+it does not rewrite the user's immutable command or opaque context.
+
+Root `rejectExecute(input,reason)` is an optional advertised additive contract,
+`request.reject.execute/v1`. It admits a failed `execute` under the original
+canonical input and fixed reason without any Host/native dispatch. Existing
+requests win and are never overwritten. Its read-only observation of a Gateway-
+enriched unqualified steer requires identical validated/fingerprinted public
+contexts and permits only the captured private steer turn/attachment difference;
+ordinary execute deduplication still requires the full immutable private hash.
+
+Root original-ID reconciliation queries terminal Host receipts for both
+`dispatched` and `outcomeUnknown`. Reads coalesce by identity and retain bounded
+underlying ownership after caller expiry, with at most 64 owners by default.
+Matched session/operation/hash and current Host ownership are required; lookup
+never dispatches a command. Forwarding, late ACK and receipt lookup settlements
+serialize monotonically so a terminal receipt cannot regress.
+Root shutdown retains forward, receipt-read and settlement ownership until all
+possible late durable writes finish, even when their callers already timed out.
+Ordinary forwards use at most 64 retained owners by default. A separate finite
+reservation of eight urgent controls admits exact-attachment explicit-turn
+Interrupt, Stop/Recover and exact interaction replies when ordinary ownership
+is saturated. Reservations occur before durable dispatch, so concurrent
+admissions cannot overrun either bound. The Host still validates actual turn,
+attachment and callback ownership; unfenced controls consume ordinary slots.
+
+Interaction/lifecycle ingress reserves a bounded lane independent of blocked
+presentation payload externalization. Only explicitly adapter-annotated
+structurally proven presentation events may lose display continuity without
+latching the native interaction guard, including pure final assistant material.
+Missing annotations, unknown or authoritative events, delivery-bearing completed
+items, actual interaction loss and continuity gaps stay strict. A
+presentation gap remains visible for resynchronization and is not silently hidden.
+Diagnostics may include fixed phase/reason and numeric duration keyed by
+request/session/boot; they never need prompt/provider/path data.
 
 Root watch starts with a complete RootSnapshot followed by strictly increasing
 RootDelta revisions in the same Root boot. A slow observer is terminated and

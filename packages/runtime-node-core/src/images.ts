@@ -359,14 +359,19 @@ function identifyPathPreview(path: string, bytes: Buffer): PreviewMediaType {
     if (!(error instanceof RuntimeImageError) || error.code !== "UNSUPPORTED") throw error;
   }
   if (bytes.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
-  if (!textPreviewExtensions.has(extname(path).toLowerCase()) &&
-      !["dockerfile", "makefile", "license", "readme", ".gitignore", ".env.example"].includes((path.split(/[\\/]/).at(-1) ?? "").toLowerCase())) {
-    throw new RuntimeImageError("UNSUPPORTED", "file type has no read-only preview");
-  }
+  // Retain the existing treatment of known text (including ANSI log output).
+  // Unknown extensions and extensionless files are admitted by their bytes,
+  // with stricter control-character checks so binary data is not guessed text.
+  const knownText = textPreviewExtensions.has(extname(path).toLowerCase()) ||
+    ["dockerfile", "makefile", "license", "readme", ".gitignore", ".env.example"].includes((path.split(/[\\/]/).at(-1) ?? "").toLowerCase());
   if (bytes.length > 2 * 1_024 * 1_024) throw new RuntimeImageError("RESOURCE_EXHAUSTED", "text preview exceeds 2 MiB");
   if (bytes.includes(0)) throw new RuntimeImageError("UNSUPPORTED", "binary file has no text preview");
-  try { new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  let text: string;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
   catch { throw new RuntimeImageError("UNSUPPORTED", "text preview is not valid UTF-8"); }
+  if (!knownText && /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(text)) {
+    throw new RuntimeImageError("UNSUPPORTED", "binary control characters have no text preview");
+  }
   return "text/plain; charset=utf-8";
 }
 

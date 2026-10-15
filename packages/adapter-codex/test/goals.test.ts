@@ -150,7 +150,7 @@ describe("Codex durable native goal commands", () => {
     for (const patch of [{ objective: "New objective" }, { objective: "Edited objective" },
       { status: "paused" as const }, { status: "active" as const }, { tokenBudget: 100_000 }, { tokenBudget: null }]) {
       expect(await f.session.execute({ harness: "codex", command: { type: "setGoal", ...patch } })).toEqual({ goal: originalGoal });
-      expect(f.request).toHaveBeenLastCalledWith("thread/goal/set", { threadId: originalGoal.threadId, ...patch });
+      expect(f.request.mock.calls.at(-1)?.slice(0, 2)).toEqual(["thread/goal/set", { threadId: originalGoal.threadId, ...patch }]);
     }
     expect(f.request).toHaveBeenCalledTimes(6);
   });
@@ -160,7 +160,7 @@ describe("Codex durable native goal commands", () => {
     f.clearResult({ cleared });
     f.request.mockClear();
     expect(await f.session.execute({ harness: "codex", command: { type: "clearGoal" } })).toEqual({ cleared });
-    expect(f.request.mock.calls).toEqual([["thread/goal/clear", { threadId: originalGoal.threadId }]]);
+    expect(f.request.mock.calls.map(([method, params]) => [method, params])).toEqual([["thread/goal/clear", { threadId: originalGoal.threadId }]]);
   });
 
   it("preserves explicit native refusals and transport unknown outcomes without retries", async () => {

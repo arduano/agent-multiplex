@@ -22,6 +22,7 @@ import {
 } from "@arduano/agent-multiplex-protocol";
 import {
   AdapterOutcomeUnknownError,
+  AdapterInputNotSubmittedError,
   type AdapterEvent,
   type AdapterSession,
   type AgentAdapter,
@@ -48,12 +49,18 @@ import { codexConversationEvidence } from "./conversation.js";
 import type { UserInput } from "./generated/v2/UserInput.js";
 import {
   CodexRpcClient,
+  CodexRpcError,
+  CodexRpcPendingError,
   type CodexNotification,
   type CodexRpcClientOptions,
   type CodexServerRequest,
 } from "./rpc.js";
+import { codexInputNotSubmitted, codexObservationTimeout, observeCodexOperation, validateCodexLocalInput } from "./input.js";
+import type { ThreadQueueAddResponse } from "./generated/v2/ThreadQueueAddResponse.js";
 
 const CODEX_VERSION = "0.158.0";
+const presentationNotifications = new Set(["item/agentMessage/delta", "item/reasoning/textDelta",
+  "item/reasoning/summaryTextDelta", "item/commandExecution/outputDelta", "item/mcpToolCall/progress", "thread/tokenUsage/updated"]);
 
 const json = (value: unknown): JsonValue =>
   toJsonValue(JSON.parse(JSON.stringify(value)) as unknown);
@@ -78,7 +85,7 @@ const statusOf = (thread: Thread): SessionRuntimeStatus => {
     case "systemError":
       return "error";
     case "active":
-      return "running";
+      return Array.isArray(thread.status.activeFlags) && thread.status.activeFlags.length > 0 ? "waitingForInput" : "running";
   }
 };
 
@@ -107,6 +114,24 @@ const recordOf = (value: unknown): Record<string, JsonValue> | undefined =>
   value !== null && !Array.isArray(value) && typeof value === "object"
     ? value as Record<string, JsonValue>
     : undefined;
+
+function presentationOnly(notification: CodexNotification): boolean {
+  if (presentationNotifications.has(notification.method)) return true;
+  if (notification.method !== "item/started" && notification.method !== "item/completed") return false;
+  const params = recordOf(notification.params), item = recordOf(params?.item);
+  if (!params || !item || Object.keys(params).some(key => !["threadId", "turnId", "item"].includes(key)) ||
+      typeof item.id !== "string" || !item.id) return false;
+  if (item.type === "reasoning") return Object.keys(item).every(key => ["type", "id", "summary", "content"].includes(key)) &&
+    Array.isArray(item.summary) && item.summary.every(value => typeof value === "string") &&
+    Array.isArray(item.content) && item.content.every(value => typeof value === "string");
+  if (item.type !== "agentMessage" || typeof item.text !== "string" ||
+      Object.keys(item).some(key => !["type", "id", "text", "phase", "memoryCitation", "delivery", "questions"].includes(key))) return false;
+  // An agentMessage can carry native asynchronous questions. Those, future
+  // delivery controls and unknown fields are never presentation-only.
+  return (item.delivery === undefined || item.delivery === null) &&
+    (item.questions === undefined || item.questions === null || Array.isArray(item.questions) && item.questions.length === 0) &&
+    (item.phase === undefined || item.phase === null || item.phase === "commentary" || item.phase === "final_answer");
+}
 
 const GOAL_STATUSES = new Set<ThreadGoal["status"]>([
   "active", "paused", "blocked", "usageLimited", "budgetLimited", "complete",
@@ -197,10 +222,16 @@ export interface CodexAdapterOptions extends CodexRpcClientOptions {
   rpcClient?: CodexRpcClient;
   /** Bundle-owned native runtime cleanup, used by createCodexRuntime. */
   closeRuntime?: () => Promise<void>;
+  mutationTimeoutMs?: number;
 }
 
 export class CodexAdapter implements AgentAdapter {
   public readonly imageCodec = codexImageCodec;
+  /** Pure construction metadata; never starts an app-server. */
+  public readonly inputCapabilities: HarnessCatalogEntry["capabilities"] = [
+    { name: "codex.input.atomic", version: "v1", experimental: false },
+    { name: "codex.input.control", version: "v1", experimental: false },
+  ];
   public readonly harness = "codex" as const;
   public readonly adapterScopeId: AdapterScopeId;
   readonly #rpc: CodexRpcClient;
@@ -212,12 +243,14 @@ export class CodexAdapter implements AgentAdapter {
   readonly #unsubscribeRequest: () => void;
   readonly #unsubscribeExit: () => void;
   readonly #closeRuntime: (() => Promise<void>) | undefined;
+  readonly #mutationTimeoutMs: number;
   #closing: Promise<void> | undefined;
 
   public constructor(options: CodexAdapterOptions = {}) {
     this.adapterScopeId = adapterScopeIdSchema.parse(options.adapterScopeId ?? "codex:default");
     this.#rpc = options.rpcClient ?? new CodexRpcClient(options);
     this.#closeRuntime = options.closeRuntime;
+    this.#mutationTimeoutMs = codexObservationTimeout(options.mutationTimeoutMs);
     this.#unsubscribeNotification = this.#rpc.onNotification((event) => this.#onNotification(event));
     this.#unsubscribeRequest = this.#rpc.onServerRequest((event) => this.#onServerRequest(event));
     this.#unsubscribeExit = this.#rpc.onExit((error) => {
@@ -235,8 +268,9 @@ export class CodexAdapter implements AgentAdapter {
         adapterScopeId: this.adapterScopeId,
         available: true,
         version: CODEX_VERSION,
-        runtimeVersion: CODEX_VERSION,
+        runtimeVersion: this.#rpc.nativeVersion ?? CODEX_VERSION,
         capabilities: [
+          ...this.inputCapabilities,
           { name: "thread.start", version: "v2", experimental: false },
           { name: "thread.resume", version: "v2", experimental: false },
           { name: "thread.loaded.list", version: "v2", experimental: false },
@@ -456,7 +490,7 @@ export class CodexAdapter implements AgentAdapter {
       this.#drainEarly(thread.id, existing);
       return existing;
     }
-    const session = new CodexSession(this.#rpc, this.adapterScopeId, thread, settings, () => {
+    const session = new CodexSession(this.#rpc, this.adapterScopeId, thread, settings, this.#mutationTimeoutMs, () => {
       this.#sessions.delete(thread.id);
       for (const [childId, ownerId] of this.#childOwners) {
         if (ownerId === thread.id) this.#childOwners.delete(childId);
@@ -619,12 +653,14 @@ class CodexSession implements AdapterSession {
   /** Root turns whose completion arrived before their turn/start continuation. */
   readonly #completedTurnIds = new Set<string>();
   #closed = false;
+  #nativeInteractionBaselineComplete = false;
 
   public constructor(
     rpc: CodexRpcClient,
     public readonly adapterScopeId: AdapterScopeId,
     thread: Thread,
     settings: InitialThreadSettings | undefined,
+    readonly mutationTimeoutMs: number,
     onStop: () => void,
   ) {
     this.#rpc = rpc;
@@ -640,6 +676,7 @@ class CodexSession implements AdapterSession {
     };
     this.#onStop = onStop;
     this.#history = new CodexHistoryReader(rpc, thread.id, () => this.#assertActive(), thread.sessionId);
+    this.#observeInteractionBaseline(thread.status);
   }
 
   public get vendorSessionId(): string {
@@ -687,35 +724,89 @@ class CodexSession implements AdapterSession {
     return () => this.#state.listeners.delete(listener);
   }
 
-  public async execute(envelope: HarnessCommand): Promise<JsonValue | undefined> {
+  public execute(envelope: HarnessCommand, context?: { requestId: string }): Promise<JsonValue | undefined> {
+    const operation = this.#executeCore(envelope, context).catch(error => {
+      const type = envelope.command.type;
+      if (type === "send" || type === "steer" || type === "interrupt") throw codexInputNotSubmitted(error, type) ?? error;
+      throw error;
+    });
+    return observeCodexOperation(operation, envelope.command.type, this.mutationTimeoutMs);
+  }
+
+  async #nativeRequest<T = unknown>(method: string, params: unknown): Promise<T> {
+    try { return await this.#rpc.request<T>(method, params, { beforeDispatch: () => {
+      if (this.#closed) throw new CodexRpcError("Session retired before input dispatch", undefined, undefined, "beforeDispatch");
+    } }); }
+    catch (error) {
+      if (error instanceof CodexRpcPendingError) return await error.settlement as T;
+      throw error;
+    }
+  }
+
+  async #executeCore(envelope: HarnessCommand, context?: { requestId: string }): Promise<JsonValue | undefined> {
+    validateCodexLocalInput(envelope);
     if (envelope.harness !== "codex") throw new Error("command harness does not match Codex");
     const command = envelope.command;
+    if (this.#closed && (command.type === "send" || command.type === "steer" || command.type === "interrupt"))
+      throw new AdapterInputNotSubmittedError(command.type, "closedBeforeDispatch");
     switch (command.type) {
       case "send": {
-        const native = command.native ?? {};
+        const native = { ...command.native,
+          ...(command.native?.clientUserMessageId === undefined && context?.requestId ? { clientUserMessageId: context.requestId } : {}) };
         this.#turnStartsInFlight += 1;
         let response: TurnStartResponse;
         try {
-          response = await this.#rpc.request<TurnStartResponse>("turn/start", {
+          response = await this.#nativeRequest<TurnStartResponse>("turn/start", {
             ...native,
             threadId: this.vendorSessionId,
             input: inputsFrom(command.input),
           });
+        } catch (error) {
+          const proof = codexInputNotSubmitted(error, "send");
+          const version = this.#rpc.nativeVersion?.split(".").map(Number);
+          const queueSupported = version?.[0] === 0 && (version[1]! > 162 || version[1] === 162 && version[2]! >= 1);
+          // Only native NotSubmitted permits this SQLite-owned queue fallback.
+          if (proof?.reason !== "activeTurnNotSteerable" || !queueSupported ||
+              Object.keys(native).some(key => key !== "clientUserMessageId")) throw proof ?? error;
+          const clientId = native.clientUserMessageId;
+          if (typeof clientId !== "string" || !clientId.trim() || clientId.length > 4096) throw proof;
+          let queued: ThreadQueueAddResponse;
+          try {
+            queued = await this.#nativeRequest<ThreadQueueAddResponse>("thread/queue/add", {
+              threadId: this.vendorSessionId, input: inputsFrom(command.input), clientUserMessageId: clientId,
+            });
+          } catch (queueError) {
+            // Unsupported/unavailable native queue refuses before enqueue. Storage
+            // failures, write loss and all other errors preserve uncertainty.
+            if (queueError instanceof CodexRpcError && (queueError.code === -32601 ||
+                queueError.code === -32600 && queueError.message === "user message queue is unavailable"))
+              throw new AdapterInputNotSubmittedError("send", "activeTurnNotSteerable", undefined, { cause: queueError });
+            throw queueError;
+          }
+          if (!queued?.queuedSubmission || typeof queued.queuedSubmission.id !== "string" ||
+              !queued.queuedSubmission.id.trim() || queued.queuedSubmission.id.length > 256 ||
+              /[\u0000-\u001f\u007f]/.test(queued.queuedSubmission.id) || queued.queuedSubmission.clientUserMessageId !== clientId)
+            throw new AdapterOutcomeUnknownError("Native queued submission acknowledgement is invalid");
+          // The native queue owns the complete input. Its echo can contain
+          // base64 images; the command receipt acknowledges only exact IDs.
+          return json({ projection: "codex.input.queue-ack.v1", inputEcho: "omitted", queuedSubmission: {
+            id: queued.queuedSubmission.id, clientUserMessageId: queued.queuedSubmission.clientUserMessageId,
+          } });
         } finally {
           this.#turnStartsInFlight -= 1;
         }
-        const completedBeforeAck = this.#completedTurnIds.delete(response.turn.id);
-        if (!completedBeforeAck) this.#state.currentTurnId = response.turn.id;
+        const completedBeforeAck = this.#completedTurnIds.has(response.turn.id);
+        if (!completedBeforeAck && !this.#closed) this.#state.currentTurnId = response.turn.id;
         // A blocking reverse request can also arrive in the same stdout batch
         // as the response, so derive status from all state observed so far.
-        this.#restoreStatusAfterInput();
+        if (!this.#closed) this.#restoreStatusAfterInput();
         return json(response);
       }
       case "steer": {
-        const expectedTurnId = command.expectedTurnId ?? this.#state.currentTurnId;
-        if (!expectedTurnId) throw new Error("Codex turn/steer requires an active turn id");
+        const expectedTurnId = command.expectedTurnId ?? this.#state.currentTurnId ?? await this.#refreshActiveTurnId(true);
+        if (!expectedTurnId) throw new AdapterInputNotSubmittedError("steer", "noActiveTurn");
         const native = command.native ?? {};
-        const response = await this.#rpc.request<TurnSteerResponse>("turn/steer", {
+        const response = await this.#nativeRequest<TurnSteerResponse>("turn/steer", {
           ...native,
           threadId: this.vendorSessionId,
           input: inputsFrom(command.input),
@@ -724,10 +815,10 @@ class CodexSession implements AdapterSession {
         return json(response);
       }
       case "interrupt": {
-        const turnId = command.turnId ?? this.#state.currentTurnId;
-        if (!turnId) throw new Error("Codex turn/interrupt requires an active turn id");
+        const turnId = command.turnId ?? this.#state.currentTurnId ?? await this.#refreshActiveTurnId(true);
+        if (!turnId) throw new AdapterInputNotSubmittedError("interrupt", "noActiveTurn");
         const commandItemIds = new Set(this.#commandItemsByTurn.get(turnId) ?? []);
-        const response = await this.#rpc.request("turn/interrupt", {
+        const response = await this.#nativeRequest("turn/interrupt", {
           threadId: this.vendorSessionId,
           turnId,
         });
@@ -745,7 +836,7 @@ class CodexSession implements AdapterSession {
       }
       case "setModel": {
         const collaborationMode = this.#patchedCollaborationMode({ model: command.model });
-        const response = await this.#rpc.request("thread/settings/update", {
+        const response = await this.#nativeRequest("thread/settings/update", {
           threadId: this.vendorSessionId,
           model: command.model,
           ...(collaborationMode !== undefined ? { collaborationMode } : {}),
@@ -757,7 +848,7 @@ class CodexSession implements AdapterSession {
       }
       case "setEffort": {
         const collaborationMode = this.#patchedCollaborationMode({ effort: command.effort });
-        const response = await this.#rpc.request("thread/settings/update", {
+        const response = await this.#nativeRequest("thread/settings/update", {
           threadId: this.vendorSessionId,
           effort: command.effort,
           ...(collaborationMode !== undefined ? { collaborationMode } : {}),
@@ -769,7 +860,7 @@ class CodexSession implements AdapterSession {
       }
       case "setMode": {
         const collaborationMode = this.#collaborationMode(command.mode);
-        const response = await this.#rpc.request("thread/settings/update", {
+        const response = await this.#nativeRequest("thread/settings/update", {
           threadId: this.vendorSessionId,
           collaborationMode,
         });
@@ -780,7 +871,7 @@ class CodexSession implements AdapterSession {
       case "compact": {
         this.#assertActive();
         codexCommandSchema.parse(command);
-        const response = await this.#rpc.request<ThreadCompactStartResponse>("thread/compact/start", {
+        const response = await this.#nativeRequest<ThreadCompactStartResponse>("thread/compact/start", {
           threadId: this.vendorSessionId,
         });
         // The pinned native response acknowledges starting compaction, not its
@@ -793,7 +884,7 @@ class CodexSession implements AdapterSession {
       case "setGoal": {
         this.#assertActive();
         codexCommandSchema.parse(command);
-        const response = await this.#rpc.request<ThreadGoalSetResponse>("thread/goal/set", {
+        const response = await this.#nativeRequest<ThreadGoalSetResponse>("thread/goal/set", {
           threadId: this.vendorSessionId,
           ...(command.objective !== undefined ? { objective: command.objective } : {}),
           ...(command.status !== undefined ? { status: command.status } : {}),
@@ -810,7 +901,7 @@ class CodexSession implements AdapterSession {
       case "clearGoal": {
         this.#assertActive();
         codexCommandSchema.parse(command);
-        const response = await this.#rpc.request<ThreadGoalClearResponse>("thread/goal/clear", {
+        const response = await this.#nativeRequest<ThreadGoalClearResponse>("thread/goal/clear", {
           threadId: this.vendorSessionId,
         });
         if (this.#closed || typeof recordOf(response)?.cleared !== "boolean") {
@@ -821,7 +912,7 @@ class CodexSession implements AdapterSession {
       case "updateTurnSettings": {
         const turnId = command.turnId ?? this.#state.currentTurnId;
         if (!turnId) throw new Error("Codex turn/settings/update requires an active turn id");
-        return json(await this.#rpc.request("turn/settings/update", {
+        return json(await this.#nativeRequest("turn/settings/update", {
           threadId: this.vendorSessionId,
           turnId,
           ...(command.model ? { model: command.model } : {}),
@@ -839,7 +930,7 @@ class CodexSession implements AdapterSession {
           const response: {
             data: JsonValue[];
             nextCursor: string | null;
-          } = await this.#rpc.request("thread/backgroundTerminals/list", {
+          } = await this.#nativeRequest("thread/backgroundTerminals/list", {
             threadId: this.vendorSessionId,
             cursor,
             limit: command.limit,
@@ -850,12 +941,12 @@ class CodexSession implements AdapterSession {
         return { data: data.slice(0, command.limit), nextCursor: cursor };
       }
       case "terminateBackgroundTerminal":
-        return json(await this.#rpc.request("thread/backgroundTerminals/terminate", {
+        return json(await this.#nativeRequest("thread/backgroundTerminals/terminate", {
           threadId: this.vendorSessionId,
           processId: command.processId,
         }));
       case "cleanBackgroundTerminals":
-        return json(await this.#rpc.request("thread/backgroundTerminals/clean", {
+        return json(await this.#nativeRequest("thread/backgroundTerminals/clean", {
           threadId: this.vendorSessionId,
         }));
     }
@@ -867,7 +958,17 @@ class CodexSession implements AdapterSession {
 
   public async readNativeState(request: NativeStateRequest): Promise<AdapterNativeStateResult> {
     this.#assertActive();
-    if (request.harness !== "codex" || request.view !== "goal") throw new TypeError("Unsupported Codex native state view");
+    if (request.harness !== "codex") throw new TypeError("Unsupported Codex native state view");
+    if (request.view === "input") {
+      const turnId = this.#state.currentTurnId ?? (this.#state.status === "running" ? await this.#refreshActiveTurnId() : undefined);
+      this.#assertActive();
+      return { harness: "codex", vendorSessionId: this.vendorSessionId, payload: {
+        threadId: this.vendorSessionId, status: this.#state.status, turnId: turnId ?? null,
+        canSteer: !!turnId && this.#state.status === "running" && this.#nativeInteractionBaselineComplete &&
+          ![...this.#pendingRequests.values()].some(row => row.blocking),
+      } };
+    }
+    if (request.view !== "goal") throw new TypeError("Unsupported Codex native state view");
     const response = await this.#rpc.request<ThreadGoalGetResponse>("thread/goal/get", {
       threadId: this.vendorSessionId,
     });
@@ -919,11 +1020,13 @@ class CodexSession implements AdapterSession {
           : this.#state.currentTurnId;
       if (completedTurnId) this.#settleTurnRequests(completedTurnId);
       if (isRootThread) {
-        if (completedTurnId && this.#turnStartsInFlight > 0) {
+        if (completedTurnId) {
           this.#rememberCompletedTurn(completedTurnId);
         }
-        this.#state.currentTurnId = undefined;
-        this.#restoreStatusAfterInput();
+        if (!completedTurnId || completedTurnId === this.#state.currentTurnId) {
+          this.#state.currentTurnId = undefined;
+          this.#restoreStatusAfterInput();
+        }
       }
     } else if (
       isRootThread &&
@@ -937,8 +1040,10 @@ class CodexSession implements AdapterSession {
     ) {
       const type = params.status.type;
       if (type === "idle") this.#setStatus("idle");
-      else if (type === "active") this.#setStatus("running");
+      else if (type === "active") this.#setStatus(Array.isArray(params.status.activeFlags) && params.status.activeFlags.length > 0
+        ? "waitingForInput" : "running");
       else if (type === "systemError") this.#setStatus("error");
+      if (type !== "notLoaded") this.#observeInteractionBaseline(params.status);
       // A native thread/resume may emit `notLoaded` immediately before its
       // loaded/idle transition. Treating that transient notification as a
       // terminal Multiplex status can synchronously retire the freshly
@@ -996,6 +1101,7 @@ class CodexSession implements AdapterSession {
       nativeType: notification.method,
       payload: notification.params,
       ephemeral: isEphemeral(notification.method),
+      ...(presentationOnly(notification) ? { continuity: "presentation" as const } : {}),
       ...(conversation.items.length ? { conversation } : {}),
     });
   }
@@ -1017,6 +1123,10 @@ class CodexSession implements AdapterSession {
       ...(expiresAt ? { expiresAt } : {}),
       ...(turnId ? { turnId } : {}),
     });
+    // A newly observed reverse request invalidates an earlier empty baseline
+    // before its callback waits behind any presentation/image externalization.
+    this.#nativeInteractionBaselineComplete = false;
+    this.#emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: false } });
     if (blocking) this.#setStatus("waitingForInput");
     this.#emit({
       kind: "interaction",
@@ -1027,9 +1137,19 @@ class CodexSession implements AdapterSession {
       ...(expiresAt ? { expiresAt } : {}),
       resolve: async (response) => {
         validateInteractionResponse(request.method, response);
-        this.#pendingRequests.delete(nativeRequestId);
-        request.respond(response);
-        this.#restoreStatusAfterInput();
+        const settlement = Promise.resolve().then(async () => {
+          if (this.#closed) throw new AdapterOutcomeUnknownError("Native interaction owner was retired before reply dispatch");
+          try { await request.respond(response); }
+          catch (error) {
+            if (error instanceof CodexRpcPendingError) await error.settlement;
+            else throw error;
+          }
+        }).then(() => {
+          this.#pendingRequests.delete(nativeRequestId);
+          if (!this.#closed) this.#restoreStatusAfterInput();
+          return undefined;
+        });
+        await observeCodexOperation(settlement, "resolveInteraction", this.mutationTimeoutMs);
       },
     });
   }
@@ -1059,6 +1179,34 @@ class CodexSession implements AdapterSession {
     this.#closed = true;
     this.#pendingRequests.clear();
     this.#setStatus("stopped");
+  }
+
+  async #refreshActiveTurnId(owned = false): Promise<string | undefined> {
+    this.#assertActive();
+    const params = {
+      threadId: this.vendorSessionId, cursor: null, limit: 1, sortDirection: "desc", itemsView: "notLoaded",
+    };
+    const response = owned
+      ? await this.#nativeRequest<{ data?: Array<{ id?: string; status?: string }> }>("thread/turns/list", params)
+      : await this.#rpc.request<{ data?: Array<{ id?: string; status?: string }> }>("thread/turns/list", params);
+    this.#assertActive();
+    const turn = response.data?.length === 1 ? response.data[0] : undefined;
+    if (turn?.status !== "inProgress" || typeof turn.id !== "string" || !turn.id.trim() ||
+        turn.id.length > 256 || /[\u0000-\u001f\u007f]/.test(turn.id) || this.#completedTurnIds.has(turn.id)) return undefined;
+    if (this.#state.currentTurnId === undefined) this.#state.currentTurnId = turn.id;
+    return this.#state.currentTurnId;
+  }
+
+  #observeInteractionBaseline(status: unknown): void {
+    const native = recordOf(status);
+    // Neither an empty callback list nor an RPC ACK certifies hydration. Native
+    // idle / explicit empty flags are the positive absence evidence available
+    // from this pinned protocol; waiting or unknown flags keep recovery fenced.
+    const complete = (native?.type === "idle" || native?.type === "active" &&
+      Array.isArray(native.activeFlags) && native.activeFlags.length === 0) &&
+      this.#pendingRequests.size === 0;
+    this.#nativeInteractionBaselineComplete = complete;
+    this.#emit({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete } });
   }
 
   #assertActive(): void {

@@ -32,7 +32,7 @@ describe("Codex native compaction", () => {
     const f = await fixture();
     expect((await f.adapter.describe()).capabilities).toContainEqual({ name: "context.compact", version: "v1", experimental: false });
     expect(await f.session.execute(command)).toEqual({});
-    expect(f.request.mock.calls).toEqual([["thread/compact/start", { threadId: "compact-thread" }]]);
+    expect(f.request.mock.calls.map(([method, params]) => [method, params])).toEqual([["thread/compact/start", { threadId: "compact-thread" }]]);
     expect(f.session.status()).toBe("idle");
   });
 

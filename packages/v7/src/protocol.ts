@@ -23,6 +23,11 @@ export type CreateSessionInput = z.infer<typeof createSessionInputSchema>;
 export const executeInputSchema = requestEnvelopeSchema.extend({ command: harnessCommandSchema,
   images: z.array(commandImageBindingSchema).max(IMAGE_MAX_COMMAND_IMAGES).optional() }).strict();
 export type ExecuteInput = z.infer<typeof executeInputSchema>;
+/** Root-owned definite refusal before native dispatch; fixed reasons only. */
+export const executeRejectionReasonSchema = z.enum([
+  "CODEX_STEER_UNAVAILABLE", "TARGET_CHANGED", "INTERACTION_UNCERTAIN", "HOST_OFFLINE", "UNSUPPORTED",
+]);
+export type ExecuteRejectionReason = z.infer<typeof executeRejectionReasonSchema>;
 export const resolveInputSchema = requestEnvelopeSchema.extend({ interactionId: id, response: jsonValueSchema }).strict();
 export type ResolveInput = z.infer<typeof resolveInputSchema>;
 export const historyInputSchema = z.object({ sessionId: id, request: nativeHistoryRequestSchema }).strict();
@@ -128,6 +133,9 @@ export interface RootApi {
   recover(input: RequestEnvelope): Promise<RequestReceipt>;
   archive(input: RequestEnvelope): Promise<RequestReceipt>;
   execute(input: ExecuteInput): Promise<RequestReceipt>;
+  /** Optional so a consumer can explicitly capability-fence older Roots.
+   * This uses operation execute and its original immutable input identity. */
+  rejectExecute?(input: ExecuteInput, reason: ExecuteRejectionReason): Promise<RequestReceipt>;
   history(input: HistoryInput): Promise<NativeHistoryResult>;
   nativeState(input: NativeStateInput): Promise<NativeStateResult>;
   interactions(sessionId: string): NativeInteraction[] | Promise<NativeInteraction[]>;

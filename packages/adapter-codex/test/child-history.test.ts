@@ -1,17 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { CodexAdapter } from "../src/adapter.js";
 import type { CodexRpcConnection } from "../src/rpc.js";
+import { NATIVE_PAYLOAD_MAX_BYTES, toJsonValue } from "@arduano/agent-multiplex-protocol";
+import { codexHistoryPageBytes } from "../src/images.js";
 
 function fixture() {
   const listeners = new Set<(message: string) => void>();
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
-  const threads: Record<string, { id: string; sessionId: string; parentThreadId: string | null }> = {
-    root: { id: "root", sessionId: "tree", parentThreadId: null },
-    child: { id: "child", sessionId: "tree", parentThreadId: "root" },
-    nested: { id: "nested", sessionId: "tree", parentThreadId: "child" },
+  const threads: Record<string, { id: string; sessionId: string; parentThreadId: string | null;
+    model?: unknown; reasoningEffort?: unknown; updatedAt?: unknown; modelProvider?: unknown }> = {
+    root: { id: "root", sessionId: "tree", parentThreadId: null, model: "parent-only", modelProvider: "provider-only" },
+    child: { id: "child", sessionId: "tree", parentThreadId: "root", model: "child-configured", reasoningEffort: "high", updatedAt: 1_800_000_000 },
+    nested: { id: "nested", sessionId: "tree", parentThreadId: "child", model: "nested-configured", reasoningEffort: "ultra", updatedAt: 1_800_000_001 },
     foreign: { id: "foreign", sessionId: "other-tree", parentThreadId: "root" },
     unrelated: { id: "unrelated", sessionId: "tree", parentThreadId: null },
   };
+  let page = { data: [{ turnId: "turn", item: { id: "reply", type: "agentMessage", text: "child result" } }],
+    nextCursor: null as string | null, backwardsCursor: null as string | null };
   const connection: CodexRpcConnection = {
     start: async () => undefined, close: async () => undefined,
     onMessage: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -23,13 +28,12 @@ function fixture() {
       const result = message.method === "thread/start"
         ? { thread: { ...threads.root, cwd: "/workspace", status: { type: "idle" } }, model: "mock", reasoningEffort: null }
         : message.method === "thread/read" ? { thread: threads[message.params.threadId] }
-        : message.method === "thread/items/list"
-          ? { data: [{ turnId: "turn", item: { id: "reply", type: "agentMessage", text: "child result" } }],
-            nextCursor: null, backwardsCursor: null } : {};
+        : message.method === "thread/items/list" ? page : {};
       for (const listener of listeners) listener(JSON.stringify({ id: message.id, result }));
     },
   };
-  return { adapter: new CodexAdapter({ createConnection: () => connection }), calls };
+  return { adapter: new CodexAdapter({ createConnection: () => connection }), calls, threads,
+    setPage: (value: typeof page) => { page = value; } };
 }
 
 describe("Codex child native history", () => {
@@ -41,11 +45,111 @@ describe("Codex child native history", () => {
         native: { view: "child", threadId: "nested", sortDirection: "desc" } };
       const first = await session.readNativeHistory(request);
       expect(first).toMatchObject({ harness: "codex", vendorSessionId: "root", complete: true,
-        payload: { threadId: "nested", data: [{ item: { text: "child result" } }] } });
+        payload: { threadId: "nested", data: [{ item: { text: "child result" } }],
+          childThread: { projection: "codex.child-settings.v1", id: "nested", model: "nested-configured", reasoningEffort: "ultra", updatedAt: 1_800_000_001 } } });
       expect(calls.filter(call => call.method === "thread/read").map(call => call.params.threadId)).toEqual(["nested", "child"]);
       expect(calls.find(call => call.method === "thread/items/list")?.params).toMatchObject({ threadId: "nested", limit: 10, sortDirection: "desc" });
       await session.readNativeHistory(request);
-      expect(calls.filter(call => call.method === "thread/read")).toHaveLength(2);
+      expect(calls.filter(call => call.method === "thread/read").map(call => call.params.threadId)).toEqual(["nested", "child", "nested"]);
+      expect(calls.filter(call => call.method === "thread/read").every(call => call.params.includeTurns === false)).toBe(true);
+    } finally { await adapter.close(); }
+  });
+
+  it("refreshes one reopened child selection and omits settings on older item pages", async () => {
+    const { adapter, calls, threads } = fixture();
+    try {
+      const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+      const request = { harness: "codex" as const, includeTurns: true,
+        native: { view: "child", threadId: "child", sortDirection: "desc" } };
+      const first = await session.readNativeHistory(request);
+      expect(first.payload).toMatchObject({ childThread: { id: "child", model: "child-configured" } });
+      threads.child!.model = "new-native-configuration";
+      threads.child!.reasoningEffort = "medium";
+      threads.child!.updatedAt = 1_800_000_002;
+      const reopened = await session.readNativeHistory(request);
+      expect(reopened.payload).toMatchObject({ childThread: { model: "new-native-configuration", reasoningEffort: "medium", updatedAt: 1_800_000_002 } });
+      const oldPage = await session.readNativeHistory({ ...request, cursor: "native-older-cursor" });
+      expect(oldPage.payload).not.toHaveProperty("childThread");
+      expect(calls.filter(call => call.method === "thread/read").map(call => call.params)).toEqual([
+        { threadId: "child", includeTurns: false }, { threadId: "child", includeTurns: false },
+      ]);
+      expect(calls.filter(call => call.method === "thread/items/list").at(-1)?.params.cursor).toBe("native-older-cursor");
+      expect(JSON.stringify(reopened.payload)).not.toContain("parent-only");
+      expect(JSON.stringify(reopened.payload)).not.toContain("provider-only");
+    } finally { await adapter.close(); }
+  });
+
+  it("preserves explicit unavailable and malformed selection without guessing a child model", async () => {
+    const { adapter, threads } = fixture();
+    try {
+      const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+      for (const value of [null, undefined, "", " \t ", "invalid\nmodel", "x".repeat(257), { model: "requested-only" }]) {
+        threads.child!.model = value;
+        threads.child!.reasoningEffort = value;
+        threads.child!.updatedAt = "bad-timestamp";
+        const result = await session.readNativeHistory({ harness: "codex", includeTurns: true,
+          native: { view: "child", threadId: "child" } });
+        expect(result.payload).toMatchObject({ childThread: { projection: "codex.child-settings.v1", id: "child", model: null, reasoningEffort: null, updatedAt: null } });
+      }
+      threads.child!.model = "x".repeat(256);
+      threads.child!.reasoningEffort = "ultra";
+      threads.child!.updatedAt = 8_640_000_000_001;
+      const validModel = await session.readNativeHistory({ harness: "codex", includeTurns: true,
+        native: { view: "child", threadId: "child" } });
+      expect(validModel.payload).toMatchObject({ childThread: { model: "x".repeat(256), reasoningEffort: "ultra", updatedAt: null } });
+    } finally { await adapter.close(); }
+  });
+
+  it("rejects changed fresh child ownership before page access even after authorization was cached", async () => {
+    for (const replacement of [
+      { id: "wrong-child" }, { sessionId: "foreign-tree" }, { parentThreadId: null }, { parentThreadId: "child" },
+    ]) {
+      const { adapter, calls, threads } = fixture();
+      try {
+        const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+        const request = { harness: "codex" as const, includeTurns: true, native: { view: "child", threadId: "child" } };
+        await session.readNativeHistory(request);
+        Object.assign(threads.child!, replacement);
+        await expect(session.readNativeHistory(request)).rejects.toThrow();
+        expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
+      } finally { await adapter.close(); }
+    }
+  });
+
+  it("does not let a previously authorized descendant certify a changed cyclic parent", async () => {
+    const { adapter, calls, threads } = fixture();
+    try {
+      const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+      await session.readNativeHistory({ harness: "codex", includeTurns: true,
+        native: { view: "child", threadId: "nested" } });
+      threads.child!.parentThreadId = "nested";
+      await expect(session.readNativeHistory({ harness: "codex", includeTurns: true,
+        native: { view: "child", threadId: "child" } })).rejects.toThrow("Cyclic");
+      expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
+    } finally { await adapter.close(); }
+  });
+
+  it("includes child settings in the wire budget and preserves them with an explicit oversized-item omission", async () => {
+    const { adapter, calls, setPage } = fixture();
+    const base = { data: [{ turnId: "turn", item: { id: "large", type: "agentMessage", text: "" } }],
+      nextCursor: "native-next", backwardsCursor: null };
+    const overhead = codexHistoryPageBytes(toJsonValue(base));
+    const page = { ...base, data: [{ ...base.data[0]!, item: { ...base.data[0]!.item,
+      text: "x".repeat(NATIVE_PAYLOAD_MAX_BYTES - overhead - 1) } }] };
+    expect(codexHistoryPageBytes(toJsonValue(page))).toBeLessThan(NATIVE_PAYLOAD_MAX_BYTES);
+    setPage(page);
+    try {
+      const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+      const request = { harness: "codex" as const, includeTurns: true, limit: 1,
+        native: { view: "child", threadId: "child", omitOversizedItems: true } };
+      const result = await session.readNativeHistory(request);
+      expect(result).toMatchObject({ vendorSessionId: "root", complete: false, nextCursor: "native-next",
+        unavailableItem: { reason: "exceedsWireLimit", nativeItemId: "large" },
+        payload: { threadId: "child", data: [], childThread: { id: "child", model: "child-configured" } } });
+      expect(codexHistoryPageBytes(result.payload)).toBeLessThan(NATIVE_PAYLOAD_MAX_BYTES);
+      expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
+      await expect(session.readNativeHistory({ ...request, native: { view: "child", threadId: "child" } }))
+        .rejects.toThrow("bounded wire envelope");
     } finally { await adapter.close(); }
   });
 

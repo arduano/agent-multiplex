@@ -58,6 +58,9 @@ export interface AdapterNativeEvent {
   nativeType: string;
   payload: JsonValue;
   ephemeral: boolean;
+  /** Explicit adapter structural proof that losing this event affects display only.
+   * Missing annotations and all interaction/lifecycle events remain required. */
+  continuity?: "presentation";
 }
 
 export interface AdapterInteractionEvent {
@@ -125,7 +128,7 @@ export interface AdapterSession {
   /** Last settings acknowledged by the native harness, when observable. */
   settings?(): HarnessSessionSettings | undefined;
   subscribe(listener: (event: AdapterEvent) => void): () => void;
-  execute(command: HarnessCommand): Promise<JsonValue | undefined>;
+  execute(command: HarnessCommand, context?: { requestId: string }): Promise<JsonValue | undefined>;
   readNativeHistory(request: NativeHistoryRequest): Promise<AdapterNativeHistoryResult>;
   /** Optional active-session observation; does not mutate the native session. */
   readNativeState?(request: NativeStateRequest): Promise<AdapterNativeStateResult>;
@@ -136,6 +139,8 @@ export interface AgentAdapter {
   readonly harness: Harness;
   readonly adapterScopeId: AdapterScopeId;
   readonly imageCodec?: NativeImageCodec;
+  /** Static opt-in native input contracts; reading this must not start an owner. */
+  readonly inputCapabilities?: HarnessCatalogEntry["capabilities"];
   /** Trusted harness policy for one confirmed optional context snapshot only.
    * Missing, malformed, unknown and authoritative events remain required.
    * This never grants admission or permits truncating a native payload. */
@@ -202,6 +207,35 @@ export class AdapterOutcomeUnknownError extends Error {
   public constructor(message: string, options?: ErrorOptions) {
     super(message, options);
     this.name = "AdapterOutcomeUnknownError";
+  }
+}
+
+/** A caller observation deadline expired while the exact native operation still
+ * owns its request. Consumers must retain ownership and observe late settlement,
+ * never free a mutation lane or replay merely because this error was returned. */
+export class AdapterOperationPendingError extends AdapterOutcomeUnknownError {
+  public constructor(public readonly settlement: Promise<JsonValue | undefined>,
+    public readonly operation?: string, options?: ErrorOptions) {
+    super("Native operation acknowledgement is pending", options);
+    this.name = "AdapterOperationPendingError";
+    void settlement.catch(() => {});
+  }
+}
+
+/** Operation-specific native proof that no input/effect was submitted. This is
+ * never inferred from arbitrary exception text or a generic JSON-RPC error. */
+export class AdapterInputNotSubmittedError extends Error {
+  public constructor(public readonly operation: "send" | "steer" | "interrupt",
+    public readonly reason: "noActiveTurn" | "expectedTurnMismatch" | "activeTurnNotSteerable" |
+      "serverDraining" | "invalidInput" | "closedBeforeDispatch" | "nativeNotReady",
+    public readonly actualTurnId?: string, options?: ErrorOptions) {
+    super("Native input was not submitted", options);
+    this.name = "AdapterInputNotSubmittedError";
+    if (!["send", "steer", "interrupt"].includes(operation) ||
+      !["noActiveTurn", "expectedTurnMismatch", "activeTurnNotSteerable", "serverDraining", "invalidInput", "closedBeforeDispatch", "nativeNotReady"].includes(reason))
+      throw new TypeError("Native not-submitted proof is invalid");
+    if (actualTurnId !== undefined && (!actualTurnId.trim() || actualTurnId.length > 256 || /[\u0000-\u001f\u007f]/.test(actualTurnId)))
+      throw new TypeError("Native turn identity is invalid");
   }
 }
 

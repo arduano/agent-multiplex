@@ -39,6 +39,10 @@ export class EventQueue<T> implements AsyncIterableIterator<T> {
 
 export interface Diagnostic {
   role: "host" | "root"; operation: string; sessionId?: string; requestId?: string; code: string; error?: unknown;
+  /** Fixed phase and numeric timing only; never input/provider/native text. */
+  phase?: "dispatch" | "nativeAck" | "terminal" | "reconciliation" | "ackDeadline";
+  durationMs?: number;
+  hostBootId?: string;
 }
 /** Exceptions thrown by user diagnostics can never become service failures. */
 export function diagnose(sink: ((event: Diagnostic) => void) | undefined, event: Diagnostic): void {

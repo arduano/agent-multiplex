@@ -5,15 +5,31 @@ import { codexHistoryPageBytes, codexImageLeaves } from "./images.js";
 import { codexHistoryDeliveryFacts } from "./history-delivery.js";
 import { codexConversationEvidence } from "./conversation.js";
 import type { ThreadReadResponse } from "./generated/v2/ThreadReadResponse.js";
+import type { Thread } from "./generated/v2/Thread.js";
 import type { ThreadItemsListResponse } from "./generated/v2/ThreadItemsListResponse.js";
 import type { ThreadTurnsListParams } from "./generated/v2/ThreadTurnsListParams.js";
 import type { ThreadTurnsListResponse } from "./generated/v2/ThreadTurnsListResponse.js";
 const json = (value: unknown) => toJsonValue(JSON.parse(JSON.stringify(value)));
 
+/** Only the verified selected child's native configured/persisted selection.
+ * This is not requested spawn input or per-turn execution telemetry. */
+function childThreadSettings(thread: Thread) {
+  const boundedSelection = (value: unknown): string | null => typeof value === "string" &&
+    value.trim().length > 0 && value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value) ? value : null;
+  return {
+    projection: "codex.child-settings.v1",
+    id: thread.id,
+    model: boundedSelection(thread.model),
+    reasoningEffort: boundedSelection(thread.reasoningEffort),
+    updatedAt: Number.isSafeInteger(thread.updatedAt) && thread.updatedAt >= 0 && thread.updatedAt <= 8_640_000_000_000
+      ? thread.updatedAt : null,
+  };
+}
+
 /** Reads native persisted history without attaching or resuming a thread.
  * Live and stopped reads share the exact page normalization and wire bounds. */
 export class CodexHistoryReader {
-  readonly #authorizedHistoryChildren = new Set<string>();
+  readonly #authorizedHistoryChildren = new Map<string, string>();
   readonly #rpc: CodexRpcClient;
   readonly #assertActive: () => void;
   #sessionTreeId: string | undefined;
@@ -28,8 +44,11 @@ export class CodexHistoryReader {
       if (!request.includeTurns) throw new TypeError("Codex turns history requires includeTurns");
       return this.#readNativeTurns(request);
     }
-    const childThreadId = request.native?.view === "child"
-      ? await this.#authorizedChildThreadId(request.native.threadId) : undefined;
+    const child = request.native?.view === "child"
+      ? await this.#authorizedChildThread(request.native.threadId, !request.cursor) : undefined;
+    const childThreadId = child?.id;
+    const childFields = child ? { threadId: child.id,
+      ...(child.thread ? { childThread: childThreadSettings(child.thread) } : {}) } : {};
     if (childThreadId && !request.includeTurns) throw new TypeError("Codex child history requires item pagination");
     if (request.includeTurns) {
       const sortDirection = request.native?.sortDirection ?? "asc";
@@ -46,12 +65,13 @@ export class CodexHistoryReader {
           turnId: null,
         });
         this.#assertActive();
-        const page = json(response);
+        const page = json({ ...response, ...childFields });
         if (codexHistoryPageBytes(page) <= NATIVE_PAYLOAD_MAX_BYTES && codexImageLeaves(page).length <= 256) break;
         if (limit === 1) {
           if (request.native?.omitOversizedItems !== true) throw new Error("One native Codex history item exceeds the bounded wire envelope");
           const item = response.data[0]?.item;
-          const payload = json({ ...response, data: [], ...(childThreadId ? { threadId: childThreadId } : {}) });
+          const payload = json({ ...response, data: [], ...childFields });
+          if (codexHistoryPageBytes(payload) > NATIVE_PAYLOAD_MAX_BYTES) throw new Error("Codex history cursors exceed the bounded wire envelope");
           // Advance only with the real native single-item cursor, preserving a
           // visible omission instead of truncating or inventing native output.
           return {
@@ -73,7 +93,7 @@ export class CodexHistoryReader {
         limit = Math.max(1, Math.floor(limit / 2));
       }
       const messageDeliveryFacts = !childThreadId ? codexHistoryDeliveryFacts(response, this.vendorSessionId) : [];
-      const payload = json({ ...response, ...(childThreadId ? { threadId: childThreadId } : {}) });
+      const payload = json({ ...response, ...childFields });
       return {
         harness: "codex", vendorSessionId: this.vendorSessionId,
         payload, sortDirection,
@@ -100,17 +120,23 @@ export class CodexHistoryReader {
     };
   }
 
-  async #authorizedChildThreadId(value: unknown): Promise<string> {
+  async #authorizedChildThread(value: unknown, includeSettings: boolean): Promise<{ id: string; thread?: Thread }> {
     if (typeof value !== "string" || value.length < 1 || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value) || value === this.vendorSessionId) {
       throw new TypeError("Invalid Codex child thread identifier");
     }
-    if (this.#authorizedHistoryChildren.has(value)) return value;
+    // Old item pages have no current-settings claim. Opening or reopening the
+    // selected child refreshes only its small native Thread, even when its
+    // immutable ancestry was previously verified.
+    if (this.#authorizedHistoryChildren.has(value) && !includeSettings) return { id: value };
     if (this.#sessionTreeId === undefined) {
       this.#sessionTreeId = (await this.#rpc.request<ThreadReadResponse>("thread/read", { threadId: this.vendorSessionId, includeTurns: false })).thread.sessionId;
       this.#assertActive();
     }
     const seen = new Set<string>();
+    const parents = new Map<string, string>();
     let threadId = value;
+    let selectedThread: Thread | undefined;
+    let reuseCachedAncestry = true;
     for (let depth = 0; depth < 32; depth++) {
       if (seen.has(threadId)) throw new TypeError("Cyclic Codex child ancestry");
       seen.add(threadId);
@@ -120,10 +146,18 @@ export class CodexHistoryReader {
       if (thread?.id !== threadId || thread.sessionId !== this.#sessionTreeId) {
         throw new TypeError("Codex child thread belongs to another session tree");
       }
+      if (threadId === value) selectedThread = thread;
       const parentId = thread.parentThreadId;
-      if (parentId === this.vendorSessionId) {
-        for (const id of seen) this.#authorizedHistoryChildren.add(id);
-        return value;
+      if (typeof parentId === "string" && seen.has(parentId)) throw new TypeError("Cyclic Codex child ancestry");
+      const knownParent = this.#authorizedHistoryChildren.get(value);
+      // Native ancestry is normally immutable. If the refreshed selected
+      // Thread disagrees with its earlier parent, prove the entire new path
+      // rather than letting cached descendants certify a new cycle.
+      if (threadId === value && knownParent !== undefined && knownParent !== parentId) reuseCachedAncestry = false;
+      if (typeof parentId === "string" && parentId) parents.set(threadId, parentId);
+      if (parentId === this.vendorSessionId || reuseCachedAncestry && typeof parentId === "string" && this.#authorizedHistoryChildren.has(parentId)) {
+        for (const [id, parent] of parents) this.#authorizedHistoryChildren.set(id, parent);
+        return { id: value, ...(includeSettings && selectedThread ? { thread: selectedThread } : {}) };
       }
       if (typeof parentId !== "string" || !parentId) throw new TypeError("Codex thread is not a descendant of this session");
       threadId = parentId;

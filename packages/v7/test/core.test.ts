@@ -55,8 +55,8 @@ async function fixture(options: Partial<ConstructorParameters<typeof HostService
   };
   const store = options.store ?? await V7Store.open({ filename: ":memory:", role: "host", instanceId: "host" });
   const host = new HostService({ store, hostId: "host", name: "Fixture", native: port, ...options });
-  cleanup.push(() => host.close());
-  return { handles, port, store, host };
+  const closeHost = () => host.close(); cleanup.push(closeHost);
+  return { handles, port, store, host, closeHost };
 }
 const create = (sessionId: string) => ({ requestId: `create-${sessionId}`, sessionId, options: { harness: "copilot" as const, cwd: "/disposable" } });
 const send = (requestId: string, sessionId = "one", prompt = "fixture") => ({ requestId, sessionId,
@@ -135,6 +135,9 @@ describe("V7 minimal durable request ownership", () => {
     await expect(f.host.close()).rejects.toThrow("V7 Host cleanup failed");
     expect(await waiting).toEqual({ done: true, value: undefined });
     expect(f.handles[0]!.listeners.size).toBe(0); expect(closeStore).toHaveBeenCalledOnce();
+    // A repeated close preserves the original failure rather than claiming
+    // cleanup succeeded. The writer is already closed: no second disposal.
+    cleanup.splice(cleanup.indexOf(f.closeHost), 1);
     await expect(f.store.receipt("create-one")).rejects.toMatchObject({ code: "CLOSED" });
   });
   it("closes the native owner to settle an in-flight command before draining receipts", async () => {

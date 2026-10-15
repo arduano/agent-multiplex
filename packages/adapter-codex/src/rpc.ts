@@ -23,8 +23,8 @@ export interface CodexNotification {
 
 export interface CodexServerRequest extends CodexNotification {
   id: number | string;
-  respond(result: JsonValue): void;
-  reject(code: number, message: string, data?: JsonValue): void;
+  respond(result: JsonValue): Promise<void>;
+  reject(code: number, message: string, data?: JsonValue): Promise<void>;
 }
 
 export interface CodexRpcClientOptions {
@@ -38,6 +38,12 @@ export interface CodexRpcClientOptions {
   prepareProcess?: () => Promise<void>;
   /** Alternate framed transport used by a shared app-server runtime. */
   createConnection?: () => CodexRpcConnection;
+  /** Caller observation only; exact pending native IDs remain retained. */
+  requestTimeoutMs?: number;
+  pendingRequestLimit?: number;
+  pendingRequestBytes?: number;
+  controlRequestLimit?: number;
+  controlRequestBytes?: number;
 }
 
 /**
@@ -57,16 +63,34 @@ type Pending = {
   resolve(value: unknown): void;
   reject(reason: Error): void;
   dispatched: boolean;
+  lane: "normal" | "control";
+  bytes: number;
 };
+
+/** Leave room for the published ten-image input envelope, while bounding all
+ * admitted native calls. Controls retain independent small reservations. */
+export const CODEX_RPC_ADMISSION_LIMITS = Object.freeze({
+  pendingRequestLimit: 32, pendingRequestBytes: 160 * 1024 * 1024,
+  controlRequestLimit: 8, controlRequestBytes: 1024 * 1024,
+});
 
 export class CodexRpcError extends Error {
   public constructor(
     message: string,
     public readonly code?: number,
     public readonly data?: unknown,
+    public readonly phase?: "beforeDispatch" | "response",
   ) {
     super(message);
     this.name = "CodexRpcError";
+  }
+}
+
+export class CodexRpcPendingError extends AdapterOutcomeUnknownError {
+  public constructor(public readonly settlement: Promise<unknown>, public readonly method: string) {
+    super("Codex native acknowledgement is pending");
+    this.name = "CodexRpcPendingError";
+    void settlement.catch(() => {});
   }
 }
 
@@ -89,15 +113,37 @@ export class CodexRpcClient {
   #ready = false;
   #closed = false;
   #retirementError: Error | undefined;
+  readonly #requestTimeoutMs: number;
+  #nativeVersion: string | undefined;
+  readonly #admission: Readonly<Record<keyof typeof CODEX_RPC_ADMISSION_LIMITS, number>>;
+  readonly #pendingBytes = { normal: 0, control: 0 };
 
   public constructor(options: CodexRpcClientOptions = {}) {
     this.#options = options;
+    this.#requestTimeoutMs = options.requestTimeoutMs ?? (process.platform === "win32" ? 60_000 : 15_000);
+    if (!Number.isSafeInteger(this.#requestTimeoutMs) || this.#requestTimeoutMs < 1 || this.#requestTimeoutMs > 600_000)
+      throw new RangeError("Codex request observation budget is invalid");
+    this.#admission = Object.freeze({
+      pendingRequestLimit: options.pendingRequestLimit ?? CODEX_RPC_ADMISSION_LIMITS.pendingRequestLimit,
+      pendingRequestBytes: options.pendingRequestBytes ?? CODEX_RPC_ADMISSION_LIMITS.pendingRequestBytes,
+      controlRequestLimit: options.controlRequestLimit ?? CODEX_RPC_ADMISSION_LIMITS.controlRequestLimit,
+      controlRequestBytes: options.controlRequestBytes ?? CODEX_RPC_ADMISSION_LIMITS.controlRequestBytes,
+    });
+    for (const value of Object.values(this.#admission))
+      if (!Number.isSafeInteger(value) || value < 1) throw new RangeError("Codex pending admission limits must be positive integers");
     let retire!: () => void;
     this.#retired = new Promise<void>((resolve) => { retire = resolve; });
     this.#retire = retire;
   }
 
   public get closing(): boolean { return this.#closed; }
+  public get nativeVersion(): string | undefined { return this.#nativeVersion; }
+  public get pendingObservation(): { normalCount: number; normalBytes: number; controlCount: number; controlBytes: number } {
+    return { normalCount: [...this.#pending.values()].filter(row => row.lane === "normal").length,
+      normalBytes: this.#pendingBytes.normal,
+      controlCount: [...this.#pending.values()].filter(row => row.lane === "control").length,
+      controlBytes: this.#pendingBytes.control };
+  }
 
   public onNotification(listener: (notification: CodexNotification) => void): () => void {
     this.#notifications.add(listener);
@@ -131,7 +177,12 @@ export class CodexRpcClient {
         () => { if (this.#starting === starting) this.#starting = undefined; },
       );
     }
-    await this.#starting.caller;
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new CodexRpcError("Native initialization is still pending before input dispatch",
+        undefined, undefined, "beforeDispatch")), this.#requestTimeoutMs);
+      timer.unref();
+      void this.#starting!.caller.then(() => { clearTimeout(timer); resolve(); }, error => { clearTimeout(timer); reject(error); });
+    });
   }
 
   async #start(): Promise<void> {
@@ -150,7 +201,7 @@ export class CodexRpcClient {
         }));
     this.#connection = connection;
     this.#connectionDisposers = [
-      connection.onMessage((message) => this.#receive(message)),
+      connection.onMessage((message) => this.#receive(message, connection)),
       connection.onExit((error) => this.#didExit(connection, error)),
       connection.onDiagnostic?.((message) => {
         if (message) {
@@ -163,14 +214,16 @@ export class CodexRpcClient {
     try {
       await connection.start();
       this.#assertConnection(connection);
-      await this.#request(connection, "initialize", {
+      const initialized = await this.#request<{ userAgent?: string }>(connection, "initialize", {
         clientInfo: {
           name: "agent_multiplex",
           title: "Agent Multiplex",
           version: this.#options.clientVersion ?? "0.1.0",
         },
         capabilities: { experimentalApi: true },
-      });
+      }, false);
+      // Initialize returns originator/<CARGO_PKG_VERSION>, not the client version.
+      this.#nativeVersion = /^[^/\s]+\/(\d+\.\d+\.\d+)(?:\s|$)/.exec(initialized?.userAgent ?? "")?.[1];
       this.#assertConnection(connection);
       await connection.send(JSON.stringify({ method: "initialized" }));
       this.#assertConnection(connection);
@@ -186,7 +239,8 @@ export class CodexRpcClient {
     }
   }
 
-  public async request<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+  public async request<T = unknown>(method: string, params: unknown = {},
+    admission?: { beforeDispatch?: () => void }): Promise<T> {
     try {
       await this.start();
     } catch (error) {
@@ -195,27 +249,43 @@ export class CodexRpcClient {
       // command outcomeUnknown when it never reached the transport.
       this.#assertOpen();
       if (error instanceof AdapterOutcomeUnknownError) {
-        throw new CodexRpcError("Codex RPC initialization failed before request dispatch");
+        throw new CodexRpcError("Codex RPC initialization failed before request dispatch", undefined, undefined, "beforeDispatch");
       }
       throw error;
     }
     const connection = this.#connection;
     this.#assertOpen();
+    admission?.beforeDispatch?.();
     if (!connection || !this.#ready) {
-      throw new CodexRpcError("codex app-server is not writable");
+      throw new CodexRpcError("codex app-server is not writable", undefined, undefined, "beforeDispatch");
     }
     return this.#request<T>(connection, method, params);
   }
 
-  #request<T = unknown>(connection: CodexRpcConnection, method: string, params: unknown): Promise<T> {
+  #request<T = unknown>(connection: CodexRpcConnection, method: string, params: unknown, observe = true): Promise<T> {
     this.#assertConnection(connection);
-    const id = this.#nextId++;
-    const message = JSON.stringify({ method, id, params });
+    const id = this.#nextId;
+    let message: string;
+    try { message = JSON.stringify({ method, id, params }); }
+    catch { throw new CodexRpcError("Native input cannot be serialized before dispatch", -32600, undefined, "beforeDispatch"); }
+    const bytes = Buffer.byteLength(message, "utf8");
+    const data = params && typeof params === "object" && !Array.isArray(params) ? params as Record<string, unknown> : undefined;
+    const lane = method === "initialize" || method === "turn/interrupt" || method === "thread/unsubscribe" ||
+      method === "thread/turns/list" && data?.itemsView === "notLoaded" && data.limit === 1 && data.cursor === null
+      ? "control" : "normal";
+    const count = [...this.#pending.values()].filter(row => row.lane === lane).length;
+    const maximumCount = lane === "control" ? this.#admission.controlRequestLimit : this.#admission.pendingRequestLimit;
+    const maximumBytes = lane === "control" ? this.#admission.controlRequestBytes : this.#admission.pendingRequestBytes;
+    if (count >= maximumCount || this.#pendingBytes[lane] + bytes > maximumBytes)
+      throw new CodexRpcError("Native request capacity is occupied; input was not dispatched", undefined, undefined, "beforeDispatch");
+    this.#nextId += 1;
+    this.#pendingBytes[lane] += bytes;
     const result = new Promise<T>((resolve, reject) => {
       this.#pending.set(id, {
         resolve: (value) => resolve(value as T),
         reject,
         dispatched: false,
+        lane, bytes,
       });
     });
     const pending = this.#pending.get(id)!;
@@ -223,7 +293,7 @@ export class CodexRpcClient {
     // that interval as dispatched rather than claiming the native effect failed.
     pending.dispatched = true;
     const failed = (error: unknown) => {
-      if (this.#pending.delete(id)) {
+      if (this.#releasePending(id)) {
         const cause = asError(error);
         pending.reject(new AdapterOutcomeUnknownError("Codex RPC write failed after transport dispatch", { cause }));
       }
@@ -233,13 +303,34 @@ export class CodexRpcClient {
     } catch (error) {
       failed(error);
     }
-    return result;
+    return observe ? this.#observe(result, method) : result;
+  }
+
+  #observe<T>(settlement: Promise<T>, method: string): Promise<T> {
+    void settlement.catch(() => {});
+    const observed = new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new CodexRpcPendingError(settlement, method)), this.#requestTimeoutMs);
+      timer.unref();
+      void settlement.then(value => { clearTimeout(timer); resolve(value); }, error => { clearTimeout(timer); reject(error); });
+    });
+    // Native auto-rejection callers may intentionally discard their observer.
+    // Awaiting consumers still receive its actual rejection.
+    void observed.catch(() => {});
+    return observed;
+  }
+
+  #releasePending(id: number): Pending | undefined {
+    const pending = this.#pending.get(id);
+    if (!pending) return undefined;
+    this.#pending.delete(id);
+    this.#pendingBytes[pending.lane] -= pending.bytes;
+    return pending;
   }
 
   public notify(method: string, params?: unknown): void {
     this.#assertOpen();
     const connection = this.#connection;
-    if (!connection || !this.#ready) throw new CodexRpcError("codex app-server is not writable");
+    if (!connection || !this.#ready) throw new CodexRpcError("codex app-server is not writable", undefined, undefined, "beforeDispatch");
     void connection
       .send(JSON.stringify(params === undefined ? { method } : { method, params }))
       .catch((error: unknown) => this.#didExit(connection, asError(error)));
@@ -252,9 +343,9 @@ export class CodexRpcClient {
     this.#closed = true;
     this.#retirementError = this.#starting && this.#pending.size > 0
       ? new AdapterOutcomeUnknownError("Codex RPC initialization was retired after dispatch")
-      : new CodexRpcError("Codex RPC client is closed");
+      : new CodexRpcError("Codex RPC client is closed", undefined, undefined, "beforeDispatch");
     this.#retire();
-    this.#rejectPending(new CodexRpcError("Codex RPC client is closed"));
+    this.#rejectPending(new CodexRpcError("Codex RPC client is closed", undefined, undefined, "beforeDispatch"));
   }
 
   public close(): Promise<void> {
@@ -266,7 +357,7 @@ export class CodexRpcClient {
 
   async #close(): Promise<void> {
     const connection = this.#connection;
-    if (connection) this.#disconnect(connection, new CodexRpcError("Codex RPC client is closed"));
+    if (connection) this.#disconnect(connection, new CodexRpcError("Codex RPC client is closed", undefined, undefined, "beforeDispatch"));
     // Close the transport before waiting for startup: its initialize request
     // must be rejected so startup cannot deadlock shutdown.
     const results = await Promise.allSettled([
@@ -297,15 +388,16 @@ export class CodexRpcClient {
   }
 
   #assertOpen(): void {
-    if (this.#closed) throw new CodexRpcError("Codex RPC client is closed");
+    if (this.#closed) throw new CodexRpcError("Codex RPC client is closed", undefined, undefined, "beforeDispatch");
   }
 
   #assertConnection(connection: CodexRpcConnection): void {
     this.#assertOpen();
-    if (this.#connection !== connection) throw new CodexRpcError("codex app-server is not writable");
+    if (this.#connection !== connection) throw new CodexRpcError("codex app-server is not writable", undefined, undefined, "beforeDispatch");
   }
 
-  #receive(line: string): void {
+  #receive(line: string, owner: CodexRpcConnection): void {
+    if (this.#connection !== owner) return;
     let message: unknown;
     try {
       message = JSON.parse(line);
@@ -321,7 +413,7 @@ export class CodexRpcClient {
       const id = Number(record.id);
       const pending = this.#pending.get(id);
       if (!pending) return;
-      this.#pending.delete(id);
+      this.#releasePending(id);
       const response = record as unknown as RpcResponse;
       if (response.error) {
         pending.reject(
@@ -329,6 +421,7 @@ export class CodexRpcClient {
             response.error.message ?? "Codex app-server request failed",
             response.error.code,
             response.error.data,
+            "response",
           ),
         );
       } else {
@@ -340,27 +433,26 @@ export class CodexRpcClient {
     const params = toJsonValue(record.params ?? {});
     if (record.id !== undefined) {
       const id = record.id as number | string;
-      let settled = false;
+      let response: Promise<void> | undefined;
+      let serialized: string | undefined;
+      const reply = (value: unknown): Promise<void> => {
+        const encoded = JSON.stringify(value);
+        if (response) {
+          if (encoded !== serialized) return Promise.reject(new CodexRpcError("A different reply already owns this native request"));
+          return response;
+        }
+        serialized = encoded;
+        response = this.#observe(this.#writeServerResponse(owner, encoded), "server/requestReply");
+        void response.catch(() => {});
+        return response;
+      };
       const request: CodexServerRequest = {
-        method: record.method,
-        id,
-        params,
-        respond: (result) => {
-          if (settled) return;
-          settled = true;
-          this.#writeServerResponse({ id, result });
-        },
-        reject: (code, message, data) => {
-          if (settled) return;
-          settled = true;
-          this.#writeServerResponse({
-            id,
-            error: { code, message, ...(data === undefined ? {} : { data }) },
-          });
-        },
+        method: record.method, id, params,
+        respond: result => reply({ id, result }),
+        reject: (code, message, data) => reply({ id, error: { code, message, ...(data === undefined ? {} : { data }) } }),
       };
       if (this.#serverRequests.size === 0) {
-        request.reject(-32601, "No controller is attached to answer this request");
+        void request.reject(-32601, "No controller is attached to answer this request");
       } else {
         for (const listener of this.#serverRequests) listener(request);
       }
@@ -370,12 +462,17 @@ export class CodexRpcClient {
     for (const listener of this.#notifications) listener(notification);
   }
 
-  #writeServerResponse(response: unknown): void {
-    const connection = this.#connection;
-    if (!connection) return;
-    void connection.send(JSON.stringify(response)).catch((error: unknown) => {
-      this.#didExit(connection, asError(error));
-    });
+  async #writeServerResponse(owner: CodexRpcConnection, response: string): Promise<void> {
+    if (this.#closed || this.#connection !== owner || !this.#ready)
+      throw new AdapterOutcomeUnknownError("Native reply belongs to an unavailable transport");
+    try {
+      await owner.send(response);
+      if (this.#connection !== owner || this.#closed)
+        throw new AdapterOutcomeUnknownError("Native reply transport changed before write acknowledgement");
+    } catch (cause) {
+      this.#didExit(owner, asError(cause));
+      throw new AdapterOutcomeUnknownError("Native reply write was not acknowledged", { cause });
+    }
   }
 
   #didExit(connection: CodexRpcConnection, error: Error): void {
@@ -402,6 +499,8 @@ export class CodexRpcClient {
       );
     }
     this.#pending.clear();
+    this.#pendingBytes.normal = 0;
+    this.#pendingBytes.control = 0;
   }
 
   #disposeConnectionListeners(): void {
@@ -466,7 +565,7 @@ class StdioCodexRpcConnection implements CodexRpcConnection {
   public async send(message: string): Promise<void> {
     const child = this.#process;
     if (!child || child.killed || !child.stdin.writable) {
-      throw new CodexRpcError("codex app-server is not writable");
+      throw new CodexRpcError("codex app-server is not writable", undefined, undefined, "beforeDispatch");
     }
     await new Promise<void>((resolve, reject) => {
       child.stdin.write(`${message}\n`, (error) => (error ? reject(error) : resolve()));
