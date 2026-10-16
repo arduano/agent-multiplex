@@ -338,11 +338,11 @@ describe("V7 single Root authority", () => {
     f.handles[0]!.readNativeState.mockImplementationOnce(async () => ({ harness: "copilot", vendorSessionId: "another-native-session", payload: {} }));
     await expect(f.host.nativeState({ sessionId: "one", request: { harness: "copilot", kind: "queue" } })).rejects.toMatchObject({ code: "STATE_OWNER" });
   });
-  it("advertises only supplied Host capabilities and does not leak mutable descriptors", async () => {
+  it("advertises implemented origin observation plus supplied Host capabilities without leaking mutable descriptors", async () => {
     const f = await fixture({ capabilities: [{ name: "terminal.side-channel", version: "v1", experimental: false }] });
     const descriptor = f.host.descriptor(); descriptor.capabilities![0]!.name = "mutated";
     expect(f.host.descriptor().capabilities?.[0]?.name).toBe("terminal.side-channel");
-    expect((await fixture()).host.descriptor().capabilities).toBeUndefined();
+    expect((await fixture()).host.descriptor().capabilities).toEqual([{ name: "observation.origin-liveness", version: "v1", experimental: false }]);
   });
   it("archives a definite failed creation reservation without replaying native create", async () => {
     const f = await fixture(), { root } = await rootFixture();

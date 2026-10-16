@@ -7,6 +7,23 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `.39` candidate; consumer deployment acceptance remains separate).
 
+## V7 optional origin observation candidate `.42`
+
+The October 16 owner candidate adds negotiated Host and Root observation lanes
+with producer heartbeats and attachment-scoped presentation watermarks. Existing
+legacy watch vocabularies are unchanged; new consumers negotiate the separate
+endpoints and cannot infer native health from a Gateway or Root heartbeat.
+Quiet thinking remains valid. Missing negotiated heartbeats retire the affected
+read-only observation, without replaying or cancelling native work.
+
+All 17 package versions advance together; the independent transport, native
+SDK/CLI, persisted schemas, provider settings and original native state remain
+unchanged. Consumer rollout is explicitly NAS Gateway only. Host/Root code is
+prepared but not activated by this package publication. Existing peers retain
+legacy/unverified upstream freshness until their own update is authorized.
+See the [contract](../../packages/v7/CONTRACT.md#negotiated-origin-observation)
+and [scope and qualification](../audits/v7-origin-observation-20261016.md).
+
 ## Independent V7 fresh-state candidate
 
 The new `@arduano/agent-multiplex-v7` workspace uses wire generation 7 and shares

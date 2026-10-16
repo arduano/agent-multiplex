@@ -139,3 +139,40 @@ must obtain another snapshot. Session streams carry one attachment ID and
 monotonic sequence; bounded replay emits a gap when continuity cannot be proved.
 Native/interaction failures affect only the targeted session. Presence never
 depends on history, inventory, diagnostics, or model list requests.
+
+## Negotiated origin observation
+
+`observation.origin-liveness/v1` opts in to separate observer envelopes.
+`HostApi.watchSessionObserved(input)` yields `SessionObservation`: unchanged
+session events under `{ kind: "event", event }`, plus Host-origin heartbeats.
+`RootApi.watchObserved(signal)` yields `RootObservation`: unchanged Root items
+under `{ kind: "item", item }`, plus Root-origin heartbeats.
+`RootApi.watchSessionObserved(input)` forwards the exact current Host's observed
+stream. Transports advertise these optional methods only when implemented;
+selected native observation additionally requires the actual Host descriptor's
+capability. A new Root refuses an old Host's observed endpoint rather than
+substituting Root liveness for Host liveness.
+
+Legacy `watch` and `watchSession` retain their existing vocabularies and replay
+semantics. Old consumers never receive an unknown heartbeat kind; new consumers
+must fall back without claiming origin-liveness proof when a peer lacks the
+capability. Heartbeats do not increment Root revisions or native event sequences,
+prove native model progress, or certify transcript catch-up.
+
+Producers emit an initial heartbeat and another every 10 seconds, independently
+of payload materialization or durability. Root heartbeats identify the Root and
+boot plus its current revision. Host heartbeats identify Host/boot/session/native
+attachment, carry its emitted `eventSequence`, and report attachment-scoped
+`receivedPresentation`, conservative contiguous `materializedPresentation`,
+`pendingPresentations` and `presentationGap`. Every rejected, overflowed or failed
+native presentation latches the presentation gap; a later successful ordinal
+cannot conceal that missing work. Critical status/interaction ingress remains
+independent of the presentation queue. An authoritative history rebaseline may
+repair a client's view despite a retained stream gap.
+
+Consumer liveness deadlines apply only after negotiation and only to missing
+origin heartbeats, using a monotonic clock. Quiet thinking, tools, idle sessions
+and pending materialization remain valid while those beats arrive. Root boot
+and Host/attachment identity fences still apply. Renewing a stale observer is a
+read-only operation with a bounded buffer and cancellation lifetime; it never
+replays a native mutation or turns unknown work into success.

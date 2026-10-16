@@ -79,6 +79,22 @@ export type RootDelta = {
   | { kind: "session"; session: SessionView }
 );
 export type RootWatchItem = { kind: "snapshot"; snapshot: RootSnapshot } | { kind: "delta"; delta: RootDelta };
+/** Negotiated observers are separate from legacy events: older consumers never
+ * receive an unknown RootWatchItem or SessionEvent kind. No heartbeat advances
+ * a durable catalog revision or a native replay cursor. */
+export const V7_OBSERVED_STREAM_CAPABILITY = "observation.origin-liveness";
+export interface RootOriginHeartbeat {
+  kind: "originHeartbeat"; origin: "root"; protocolVersion: 7;
+  rootId: string; bootId: string; revision: number;
+}
+export interface HostOriginHeartbeat {
+  kind: "originHeartbeat"; origin: "host"; protocolVersion: 7;
+  hostId: string; bootId: string; sessionId: string; attachmentId: string | null;
+  eventSequence: number; receivedPresentation: number; materializedPresentation: number;
+  pendingPresentations: number; presentationGap: boolean;
+}
+export type RootObservation = { kind: "item"; item: RootWatchItem } | RootOriginHeartbeat;
+export type SessionObservation = { kind: "event"; event: SessionEvent } | HostOriginHeartbeat;
 export interface NativeInteraction {
   interactionId: string; nativeRequestId?: string;
   requestType: "approval" | "permission" | "userInput" | "elicitation" | "exitPlan" | "other";
@@ -117,6 +133,7 @@ export interface HostApi {
   resolve(input: ResolveInput): Promise<RequestReceipt>;
   receipt(requestId: string): RequestReceipt | null | Promise<RequestReceipt | null>;
   watchSession(input: SessionWatchInput): AsyncIterable<SessionEvent>;
+  watchSessionObserved?(input: SessionWatchInput): AsyncIterable<SessionObservation>;
 }
 export interface RootCreateInput extends CreateSessionInput { hostId: string; title: string }
 export interface RenameInput extends RequestEnvelope { title: string }
@@ -124,6 +141,7 @@ export interface UpdateMetadataInput extends RequestEnvelope { pinned?: boolean;
 export interface RootApi {
   snapshot(): RootSnapshot | Promise<RootSnapshot>;
   watch(signal?: AbortSignal): AsyncIterable<RootWatchItem>;
+  watchObserved?(signal?: AbortSignal): AsyncIterable<RootObservation>;
   create(input: RootCreateInput): Promise<RequestReceipt>;
   rename(input: RenameInput): Promise<RequestReceipt>;
   updateMetadata(input: UpdateMetadataInput): Promise<RequestReceipt>;
@@ -142,6 +160,7 @@ export interface RootApi {
   resolve(input: ResolveInput): Promise<RequestReceipt>;
   receipt(requestId: string): RequestReceipt | null | Promise<RequestReceipt | null>;
   watchSession(input: SessionWatchInput): AsyncIterable<SessionEvent>;
+  watchSessionObserved?(input: SessionWatchInput): AsyncIterable<SessionObservation>;
 }
 export type { Harness, HarnessCommand, HarnessSessionSettings, HarnessSpawnOptions, JsonValue,
   NativeHistoryRequest, NativeHistoryResult, NativeModel, NativePayload, NativeStateRequest,

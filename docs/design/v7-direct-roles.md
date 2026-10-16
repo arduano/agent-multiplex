@@ -99,3 +99,14 @@ patches, metadata compare-and-set and exact attachment fences.
 These tests make no model calls, touch no installed state and establish no live
 fleet or Windows native acceptance. Personal application composition, service
 registration and sealed native payload qualification are consumer-owned.
+
+## Optional origin-liveness observers
+
+The separate `observation.origin-liveness/v1` observer envelopes add producer
+heartbeats and attachment-scoped presentation watermarks while preserving legacy
+Root/session event vocabularies. A Root forwards actual Host-origin liveness only
+for a capable Host; its own healthy control stream cannot establish that fact.
+Missing negotiated heartbeats can retire one read-only observer independently
+of native work. Quiet token streams are valid. See the
+[package contract](../../packages/v7/CONTRACT.md#negotiated-origin-observation)
+for negotiation, identity, replay and materialization-gap requirements.

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { originObservedStream } from "./observation-stream.js";
 import { jsonValueSchema, commandEnvelopeSchema, canonicalProtocolRecordJson } from "@arduano/agent-multiplex-protocol";
 import { EventQueue, diagnose, type Diagnostic } from "./events.js";
 import { V7Error, errorDetails } from "./errors.js";
@@ -11,6 +12,7 @@ import {
   type RequestEnvelope, type RequestReceipt, type ResolveInput, type RootApi, type RootCreateInput,
   type RootDelta, type RootSnapshot, type RootWatchItem, type SessionMetadata,
   type SessionView, type SessionWatchInput, type UpdateMetadataInput,
+  type RootObservation, type SessionObservation, V7_OBSERVED_STREAM_CAPABILITY,
 } from "./protocol.js";
 
 export interface RootServiceOptions {
@@ -104,6 +106,11 @@ export class RootService implements RootApi {
     });
     this.#watchers.add(queue); queue.push({ kind: "snapshot", snapshot: this.snapshot() });
     signal?.addEventListener("abort", abort, { once: true }); if (signal?.aborted) queue.close(); return queue;
+  }
+  public watchObserved(signal?: AbortSignal): AsyncIterable<RootObservation> {
+    return originObservedStream<RootWatchItem, RootObservation>(abort => this.watch(abort), item => ({ kind: "item", item }),
+      () => { this.assertOpen(); return { kind: "originHeartbeat", origin: "root", protocolVersion: 7,
+        rootId: this.options.rootId, bootId: this.#bootId, revision: this.#revision }; }, signal);
   }
   public create(input: RootCreateInput): Promise<RequestReceipt> {
     input = structuredClone(input);
@@ -205,6 +212,13 @@ export class RootService implements RootApi {
     const host = this.route(input.sessionId); const stream = host.api.watchSession(input);
     const root = this;
     return (async function* () { for await (const event of stream) { root.assertCurrent(host); yield event; } })();
+  }
+  public watchSessionObserved(input: SessionWatchInput): AsyncIterable<SessionObservation> {
+    const host = this.route(input.sessionId);
+    if (!host.api.watchSessionObserved || !host.descriptor.capabilities?.some(value => value.name === V7_OBSERVED_STREAM_CAPABILITY && value.version === "v1"))
+      throw new V7Error("UNSUPPORTED", "Host does not support origin observation");
+    const stream = host.api.watchSessionObserved(input), root = this;
+    return (async function* () { for await (const item of stream) { root.assertCurrent(host); yield item; } })();
   }
   public async receipt(requestId: string): Promise<RequestReceipt | null> {
     this.assertOpen();

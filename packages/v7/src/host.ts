@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { originObservedStream } from "./observation-stream.js";
 import {
   jsonValueSchema, jsonWireByteUpperBound, nativePayloadSchema, harnessCommandSchema, capabilitySchema, type NativePayload,
 } from "@arduano/agent-multiplex-protocol";
@@ -13,7 +14,8 @@ import {
   type CreateSessionInput, type ExecuteInput, type HistoryInput, type HostApi, type HostDescriptor,
   type HostEvent, type HostSession, type JsonValue, type NativeInteraction, type NativeStateInput,
   type RequestEnvelope, type RequestReceipt, type ResolveInput, type SessionBinding,
-  type SessionEvent, type SessionWatchInput,
+  type SessionEvent, type SessionWatchInput, type SessionObservation,
+  V7_OBSERVED_STREAM_CAPABILITY,
 } from "./protocol.js";
 
 export interface HostServiceOptions {
@@ -35,7 +37,7 @@ interface Attachment {
   tail: Promise<void>; recoveryRequired: boolean;
   eventGap: boolean;
   pendingMutationGuard: boolean; interactionsComplete: boolean;
-  presentationGap: boolean;
+  presentationGap: boolean; receivedPresentation: number; materializedPresentation: number;
   interactions: Map<string, { wire: NativeInteraction; resolve: (response: JsonValue) => Promise<void> }>;
 }
 interface Ring { sequence: number; events: SessionEvent[]; bytes: number }
@@ -72,8 +74,8 @@ export class HostService implements HostApi {
     if (options.store.role !== "host" || options.store.instanceId !== options.hostId) throw new V7Error("STORE_ROLE", "Host needs its own V7 store");
     this.#descriptor = { protocolVersion: V7_PROTOCOL_VERSION, hostId: options.hostId,
       name: options.name, harness: options.native.harness, bootId: options.bootId ?? randomUUID(),
-      ...((options.capabilities?.length || options.native.inputCapabilities?.length) ? { capabilities:
-        [...(options.capabilities ?? []), ...(options.native.inputCapabilities ?? [])].map(value => capabilitySchema.parse(value)) } : {}) };
+      capabilities: [...(options.capabilities ?? []), ...(options.native.inputCapabilities ?? []),
+        { name: V7_OBSERVED_STREAM_CAPABILITY, version: "v1", experimental: false }].map(value => capabilitySchema.parse(value)) };
     this.#ackTimeout = positiveBound(options.nativeAckTimeoutMs ?? 15_000, "Native acknowledgement timeout");
     this.#closeTimeout = positiveBound(options.closeTimeoutMs ?? 5_000, "Native cleanup observation timeout");
     this.#ringSize = options.eventBufferSize ?? 256;
@@ -254,6 +256,19 @@ export class HostService implements HostApi {
     if (input.signal?.aborted) queue.close();
     return queue;
   }
+  public watchSessionObserved(input: SessionWatchInput): AsyncIterable<SessionObservation> {
+    this.assertOpen(); this.requireBinding(input.sessionId, true);
+    return originObservedStream<SessionEvent, SessionObservation>(
+      signal => this.watchSession({ ...input, signal }), event => ({ kind: "event", event }), () => {
+        const active = this.#active.get(input.sessionId);
+        return { kind: "originHeartbeat", origin: "host", protocolVersion: 7,
+          hostId: this.#descriptor.hostId, bootId: this.#descriptor.bootId, sessionId: input.sessionId,
+          attachmentId: active?.id ?? null, eventSequence: this.ring(input.sessionId).sequence,
+          receivedPresentation: active?.receivedPresentation ?? 0,
+          materializedPresentation: active?.materializedPresentation ?? 0,
+          pendingPresentations: active?.pending ?? 0, presentationGap: active?.presentationGap ?? false };
+      }, input.signal);
+  }
   private interruptLane(input: ExecuteInput): "normal" | "urgent" {
     return input.command.harness === "codex" && input.command.command.type === "interrupt" &&
       typeof input.command.command.turnId === "string" && input.command.command.turnId.trim().length > 0 &&
@@ -391,7 +406,7 @@ export class HostService implements HostApi {
       pendingBytes: 0,
       criticalPending: 0, criticalBytes: 0, criticalTail: Promise.resolve(),
       tail: Promise.resolve(), recoveryRequired: native.harness === "codex" || Boolean(this.#sessionWork.get(binding.sessionId)?.expired), eventGap: false,
-      pendingMutationGuard: Boolean(this.#sessionWork.get(binding.sessionId)?.expired), interactionsComplete: native.harness !== "codex", presentationGap: false, interactions: new Map() };
+      pendingMutationGuard: Boolean(this.#sessionWork.get(binding.sessionId)?.expired), interactionsComplete: native.harness !== "codex", presentationGap: false, receivedPresentation: 0, materializedPresentation: 0, interactions: new Map() };
     try {
       this.assertOpen(); await this.options.store.putBinding(binding); this.assertOpen();
       this.#active.set(binding.sessionId, active);
@@ -428,10 +443,12 @@ export class HostService implements HostApi {
   }
   private enqueue(sessionId: string, active: Attachment, event: AdapterEvent): void {
     if (this.#active.get(sessionId) !== active) return;
+    const presentationOrdinal = event.kind === "native" ? ++active.receivedPresentation : undefined;
     const presentationOnly = event.kind === "native" && event.continuity === "presentation";
     let bytes: number;
     try { bytes = event.kind === "native" || event.kind === "interaction" ? jsonWireByteUpperBound(event.payload) : 512; }
     catch (error) { this.gap(sessionId, active, "nativeEventRejected", !presentationOnly);
+      if (event.kind === "native") active.presentationGap = true;
       diagnose(this.options.diagnostic, { role: "host", sessionId, operation: "event", code: "nativeEventRejected", error }); return; }
     // Safety facts are observed at ingress. A blocked image transfer cannot
     // defer known interaction uncertainty behind presentation-only work.
@@ -445,14 +462,16 @@ export class HostService implements HostApi {
     const critical = event.kind !== "native";
     if (critical ? active.criticalPending >= this.#criticalLimit || active.criticalBytes + bytes > this.#criticalBytes
       : active.pending >= this.#pendingLimit || active.pendingBytes + bytes > this.#pendingBytes) {
-      this.gap(sessionId, active, "eventOverflow", !presentationOnly); return;
+      this.gap(sessionId, active, "eventOverflow", !presentationOnly); if (event.kind === "native") active.presentationGap = true; return;
     }
     if (critical) { active.criticalPending += 1; active.criticalBytes += bytes; }
     else { active.pending += 1; active.pendingBytes += bytes; }
     const work = (critical ? active.criticalTail : active.tail).then(async () => {
       if (this.#active.get(sessionId) !== active) return;
-      try { await this.onNativeEvent(sessionId, active, event); }
+      try { await this.onNativeEvent(sessionId, active, event);
+        if (presentationOrdinal !== undefined && !active.presentationGap) active.materializedPresentation = presentationOrdinal; }
       catch (error) { this.gap(sessionId, active, "nativeEventRejected", !presentationOnly);
+        if (event.kind === "native") active.presentationGap = true;
         diagnose(this.options.diagnostic, { role: "host", sessionId, operation: "event", code: "nativeEventRejected", error }); }
     }).finally(() => {
       if (critical) { active.criticalPending -= 1; active.criticalBytes -= bytes; }
