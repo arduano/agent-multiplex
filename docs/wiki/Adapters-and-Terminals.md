@@ -280,6 +280,18 @@ The maintained adapter is pinned to Codex CLI `0.152.0`. OpenAI classifies the
 app-server command and WebSocket transport as experimental; re-run adapter and
 live qualifications for every upgrade.
 
+### Codex failed-idle interaction baseline
+
+Native `systemError` reports an inactive failed thread without tracked approval
+or user-input flags. Treat it as a complete interaction baseline when the
+adapter has zero pending callback owners, while retaining runtime status
+`error`. The next explicitly requested native turn can clear that error.
+An ordinary error must not require listener recovery solely because of its
+status. Pending callbacks, waiting/unknown active flags, real Host event gaps
+and unresolved mutation ownership retain their respective fences. Resume and
+live status changes use the same completeness predicate. See the
+[incident scope](../audits/codex-system-error-recovery-20261018.md).
+
 ### Codex goals
 
 The experimental `thread.goal` v2 capability advertises the native goal view and

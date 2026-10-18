@@ -67,6 +67,12 @@ positive completeness evidence. Safety facts apply immediately at native ingress
 independent of a pending presentation/image transfer. A real lost native event stays uncertain until
 explicit recovery; an expired observer replay only asks the view to refresh.
 
+Codex's known inactive `systemError` status is positive baseline evidence when
+the adapter has no pending request owners. It preserves error presentation
+without introducing interaction uncertainty. This cannot clear a Host event-gap
+or pending-mutation fence. A new explicit user turn, never automatic replay,
+remains the native error-recovery operation.
+
 Malformed native payloads, overflowing subscribers, failed history reads and
 diagnostic exceptions affect one session/observer. They cannot make a healthy
 Host or peer session offline. Diagnostics are optional and cannot block service

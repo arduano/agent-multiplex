@@ -1199,10 +1199,12 @@ class CodexSession implements AdapterSession {
 
   #observeInteractionBaseline(status: unknown): void {
     const native = recordOf(status);
-    // Neither an empty callback list nor an RPC ACK certifies hydration. Native
-    // idle / explicit empty flags are the positive absence evidence available
-    // from this pinned protocol; waiting or unknown flags keep recovery fenced.
-    const complete = (native?.type === "idle" || native?.type === "active" &&
+    // Native systemError is failed but inactive: the app-server clears running
+    // and pending-input flags, and the next turn clears the error. Keep that
+    // error visible without blocking the next turn as unknown interaction state.
+    // Adapter-owned callbacks remain an independent fence for every status;
+    // waiting, notLoaded and unrecognized native flags do not certify hydration.
+    const complete = (native?.type === "idle" || native?.type === "systemError" || native?.type === "active" &&
       Array.isArray(native.activeFlags) && native.activeFlags.length === 0) &&
       this.#pendingRequests.size === 0;
     this.#nativeInteractionBaselineComplete = complete;

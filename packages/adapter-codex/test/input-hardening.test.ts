@@ -51,9 +51,9 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { await Promise.all(cleanups.splice(0).map(close => close())); vi.useRealTimers(); });
 const send = (native: Record<string, string> = { clientUserMessageId: "original-message" }): HarnessCommand =>
   ({ harness: "codex", command: { type: "send", input: "synthetic input", native } });
-async function fixture({ resume = false, active = false, budget = 1000, flags = [] as string[] } = {}) {
+async function fixture({ resume = false, active = false, budget = 1000, flags = [] as string[], status = "idle" } = {}) {
   const connection = new MemoryConnection();
-  if (active) connection.threadStatus = "active";
+  connection.threadStatus = active ? "active" : status;
   connection.activeFlags = flags;
   const rpc = new CodexRpcClient({ createConnection: () => connection, requestTimeoutMs: budget });
   const adapter = new CodexAdapter({ rpcClient: rpc, mutationTimeoutMs: budget });
@@ -123,6 +123,51 @@ describe("Codex input ownership and CLI parity", () => {
     f.connection.emit({ id: 91, method: "item/tool/requestUserInput", params: { threadId: "bound-thread", isBlocking: false } });
     f.connection.notify("thread/status/changed", { threadId: "bound-thread", status: { type: "idle" } });
     expect(f.events.at(-2)).toMatchObject({ kind: "lifecycle", fact: { complete: false } });
+  });
+
+  it("cold resume of a failed native thread retains error presentation and permits an explicit next input", async () => {
+    const f = await fixture({ resume: true, status: "systemError" });
+    expect(f.session.status()).toBe("error");
+    expect(f.events).toContainEqual({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    await expect(f.session.readNativeState!({ harness: "codex", view: "input" })).resolves.toMatchObject({
+      payload: { threadId: "bound-thread", status: "error", turnId: null, canSteer: false },
+    });
+    expect(f.connection.methods()).not.toContain("turn/start");
+    expect(f.connection.methods()).not.toContain("thread/turns/list");
+    await expect(f.session.execute(send())).resolves.toMatchObject({ turn: { id: "turn-a" } });
+    expect(f.connection.methods().filter(method => method === "turn/start")).toHaveLength(1);
+  });
+
+  it("a failed completed turn reports a complete error baseline without automatically retrying input", async () => {
+    const f = await fixture();
+    f.connection.notify("turn/started", { threadId: "bound-thread", turn: { id: "failed-turn" } });
+    f.connection.notify("turn/completed", { threadId: "bound-thread", turn: {
+      id: "failed-turn", status: "failed", error: { message: "synthetic upstream network failure" },
+    } });
+    f.connection.notify("thread/status/changed", { threadId: "bound-thread", status: { type: "systemError" } });
+    expect(f.events.filter(row => row.kind === "lifecycle").at(-1))
+      .toEqual({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    await expect(f.session.readNativeState!({ harness: "codex", view: "input" })).resolves.toMatchObject({
+      payload: { status: "error", turnId: null, canSteer: false },
+    });
+    expect(f.connection.methods().filter(method => method?.startsWith("turn/"))).toEqual([]);
+  });
+
+  it.each([true, false])("systemError does not certify hydration while an owned callback is pending (blocking=%s)", async blocking => {
+    const f = await fixture();
+    f.connection.emit({ id: 91, method: "item/tool/requestUserInput", params: {
+      threadId: "bound-thread", isBlocking: blocking,
+    } });
+    f.connection.notify("thread/status/changed", { threadId: "bound-thread", status: { type: "systemError" } });
+    expect(f.events.filter(row => row.kind === "lifecycle").at(-1))
+      .toEqual({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: false } });
+    expect(f.connection.messages.filter(row => row.id === 91 && !row.method)).toHaveLength(0);
+    f.connection.notify("serverRequest/resolved", { threadId: "bound-thread", requestId: 91 });
+    f.connection.notify("thread/status/changed", { threadId: "bound-thread", status: { type: "systemError" } });
+    expect(f.events.filter(row => row.kind === "lifecycle").at(-1))
+      .toEqual({ kind: "lifecycle", fact: { type: "interactionsHydrated", items: [], complete: true } });
+    expect(f.events).toContainEqual({ kind: "interactionSettled", nativeRequestId: "91", state: "stale" });
+    expect(f.connection.methods()).not.toContain("turn/start");
   });
 
   it("rejects exact stale steering definitely without retargeting, retrying or Send fallback", async () => {

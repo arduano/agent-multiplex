@@ -7,6 +7,16 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `.39` candidate; consumer deployment acceptance remains separate).
 
+## Codex failed-idle recovery correction candidate `.43`
+
+The owner-authorized October 18 repair recognizes native `systemError` as a
+complete interaction baseline only when the adapter owns no pending requests.
+The failed runtime status remains visible; Host event gaps and expired mutation
+ownership remain independent recovery fences. Listener resume uses the same
+predicate. No native work is automatically replayed. All 17 package versions
+advance together; transport/native versions and persisted schemas stay fixed.
+See [the incident and qualification scope](../audits/codex-system-error-recovery-20261018.md).
+
 ## V7 optional origin observation candidate `.42`
 
 The October 16 owner candidate adds negotiated Host and Root observation lanes
