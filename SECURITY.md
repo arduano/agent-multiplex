@@ -93,6 +93,11 @@ disclosure.
   runtime boot/binding fences. `native.activeBindingOnly` refuses a stopped
   attachment after the lock recheck; it never grants lifecycle recovery or
   mutation replay from a historical uncertain receipt.
+- Selected Codex child history proves a complete bounded native parent chain
+  to the managed root before item access. Direct and source spawn parents must
+  agree. Context identity may name only the node itself, a proved ancestor or
+  root context; a matching context alone grants no ancestry. Failed fresh proofs
+  retire cached cursor authorization, and binding retirement still fences reads.
 - Native Copilot task lists/progress use the active-binding `read` boundary
   and can include commands, paths, prompt text and recent output. They never
   resume stopped sessions or grant arbitrary shell/process access. Exact-ID

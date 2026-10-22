@@ -7,6 +7,19 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `.39` candidate; consumer deployment acceptance remains separate).
 
+## Codex cold child-history correction candidate `.44`
+
+The October 22 owner candidate removes a stale shared-context assumption from
+selected-child history authorization. Native unloaded children can expose their
+own context while retaining valid direct/source ancestry to the managed root.
+The adapter now proves the complete bounded ancestry first, validates contexts
+against the root/self/proved ancestors, and invalidates cached cursor access if
+a fresh proof fails. Foreign/conflicting metadata still fails before item reads.
+No native ownership, mutation or model call is introduced. All 17 package
+versions and internal edges advance together; native/transport pins and schemas
+remain unchanged. This is an owner candidate, not registry/hosted-CI promotion or
+installed fleet acceptance. See [scope and verification](../audits/codex-cold-child-history-20261022.md).
+
 ## Codex failed-idle recovery correction candidate `.43`
 
 The owner-authorized October 18 repair recognizes native `systemError` as a

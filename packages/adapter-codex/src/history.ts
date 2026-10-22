@@ -26,6 +26,33 @@ function childThreadSettings(thread: Thread) {
   };
 }
 
+const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+const identity = (value: unknown): string | undefined => typeof value === "string" && value.trim().length > 0 && value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value) ? value : undefined;
+
+/** Cold native metadata can report a child's own context even when its loaded
+ * ancestor shares a context. Context equality alone is not tree ownership. */
+function childAncestry(thread: Thread | undefined, expectedId: string): { context: string; parent?: string } {
+  const raw = record(thread), context = identity(raw?.sessionId);
+  if (!raw || raw.id !== expectedId || !context) throw new TypeError("Codex child thread belongs to another session tree");
+  const source = record(raw.source), parents: string[] = [];
+  if (raw.parentThreadId !== undefined && raw.parentThreadId !== null) {
+    const parent = identity(raw.parentThreadId);
+    if (!parent) throw new TypeError("Invalid Codex child parent identity");
+    parents.push(parent);
+  }
+  for (const kind of ["subagent", "subAgent"]) {
+    const agent = record(source?.[kind]);
+    if (agent && Object.hasOwn(agent, "thread_spawn")) {
+      const spawn = record(agent.thread_spawn), parent = identity(spawn?.parent_thread_id);
+      if (!parent) throw new TypeError("Invalid Codex child source parent identity");
+      parents.push(parent);
+    }
+  }
+  if (new Set(parents).size > 1) throw new TypeError("Conflicting Codex child parent identities");
+  const parent = parents[0];
+  return { context, ...(parent ? { parent } : {}) };
+}
+
 /** Reads native persisted history without attaching or resuming a thread.
  * Live and stopped reads share the exact page normalization and wire bounds. */
 export class CodexHistoryReader {
@@ -56,6 +83,7 @@ export class CodexHistoryReader {
       let limit = Math.min(request.limit ?? 100, 100);
       let response: ThreadItemsListResponse;
       for (;;) {
+        this.#assertActive();
         response = await this.#rpc.request<ThreadItemsListResponse>("thread/items/list", {
           ...Object.fromEntries(Object.entries(request.native ?? {}).filter(([key]) => key !== "omitOversizedItems" && key !== "view" && key !== "threadId")),
           threadId: childThreadId ?? this.vendorSessionId,
@@ -121,46 +149,47 @@ export class CodexHistoryReader {
   }
 
   async #authorizedChildThread(value: unknown, includeSettings: boolean): Promise<{ id: string; thread?: Thread }> {
-    if (typeof value !== "string" || value.length < 1 || value.length > 256 || /[\u0000-\u001f\u007f]/.test(value) || value === this.vendorSessionId) {
-      throw new TypeError("Invalid Codex child thread identifier");
-    }
-    // Old item pages have no current-settings claim. Opening or reopening the
-    // selected child refreshes only its small native Thread, even when its
-    // immutable ancestry was previously verified.
+    if (typeof value !== "string" || identity(value) !== value || value === this.vendorSessionId) throw new TypeError("Invalid Codex child thread identifier");
+    // Older pages reuse only a previously proved immutable selection within
+    // this attachment. Reopening a selection proves its full ancestry afresh.
     if (this.#authorizedHistoryChildren.has(value) && !includeSettings) return { id: value };
+    // A failed fresh proof must retire the earlier authorization, including
+    // cursor continuations. Keep at most one bounded proved ancestry chain.
+    this.#authorizedHistoryChildren.clear();
     if (this.#sessionTreeId === undefined) {
-      this.#sessionTreeId = (await this.#rpc.request<ThreadReadResponse>("thread/read", { threadId: this.vendorSessionId, includeTurns: false })).thread.sessionId;
       this.#assertActive();
+      const root = (await this.#rpc.request<ThreadReadResponse>("thread/read", { threadId: this.vendorSessionId, includeTurns: false })).thread;
+      this.#assertActive();
+      this.#sessionTreeId = childAncestry(root, this.vendorSessionId).context;
     }
-    const seen = new Set<string>();
-    const parents = new Map<string, string>();
+    if (!identity(this.#sessionTreeId)) throw new TypeError("Invalid Codex root context identity");
+    const seen = new Set<string>(), chain: Array<{ id: string; context: string; parent: string }> = [];
     let threadId = value;
     let selectedThread: Thread | undefined;
-    let reuseCachedAncestry = true;
     for (let depth = 0; depth < 32; depth++) {
       if (seen.has(threadId)) throw new TypeError("Cyclic Codex child ancestry");
       seen.add(threadId);
-      const response = await this.#rpc.request<ThreadReadResponse>("thread/read", { threadId, includeTurns: false });
-      const thread = response?.thread;
       this.#assertActive();
-      if (thread?.id !== threadId || thread.sessionId !== this.#sessionTreeId) {
-        throw new TypeError("Codex child thread belongs to another session tree");
-      }
+      const response = await this.#rpc.request<ThreadReadResponse>("thread/read", { threadId, includeTurns: false });
+      this.#assertActive();
+      const thread = response?.thread, metadata = childAncestry(thread, threadId);
       if (threadId === value) selectedThread = thread;
-      const parentId = thread.parentThreadId;
-      if (typeof parentId === "string" && seen.has(parentId)) throw new TypeError("Cyclic Codex child ancestry");
-      const knownParent = this.#authorizedHistoryChildren.get(value);
-      // Native ancestry is normally immutable. If the refreshed selected
-      // Thread disagrees with its earlier parent, prove the entire new path
-      // rather than letting cached descendants certify a new cycle.
-      if (threadId === value && knownParent !== undefined && knownParent !== parentId) reuseCachedAncestry = false;
-      if (typeof parentId === "string" && parentId) parents.set(threadId, parentId);
-      if (parentId === this.vendorSessionId || reuseCachedAncestry && typeof parentId === "string" && this.#authorizedHistoryChildren.has(parentId)) {
-        for (const [id, parent] of parents) this.#authorizedHistoryChildren.set(id, parent);
+      if (!metadata.parent) throw new TypeError("Codex thread is not a descendant of this session");
+      if (seen.has(metadata.parent)) throw new TypeError("Cyclic Codex child ancestry");
+      chain.push({ id: threadId, context: metadata.context, parent: metadata.parent });
+      if (metadata.parent === this.vendorSessionId) {
+        // Prove every edge first. A node's context may name only itself, a
+        // proved ancestor, or the managed root context; never a descendant or
+        // an unrelated tree. A shared context never substitutes for ancestry.
+        const contexts = new Set([this.#sessionTreeId, this.vendorSessionId]);
+        for (const node of [...chain].reverse()) {
+          contexts.add(node.id);
+          if (!contexts.has(node.context)) throw new TypeError("Codex child thread belongs to another session tree");
+        }
+        for (const node of chain) this.#authorizedHistoryChildren.set(node.id, node.parent);
         return { id: value, ...(includeSettings && selectedThread ? { thread: selectedThread } : {}) };
       }
-      if (typeof parentId !== "string" || !parentId) throw new TypeError("Codex thread is not a descendant of this session");
-      threadId = parentId;
+      threadId = metadata.parent;
     }
     throw new TypeError("Codex child ancestry exceeds the supported bound");
   }

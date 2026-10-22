@@ -198,9 +198,13 @@ item view. Copilot accepts `native: { view: "subagent", agentId, sortDirection:
 [agentId] })`. The adapter rejects returned events owned by another agent and
 binds the opaque cursor to that exact agent. Codex accepts `native: { view:
 "child", threadId, sortDirection: "desc" }` with `includeTurns: true`. It reads
-native `thread/read` parent links, checks the same native session tree and an
-ancestry path to the managed root, then pages only that thread's
-`thread/items/list`. A foreign, orphaned or cyclic thread fails closed. Child
+native metadata-only `thread/read` parent links and proves a complete path of
+at most 32 nodes to the managed root before paging that thread's
+`thread/items/list`. Direct and canonical/legacy source parent links must agree.
+A context may identify the node itself, a proved ancestor or the managed root
+context; cold unloaded children may have their own context. Shared context alone
+never proves ancestry. Fresh selections reprove the full path, and a failed
+reproof invalidates earlier cursor authorization. A foreign, orphaned or cyclic thread fails closed. Child
 pages retain the logical root `vendorSessionId`; the Codex payload also carries
 the verified `threadId` for client routing. These reads are bounded and
 read-only, do not attach a new session, and do not alter root-history cursors.

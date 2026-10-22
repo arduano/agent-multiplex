@@ -5,6 +5,18 @@ Codex sessions, model and mode changes, prompts, interactions, interrupts,
 events, and native history onto the runtime adapter boundary without parsing
 Codex history files.
 
+## Bounded child history authorization
+
+Selected child reads prove a metadata-only ancestry path to the managed native
+root, with at most 32 child/ancestor reads. Direct `parentThreadId` and canonical
+`source.subagent` / legacy `source.subAgent` spawn parents must agree. A valid
+context may identify the child itself, a proved ancestor or the root context;
+unloaded stored children can report their own context. Context equality does not
+substitute for the parent chain. Foreign contexts, conflicts, cycles, missing
+parents and overlong chains fail before item access. Fresh selections reprove
+the full path; a failed proof retires previous cursor authorization. These reads
+never resume a child, rewrite native identity or send a model request.
+
 ## Bounded turn status and errors
 
 The `history.native.turns` v1 capability adds an opt-in native history view:

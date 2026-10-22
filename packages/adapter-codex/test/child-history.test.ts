@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CodexAdapter } from "../src/adapter.js";
+import { CodexHistoryReader } from "../src/history.js";
+import type { CodexRpcClient } from "../src/rpc.js";
 import type { CodexRpcConnection } from "../src/rpc.js";
 import { NATIVE_PAYLOAD_MAX_BYTES, toJsonValue } from "@arduano/agent-multiplex-protocol";
 import { codexHistoryPageBytes } from "../src/images.js";
@@ -8,7 +10,7 @@ function fixture() {
   const listeners = new Set<(message: string) => void>();
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const threads: Record<string, { id: string; sessionId: string; parentThreadId: string | null;
-    model?: unknown; reasoningEffort?: unknown; updatedAt?: unknown; modelProvider?: unknown }> = {
+    model?: unknown; reasoningEffort?: unknown; updatedAt?: unknown; modelProvider?: unknown; source?: unknown }> = {
     root: { id: "root", sessionId: "tree", parentThreadId: null, model: "parent-only", modelProvider: "provider-only" },
     child: { id: "child", sessionId: "tree", parentThreadId: "root", model: "child-configured", reasoningEffort: "high", updatedAt: 1_800_000_000 },
     nested: { id: "nested", sessionId: "tree", parentThreadId: "child", model: "nested-configured", reasoningEffort: "ultra", updatedAt: 1_800_000_001 },
@@ -50,7 +52,7 @@ describe("Codex child native history", () => {
       expect(calls.filter(call => call.method === "thread/read").map(call => call.params.threadId)).toEqual(["nested", "child"]);
       expect(calls.find(call => call.method === "thread/items/list")?.params).toMatchObject({ threadId: "nested", limit: 10, sortDirection: "desc" });
       await session.readNativeHistory(request);
-      expect(calls.filter(call => call.method === "thread/read").map(call => call.params.threadId)).toEqual(["nested", "child", "nested"]);
+      expect(calls.filter(call => call.method === "thread/read").map(call => call.params.threadId)).toEqual(["nested", "child", "nested", "child"]);
       expect(calls.filter(call => call.method === "thread/read").every(call => call.params.includeTurns === false)).toBe(true);
     } finally { await adapter.close(); }
   });
@@ -111,6 +113,7 @@ describe("Codex child native history", () => {
         await session.readNativeHistory(request);
         Object.assign(threads.child!, replacement);
         await expect(session.readNativeHistory(request)).rejects.toThrow();
+        await expect(session.readNativeHistory({ ...request, cursor: "native-older-cursor" })).rejects.toThrow();
         expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
       } finally { await adapter.close(); }
     }
@@ -157,11 +160,103 @@ describe("Codex child native history", () => {
     const { adapter, calls } = fixture();
     try {
       const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
-      for (const threadId of ["foreign", "unrelated", "root", ""]) {
+      for (const threadId of ["foreign", "unrelated", "root", "", undefined]) {
         await expect(session.readNativeHistory({ harness: "codex", includeTurns: true,
-          native: { view: "child", threadId } })).rejects.toThrow();
+          native: { view: "child", ...(threadId === undefined ? {} : { threadId }) } })).rejects.toThrow();
       }
       expect(calls.some(call => call.method === "thread/items/list")).toBe(false);
     } finally { await adapter.close(); }
   });
+
+  it("reads a cold unloaded child's own context with agreeing direct/source ancestry", async () => {
+    const { adapter, calls, threads } = fixture();
+    threads.child!.sessionId = "child";
+    threads.child!.source = { subAgent: { thread_spawn: { parent_thread_id: "root" } } };
+    try {
+      const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+      const result = await session.readNativeHistory({ harness: "codex", includeTurns: true,
+        native: { view: "child", threadId: "child" } });
+      expect(result).toMatchObject({ vendorSessionId: "root", payload: { threadId: "child", data: [{ item: { text: "child result" } }] } });
+      expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
+      expect(threads.child!.sessionId).toBe("child");
+    } finally { await adapter.close(); }
+  });
+
+  it("accepts inherited fork-all context only after proving its fork-none ancestor", async () => {
+    const { adapter, calls, threads } = fixture();
+    threads.child!.sessionId = "child";
+    threads.nested!.sessionId = "child";
+    try {
+      const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+      await session.readNativeHistory({ harness: "codex", includeTurns: true, native: { view: "child", threadId: "nested" } });
+      expect(calls.filter(call => call.method === "thread/read").map(call => call.params.threadId)).toEqual(["nested", "child"]);
+      threads.child!.sessionId = "nested";
+      await expect(session.readNativeHistory({ harness: "codex", includeTurns: true,
+        native: { view: "child", threadId: "nested" } })).rejects.toThrow("another session tree");
+      expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
+    } finally { await adapter.close(); }
+  });
+
+  it("accepts canonical and legacy source-only parents but rejects conflicting or malformed ancestry", async () => {
+    for (const kind of ["subagent", "subAgent"]) {
+      const { adapter, calls, threads } = fixture();
+      threads.child!.parentThreadId = null;
+      threads.child!.source = { [kind]: { thread_spawn: { parent_thread_id: "root" } } };
+      try {
+        const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+        const request = { harness: "codex" as const, includeTurns: true, native: { view: "child", threadId: "child" } };
+        await session.readNativeHistory(request);
+        threads.child!.parentThreadId = "nested";
+        await expect(session.readNativeHistory(request)).rejects.toThrow("Conflicting");
+        threads.child!.parentThreadId = "root";
+        threads.child!.source = { [kind]: { thread_spawn: { parent_thread_id: "bad\nparent" } } };
+        await expect(session.readNativeHistory(request)).rejects.toThrow("Invalid");
+        threads.child!.source = { subagent: { thread_spawn: { parent_thread_id: "root" } }, subAgent: { thread_spawn: { parent_thread_id: "nested" } } };
+        await expect(session.readNativeHistory(request)).rejects.toThrow("Conflicting");
+        for (const malformed of [null, {}, { parent_thread_id: null }]) {
+          threads.child!.source = { [kind]: { thread_spawn: malformed } };
+          await expect(session.readNativeHistory(request)).rejects.toThrow("Invalid");
+        }
+        expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(1);
+      } finally { await adapter.close(); }
+    }
+  });
+
+  it("bounds metadata ancestry at 32 nodes and never opens items beyond it", async () => {
+    for (const count of [32, 33]) {
+      const { adapter, calls, threads } = fixture();
+      for (let index = 0; index < count; index++) threads[`depth-${index}`] = {
+        id: `depth-${index}`, sessionId: `depth-${index}`, parentThreadId: index === count - 1 ? "root" : `depth-${index + 1}`,
+      };
+      try {
+        const session = await adapter.spawn({ harness: "codex", cwd: "/workspace" });
+        const result = session.readNativeHistory({ harness: "codex", includeTurns: true, native: { view: "child", threadId: "depth-0" } });
+        if (count === 32) await expect(result).resolves.toMatchObject({ payload: { threadId: "depth-0" } });
+        else await expect(result).rejects.toThrow("supported bound");
+        expect(calls.filter(call => call.method === "thread/read")).toHaveLength(32);
+        expect(calls.filter(call => call.method === "thread/items/list")).toHaveLength(count === 32 ? 1 : 0);
+      } finally { await adapter.close(); }
+    }
+  });
+
+  it("fences a retired metadata response and invalid root identity before any item read", async () => {
+    const calls: string[] = [];
+    let active = true;
+    const rpc = { request: async (method: string, params: { threadId: string }) => {
+      calls.push(method);
+      if (params.threadId === "root") return { thread: { id: "root", sessionId: "root", parentThreadId: null } };
+      active = false;
+      return { thread: { id: "child", sessionId: "child", parentThreadId: "root" } };
+    } } as unknown as CodexRpcClient;
+    const reader = new CodexHistoryReader(rpc, "root", () => { if (!active) throw new Error("Attachment retired"); });
+    await expect(reader.read({ harness: "codex", includeTurns: true, native: { view: "child", threadId: "child" } })).rejects.toThrow("Attachment retired");
+    expect(calls).toEqual(["thread/read", "thread/read"]);
+    for (const root of [{ id: "foreign", sessionId: "root" }, { id: "root" }, { id: "root", sessionId: "" }, { id: "root", sessionId: "bad\ncontext" }]) {
+      const methods: string[] = [];
+      const wrongRoot = new CodexHistoryReader({ request: async (method: string) => { methods.push(method); return { thread: root }; } } as unknown as CodexRpcClient, "root");
+      await expect(wrongRoot.read({ harness: "codex", includeTurns: true, native: { view: "child", threadId: "child" } })).rejects.toThrow("another session tree");
+      expect(methods).toEqual(["thread/read"]);
+    }
+  });
+
 });
