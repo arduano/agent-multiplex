@@ -40,7 +40,7 @@ const harnessEnvironmentLines = source.run.split("\n").filter((line) =>
 assert.deepEqual(harnessEnvironmentLines.map((line) => line.trim()), [
   "--env AGENT_MULTIPLEX_RUNTIME_NODE_HARNESSES=copilot \\",
 ]);
-assert.match(source.run, /--mount type=bind,src="\$SOURCE_KEY",dst=\/run\/secrets\/codex-lb-api-key,readonly/);
+assert.match(source.run, /--mount type=bind,src="\$SOURCE_KEY",dst=\/run\/secrets\/provider-api-key,readonly/);
 assert.match(source.run, /secret_values_present_in_receipt/);
 assert.match(source.run, /identity mismatch/);
 assert.match(source.run, /copilot-only-provider-proxy\.mjs/);

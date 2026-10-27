@@ -25,6 +25,12 @@ describe.skipIf(process.platform === "win32")("POSIX private state helper", () =
     writeFileSync(file, "fixture", { mode: 0o644 });
     assertPrivateFileSync(file);
     expect(statSync(file).mode & 0o777).toBe(0o600);
+    const unchanged = statSync(file, { bigint: true }).ctimeNs;
+    assertPrivateFileSync(file);
+    expect(statSync(file, { bigint: true }).ctimeNs).toBe(unchanged);
+    chmodSync(file, 0o7600);
+    assertPrivateFileSync(file);
+    expect(statSync(file).mode & 0o7777).toBe(0o600);
     symlinkSync(file, join(root, "file-link"));
     symlinkSync(root, join(root, "dir-link"));
     expect(() => assertPrivateFileSync(join(root, "file-link"))).toThrow("non-symlink");

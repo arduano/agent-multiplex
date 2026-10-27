@@ -6,8 +6,10 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 P2PRPC_CORE=${AGENT_MULTIPLEX_P2PRPC_CORE:-"$REPO_ROOT/../p2prpc/packages/core"}
-SOURCE_CONFIG=${AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG:-"${HOME}/.codex/config.toml"}
-SOURCE_KEY=${AGENT_MULTIPLEX_COPILOT_SOURCE_KEY:-"${HOME}/.codex/codex-lb-api-key"}
+SOURCE_CONFIG=${AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG:?Explicit AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG is required}
+SOURCE_KEY=${AGENT_MULTIPLEX_COPILOT_SOURCE_KEY:?Explicit AGENT_MULTIPLEX_COPILOT_SOURCE_KEY is required}
+SOURCE_PROVIDER=${AGENT_MULTIPLEX_SOURCE_PROVIDER:?Explicit AGENT_MULTIPLEX_SOURCE_PROVIDER is required}
+[[ "$SOURCE_PROVIDER" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo "Invalid explicit provider ID" >&2; exit 2; }
 RECEIPT_ROOT=${AGENT_MULTIPLEX_COPILOT_E2E_RECEIPT_ROOT:-"$REPO_ROOT/receipts/copilot-interactive-docker-e2e"}
 INITIAL_MODEL=${AGENT_MULTIPLEX_COPILOT_E2E_MODEL:-gpt-5.6-sol}
 SECOND_MODEL=${AGENT_MULTIPLEX_COPILOT_E2E_SECOND_MODEL:-gpt-5.6-terra}
@@ -112,7 +114,7 @@ redact_stream() {
         @pairs = (
           [$ENV{AM_REDACT_SHARED} // "", "<redacted-shared-secret>"],
           [$ENV{AM_REDACT_TICKET} // "", "<redacted-p2p-ticket>"],
-          [$ENV{AM_REDACT_KEY} // "", "<redacted-codex-lb-api-key>"],
+          [$ENV{AM_REDACT_KEY} // "", "<redacted-provider-api-key>"],
           [$ENV{AM_REDACT_PROVIDER} // "", "<redacted-provider-endpoint>"],
         );
       }
@@ -297,20 +299,20 @@ phase_events() {
   ' "$RECEIPT_DIR/logs/fleet-events.ndjson" >"$destination"
 }
 
-note "reading codex-lb endpoint and validating the read-only API-key source"
+note "reading qualification-provider endpoint and validating the read-only API-key source"
 API_KEY_LITERAL=$(tr -d '\r\n' <"$SOURCE_KEY")
-if (( ${#API_KEY_LITERAL} < 16 )); then fail "codex-lb API key is unexpectedly short"; fi
-PROVIDER_URL=$(awk '
-  /^\[model_providers\.codex-lb\]$/ { in_provider = 1; next }
+if (( ${#API_KEY_LITERAL} < 16 )); then fail "qualification-provider API key is unexpectedly short"; fi
+PROVIDER_URL=$(awk -v selected="$SOURCE_PROVIDER" '
+  $0 == "[model_providers." selected "]" { in_provider = 1; next }
   in_provider && /^\[/ { exit }
   in_provider && /^[[:space:]]*base_url[[:space:]]*=/ {
     sub(/^[^=]*=[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit
   }
 ' "$SOURCE_CONFIG")
-if [[ -z "$PROVIDER_URL" ]]; then fail "codex-lb base_url was not found"; fi
+if [[ -z "$PROVIDER_URL" ]]; then fail "qualification-provider base_url was not found"; fi
 if ! node -e 'const u=new URL(process.argv[1]);if(!/^https?:$/.test(u.protocol)||u.username||u.password)process.exit(1)' \
   "$PROVIDER_URL"; then
-  fail "codex-lb base_url is not a credential-free HTTP(S) URL"
+  fail "qualification-provider base_url is not a credential-free HTTP(S) URL"
 fi
 
 note "building the shared host/worker image"
@@ -373,10 +375,10 @@ docker run --detach \
   --security-opt no-new-privileges --security-opt seccomp=unconfined \
   --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
-  --tmpfs /home/arduano/.copilot:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+  --tmpfs /home/multiplex/.copilot:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
   --mount "type=bind,src=$WORKSPACE_DIR,dst=/workspace/e2e" \
-  --mount "type=bind,src=$SOURCE_KEY,dst=/run/secrets/codex-lb-api-key,readonly" \
-  --env HOME=/home/arduano \
+  --mount "type=bind,src=$SOURCE_KEY,dst=/run/secrets/provider-api-key,readonly" \
+  --env HOME=/home/multiplex \
   --env XDG_CACHE_HOME=/tmp/cache \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$P2P_ENDPOINT_ID" \
@@ -388,7 +390,7 @@ docker run --detach \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_HEARTBEAT_MS=2000 \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_INVENTORY_REFRESH_MS=5000 \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_RECONNECT_MAX_MS=5000 \
-  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/arduano/.copilot \
+  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/multiplex/.copilot \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_LOG_LEVEL=none \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TYPE=openai \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL="$PROVIDER_URL" \
@@ -396,16 +398,16 @@ docker run --detach \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TRANSPORT=http \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL="$INITIAL_MODEL" \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODELS="[\"$INITIAL_MODEL\",\"$SECOND_MODEL\"]" \
-  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/codex-lb-api-key \
+  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/provider-api-key \
   "$IMAGE_TAG" node apps/runtime-node/dist/main.js >/dev/null
 WORKER_STARTED=1
 
 docker inspect "$WORKER_CONTAINER" | jq --arg source "$SOURCE_KEY" '
   .[0] as $container |
-  ($container.Mounts | map(select(.Destination == "/run/secrets/codex-lb-api-key"))[0]) as $mount |
+  ($container.Mounts | map(select(.Destination == "/run/secrets/provider-api-key"))[0]) as $mount |
   {
     workerCreatedAt:$container.Created,
-    sourceKind:"host codex-lb API-key file",
+    sourceKind:"host qualification-provider API-key file",
     destination:$mount.Destination,
     mountType:$mount.Type,
     readOnly:($mount.RW | not),
@@ -415,7 +417,7 @@ docker inspect "$WORKER_CONTAINER" | jq --arg source "$SOURCE_KEY" '
   }
 ' >"$RECEIPT_DIR/auth-mount-proof.json"
 assert_json "API-key mount is not narrowly scoped and read-only" '
-  .destination == "/run/secrets/codex-lb-api-key" and .mountType == "bind" and
+  .destination == "/run/secrets/provider-api-key" and .mountType == "bind" and
   .readOnly == true and .apiKeyCopiedIntoImage == false and
   .fullCodexHomeMounted == false and .sourcePathMatchesExpected == true
 ' "$RECEIPT_DIR/auth-mount-proof.json"
@@ -927,7 +929,7 @@ jq -n \
     transport:{protocol:"p2prpc v1 over Iroh",hostEndpointId:$endpoint,
       ticketRecorded:false,ticketSha256:$ticketDigest},
     browserRunsOnDockerHost:true,
-    apiKeyMount:{destination:"/run/secrets/codex-lb-api-key",readOnly:true,recorded:false}
+    apiKeyMount:{destination:"/run/secrets/provider-api-key",readOnly:true,recorded:false}
   }
 ' >"$RECEIPT_DIR/topology.json"
 
@@ -977,7 +979,7 @@ jq -n '
   printf 'Status: **PASS**\n\nRun: `%s`\n\n' "$RUN_ID"
   printf 'Exactly two application containers were used: one canonical Multiplex host and one worker running the real Copilot runtime. Playwright ran on the Docker host.\n\n'
   printf '## Verified phases\n\n'
-  printf -- '- OpenAI-compatible BYOK through codex-lb using an API key, the Responses API, and HTTP transport.\n'
+  printf -- '- OpenAI-compatible BYOK through qualification-provider using an API key, the Responses API, and HTTP transport.\n'
   printf -- '- Exact reconstruction of a final answer from multiple native `assistant.message_delta` events.\n'
   printf -- '- Native shell permission request, canonical interactive approval, and matching tool start/completion events.\n'
   printf -- '- Runtime model switch and a response reporting the second model.\n'

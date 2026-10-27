@@ -1,0 +1,24 @@
+/** Reusable public primitives. Scripted effect/transport fixtures are intentionally separate. */
+export type * from "./contracts/types.js";
+export { CAPTURE_GAP_ID } from "./contracts/types.js";
+export { rowMedia, mediaDigest } from "./contracts/media.js";
+export type { NativeMediaOccurrence, NativeMediaHandler, MediaResolution } from "./contracts/media.js";
+export { scopeKey, conversationKey, sameScope, sameConversation } from "./contracts/identity.js";
+export { PrimitiveError, validateFrame, validateScope } from "./contracts/validation.js";
+export { HistoryHub, HistoryOwner, HistorySubscription } from "./host/history-owner.js";
+export type { HostLimits } from "./host/history-owner.js";
+export type { HistoryReadFence } from "./host/history-owner.js";
+export { HistoryAcquisition } from "./acquisition/owner.js";
+export type { AcquisitionResult, AcquisitionLimits } from "./acquisition/owner.js";
+export type { HistoryRecord, AcquisitionBatch, AcquisitionPort, AcquisitionRequest, HistoryObservation, HistoryRecovery } from "./acquisition/types.js";
+export { createCodexHistoryPort } from "./native/codex/history.js";
+export { createCopilotHistoryPort } from "./native/copilot/history.js";
+export type { CodexItemsRequest, CodexItemsPage, CodexHistoryEntry } from "./native/codex/history.js";
+export type { CopilotHistoryOptions, CopilotNativeHistoryRequest, CopilotActiveHistoryRequest, CopilotPersistedHistoryRequest } from "./native/copilot/history.js";
+export * from "./client/index.js";
+export { createCodexCodec, CodexCodec, proveCodexLineage } from "./native/codex/index.js";
+export { createCopilotCodec } from "./native/copilot/index.js";
+export { ReadCoordinator, ReadHandle, reasons } from "./repair/read-coordinator.js";
+export type { ReadRequest, ReadObservation, ExceptionReason } from "./repair/read-coordinator.js";
+export { readActivePage, PersistedSnapshotReader } from "./repair/cursors.js";
+export type { NativePage, PagePort } from "./repair/cursors.js";

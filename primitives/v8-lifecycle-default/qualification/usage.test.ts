@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
+import { defaultLifecycle } from "../src/plugin.js";
+import { existingDirectoryWorkspace } from "../src/workspace.js";
+import { readJournalFacts } from "../src/session/receipt-reader.js";
+import { scriptedHost, until } from "../../v8-host/qualification/fixture.js";
+import { observedSnapshot } from "../../v8-session/src/client/validation.js";
+import { scopeKey, type SessionScope } from "../../v8-session/src/contracts/types.js";
+
+test("root native cumulative credit facts commit in order, survive Stop/Resume and cold list without an adapter", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "v8-observed-usage-"));
+  const scope: SessionScope = { connection: "account", principal: "owner", host: "host", session: "logical" };
+  const route = { authority: "authority", owner: "durable-owner", host: "host", routeEpoch: "epoch-1" };
+  const driver = scriptedHost("copilot", { cwd: directory }); let factories = 0;
+  const harness = { kind: "harness" as const, nativeKind: "copilot" as const, protocol: driver.controller.protocol, identity: { id: "scripted.copilot", version: 1, recordVersion: 1 }, capabilities: [], async create() { factories++; return { controller: driver.controller }; } };
+  const options = { directory: join(directory, "host"), harness, workspace: existingDirectoryWorkspace(), policy: { kind: "copilot", provider: "copilot-only", permissions: "manual" } as const };
+  const context = { route, storage: null };
+  let runtime = await defaultLifecycle(options).open(context);
+  const fact = async () => (await runtime.sessions.attached(scope)!.session.snapshot(scope)).usage;
+  const settled = async () => { await until(() => !runtime.sessions.attached(scope)!.session.updateReadiness().reasons.some(reason => ["admitted-work-unsettled", "journal-io-unsettled"].includes(reason))); };
+  const emit = (total: unknown, at: string | undefined, agent?: string, type = "session.usage_checkpoint") => driver.event(type, { totalNanoAiu: total }, agent, at);
+  const t = (second: number) => `2026-10-25T00:00:${String(second).padStart(2, "0")}.000Z`;
+  try {
+    assert.equal(factories, 0);
+    await runtime.sessions.create(scope, "create", { cwd: directory });
+    await until(async () => (await runtime.sessions.original(scope, "create"))?.state === "acknowledged");
+    assert.equal(await fact(), undefined, "no event means unknown, never zero");
+    emit(0, t(1)); await until(async () => (await fact())?.totalNanoAiu === 0); await settled();
+    const zero = (await fact())!; assert.equal(zero.reportedAt, t(1));
+    driver.event("subagent.started", { toolCallId: "child-task" }, "child");
+    emit(9000, t(9), "child");
+    emit(-1, t(2)); emit(3.5, t(2)); emit(Number.MAX_SAFE_INTEGER + 1, t(2)); emit(4, undefined); emit(4, "invalid");
+    driver.event("assistant.usage", { totalNanoAiu: 9000 }, undefined, t(9));
+    emit(100, t(3)); emit(10, t(4)); emit(200, t(2)); emit(100, t(3));
+    await until(async () => (await fact())?.totalNanoAiu === 100); await settled();
+    const accepted = (await fact())!;
+    assert.equal(accepted.reportedAt, t(3));
+    emit(100, t(3)); await settled();
+    assert.deepEqual(await fact(), accepted, "duplicate cannot refresh observedAt");
+    emit(100, t(4), undefined, "session.shutdown"); await until(async () => (await fact())?.reportedAt === t(4)); await settled();
+    assert.equal((await fact())!.totalNanoAiu, 100, "shutdown replaces, never adds");
+    const host = runtime.sessions.attached(scope)!.session, snapshot = await host.snapshot(scope);
+    assert.throws(() => observedSnapshot({ ...snapshot, usage: { ...snapshot.usage!, nativeSession: "different-native" } }), { code: "INVALID" });
+    assert.throws(() => observedSnapshot({ ...snapshot, kind: "codex", selection: { kind: "codex" } }), { code: "INVALID" });
+    await runtime.sessions.submit({ scope, id: "stop", generation: 1, command: { type: "stop" } });
+    await until(() => runtime.readiness().ready);
+    const retained = (await fact())!;
+    await runtime.sessions.submit({ scope, id: "resume", generation: 1, command: { type: "resume" } });
+    await until(async () => (await host.snapshot(scope)).phase === "running");
+    assert.deepEqual(await fact(), retained, "new run generation of same native identity retains cumulative accounting");
+    emit(101, t(5)); await until(async () => (await fact())?.totalNanoAiu === 101); await settled();
+    await runtime.sessions.submit({ scope, id: "stop-again", generation: 2, command: { type: "stop" } });
+    await until(() => runtime.readiness().ready);
+    const final = (await fact())!; await runtime.close();
+    const filename = join(options.directory, "sessions", createHash("sha256").update(scopeKey(scope)).digest("hex"), "session", "session.sqlite");
+    const identity = { lifecycle: { id: "multiplex.default-lifecycle", recordVersion: 1 }, harness: { id: harness.identity.id, recordVersion: 1 }, workspace: { id: "multiplex.existing-directory", recordVersion: 1 } };
+    const epoch = () => { const db = new DatabaseSync(filename, { readOnly: true }); try { return (JSON.parse(String(db.prepare("SELECT json FROM state").get()!.json)) as { epoch: number }).epoch; } finally { db.close(); } };
+    const priorEpoch = epoch();
+    assert.deepEqual(readJournalFacts(filename, scope, identity)?.usage, final);
+    assert.throws(() => readJournalFacts(filename, { ...scope, principal: "other" }, identity), { code: "FENCED" });
+    assert.throws(() => readJournalFacts(filename, scope, { ...identity, harness: { ...identity.harness, recordVersion: 2 } }), { code: "FENCED" });
+    runtime = await defaultLifecycle(options).open(context);
+    const cold = runtime.sessions.list()[0]!;
+    assert.equal(cold.native, null, "saved accounting does not invent a current native observation");
+    assert.deepEqual(cold.usage, final); assert.equal(factories, 1);
+    assert.equal(driver.counts.bodyReads, 0); assert.equal(driver.counts.opens, 1); assert.equal(driver.counts.resumes, 1);
+    assert.equal(epoch(), priorEpoch, "cold list did not open the session writer/advance epoch");
+    // Cold native custody intentionally remains unobserved; passive listing
+    // does not itself prove update readiness or authorize an adapter close.
+  } finally { await runtime.sessions.terminate(); await rm(directory, { recursive: true, force: true }); }
+});

@@ -68,6 +68,31 @@ compiled JavaScript source maps plus the explicitly embedded CSS/Geist inputs. I
 contains every discovered component identity and the complete corresponding
 upstream license/copyright documents; the release gate rejects a stale copy.
 
+## V8 chat code and font assets
+
+The continuous document viewer uses the exact published MIT-licensed
+`@tanstack/react-virtual` 3.14.10 and its locked `@tanstack/virtual-core`
+dependency. The existing build derives their license entries from the actual
+bundle inputs and emits their full upstream license text with the artifact.
+
+The isolated V8 React chat has its own exact dependency lock under
+`primitives/v8-react-ui`. Its build-time notice companion uses actual JavaScript
+and CSS input graphs, including the fixed Mermaid renderer, rather than assuming
+the parent dashboard's dependency closure. Mermaid/KaTeX/math plugins add MIT,
+ISC, BSD, Apache and other declared components. The bundled `elkjs@0.9.3` layout
+engine is EPL-2.0; the companion includes its complete license and source
+availability locator. DOMPurify uses its Apache-2.0 alternative. KaTeX's emitted
+font software retains separate SIL OFL 1.1 copyright/Reserved Font Name records,
+alongside its MIT JavaScript license. Distribute `THIRD_PARTY_LICENSES.txt` and
+`THIRD_PARTY_COMPONENTS.json` with the emitted chat/renderer/font assets. A
+consumer's bundled React/fonts and other inputs remain part of its own companion.
+
+The passive document preview pins `pdfjs-dist@6.3.289` (Apache-2.0). The build
+emits its exact worker, Adobe CMaps and standard font files without the scripting
+sandbox runtime. The package's own font/CMap license documents are included in
+the generated companion and beside their unmodified emitted assets. These font
+terms are independent of the PDF.js JavaScript license.
+
 ## Build and test dependencies
 
 The lockfile also contains build and test tools under MIT, Apache-2.0,

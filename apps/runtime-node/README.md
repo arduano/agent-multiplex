@@ -192,17 +192,17 @@ Optional settings are:
   `AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE` and
   `AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BEARER_TOKEN_FILE`.
 
-For an OpenAI-compatible codex-lb deployment:
+For an explicitly selected OpenAI-compatible provider:
 
 ```bash
 export AGENT_MULTIPLEX_RUNTIME_NODE_HARNESSES=copilot
-export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL='http://codex-lb.internal/v1'
+export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL='https://provider.example/v1'
 export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TYPE=openai
 export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_WIRE_API=responses
 export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TRANSPORT=http
 export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL=gpt-5.6-sol
 export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODELS='["gpt-5.6-sol","gpt-5.6-terra"]'
-export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/codex-lb-api-key
+export AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/provider-api-key
 ```
 
 Provider credentials stay local: they are injected into SDK sessions, never

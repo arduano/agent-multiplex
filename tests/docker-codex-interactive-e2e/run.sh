@@ -6,8 +6,10 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 P2PRPC_CORE=${AGENT_MULTIPLEX_P2PRPC_CORE:-"$REPO_ROOT/../p2prpc/packages/core"}
-CODEX_SOURCE_CONFIG=${AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG:-"${HOME}/.codex/config.toml"}
-CODEX_SOURCE_KEY=${AGENT_MULTIPLEX_CODEX_SOURCE_KEY:-"${HOME}/.codex/codex-lb-api-key"}
+CODEX_SOURCE_CONFIG=${AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG:?Explicit AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG is required}
+CODEX_SOURCE_KEY=${AGENT_MULTIPLEX_CODEX_SOURCE_KEY:?Explicit AGENT_MULTIPLEX_CODEX_SOURCE_KEY is required}
+SOURCE_PROVIDER=${AGENT_MULTIPLEX_SOURCE_PROVIDER:?Explicit AGENT_MULTIPLEX_SOURCE_PROVIDER is required}
+[[ "$SOURCE_PROVIDER" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo "Invalid explicit provider ID" >&2; exit 2; }
 RECEIPT_ROOT=${AGENT_MULTIPLEX_INTERACTIVE_E2E_RECEIPT_ROOT:-"$REPO_ROOT/receipts/codex-interactive-docker-e2e"}
 INITIAL_MODEL=${AGENT_MULTIPLEX_INTERACTIVE_E2E_MODEL:-gpt-5.6-sol}
 
@@ -27,7 +29,7 @@ if [[ ! -r "$CODEX_SOURCE_CONFIG" ]]; then
   exit 1
 fi
 if [[ ! -r "$CODEX_SOURCE_KEY" ]]; then
-  echo "interactive Docker Codex E2E: codex-lb source key is not readable: $CODEX_SOURCE_KEY" >&2
+  echo "interactive Docker Codex E2E: qualification-provider source key is not readable: $CODEX_SOURCE_KEY" >&2
   exit 1
 fi
 
@@ -118,7 +120,7 @@ redact_stream() {
         @pairs = (
           [$ENV{AM_REDACT_SHARED} // "", "<redacted-shared-secret>"],
           [$ENV{AM_REDACT_TICKET} // "", "<redacted-p2p-ticket>"],
-          [$ENV{AM_REDACT_KEY} // "", "<redacted-codex-lb-key>"],
+          [$ENV{AM_REDACT_KEY} // "", "<redacted-qualification-provider-key>"],
           [$ENV{AM_REDACT_PROVIDER} // "", "<redacted-provider-endpoint>"],
         );
       }
@@ -403,46 +405,46 @@ phase_events() {
   ' "$RECEIPT_DIR/logs/fleet-events.ndjson" >"$destination"
 }
 
-note "preparing isolated codex-lb runtime configuration"
+note "preparing isolated qualification-provider runtime configuration"
 API_KEY_LITERAL=$(tr -d '\r\n' <"$CODEX_SOURCE_KEY")
 if (( ${#API_KEY_LITERAL} < 16 )); then
-  fail "codex-lb key file is unexpectedly short"
+  fail "qualification-provider key file is unexpectedly short"
 fi
-PROVIDER_URL=$(awk '
-  /^\[model_providers\.codex-lb\]$/ { in_provider = 1; next }
+PROVIDER_URL=$(awk -v selected="$SOURCE_PROVIDER" '
+  $0 == "[model_providers." selected "]" { in_provider = 1; next }
   in_provider && /^\[/ { exit }
   in_provider && /^[[:space:]]*base_url[[:space:]]*=/ {
     sub(/^[^=]*=[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit
   }
 ' "$CODEX_SOURCE_CONFIG")
 if [[ -z "$PROVIDER_URL" ]]; then
-  fail "codex-lb provider base_url was not found in the source config"
+  fail "qualification-provider provider base_url was not found in the source config"
 fi
 
 MINIMAL_CONFIG_RAW="$RUNTIME_DIR/config.raw.toml"
 MINIMAL_CONFIG="$RUNTIME_DIR/config.toml"
-awk '
+awk -v selected="$SOURCE_PROVIDER" '
   /^[[:space:]]*model_provider[[:space:]]*=/ {
-    if ($0 ~ /"codex-lb"/) print
+    if (index($0, "\"" selected "\"")) print "model_provider = \"qualification-provider\""
     next
   }
   /^[[:space:]]*model[[:space:]]*=/ { print; next }
-  /^\[model_providers\.codex-lb\]$/ { in_provider = 1; print; next }
+  $0 == "[model_providers." selected "]" { in_provider = 1; print "[model_providers.qualification-provider]"; next }
   in_provider && /^\[/ {
-    if ($0 == "[model_providers.codex-lb.auth]") { print; next }
+    if ($0 == "[model_providers." selected ".auth]") { print "[model_providers.qualification-provider.auth]"; next }
     in_provider = 0
   }
   in_provider { print }
 ' "$CODEX_SOURCE_CONFIG" >"$MINIMAL_CONFIG_RAW"
 sed -E \
-  's#^([[:space:]]*args[[:space:]]*=[[:space:]]*)\["[^"]*codex-lb-api-key"\]#\1["/home/arduano/.codex/codex-lb-api-key"]#' \
+  's#^([[:space:]]*args[[:space:]]*=[[:space:]]*)\["[^"]*"\]#\1["/home/multiplex/.codex/provider-api-key"]#' \
   "$MINIMAL_CONFIG_RAW" >"$MINIMAL_CONFIG"
 printf '\n[projects."/workspace/e2e"]\ntrust_level = "trusted"\n' >>"$MINIMAL_CONFIG"
 chmod 600 "$MINIMAL_CONFIG"
-if ! grep -q '^model_provider = "codex-lb"$' "$MINIMAL_CONFIG" || \
-   ! grep -q '^\[model_providers.codex-lb.auth\]$' "$MINIMAL_CONFIG" || \
-   ! grep -q '/home/arduano/.codex/codex-lb-api-key' "$MINIMAL_CONFIG"; then
-  fail "generated minimal codex-lb config did not pass validation"
+if ! grep -q '^model_provider = "qualification-provider"$' "$MINIMAL_CONFIG" || \
+   ! grep -q '^\[model_providers.qualification-provider.auth\]$' "$MINIMAL_CONFIG" || \
+   ! grep -q '/home/multiplex/.codex/provider-api-key' "$MINIMAL_CONFIG"; then
+  fail "generated minimal qualification-provider config did not pass validation"
 fi
 
 note "building the shared host/worker image"
@@ -514,7 +516,7 @@ for attempt in $(seq 1 30); do
   sleep 1
 done
 
-note "starting worker container, then copying only codex-lb auth material into it"
+note "starting worker container, then copying only qualification-provider auth material into it"
 WORKER_CREATED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker run --detach \
   --name "$WORKER_CONTAINER" \
@@ -528,8 +530,8 @@ docker run --detach \
   --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
   --mount "type=bind,src=$WORKSPACE_DIR,dst=/workspace/e2e" \
-  --env HOME=/home/arduano \
-  --env CODEX_HOME=/home/arduano/.codex \
+  --env HOME=/home/multiplex \
+  --env CODEX_HOME=/home/multiplex/.codex \
   --env XDG_CACHE_HOME=/tmp/cache \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$P2P_ENDPOINT_ID" \
@@ -547,16 +549,16 @@ docker run --detach \
 WORKER_STARTED=1
 
 docker cp -a "$CODEX_SOURCE_KEY" \
-  "$WORKER_CONTAINER:/home/arduano/.codex/codex-lb-api-key"
+  "$WORKER_CONTAINER:/home/multiplex/.codex/provider-api-key"
 docker cp -a "$MINIMAL_CONFIG" \
-  "$WORKER_CONTAINER:/home/arduano/.codex/config.toml"
+  "$WORKER_CONTAINER:/home/multiplex/.codex/config.toml"
 AUTH_COPIED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
 docker exec "$WORKER_CONTAINER" node -e '
   const fs = require("node:fs");
   const paths = [
-    "/home/arduano/.codex/config.toml",
-    "/home/arduano/.codex/codex-lb-api-key",
+    "/home/multiplex/.codex/config.toml",
+    "/home/multiplex/.codex/provider-api-key",
   ];
   const files = Object.fromEntries(paths.map((path) => {
     const stat = fs.statSync(path);
@@ -574,7 +576,7 @@ jq -n \
   --arg copiedAt "$AUTH_COPIED_AT" \
   --slurpfile stat "$RUNTIME_DIR/auth-stat.json" '
     {
-      source: "host codex-lb provider config/key only",
+      source: "host qualification-provider provider config/key only",
       method: "docker cp -a after worker creation",
       isolatedCodexHome: true,
       authJsonCopied: false,
@@ -1363,7 +1365,7 @@ jq -n --argjson maxTick "$((10#$INTERRUPT_MAX_TICK))" '
   printf -- '- Visible long command output followed by native interrupt and stopped output (last tick `%s`).\n' "$INTERRUPT_MAX_TICK"
   printf -- '- Native subagent started/completed activity, an exact child marker routed from the started child thread, and parent result visibility.\n'
   printf -- '- Final history obtained through Codex `thread/read`; no local history parsing.\n\n'
-  printf 'The fresh worker received only a minimal codex-lb provider configuration and key after container creation. No auth.json, provider endpoint, raw key, raw P2P ticket, or shared secret is included.\n\n'
+  printf 'The fresh worker received only a minimal qualification-provider provider configuration and key after container creation. No auth.json, provider endpoint, raw key, raw P2P ticket, or shared secret is included.\n\n'
   printf 'Primary evidence is in `phases/`, `rpc/`, `logs/fleet-events.ndjson`, and the three screenshots under `screenshots/`.\n'
 } >"$RECEIPT_DIR/README.md"
 

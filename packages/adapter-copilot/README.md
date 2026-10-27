@@ -186,7 +186,7 @@ adapter constructor:
 new CopilotAdapter({
   provider: {
     type: "openai",
-    baseUrl: "http://codex-lb.internal/v1",
+    baseUrl: "https://provider.example/v1",
     apiKey: readRuntimeNodeSecret(),
     wireApi: "responses",
     transport: "http",
@@ -196,9 +196,9 @@ new CopilotAdapter({
 });
 ```
 
-`baseUrl` is the OpenAI-compatible API base, so codex-lb URLs include `/v1`
-and do not include `/responses`. Responses over HTTP are the supported v1
-codex-lb path. A configured provider requires `defaultModel`. The optional
+`baseUrl` is the selected provider's OpenAI-compatible API base, illustrated
+with `/v1`, rather than the `/responses` operation URL. This configuration uses
+Responses over HTTP. A configured provider requires `defaultModel`. The optional
 `providerModels` list is deduplicated, always includes that default, and
 replaces SDK model discovery for `models.list`; it is an advertised allowlist,
 not authorization for `setModel`.
@@ -234,8 +234,10 @@ the existing durable command identity without retry or shell fallbacks.
 See [task operation guidance](../../docs/wiki/Adapters-and-Terminals.md#copilot-tracked-tasks)
 for view/command names, read limits, native caveats and client behavior. The
 [disposable native smoke](test/native-tasks-smoke.mjs) proves sync-shell
-promotion/cancellation without model requests. With a built checkout and a
-readable codex-lb config/key file, `bash packages/adapter-copilot/test/run-luna-resume-smoke.sh`
+promotion/cancellation without model requests. With a built checkout and explicit
+`AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG`, `AGENT_MULTIPLEX_COPILOT_SOURCE_KEY` and
+`AGENT_MULTIPLEX_SOURCE_PROVIDER` inputs,
+`bash packages/adapter-copilot/test/run-luna-resume-smoke.sh`
 uses a private glibc container, a read-only key mount, and a trusted CA bundle
 to send exactly one synthetic `gpt-6-luna` prompt. It checks the exact reply,
 whole-session idle, native-history retention, and intentionally partial
@@ -243,7 +245,7 @@ child/interaction hydration on same-home resume. The related
 `native-exit-plan-smoke.mjs` exercises the real CLI's Plan tool with a
 synthetic decline and **zero** provider requests; in a no-network glibc
 container it must emit `exit_plan_mode.requested`, an adapter `exitPlan`
-interaction, then `exit_plan_mode.completed`. With the same private BYOK/CA
+interaction, then `exit_plan_mode.completed`. With the same explicit provider inputs and private BYOK/CA
 mounts, `bash packages/adapter-copilot/test/run-luna-exit-plan-smoke.sh`
 sends **one** bounded `gpt-6-luna` prompt in Plan mode and checks the native
 request, exact adapter decision and whole-session idle. One prompt can involve

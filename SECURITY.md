@@ -54,6 +54,16 @@ disclosure.
 
 ## Security boundaries
 
+- V8 native MCP sign-in links are transient controller capabilities bound to
+  the current account, native run and admitted original. Every lookup requires
+  both `read` and `control`, including a query through a custom Host router.
+  Gateways intersect forwarded plugin grants with that exact Host route's
+  configured ceiling. Authorization URLs must never enter journals, receipts,
+  events, native-read caches or browser storage; HTTP responses use `no-store`.
+  Closing a view or expiring a displayed link never retries/cancels login.
+  Stop fences delivery and retires the native callback owner; late old-run
+  results cannot republish a link. Native credential storage remains vendor
+  owned; separate native homes alone do not prove safe shared keychain scoping.
 - Control nodes are trusted canonical metadata/catalog authorities.
 - Answering or expiring an imported interaction preserves its admitted child
   ownership. It does not authorize identity transfer or weaken snapshot and
@@ -135,6 +145,46 @@ disclosure.
   injection, frames, or document navigation.
 - Allowed-root validation is a path policy, not process, network, credential, or
   filesystem isolation.
+
+## V8 browser presentation
+
+The isolated V8 chat treats Markdown as text with raw HTML disabled. Arbitrary
+Markdown image URLs do not fetch bytes; previews require the existing scoped file
+owner. Mermaid source is interpreted only by a fixed packaged script in an
+opaque sandboxed iframe whose CSP denies network, remote images, frames and
+forms. Its bounded sanitized SVG result is displayed only as an inert Blob
+image, never application markup. The trusted same-origin renderer URL and any
+parent response CSP nonce are application configuration, never chat/file input.
+The parent policy remains authoritative: a `srcdoc` inherits it, and an unrelated
+nonce cannot authorize the renderer. React mount/unmount, page close and logout
+release browser observations/private views; they do not grant native Stop or
+mutation replay.
+
+Explicit local-file links use the existing authenticated file capture owner and
+immutable ResourceCache, including nested references beside a captured document.
+Self-contained HTML uses an explicitly selected authenticated representation:
+the response checks the complete immutable digest before serving, and both
+response CSP and iframe apply an opaque `sandbox allow-scripts`. Inline scripts
+and styles are allowed; same-origin privileges, parent APIs, forms, child frames,
+network APIs and external resources are denied. Only data/blob images and data
+fonts are admitted. There is no credential/API bridge or linked-asset crawler;
+this is not process isolation or a CPU bound for hostile JavaScript. Raw HTML
+downloads remain attachments without that explicit representation. The embedding
+must request the existing file-write grant for a first disk capture; an immutable
+artifact read requires its existing read grant. PDF.js receives verified byte copies and one
+owned Worker, with only fixed same-origin published font/CMap resources. PDF
+actions, scripts, annotations and forms are not mounted. Virtualized pages have
+per-page and total visible canvas limits plus finite timeouts. The application may supply an
+authenticated same-origin Open/Copy address, but its HTTP server must reauthorize
+every navigation; neither that URL nor a capture source key grants file access.
+
+Child-history menus consume only a bounded Host-proved current-run scope
+inventory, with exact root origin and per-scope authorization rechecked by the
+Gateway. Delegation text, candidate IDs and caller-provided scopes cannot grant
+read access. Read-only child facades expose no native/session mutation or parent
+callback authority, and independent child feed health cannot certify root
+history health. A native binding change fences their reads; authentication
+disposal redacts loaded rows and releases visual observations.
 
 ## Authenticated renewal
 

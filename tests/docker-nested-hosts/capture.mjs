@@ -37,10 +37,10 @@ if (
 
 const playwrightModule =
   process.env.AGENT_MULTIPLEX_PLAYWRIGHT_MODULE ??
-  "/home/arduano/.bun/install/global/node_modules/playwright/index.mjs";
+  "playwright-core";
 const chromeExecutable =
   process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ??
-  "/home/arduano/.nix-profile/bin/google-chrome";
+  "/run/current-system/sw/bin/chromium";
 const moduleSpecifier = playwrightModule.startsWith("/")
   ? pathToFileURL(playwrightModule).href
   : playwrightModule;

@@ -1,0 +1,12 @@
+/* Renderer additions only; all ordinary chat styles remain in chat.css. */
+.multiplex-chat .mpx-chat__markdown .katex-inline { display: inline-block; max-width: 100%; overflow: auto; vertical-align: middle; }
+.multiplex-chat .mpx-chat__markdown .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; padding-block: 4px; }
+.multiplex-chat .mpx-chat__markdown .katex { color: inherit; }
+.multiplex-chat .mpx-chat__markdown .math-fallback { white-space: pre-wrap; overflow-wrap: anywhere; }
+.multiplex-chat .mpx-chat__diagram { min-width: 0; max-width: 100%; overflow: hidden; margin-block: 8px; padding: 8px 12px; border: 1px solid var(--mpx-chat-border, #343a35); border-radius: 6px; }
+.multiplex-chat .mpx-chat__diagram > img { display: block; width: auto; height: auto; max-width: 100%; max-height: 480px; margin-inline: auto; }
+.multiplex-chat .mpx-chat__diagram > p { margin: 0; font-size: 12px; color: var(--mpx-chat-muted, #929b90); }
+.multiplex-chat .mpx-chat__diagram button { margin-inline-start: 8px; }
+.multiplex-chat .mpx-chat__diagram summary { cursor: pointer; min-height: 36px; padding-block: 8px; }
+.multiplex-chat .mpx-chat__diagram pre { max-height: 320px; overflow: auto; }
+.multiplex-chat .mpx-chat__local-link { display: inline; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--mpx-chat-accent, #a4c5ad); font: inherit; text-align: inherit; text-decoration: underline; cursor: pointer; }

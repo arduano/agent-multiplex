@@ -7,6 +7,278 @@ the design documents are the deeper normative contracts.
 
 Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `.39` candidate; consumer deployment acceptance remains separate).
 
+## Isolated V8 source lane
+
+The October28 T3-informed hardening keeps the existing owners: compact durable
+receipts are separate from active admission, Codex callback/live-child capacity
+recycles after positive settlement, and recent terminal evidence fences old
+starts. History acquisition retains typed loading/outcome and one eligible
+explicit retry; observer expiry is independent of native I/O. Read-only history
+acquisition rolls back late handles and cleanup attempts every independent
+release. HTTP finite requests and stream opening have bounded observation
+deadlines; admitted quiet streams remain open. Focused actual React, SQLite and
+two-viewer published-Peer fixtures qualify their respective boundaries, with
+scripted native ports. This is source work, not a release or installed/native
+acceptance claim. The retained32 history-scope limit and historical P14 remain
+open. The separate maintained workspace run has one auth-renewal-tree disconnect
+failure; its unchanged transport dependency is not newly qualified by this pass.
+
+The October27 optional-question correction preserves native Codex
+`agentMessage.questions` in live and paged history. A shared bounded projection
+keeps full accepted labels without allowing optional metadata to reject message
+text. Shared React renders inline choices that append to the retained draft;
+only the ordinary explicit Send/Steer submits it. No callback is invented from
+async message metadata or prose. Focused codec/read and actual React checks
+pass; Host activation and installed acceptance remain separate.
+
+The October27 file-preview source pass restores visible native/tool image
+thumbnails, lazy local Markdown images, expanded diagrams, source/render
+Markdown, continuous virtualized PDF and explicitly sandboxed interactive HTML.
+All use the existing FileHost/ResourceCache. Scoped child paths resolve through
+trusted native metadata; native image memo eviction preserves durable occurrence
+identity rather than imposing a lifetime image quota. A shared authenticated
+navigation adapter verifies bounded immutable bytes and retains exact failed
+cleanup. The consuming application supplies account/Host grants and the route.
+Focused source/browser checks and consuming-application/native/installed claims
+remain separate; this source paragraph is not a new deployment claim.
+
+The [V8 architecture](../design/v8-architecture.md) and
+[rewrite/module map](../design/v8-rewrite-map.md) describe the generic isolated
+implementation under `primitives/`. It is outside the maintained published
+workspace graph; released generation/package facts below remain unchanged.
+
+The source selects one lifecycle and one harness per Host, with explicit typed
+workspace strategies, startup contributions, inferred custom tRPC routers and
+retained React projections. Native ownership/journals live with the selected
+lifecycle and adapters. Gateways own authenticated direct routing and bounded
+observations, with one existing mux/reconnect owner and no mutation replay.
+Application accounts, profiles, business domains and deployment composition
+belong in consuming repositories, not this public framework.
+
+The [embeddable V8 chat](../../primitives/v8-react-ui/README.md) now renders a
+prepared retained workspace view with scoped light/dark/custom themes, native
+controls, confirmations, files and rich Markdown/math/isolated diagrams. Its
+build emits CSS/font/renderer assets and third-party companions; surrounding
+applications own navigation, authentication and Host selection. It adds no
+session, receipt or reconnect owner. This remains isolated source, with scripted
+UI evidence rather than a published package or native/production acceptance.
+
+The October27 history correction separates current residency from retained
+conversation evidence. Completed partial rows, gap annotations and old read
+evidence roll within their existing bounds; they no longer exhaust the lifetime
+of a captured conversation. Codex likewise recycles completed accumulators and
+recent turn fences. Actual excessive unfinished work remains bounded. A rejected
+capture publishes unknown history activity and a canonical gap, independent of
+native session completion. Retained views keep an exact terminal full row over a
+later weaker same-acquisition observation; positive full bodies and genuine
+retirement retain their existing rules. Root/child transcripts share explicit
+earlier-history actions at the top, and the DOM adapter lets user gestures settle
+before restoring the existing viewport anchor. Source regressions reproduce the
+old capacity, retention and scroll failures. Consumer Host activation and recovery
+of previously missed native history require separate installed acceptance.
+
+The subsequent initial-history correction starts one retained baseline when a
+resumed native lifetime is positively running and bound. Proven-empty Create,
+stopped inspection and ordinary viewer mounts/reconnects create no such work.
+The existing acquisition owns settlement independently of observer timeouts or
+cancellation. Active pages target100 entries within512KiB, with the existing
+same-cursor size reduction; the assembled Host retains128 current rows. Native
+read failures stay distinct from stale-owner/cursor fencing. Source and
+installed acceptance remain separate.
+
+The accompanying shared chat correction automatically loads model/reasoning
+choices through the existing retained catalog owner while preserving observed
+and draft values. Current proven work uses a small working indicator; retained
+partial history does not itself imply native activity. A valid Send follows
+latest at original admission only if the initiating view has not received a
+newer reading gesture during preparation. Receipt arrival adds no scroll
+effect. These corrections introduce no second catalog, history or scroll store.
+
+The follow-up Send regression strengthens the existing actual React case with
+a tall draft and a delayed native user row. The DOM adapter now treats browser
+bottom clamping and unchanged scroll notifications as geometry rather than a
+reading gesture. Explicit user scrolling still wins; later user/assistant rows
+remain followed. Ten focused scroll cases pass with a paired old-source failure.
+This source proof uses scripted native history, not a live business Send.
+
+The October26 modularity cleanup makes that component consume one prepared
+owner-bound `view`, removing its independent workspace input. Existing view
+delegates retain file/preview/original/native action ownership; they introduce
+no new session or reconnect store. `SessionWorkspace` now removes failed
+subscription acquisitions, releases handles returned after synchronous close,
+and attempts every release while retaining exact failed cleanup handles.
+Shared model-catalog types live in Host contracts. The session client entry
+exports pure validators rather than concrete native factories; explicit
+adapter/default-harness modules own those Node implementations. Codex request
+encoding and dispatch retain a correlated method/body type. Actual UI asset
+builders live under `v8-react-ui/build`, separate from qualification fixtures.
+Focused scripted owner/component/browser checks cover these corrections;
+installed/native acceptance and the historical two-viewer incident remain
+separate. No released package or installed service is changed by this lane.
+
+The October26 installed-consumer defect pass removes duplicate remote Gateway
+history authorization state: the authenticated edge checks its account/Host
+envelope and the canonical Host proves native/attachment/child membership on
+each request. Explicit cold-child recovery still authorizes before body reads.
+Only the complete session-ID feed can retire Host reachability. Bounded read
+admission now queues finite ordinary read bursts, preserving urgent control
+capacity and exact dispatch/result fences. The existing observation retry owner
+handles remote CLOSED, while local close cancels renewal. Model choices load on
+explicit picker opening through the retained read owner. Catalog creation DTOs
+detach a shared binding alias rejected by the pinned published codec; SessionHost
+keeps its initial event buffer through final persistence so newer native settings
+cannot be overwritten. Focused actual-owner and composed-browser checks pass;
+native Host activation and consumer-installed acceptance remain separate. These
+changes add no transport dependency, native readback or command replay.
+
+A subsequent source correction shares snapshot-valued remote subscriptions
+within their exact session route, with independent consumer leases and one
+bounded immutable baseline. Last release, failure or route closure clears the
+buffer. Optional subscription-failure callbacks end affected Gateway queues
+instead of leaving them admitted without an upstream. History retains its own
+cursor semantics; the existing client remains the only observation retry owner.
+The empty, unloaded transcript also exposes its existing explicit recovery
+action directly, while known-empty conversations retain their ordinary prompt.
+These leaves require their own focused and installed evidence; they do not
+establish trial readiness or close the historical physical-connection incident.
+
+The default lifecycle's history iterator now releases the actual Hub subscription
+before returning its async wrapper. This closes the quiet-read cancellation gap
+through the Host facade and fences late attachment after observer retirement.
+Source regression uses the actual lifecycle and tRPC cancellation while keeping
+the route and native owner alive. Installed Hosts require a separate activation;
+no historical transport-cause or native acceptance claim follows from this fix.
+
+The later composer cleanup puts input/actions in one inline row and uses the
+same responsive780px measure as history/settings. Routine draft saving is
+silent; storage failures remain visible. A separate Host correction gives
+ordinary notification/history failures their own gap boundary instead of
+permanently invalidating intact reverse-request continuity. Exact approval
+callbacks and genuine callback/transport loss keep their existing ownership and
+fail-closed rules. Framed-RPC/Host regressions and retained media oracles cover
+the source correction, with prior failing fixtures and broader baseline failures
+kept explicit. Source and inactive consumer staging are not installed-native
+acceptance or a reset of an already-partial callback owner.
+
+The October27 presentation revision supersedes that inline input/action geometry:
+an autosizing full-width textarea sits above one settings/action toolbar. The
+reusable `v8-react-ui/src/ui` submodule supplies shadcn-derived, scoped controls,
+semantic tokens and explicitly contained portals. Questions and plan callbacks
+are inline transcript content; permissions remain explicit dialogs. Response
+status projects the existing exact-original owner, and field errors reuse the
+native form validator. Multiple consumers share private retained answers without
+sharing DOM radio-group identities. No session, receipt or reconnect store is
+added. Optional Codex choice-description metadata remains backward compatible;
+consumer Gateway deployment does not install that Host enhancement. See the
+[chat module](../../primitives/v8-react-ui/README.md) for the stylesheet/build
+contract. Scripted presentation proof, installed consumer evidence and native
+qualification remain separate.
+
+The follow-up presentation correction replaces platform select popups with one
+controlled, themed Select (`value`, `options`, `onValueChange`). Empty values retain
+their meaning; local portals inherit each embedding's theme and native-dialog
+layer. Published Dialog/Select pins align the existing Radix focus/dismissal
+owner, so Escape closes the innermost popup. Settings facts, request fields and
+dialog action groups share spacing and a clear primary action. Existing session,
+form and native-operation owners remain unchanged; installed acceptance belongs
+to each consuming application.
+
+The next isolated UI slice adds compact observed settings with searchable native
+model labels and a separate retained Codex goal editor. A completed root-plan
+action uses one existing Send containing the exact selected plan, preserving
+ordinary drafts/files and original receipt identity through reply loss. Native
+goal/history/operation owners stay authoritative. Plugin agent facades now use
+an explicit exact-session client factory rather than reusing a Host-scoped
+client. Static consuming applications can pair their known contracts with typed
+panels without a dynamic loader. The chat also exposes multiple-file and camera
+inputs over its existing file owner; the default conversation content bound is
+100 MiB with existing protected-consumer eviction rules. Focused owner/type and
+mounted scripted checks cover these source changes; no publication, native
+campaign or installed-target acceptance is implied.
+
+The October26 chat-authoring cleanup generalizes the existing retained message
+preparation slot to the closed Send/Steer/Queue family. It freezes the action,
+run/epoch/receipt owner and Codex expected turn across asynchronous uploads.
+Captured-edit protection closes the handoff/consume reload gap without a second
+outbox: restored originals are receipt-only. Verified bytes and terminal cleanup
+remain in the existing Host/file owners. Working-primary Steer and explicit
+Queue replace the old implicit Send-to-Queue fallback. Shared chat presentation
+uses one header/status, direct model/mode/reasoning intent, compact captured
+activity and disclosed native tools. Focused owner checks, 22 renderer cases
+and 14 assembled browser journeys across seven viewports pass. A consuming
+application separately qualified a finite real gpt-6-luna/Codex authoring
+journey: Send, exact-turn PNG Steer, lost-reply settlement, explicit Queue and
+Stop. This records focused source/UI and application evidence; it does not
+establish a framework release, installed-target acceptance, full native parity
+or resolution of the two-viewer transport defect.
+
+The [V8 Gateway network module](../../primitives/v8-gateway/README.md#independent-relay-paths)
+now supports independent endpoint paths through multiple configured relays,
+serving one existing router/native owner. Signed routes require separately
+trusted endpoint/application pins; path closure has no native Stop authority.
+The focused Gateway suite passes 41 checks, including nine new relay oracles.
+Disposable real relay fixtures use pinned Iroh/p2prpc, with a separately bounded
+production TLS-refusal gate. Positive local relay traffic uses an explicit
+qualification-only HTTP endpoint seam; it does not certify production HTTPS,
+external firewalls, account delegation or the original cross-viewer incident.
+
+The [scripted integration runner](../../primitives/v8-integration/README.md)
+composes actual HTTP, SQLite, files, React and published transport with scripted
+native owners. Historical local receipts under ignored `artifacts/` retain their
+original source/dependency scope and failed diagnostics; they are not portable
+public-clone evidence or qualification of subsequent source changes. The public
+source/dependency boundary must be qualified on its own after repository
+separation. There is no implied release, deployment, model/native execution,
+complete native conformance or production authentication acceptance.
+
+The shared-hop P14 correction keeps admitted raw opening with the shared Peer
+when a viewer cancels. Its controlled multi-viewer oracle does not retroactively
+identify the first physical-close caller in the older unresolved incident.
+Native/platform containment, complete history/callback support, installed
+package closure and production composition remain separate gates.
+
+The October25 isolated source checkpoint adds exact per-Host action admission
+to retained workspaces and real lifecycle/facade routing for transient native
+MCP sign-in links. Ordinary histories/receipts do not own those links. Completed
+Archive now permits explicit passive history acquisition from exact joined
+journal proof while mutations, media capture and FilePort acquisition remain
+sealed. Sessionless readers launch from retained custody directories without
+restoring released workspaces. Copilot custom-agent startup contributions expose
+the pinned SDK's explicit model/reasoning fields with omission preserved. These
+leaves have focused source/owner checks; neither complete native parity nor a
+new Resume contract is implied by those earlier receipts.
+
+The October25 owner review retires interactive native TUI while retaining tool
+terminal output and background-terminal controls. It explicitly authorizes
+native reopening with saved-work continuation and genuine zero-message Continue
+after terminal interruptions; viewing/reconnect/switch/pin remain passive. The
+current implementation replaces the former universal open-and-wait promise
+with separate fresh-creation and explicit-reopening observations. It adds no
+automatic chain from reopening to another turn. Host-owned containment ends
+native agents/readers with their owning Host process, independently of separate
+Gateways or UI connections. These changes are isolated source work; final native
+and installed acceptance remain open.
+
+Cold child discovery now occurs inside the existing explicit parent recovery
+job: Codex verifies bounded native ancestry; Copilot accepts exact-session agent
+membership before root-body filtering. Only proved read scopes enter the existing
+Host inventory; no child body fetch or live ownership follows. Focused scripted
+runtime and mounted authenticated Gateway/React gates pass. Child-view held
+reads use the existing immutable binding as their token, preserving ordinary
+same-binding reopen while fencing actual generation replacement. The original
+live-native two-viewer incident remains unresolved.
+
+The latest isolated native checks distinguish the two promptless Continue
+contracts. Actual pinned Codex0.162.1 with a local scripted provider passes
+active-empty refusal, idle and terminal-network Continue, Stop and same-native
+reopening. Copilot SDK1.0.19/CLI1.0.95 supports zero-message runs but the actual
+active-empty probe starts an extra turn after the original; its product Continue
+capability stays unadvertised. Both checks use disposable owned state, exact
+originals and positive cleanup; the scripted provider makes no model call.
+Fresh Copilot opening now obtains idle only from actual inactive metadata, with
+newer native work events fencing a held read. No polling or shadow idle owner
+is added. See the [Copilot module](../../primitives/v8-harness-copilot/README.md).
+
 ## Codex cold child-history correction candidate `.44`
 
 The October 22 owner candidate removes a stale shared-context assumption from
@@ -1329,20 +1601,21 @@ an explicit protocol/design change with tests and migration consequences.
 When a boundary changes, update its owner and link here instead of copying a
 second detailed contract into this page.
 
-## Personal application consumer
+## Application consumer boundary
 
-[`arduano/leo-multiplex`](https://github.com/arduano/leo-multiplex) is the separate
-personal application. Its laptop fallback candidate consumes the published `0.2.3`
-artifact graph; installed consumer status belongs to that repository. The framework now supplies Windows private-state/DACL support
-and a trusted static runtime path-policy hook. The personal host can admit
-operator-selected directories across C:, D: and UNC shares without broadening
-the default framework root fence; see [embedded policy guidance](Paired-Launch-Extensions.md).
-Native Windows Codex supervision and output-image paths remain unsupported.
+Applications own their UI composition, account authentication, private provider
+profiles, deployment configuration and installed-runtime acceptance. The public
+framework supplies reusable contracts and explicitly configured extension ports;
+it does not depend on a particular consuming repository or installation.
 
-Published-artifact Windows installation, saved launcher/rerun, host registration,
-restart and work-command qualification belong to the consumer's runbook and CI.
-Corporate Copilot auth/network and physical laptop behavior remain operator UAT.
-The consumer records its laptop and NAS gateway deployment separately. Personal
-Codex hosts and sessions were not restarted for this Copilot patch. Host
-catalogs remain local; the NAS personal web/gateway has no metadata authority.
-Provider, UI, authentication and deployment policy remain in the personal repo.
+Windows private-state/DACL support and trusted static runtime path policy remain
+framework capabilities. A consumer may admit operator-selected C:, D: or UNC
+locations through that policy without broadening the default root fence; see
+[embedded policy guidance](Paired-Launch-Extensions.md). Native Windows Codex
+supervision and output-image paths retain their documented unsupported boundary.
+
+Published-artifact installation, launcher recovery, registration, restart,
+external work commands and physical machine behavior belong to each consumer's
+runbook and acceptance. Provider/authentication details stay outside public
+metadata and diagnostics. Native state stays with its owning runtime, catalog
+state with its control authority, and Gateways acquire no metadata authority.

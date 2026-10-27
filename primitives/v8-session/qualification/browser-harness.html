@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V8 retained session client fixture</title>
+<style>body{font:15px sans-serif;max-width:750px;margin:20px auto;padding:12px}nav{display:flex;flex-wrap:wrap;gap:8px}button{min-height:42px}label{display:block;margin-top:12px}input{min-height:32px}#issue{color:#a50}dl{display:grid;grid-template-columns:140px 1fr}dd{margin:0}</style>
+<nav><button id="a">Session A</button><button id="b">Session B</button><button id="pin">Pin</button><button id="disconnect">Disconnect viewer</button><button id="connect">Reconnect viewer</button><button id="stop">Stop</button></nav>
+<label>Next model <input id="draft-model"></label>
+<dl><dt>Session</dt><dd id="selected"></dd><dt>Native phase</dt><dd id="phase"></dd><dt>Activity</dt><dd id="activity"></dd><dt>Active owner</dt><dd id="active"></dd><dt>Connection</dt><dd id="connection"></dd><dt>Observed model</dt><dd id="model"></dd><dt>Last receipt</dt><dd id="receipt"></dd><dt>Pin</dt><dd id="pinned"></dd></dl>
+<p id="issue" role="status"></p>
+<script type="module">
+import {HistoryWorkspace} from '/modules/primitives/v8-history/src/client/workspace.js';
+import {SessionWorkspace} from '/modules/primitives/v8-session/src/client/index.js';
+import {ClientFixture} from '/modules/primitives/v8-session/qualification/client-fixture.js';
+const a={connection:'browser-session',principal:'fixture-owner',host:'fixture-host',session:'a'},b={...a,session:'b'};
+const scopes={a,b};const hs=name=>({kind:'copilot',agentId:null,origin:{connection:a.connection,principal:a.principal,host:a.host,nativeSession:`native-${name}`,attachment:'initial'}});
+const history=new HistoryWorkspace({connection:a.connection,principal:a.principal}),port=new ClientFixture();port.add(a);port.add(b);
+const workspace=new SessionWorkspace({history,port});const entries={a:await workspace.bind(a,hs('a')),b:await workspace.bind(b,hs('b'))};
+let selected='a',lease=null,unsubscribe=()=>{};const pending=new Map(),handles=new Map();let hold=false,failStop=false;
+port.invoke=async request=>{
+  if(request.command.type==='stop'&&failStop){failStop=false;port.publish(request.scope,{phase:'stopping',activity:'unknown',stopRequested:true,issue:'stopUnconfirmed'});return receipt(request,'outcomeUnknown')}
+  if(hold){hold=false;return new Promise(resolve=>pending.set(request.id,{request,resolve}))}
+  return receipt(request);
+};
+function receipt(request,state='acknowledged'){return{scope:request.scope,id:request.id,type:request.command.type,generation:request.generation,state,outcome:{status:'accepted'}}}
+function render(){const entry=entries[selected],s=entry.getSnapshot();for(const[id,value]of Object.entries({selected,phase:s.native?.phase??'unknown',activity:s.native?.activity??'unknown',active:String(s.active),connection:s.connected?(s.stale?'refreshing':'connected'):'disconnected',model:s.native?.selection.model??'unknown',receipt:s.operations.at(-1)?.receipt?.state??'none',pinned:String(entry.history.pinned)}))document.getElementById(id).textContent=value;document.querySelector('#issue').textContent=s.issue==='stopUnconfirmed'?'Stop not confirmed':s.issue??'';document.querySelector('#draft-model').value=s.draft?.model??''}
+function select(name){unsubscribe();lease?.release();selected=name;lease=workspace.select(scopes[name]);unsubscribe=entries[name].subscribe(render);render()}
+document.querySelector('#a').onclick=()=>select('a');document.querySelector('#b').onclick=()=>select('b');
+document.querySelector('#pin').onclick=()=>workspace.setPinned(scopes[selected],!entries[selected].history.pinned);
+document.querySelector('#disconnect').onclick=()=>workspace.setConnected(false);document.querySelector('#connect').onclick=()=>workspace.setConnected(true);
+document.querySelector('#draft-model').oninput=event=>workspace.setDraft(scopes[selected],{kind:'copilot',model:event.target.value});
+document.querySelector('#stop').onclick=()=>{const agent=workspace.agent(scopes[selected]);const handle=agent.actions.stop();handles.set(handle.id,handle)};
+select('a');
+window.fixture={workspace,history,port,entries,scopes,handles,pending,
+ state(name=selected){const e=entries[name];return{...e.getSnapshot(),pinned:e.history.pinned,mounted:e.history.mountedReferences,historyDraft:e.history.draft}},
+ async flush(){await new Promise(resolve=>setTimeout(resolve,0))},
+ counts(){return{submitted:port.submitted.length,snapshots:port.reads.filter(r=>r==='snapshot').length,receiptReads:port.reads.filter(r=>r==='receipt').length}},
+ beginModel(model){hold=true;const agent=workspace.agent(scopes[selected]);const handle=agent.actions.setModel(model,{effort:'high'});handles.set(handle.id,handle);return handle.id},
+ observe(name,model){port.publish(scopes[name],{selection:{kind:'copilot',model,providerId:'copilot',effort:null}})},
+ async acknowledge(id){const p=pending.get(id);p.resolve(receipt(p.request));pending.delete(id);await handles.get(id).result},
+ stopWillFail(){failStop=true},
+ finishStop(name){port.publish(scopes[name],{phase:'stopped',issue:undefined})},
+ startObserved(name){port.publish(scopes[name],{phase:'starting',activity:'unknown'})},
+ close(){workspace.close()},
+};window.fixtureReady=true;
+</script></html>

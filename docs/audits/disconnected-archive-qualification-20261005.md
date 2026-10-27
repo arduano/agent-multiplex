@@ -13,11 +13,11 @@ changed files are identical between those commits; the original commit itself
 is not a Git ancestor of `.30`. Qualified source is
 `1dd9ae1bfdef07af4ce931afd0284829bb4400e3`, lockstep `.30`.
 
-The exact retained NAS `.29` package used for installed-byte acceptance is:
-
-```text
-/nix/store/f59mihz3n3p6rflmk27r3z5qs1swbbv7-leo-multiplex-v6-0.1.0
-```
+Installed-byte acceptance used one exact retained immutable `.29` deployment
+artifact. Its historical deployment locator is omitted from public prose; the
+exact original is separately retained. The version alone is not a substitute
+for its recorded bytes and source/module evidence. This edit makes no new
+acceptance claim.
 
 All six relevant compiled modules are byte-identical between that package and
 qualified `.30` source: control `cold-search-reads.js`, `service.js`, `router.js`;

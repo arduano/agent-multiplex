@@ -6,8 +6,10 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 DOCKER_NPMRC=${AGENT_MULTIPLEX_DOCKER_NPMRC:-}
-SOURCE_CONFIG=${AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG:-"${HOME}/.codex/config.toml"}
-SOURCE_KEY=${AGENT_MULTIPLEX_LIVE_SOURCE_KEY:-"${HOME}/.codex/codex-lb-api-key"}
+SOURCE_CONFIG=${AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG:?Explicit AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG is required}
+SOURCE_KEY=${AGENT_MULTIPLEX_LIVE_SOURCE_KEY:?Explicit AGENT_MULTIPLEX_LIVE_SOURCE_KEY is required}
+SOURCE_PROVIDER=${AGENT_MULTIPLEX_SOURCE_PROVIDER:?Explicit AGENT_MULTIPLEX_SOURCE_PROVIDER is required}
+[[ "$SOURCE_PROVIDER" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo "Invalid explicit provider ID" >&2; exit 2; }
 RECEIPT_ROOT=${AGENT_MULTIPLEX_LIVE_RECEIPT_ROOT:-"$REPO_ROOT/receipts/protocol-v4-live-four-container"}
 TIMEOUT_MS=${AGENT_MULTIPLEX_LIVE_TIMEOUT_MS:-600000}
 INITIAL_CODEX_MODEL=${AGENT_MULTIPLEX_LIVE_CODEX_MODEL:-gpt-5.6-sol}
@@ -77,7 +79,7 @@ if [[ ! -r "$SOURCE_CONFIG" ]]; then
   exit 1
 fi
 if [[ ! -r "$SOURCE_KEY" ]]; then
-  echo "live four-container acceptance: codex-lb key file is unreadable: $SOURCE_KEY" >&2
+  echo "live four-container acceptance: qualification-provider key file is unreadable: $SOURCE_KEY" >&2
   exit 1
 fi
 
@@ -202,7 +204,7 @@ redact_stream() {
           [$ENV{AM_LIVE_SHARED} // "", "<redacted-shared-secret>"],
           [$ENV{AM_LIVE_ACCESS} // "", "<redacted-access-token>"],
           [$ENV{AM_LIVE_TICKET} // "", "<redacted-p2p-ticket>"],
-          [$ENV{AM_LIVE_KEY} // "", "<redacted-codex-lb-api-key>"],
+          [$ENV{AM_LIVE_KEY} // "", "<redacted-provider-api-key>"],
           [$ENV{AM_LIVE_PROVIDER} // "", "<redacted-provider-endpoint>"],
           [$ENV{AM_LIVE_PROVIDER_ORIGIN} // "", "<redacted-provider-origin>"],
           [$ENV{AM_LIVE_PROXY_PROVIDER} // "", "<redacted-provider-relay-endpoint>"],
@@ -714,43 +716,43 @@ assert_json() {
   fi
 }
 
-note "extracting the narrow codex-lb provider configuration"
+note "extracting the narrow qualification-provider provider configuration"
 if ! API_KEY_LITERAL=$(node -e '
   const fs = require("node:fs");
   const raw = fs.readFileSync(process.argv[1], "utf8");
   if (!/^[^\r\n]+(?:\r?\n)?$/.test(raw)) process.exit(1);
   process.stdout.write(raw.replace(/\r?\n$/, ""));
 ' "$SOURCE_KEY"); then
-  fail "codex-lb API key must contain exactly one non-empty line"
+  fail "qualification-provider API key must contain exactly one non-empty line"
 fi
-if (( ${#API_KEY_LITERAL} < 16 )); then fail "codex-lb API key is unexpectedly short"; fi
-PROVIDER_URL=$(awk '
-  /^\[model_providers\.codex-lb\]$/ { in_provider = 1; next }
+if (( ${#API_KEY_LITERAL} < 16 )); then fail "qualification-provider API key is unexpectedly short"; fi
+PROVIDER_URL=$(awk -v selected="$SOURCE_PROVIDER" '
+  $0 == "[model_providers." selected "]" { in_provider = 1; next }
   in_provider && /^\[/ { exit }
   in_provider && /^[[:space:]]*base_url[[:space:]]*=/ {
     sub(/^[^=]*=[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit
   }
 ' "$SOURCE_CONFIG")
-if [[ -z "$PROVIDER_URL" ]]; then fail "codex-lb base_url was not found"; fi
+if [[ -z "$PROVIDER_URL" ]]; then fail "qualification-provider base_url was not found"; fi
 if ! node -e '
   const url = new URL(process.argv[1]);
   if (!/^https?:$/.test(url.protocol) || url.username || url.password) process.exit(1);
 ' "$PROVIDER_URL"; then
-  fail "codex-lb base_url is not a credential-free HTTP(S) URL"
+  fail "qualification-provider base_url is not a credential-free HTTP(S) URL"
 fi
 PROVIDER_ORIGIN=$(node -e 'process.stdout.write(new URL(process.argv[1]).origin)' "$PROVIDER_URL")
 
 MINIMAL_CONFIG_RAW="$RUNTIME_DIR/config.raw.toml"
 MINIMAL_CONFIG="$RUNTIME_DIR/config.toml"
-awk '
+awk -v selected="$SOURCE_PROVIDER" '
   /^[[:space:]]*model_provider[[:space:]]*=/ {
-    if ($0 ~ /"codex-lb"/) print
+    if (index($0, "\"" selected "\"")) print "model_provider = \"qualification-provider\""
     next
   }
   /^[[:space:]]*model[[:space:]]*=/ { print; next }
-  /^\[model_providers\.codex-lb\]$/ { in_provider = 1; print; next }
+  $0 == "[model_providers." selected "]" { in_provider = 1; print "[model_providers.qualification-provider]"; next }
   in_provider && /^\[/ {
-    if ($0 == "[model_providers.codex-lb.auth]") { print; next }
+    if ($0 == "[model_providers." selected ".auth]") { print "[model_providers.qualification-provider.auth]"; next }
     in_provider = 0
   }
   in_provider { print }
@@ -769,7 +771,7 @@ IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE_TAG")
 docker network create --driver bridge "$NETWORK_NAME" >/dev/null
 NETWORK_CREATED=1
 
-# The codex-lb service is on the host's private overlay network. Docker bridge
+# The selected provider may require host-side network reachability. Docker bridge
 # traffic is not necessarily SNATed into that overlay, so bind a credential-
 # blind HTTP relay only to this run's isolated bridge. This is host-side test
 # plumbing (like Playwright), not a fifth application container or public
@@ -817,7 +819,7 @@ PROXIED_PROVIDER_ORIGIN="http://$PROVIDER_BRIDGE_HOST:$PROVIDER_PROXY_PORT"
   # proof.
   printf 'approval_policy = "never"\nsandbox_mode = "read-only"\n'
   sed -E \
-    's#^([[:space:]]*args[[:space:]]*=[[:space:]]*)\["[^"]*codex-lb-api-key"\]#\1["/home/arduano/.codex/codex-lb-api-key"]#' \
+    's#^([[:space:]]*args[[:space:]]*=[[:space:]]*)\["[^"]*"\]#\1["/home/multiplex/.codex/provider-api-key"]#' \
     "$MINIMAL_CONFIG_RAW" | \
     AGENT_MULTIPLEX_PROXY_CONFIG_URL="$PROXIED_PROVIDER_URL" perl -pe '
       if (/^([[:space:]]*base_url[[:space:]]*=[[:space:]]*).*$/) {
@@ -827,9 +829,9 @@ PROXIED_PROVIDER_ORIGIN="http://$PROVIDER_BRIDGE_HOST:$PROVIDER_PROXY_PORT"
 } >"$MINIMAL_CONFIG"
 printf '\n[projects."/workspace/project"]\ntrust_level = "trusted"\n' >>"$MINIMAL_CONFIG"
 chmod 600 "$MINIMAL_CONFIG"
-if ! rg --quiet '^model_provider = "codex-lb"$' "$MINIMAL_CONFIG" || \
-   ! rg --quiet '^\[model_providers\.codex-lb\.auth\]$' "$MINIMAL_CONFIG" || \
-   ! rg --quiet '/home/arduano/.codex/codex-lb-api-key' "$MINIMAL_CONFIG" || \
+if ! rg --quiet '^model_provider = "qualification-provider"$' "$MINIMAL_CONFIG" || \
+   ! rg --quiet '^\[model_providers\.qualification-provider\.auth\]$' "$MINIMAL_CONFIG" || \
+   ! rg --quiet '/home/multiplex/.codex/provider-api-key' "$MINIMAL_CONFIG" || \
    ! rg --fixed-strings --quiet "base_url = \"$PROXIED_PROVIDER_URL\"" "$MINIMAL_CONFIG"; then
   fail "generated minimal Codex config did not pass validation"
 fi
@@ -839,11 +841,11 @@ fi
 # state; it contains only the provider config/key copied below, never the
 # caller's full Codex home or auth.json.
 cp -- "$MINIMAL_CONFIG" "$RUNTIME_DIR/codex-home/config.toml"
-cp -- "$SOURCE_KEY" "$RUNTIME_DIR/codex-home/codex-lb-api-key"
+cp -- "$SOURCE_KEY" "$RUNTIME_DIR/codex-home/provider-api-key"
 chown 1000:100 "$RUNTIME_DIR/codex-home" \
-  "$RUNTIME_DIR/codex-home/config.toml" "$RUNTIME_DIR/codex-home/codex-lb-api-key"
+  "$RUNTIME_DIR/codex-home/config.toml" "$RUNTIME_DIR/codex-home/provider-api-key"
 chmod 700 "$RUNTIME_DIR/codex-home"
-chmod 600 "$RUNTIME_DIR/codex-home/config.toml" "$RUNTIME_DIR/codex-home/codex-lb-api-key"
+chmod 600 "$RUNTIME_DIR/codex-home/config.toml" "$RUNTIME_DIR/codex-home/provider-api-key"
 CODEX_AUTH_PREPARED_AT=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
 
 note "starting the canonical metadata authority"
@@ -889,9 +891,9 @@ docker run --detach \
   --security-opt seccomp=unconfined \
   --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
   --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
-  --mount type=bind,src="$RUNTIME_DIR/codex-home",dst=/home/arduano/.codex \
+  --mount type=bind,src="$RUNTIME_DIR/codex-home",dst=/home/multiplex/.codex \
   --mount type=bind,src="$RUNTIME_DIR/codex-workspace",dst=/workspace/project \
-  --env HOME=/home/arduano --env CODEX_HOME=/home/arduano/.codex \
+  --env HOME=/home/multiplex --env CODEX_HOME=/home/multiplex/.codex \
   --env XDG_CACHE_HOME=/tmp/cache \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$CONTROL_ENDPOINT_ID" \
@@ -912,9 +914,9 @@ wait_for_log "$CODEX_CONTAINER" '^Connected to control node ' 'Codex runtime att
 
 docker exec "$CODEX_CONTAINER" node -e '
   const fs = require("node:fs");
-  const names = ["config.toml", "codex-lb-api-key"];
+  const names = ["config.toml", "provider-api-key"];
   const files = Object.fromEntries(names.map((name) => {
-    const stat = fs.statSync(`/home/arduano/.codex/${name}`);
+    const stat = fs.statSync(`/home/multiplex/.codex/${name}`);
     return [name, {present:stat.isFile(),mode:(stat.mode & 0o777).toString(8).padStart(3,"0"),uid:stat.uid,gid:stat.gid}];
   }));
   process.stdout.write(JSON.stringify({files}, null, 2));
@@ -922,7 +924,7 @@ docker exec "$CODEX_CONTAINER" node -e '
 jq -n --arg preparedAt "$CODEX_AUTH_PREPARED_AT" --arg createdAt "$CODEX_CREATED_AT" \
   --slurpfile stat "$RUNTIME_DIR/codex-auth-stat.json" '
     {
-      source:"host codex-lb provider config/key only",
+      source:"host qualification-provider provider config/key only",
       method:"host-side narrow copy into an isolated writable CODEX_HOME bind before container creation",
       preparedAt:$preparedAt,
       containerCreatedAt:$createdAt,
@@ -937,7 +939,7 @@ assert_json "Codex auth copy is not narrow or private" '
   all(.files[]; .present == true and .mode == "600" and .uid == 1000 and .gid == 100)
 ' "$RECEIPT_DIR/codex-auth-proof.json"
 
-note "starting the isolated Copilot runtime with codex-lb BYOK"
+note "starting the isolated Copilot runtime with qualification-provider BYOK"
 COPILOT_MODELS=$(jq -cn --arg model "$COPILOT_MODEL" '[ $model ]')
 docker run --detach \
   --name "$COPILOT_CONTAINER" --hostname live-copilot --network "$NETWORK_NAME" \
@@ -945,10 +947,10 @@ docker run --detach \
   --security-opt seccomp=unconfined \
   --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
   --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
-  --tmpfs /home/arduano/.copilot:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+  --tmpfs /home/multiplex/.copilot:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
   --mount type=bind,src="$RUNTIME_DIR/copilot-workspace",dst=/workspace/project \
-  --mount type=bind,src="$SOURCE_KEY",dst=/run/secrets/codex-lb-api-key,readonly \
-  --env HOME=/home/arduano --env XDG_CACHE_HOME=/tmp/cache \
+  --mount type=bind,src="$SOURCE_KEY",dst=/run/secrets/provider-api-key,readonly \
+  --env HOME=/home/multiplex --env XDG_CACHE_HOME=/tmp/cache \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$CONTROL_ENDPOINT_ID" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_TICKET="$CONTROL_TICKET" \
@@ -960,7 +962,7 @@ docker run --detach \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_INVENTORY_REFRESH_MS=3000 \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_METADATA_FLUSH_MS=500 \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_RECONNECT_MAX_MS=1000 \
-  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/arduano/.copilot \
+  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/multiplex/.copilot \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_LOG_LEVEL=none \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TYPE=openai \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL="$PROXIED_PROVIDER_URL" \
@@ -968,7 +970,7 @@ docker run --detach \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TRANSPORT=http \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL="$COPILOT_MODEL" \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODELS="$COPILOT_MODELS" \
-  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/codex-lb-api-key \
+  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/provider-api-key \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_EXPERIMENTAL_UI_SERVER=0 \
   "$IMAGE_TAG" node apps/runtime-node/dist/main.js >/dev/null
 COPILOT_STARTED=1
@@ -977,9 +979,9 @@ wait_for_log "$COPILOT_CONTAINER" '^Connected to control node ' 'Copilot runtime
 
 docker inspect "$COPILOT_CONTAINER" | jq '
   .[0] as $container |
-  ($container.Mounts | map(select(.Destination == "/run/secrets/codex-lb-api-key"))[0]) as $mount |
+  ($container.Mounts | map(select(.Destination == "/run/secrets/provider-api-key"))[0]) as $mount |
   {
-    sourceKind:"host codex-lb API-key file",
+    sourceKind:"host qualification-provider API-key file",
     destination:$mount.Destination,
     mountType:$mount.Type,
     readOnly:($mount.RW | not),
@@ -990,7 +992,7 @@ docker inspect "$COPILOT_CONTAINER" | jq '
   }
 ' >"$RECEIPT_DIR/copilot-auth-proof.json"
 assert_json "Copilot BYOK mount is not narrow and read-only" '
-  .destination == "/run/secrets/codex-lb-api-key" and .mountType == "bind" and
+  .destination == "/run/secrets/provider-api-key" and .mountType == "bind" and
   .readOnly == true and .isolatedCopilotHome == true and
   .apiKeyCopiedIntoImage == false and .fullCodexHomeMounted == false
 ' "$RECEIPT_DIR/copilot-auth-proof.json"
@@ -1255,7 +1257,7 @@ jq -n \
 
 jq -n '
   {
-    codex:{provider:"codex-lb",credentialMode:"isolated writable CODEX_HOME bind containing only minimal config plus key",endpointRecorded:false},
+    codex:{provider:"qualification-provider",credentialMode:"isolated writable CODEX_HOME bind containing only minimal config plus key",endpointRecorded:false},
     copilot:{providerType:"openai",wireApi:"responses",transport:"http",credentialMode:"read-only API-key bind mount",endpointRecorded:false},
     reachabilityRelay:{bindScope:"isolated Docker bridge only",storesOrLogsHeaders:false,endpointRecorded:false},
     credentialsRecorded:false

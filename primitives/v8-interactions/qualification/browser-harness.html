@@ -1,0 +1,21 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V8 interaction popup fixture</title>
+<style>body{font:16px system-ui;margin:1rem;background:#101714;color:#e0e8e2}button,input{font:inherit;margin:.3rem;padding:.5rem}dialog{background:#22312a;color:inherit;max-width:min(32rem,90vw);border:1px solid #6a8172}dialog::backdrop{background:#0008}#message{white-space:pre-wrap}#status{margin:1rem}button:focus-visible,input:focus-visible{outline:3px solid #9cdaaf}</style>
+<button id="session-a">Session A</button><button id="session-b">Session B</button><button id="notification">Review pending request</button><button id="disconnect">Disconnect</button><button id="connect">Reconnect</button><div id="status" aria-live="polite"></div>
+<dialog aria-labelledby="title"><h2 id="title"></h2><p id="message"></p><form id="response"><div id="fields"></div><div id="actions"></div><button id="later" type="button">Later</button></form></dialog>
+<script type="module">
+import{interactionFixture}from'/modules/primitives/v8-interactions/qualification/fixture.js';
+const fixture=interactionFixture();await fixture.bind();const entry=fixture.workspace.entry(fixture.scope),dialog=document.querySelector('dialog'),status=document.querySelector('#status');let selected='a',shown=null;
+const escapeClose=e=>{e.preventDefault();dialog.close();};dialog.addEventListener('cancel',escapeClose);document.querySelector('#later').onclick=()=>dialog.close();
+function render(){const state=entry.getSnapshot(),pending=state.snapshot?.items.filter(i=>i.state==='pending')??[];status.textContent=`Session ${selected.toUpperCase()} · ${state.connected?'connected':'offline'} · ${pending.length} pending`;
+ if(!dialog.open)return;const current=state.snapshot?.items.find(i=>i.prompt.id===shown);if(selected!=='a'||!current||current.state!=='pending'){dialog.close();shown=null;}}
+entry.subscribe(render);render();
+function show(){const item=entry.getSnapshot().snapshot?.items.find(i=>i.state==='pending');if(selected!=='a'||!item)return;shown=item.prompt.id;const p=item.prompt;document.querySelector('#title').textContent=p.title;document.querySelector('#message').textContent=p.type==='copilot.question'?p.question:p.type==='copilot.permission'?'Native permission requested. Please review.':p.message??'Native request';const fields=document.querySelector('#fields'),actions=document.querySelector('#actions');fields.replaceChildren();actions.replaceChildren();
+ const submit=(label,answer)=>{const button=document.createElement('button');button.type='button';button.textContent=label;button.onclick=async()=>{button.disabled=true;try{await fixture.answer(p,typeof answer==='function'?answer():answer,crypto.randomUUID()).result;}catch{}render();};actions.append(button);};
+ if(p.type==='copilot.permission'){submit('Approve once',{type:p.type,kind:'approve-once'});submit('Reject',{type:p.type,kind:'reject'});}
+ else if(p.type==='copilot.question'){const input=document.createElement('input');input.id='private-answer';input.type='password';input.setAttribute('aria-label','Private answer');fields.append(input);submit('Submit answer',()=>({type:p.type,answer:input.value,wasFreeform:true}));}
+ else if(p.type==='copilot.elicitation'){if(p.mode!=='unsupported')submit('Accept',{type:p.type,action:'accept'});submit('Decline',{type:p.type,action:'decline'});submit('Cancel request',{type:p.type,action:'cancel'});}
+ dialog.showModal();(fields.querySelector('input')??actions.querySelector('button')??document.querySelector('#later')).focus();}
+document.querySelector('#notification').onclick=show;document.querySelector('#session-a').onclick=()=>{selected='a';render();};document.querySelector('#session-b').onclick=()=>{selected='b';render();};document.querySelector('#disconnect').onclick=()=>{fixture.connect(false);render();};document.querySelector('#connect').onclick=async()=>{fixture.connect(true);await fixture.workspace.refresh(fixture.scope);render();};
+document.querySelector('#response').onsubmit=e=>e.preventDefault();
+window.fixture={...fixture,state:()=>entry.getSnapshot(),selected:()=>selected,show};window.fixtureReady=true;
+</script>

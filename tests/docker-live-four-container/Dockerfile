@@ -68,8 +68,8 @@ COPY --from=build /opt/src/agent-multiplex/ /opt/src/agent-multiplex/
 # npm and COPY create package/source content with world-readable files and
 # executable package bins. Avoid walking the entire dependency tree merely to
 # restate those modes; create and own only the runtime-writable paths here.
-RUN mkdir -p /home/arduano/.codex /home/arduano/.copilot /state /workspace/project \
-    && chown -R 1000:100 /home/arduano /state /workspace
+RUN mkdir -p /home/multiplex/.codex /home/multiplex/.copilot /state /workspace/project \
+    && chown -R 1000:100 /home/multiplex /state /workspace
 
 COPY --chmod=0755 tests/docker-live-four-container/codex-runtime-entrypoint.sh \
   /usr/local/bin/agent-multiplex-live-codex-runtime

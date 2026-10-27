@@ -53,8 +53,8 @@ RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/src/agent-multiplex/ /opt/src/agent-multiplex/
-RUN mkdir -p /home/arduano/.copilot /state /workspace/project \
-    && chown -R 1000:100 /home/arduano /state /workspace
+RUN mkdir -p /home/multiplex/.copilot /state /workspace/project \
+    && chown -R 1000:100 /home/multiplex /state /workspace
 
 LABEL org.opencontainers.image.title="Agent Multiplex Copilot-only protocol-v6 acceptance"
 LABEL org.opencontainers.image.description="Isolated authority, gateway, and real Copilot SDK runtime"

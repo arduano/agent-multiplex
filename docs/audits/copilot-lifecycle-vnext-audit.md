@@ -8,12 +8,13 @@ The external evidence directory was verified before use with the required
 command:
 
 ```text
-cd /home/arduano/.local/state/leo-agents-tasks/copilot-lifecycle-vnext-20260922 && sha256sum -c SHA256SUMS
+cd /path/to/retained-read-only-evidence && sha256sum -c SHA256SUMS
 BRIEF.md: OK
 CURRENT-AUDIT.md: OK
 STABILITY-CONTEXT.md: OK
 ```
 
+The historical directory locator is omitted; the exact original is separately retained.
 Those files remained outside the worktree and were not modified. This audit
 then checked the maintained source, lifecycle implementation,
 pinned SDK/CLI declarations and JavaScript, and deterministic test sources. It

@@ -1,0 +1,60 @@
+/* Composer presentation is scoped to the embedding chat. Draft, viewport,
+   selection and dispatch lifetimes stay with the prepared workspace view. */
+.multiplex-chat .mpx-chat__composer {
+  display: flex; flex-direction: column; gap: 4px; min-width: 0; margin: 0;
+  padding: 8px; border: 1px solid var(--mpx-ui-border); border-radius: 12px;
+  background: var(--mpx-ui-surface);
+}
+.multiplex-chat .mpx-chat__composer:focus-within { border-color: var(--mpx-ui-accent); }
+.multiplex-chat .mpx-chat__composer textarea {
+  display: block; width: 100%; min-height: 44px; max-height: max(44px, min(240px, 30cqh));
+  resize: none; border: 0; border-radius: 0; outline: none; box-shadow: none;
+  padding: 11px 8px; background: transparent; line-height: 22px; overflow-y: hidden;
+}
+.multiplex-chat .mpx-chat__composer textarea:focus-visible { outline: none; box-shadow: none; }
+.multiplex-chat .mpx-chat__composer textarea::placeholder { color: var(--mpx-ui-muted); }
+.multiplex-chat .mpx-chat__composer-toolbar { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.multiplex-chat .mpx-chat__composer-actions { display: flex; flex: none; align-items: center; gap: 2px; }
+.multiplex-chat .mpx-chat__composer-toolbar :where(button, select) { min-height: 44px; }
+.multiplex-chat .mpx-chat__composer-actions > button { min-width: 44px; }
+.multiplex-chat .mpx-chat__composer-toolbar .mpx-ui-button--icon { min-width: 44px; width: 44px; }
+.multiplex-chat .mpx-chat__composer-actions svg { display: block; flex: none; }
+.multiplex-chat .mpx-chat__send { min-width: 58px; font-weight: 600; }
+.multiplex-chat .mpx-chat__send-icon { display: none; }
+.multiplex-chat .mpx-chat__composer > .mpx-chat__attachments { margin: 0; padding: 4px 0 0; }
+
+.multiplex-chat .mpx-chat__inline-settings { display: flex; flex: 1; align-items: center; gap: 2px; min-width: 0; font-size: 12px; }
+.multiplex-chat .mpx-chat__settings-trigger { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 0; min-width: 72px; max-width: 180px; height: 44px; padding: 4px 8px; font-size: 12px; }
+.multiplex-chat .mpx-chat__settings-trigger > span { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multiplex-chat .mpx-chat__settings-trigger small { font-size: 12px; line-height: 1.2; }
+.multiplex-chat .mpx-chat__pending-settings { color: var(--mpx-ui-waiting); }
+.multiplex-chat .mpx-chat__inline-fields { display: flex; flex: 1; align-items: center; gap: 2px; min-width: 0; }
+.multiplex-chat .mpx-chat__inline-fields > label { display: flex; flex: 1; flex-direction: column; align-items: stretch; justify-content: center; gap: 0; min-width: 68px; height: 44px; font-size: 0; line-height: 0; }
+.multiplex-chat .mpx-chat__inline-fields :where(select, button) { min-height: 44px; width: 100%; border: 0; padding: 0 4px; background: transparent; font-size: 12px; line-height: 22px; box-shadow: none; }
+.multiplex-chat .mpx-chat__inline-settings[data-layout=compact] { flex: 1; }
+.multiplex-chat .mpx-chat__inline-settings[data-layout=compact] .mpx-chat__settings-trigger { flex: none; min-width: 76px; }
+.multiplex-chat .mpx-chat__agent-settings-panel { width: min(460px, calc(100cqw - 24px)); max-height: min(480px, 65cqh); overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
+.multiplex-chat .mpx-chat__agent-settings-panel label { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin: 0; color: var(--mpx-ui-secondary); font-size: 12px; }
+.multiplex-chat .mpx-chat__agent-settings-panel :where(input, select) { width: 100%; }
+.multiplex-chat .mpx-chat__agent-settings-panel p { margin: 0; overflow-wrap: anywhere; }
+.multiplex-chat .mpx-chat__agent-settings-panel .mpx-chat__inline-fields { margin-block: 12px; }
+.multiplex-chat .mpx-chat__agent-settings-panel .mpx-chat__inline-fields > label { height: auto; margin: 0; min-width: 0; }
+.multiplex-chat .mpx-chat__agent-settings-panel .mpx-chat__inline-fields :where(select, button) { min-height: 44px; border: 1px solid var(--mpx-ui-border); }
+.multiplex-chat .mpx-chat__agent-settings-description { white-space: pre-wrap; color: var(--mpx-ui-secondary); }
+.multiplex-chat .mpx-chat__advanced-settings { margin-top: 12px; }
+.multiplex-chat .mpx-chat__advanced-settings > summary { min-height: 44px; }
+.multiplex-chat .mpx-chat__settings-content { display: grid; gap: 12px; min-width: 0; }
+.multiplex-chat .mpx-chat__settings-content > .mpx-ui-button { justify-self: start; }
+.multiplex-chat .mpx-chat__settings-facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 4px 12px; margin: 0; font-size: 12px; }
+.multiplex-chat .mpx-chat__settings-facts dt { color: var(--mpx-ui-muted); }
+.multiplex-chat .mpx-chat__settings-facts dd { margin: 0; overflow-wrap: anywhere; }
+.multiplex-chat .mpx-chat__settings-turn { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--mpx-ui-border); }
+.multiplex-chat .mpx-chat__settings-turn h4 { margin: 0; font-size: 12px; font-weight: 500; color: var(--mpx-ui-secondary); }
+.multiplex-chat .mpx-chat__settings-content > footer { padding-top: 12px; border-top: 1px solid var(--mpx-ui-border); }
+
+@container (max-width: 520px) {
+  .multiplex-chat .mpx-chat__composer { padding: 8px; border-radius: 12px; }
+  .multiplex-chat .mpx-chat__send { min-width: 44px; width: 44px; padding-inline: 0; }
+  .multiplex-chat .mpx-chat__send-label { display: none; }
+  .multiplex-chat .mpx-chat__send-icon { display: inline-flex; }
+}

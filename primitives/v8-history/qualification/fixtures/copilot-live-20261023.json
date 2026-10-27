@@ -1,0 +1,2119 @@
+{
+  "format": 1,
+  "native": {
+    "sdk": "1.0.19",
+    "cli": "1.0.95"
+  },
+  "normalization": [
+    "Opaque native identities are consistently replaced within each case; timestamps use deterministic fixture values.",
+    "Original user prompts, system/developer bodies, template metadata, provider details, paths and large diagnostic bodies are omitted.",
+    "Startup skill/MCP inventory entries are omitted; field reductions retain only facts consumed by this regression.",
+    "Native tool arguments, toolRequests, shell output, merged partial snapshots and full result/final text are retained.",
+    "These separately scoped excerpts are not a proof of an atomic vendor history/live handoff, child behavior or model-call budgeting."
+  ],
+  "cases": [
+    {
+      "name": "original gap-capacity failure, before root completion",
+      "provenance": {
+        "trace": "live-2026-10-22T23-27-38-634Z/observations.scrubbed.json",
+        "rawTraceSha256": "74cdcd894a25158659d49b8c388242a4d24da00f9d99e4500b2255565bd0a412",
+        "originalNotifications": 158,
+        "retainedNotifications": 158,
+        "selection": "All notifications in original delivery order; fields reduced."
+      },
+      "knownStart": true,
+      "expectedFinal": null,
+      "events": [
+        {
+          "id": "opaque-001",
+          "type": "session.start",
+          "parentId": null,
+          "timestamp": "2026-10-23T00:00:00.000Z",
+          "data": {
+            "sessionId": "opaque-002",
+            "version": 1,
+            "producer": "copilot-agent",
+            "copilotVersion": "1.0.95",
+            "selectedModel": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-003",
+          "type": "session.managed_settings_resolved",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.001Z",
+          "ephemeral": true,
+          "data": {
+            "source": "none",
+            "serverManaged": false,
+            "deviceManaged": false,
+            "clientManaged": false,
+            "failClosed": false,
+            "bypassPermissionsDisabled": false,
+            "managedKeys": []
+          }
+        },
+        {
+          "id": "opaque-004",
+          "type": "session.skills_loaded",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.002Z",
+          "ephemeral": true,
+          "data": {
+            "skills": []
+          }
+        },
+        {
+          "id": "opaque-005",
+          "type": "pending_messages.modified",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.003Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-006",
+          "type": "pending_messages.modified",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.004Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-007",
+          "type": "session.title_changed",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.005Z",
+          "ephemeral": true,
+          "data": {
+            "title": "Fixture session title (generated title omitted)"
+          }
+        },
+        {
+          "id": "opaque-008",
+          "type": "session.mcp_servers_loaded",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.006Z",
+          "ephemeral": true,
+          "data": {
+            "servers": []
+          }
+        },
+        {
+          "id": "opaque-009",
+          "type": "session.tools_updated",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.007Z",
+          "ephemeral": true,
+          "data": {
+            "model": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-010",
+          "type": "hook.start",
+          "parentId": "opaque-001",
+          "timestamp": "2026-10-23T00:00:00.008Z",
+          "data": {
+            "hookInvocationId": "opaque-011",
+            "hookType": "userPromptSubmitted"
+          }
+        },
+        {
+          "id": "opaque-012",
+          "type": "hook.end",
+          "parentId": "opaque-010",
+          "timestamp": "2026-10-23T00:00:00.009Z",
+          "data": {
+            "hookInvocationId": "opaque-011",
+            "hookType": "userPromptSubmitted",
+            "success": true
+          }
+        },
+        {
+          "id": "opaque-013",
+          "type": "hook.start",
+          "parentId": "opaque-012",
+          "timestamp": "2026-10-23T00:00:00.010Z",
+          "data": {
+            "hookInvocationId": "opaque-014",
+            "hookType": "userPromptTransformed"
+          }
+        },
+        {
+          "id": "opaque-015",
+          "type": "hook.end",
+          "parentId": "opaque-013",
+          "timestamp": "2026-10-23T00:00:00.011Z",
+          "data": {
+            "hookInvocationId": "opaque-014",
+            "hookType": "userPromptTransformed",
+            "success": true
+          }
+        },
+        {
+          "id": "opaque-016",
+          "type": "user.message",
+          "parentId": "opaque-015",
+          "timestamp": "2026-10-23T00:00:00.012Z",
+          "data": {
+            "messageId": "opaque-017",
+            "turnId": "opaque-018",
+            "interactionId": "opaque-019",
+            "delivery": "idle",
+            "content": "Fixture request (original model prompt omitted)."
+          }
+        },
+        {
+          "id": "opaque-020",
+          "type": "system.message",
+          "parentId": "opaque-016",
+          "timestamp": "2026-10-23T00:00:00.013Z",
+          "data": {
+            "role": "system",
+            "instructionBodyOmitted": true
+          }
+        },
+        {
+          "id": "opaque-021",
+          "type": "hook.start",
+          "parentId": "opaque-020",
+          "timestamp": "2026-10-23T00:00:00.014Z",
+          "data": {
+            "hookInvocationId": "opaque-022",
+            "hookType": "sessionStart"
+          }
+        },
+        {
+          "id": "opaque-023",
+          "type": "hook.end",
+          "parentId": "opaque-021",
+          "timestamp": "2026-10-23T00:00:00.015Z",
+          "data": {
+            "hookInvocationId": "opaque-022",
+            "hookType": "sessionStart",
+            "success": true
+          }
+        },
+        {
+          "id": "opaque-024",
+          "type": "model.turn_started",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.016Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "turn_started",
+            "turn": 0,
+            "model": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-025",
+          "type": "assistant.turn_start",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.017Z",
+          "data": {
+            "turnId": "opaque-018",
+            "interactionId": "opaque-019"
+          }
+        },
+        {
+          "id": "opaque-026",
+          "type": "session.usage_info",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.018Z",
+          "ephemeral": true,
+          "data": {
+            "tokenLimit": 128000,
+            "currentTokens": 9963,
+            "isInitial": true
+          }
+        },
+        {
+          "id": "opaque-027",
+          "type": "model.log",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.019Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "log",
+            "level": "debug"
+          }
+        },
+        {
+          "id": "opaque-028",
+          "type": "model.call_start",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.020Z",
+          "ephemeral": true,
+          "data": {
+            "turnId": "opaque-018",
+            "model": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-029",
+          "type": "model.model_call_started",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.021Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "model_call_started",
+            "turn": 0,
+            "model": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-030",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.022Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 6
+          }
+        },
+        {
+          "id": "opaque-031",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.023Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "{\""
+          }
+        },
+        {
+          "id": "opaque-033",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.024Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 13
+          }
+        },
+        {
+          "id": "opaque-034",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.025Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "command"
+          }
+        },
+        {
+          "id": "opaque-035",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.026Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 16
+          }
+        },
+        {
+          "id": "opaque-036",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.027Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "\":\""
+          }
+        },
+        {
+          "id": "opaque-037",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.028Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 22
+          }
+        },
+        {
+          "id": "opaque-038",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.029Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "printf"
+          }
+        },
+        {
+          "id": "opaque-039",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.030Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 24
+          }
+        },
+        {
+          "id": "opaque-040",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.031Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " '"
+          }
+        },
+        {
+          "id": "opaque-041",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.032Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 25
+          }
+        },
+        {
+          "id": "opaque-042",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.033Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "V"
+          }
+        },
+        {
+          "id": "opaque-043",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.034Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 26
+          }
+        },
+        {
+          "id": "opaque-044",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.035Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "8"
+          }
+        },
+        {
+          "id": "opaque-045",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.036Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 28
+          }
+        },
+        {
+          "id": "opaque-046",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.037Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "_C"
+          }
+        },
+        {
+          "id": "opaque-047",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.038Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 30
+          }
+        },
+        {
+          "id": "opaque-048",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.039Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "OP"
+          }
+        },
+        {
+          "id": "opaque-049",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.040Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 32
+          }
+        },
+        {
+          "id": "opaque-050",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.041Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "IL"
+          }
+        },
+        {
+          "id": "opaque-051",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.042Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 34
+          }
+        },
+        {
+          "id": "opaque-052",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.043Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "OT"
+          }
+        },
+        {
+          "id": "opaque-053",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.044Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 38
+          }
+        },
+        {
+          "id": "opaque-054",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.045Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "_TER"
+          }
+        },
+        {
+          "id": "opaque-055",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.046Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 41
+          }
+        },
+        {
+          "id": "opaque-056",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.047Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "MIN"
+          }
+        },
+        {
+          "id": "opaque-057",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.048Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 43
+          }
+        },
+        {
+          "id": "opaque-058",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.049Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "AL"
+          }
+        },
+        {
+          "id": "opaque-059",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.050Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 46
+          }
+        },
+        {
+          "id": "opaque-060",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.051Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "_OK"
+          }
+        },
+        {
+          "id": "opaque-061",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.052Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 48
+          }
+        },
+        {
+          "id": "opaque-062",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.053Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "\\\\"
+          }
+        },
+        {
+          "id": "opaque-063",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.054Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 49
+          }
+        },
+        {
+          "id": "opaque-064",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.055Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "n"
+          }
+        },
+        {
+          "id": "opaque-065",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.056Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 51
+          }
+        },
+        {
+          "id": "opaque-066",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.057Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "';"
+          }
+        },
+        {
+          "id": "opaque-067",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.058Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 57
+          }
+        },
+        {
+          "id": "opaque-068",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.059Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " sleep"
+          }
+        },
+        {
+          "id": "opaque-069",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.060Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 58
+          }
+        },
+        {
+          "id": "opaque-070",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.061Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " "
+          }
+        },
+        {
+          "id": "opaque-071",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.062Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 59
+          }
+        },
+        {
+          "id": "opaque-072",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.063Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "1"
+          }
+        },
+        {
+          "id": "opaque-073",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.064Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 60
+          }
+        },
+        {
+          "id": "opaque-074",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.065Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": ";"
+          }
+        },
+        {
+          "id": "opaque-075",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.066Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 67
+          }
+        },
+        {
+          "id": "opaque-076",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.067Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " printf"
+          }
+        },
+        {
+          "id": "opaque-077",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.068Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 69
+          }
+        },
+        {
+          "id": "opaque-078",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.069Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " '"
+          }
+        },
+        {
+          "id": "opaque-079",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.070Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 70
+          }
+        },
+        {
+          "id": "opaque-080",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.071Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "V"
+          }
+        },
+        {
+          "id": "opaque-081",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.072Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 71
+          }
+        },
+        {
+          "id": "opaque-082",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.073Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "8"
+          }
+        },
+        {
+          "id": "opaque-083",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.074Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 73
+          }
+        },
+        {
+          "id": "opaque-084",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.075Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "_C"
+          }
+        },
+        {
+          "id": "opaque-085",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.076Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 75
+          }
+        },
+        {
+          "id": "opaque-086",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.077Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "OP"
+          }
+        },
+        {
+          "id": "opaque-087",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.078Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 77
+          }
+        },
+        {
+          "id": "opaque-088",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.079Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "IL"
+          }
+        },
+        {
+          "id": "opaque-089",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.080Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 79
+          }
+        },
+        {
+          "id": "opaque-090",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.081Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "OT"
+          }
+        },
+        {
+          "id": "opaque-091",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.082Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 83
+          }
+        },
+        {
+          "id": "opaque-092",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.083Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "_TER"
+          }
+        },
+        {
+          "id": "opaque-093",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.084Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 86
+          }
+        },
+        {
+          "id": "opaque-094",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.085Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "MIN"
+          }
+        },
+        {
+          "id": "opaque-095",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.086Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 88
+          }
+        },
+        {
+          "id": "opaque-096",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.087Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "AL"
+          }
+        },
+        {
+          "id": "opaque-097",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.088Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 93
+          }
+        },
+        {
+          "id": "opaque-098",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.089Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "_DONE"
+          }
+        },
+        {
+          "id": "opaque-099",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.090Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 95
+          }
+        },
+        {
+          "id": "opaque-100",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.091Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "\\\\"
+          }
+        },
+        {
+          "id": "opaque-101",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.092Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 96
+          }
+        },
+        {
+          "id": "opaque-102",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.093Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "n"
+          }
+        },
+        {
+          "id": "opaque-103",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.094Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 97
+          }
+        },
+        {
+          "id": "opaque-104",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.095Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "'"
+          }
+        },
+        {
+          "id": "opaque-105",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.096Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 100
+          }
+        },
+        {
+          "id": "opaque-106",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.097Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "\",\""
+          }
+        },
+        {
+          "id": "opaque-107",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.098Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 111
+          }
+        },
+        {
+          "id": "opaque-108",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.099Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "description"
+          }
+        },
+        {
+          "id": "opaque-109",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.100Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 114
+          }
+        },
+        {
+          "id": "opaque-110",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.101Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "\":\""
+          }
+        },
+        {
+          "id": "opaque-111",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.102Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 117
+          }
+        },
+        {
+          "id": "opaque-112",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.103Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "Run"
+          }
+        },
+        {
+          "id": "opaque-113",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.104Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 127
+          }
+        },
+        {
+          "id": "opaque-114",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.105Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " requested"
+          }
+        },
+        {
+          "id": "opaque-115",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.106Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 136
+          }
+        },
+        {
+          "id": "opaque-116",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.107Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " terminal"
+          }
+        },
+        {
+          "id": "opaque-117",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.108Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 150
+          }
+        },
+        {
+          "id": "opaque-118",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.109Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": " qualification"
+          }
+        },
+        {
+          "id": "opaque-119",
+          "type": "assistant.streaming_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.110Z",
+          "ephemeral": true,
+          "data": {
+            "totalResponseSizeBytes": 152
+          }
+        },
+        {
+          "id": "opaque-120",
+          "type": "assistant.tool_call_delta",
+          "parentId": "opaque-025",
+          "timestamp": "2026-10-23T00:00:00.111Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "toolType": "function",
+            "inputDelta": "\"}"
+          }
+        },
+        {
+          "id": "opaque-121",
+          "type": "assistant.usage",
+          "parentId": "opaque-122",
+          "timestamp": "2026-10-23T00:00:00.112Z",
+          "ephemeral": true,
+          "data": {
+            "model": "gpt-6-luna",
+            "inputTokens": 9318,
+            "outputTokens": 58
+          }
+        },
+        {
+          "id": "opaque-123",
+          "type": "model.model_call_success",
+          "parentId": "opaque-122",
+          "timestamp": "2026-10-23T00:00:00.113Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "model_call_success",
+            "turn": 0
+          }
+        },
+        {
+          "id": "opaque-124",
+          "type": "model.call_finished",
+          "parentId": "opaque-122",
+          "timestamp": "2026-10-23T00:00:00.114Z",
+          "ephemeral": true,
+          "data": {
+            "turnId": "opaque-018",
+            "outcome": "success"
+          }
+        },
+        {
+          "id": "opaque-125",
+          "type": "model.message",
+          "parentId": "opaque-122",
+          "timestamp": "2026-10-23T00:00:00.115Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "message",
+            "turn": 0
+          }
+        },
+        {
+          "id": "opaque-126",
+          "type": "assistant.message",
+          "parentId": "opaque-122",
+          "timestamp": "2026-10-23T00:00:00.116Z",
+          "data": {
+            "messageId": "opaque-127",
+            "originatingMessageId": "opaque-017",
+            "model": "gpt-6-luna",
+            "content": "",
+            "interactionId": "opaque-019",
+            "turnId": "opaque-018",
+            "apiCallId": "opaque-128",
+            "toolRequests": [
+              {
+                "toolCallId": "opaque-032",
+                "name": "bash",
+                "arguments": {
+                  "command": "printf 'V8_COPILOT_TERMINAL_OK\\n'; sleep 1; printf 'V8_COPILOT_TERMINAL_DONE\\n'",
+                  "description": "Run requested terminal qualification"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "opaque-129",
+          "type": "tool.execution_start",
+          "parentId": "opaque-126",
+          "timestamp": "2026-10-23T00:00:00.117Z",
+          "data": {
+            "toolCallId": "opaque-032",
+            "toolName": "bash",
+            "arguments": {
+              "command": "printf 'V8_COPILOT_TERMINAL_OK\\n'; sleep 1; printf 'V8_COPILOT_TERMINAL_DONE\\n'",
+              "description": "Run requested terminal qualification"
+            },
+            "turnId": "opaque-018",
+            "model": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-130",
+          "type": "model.call_final_result",
+          "parentId": "opaque-129",
+          "timestamp": "2026-10-23T00:00:00.118Z",
+          "ephemeral": true,
+          "data": {
+            "model": "gpt-6-luna",
+            "isByok": true
+          }
+        },
+        {
+          "id": "opaque-131",
+          "type": "hook.start",
+          "parentId": "opaque-129",
+          "timestamp": "2026-10-23T00:00:00.119Z",
+          "data": {
+            "hookInvocationId": "opaque-132",
+            "hookType": "preToolUse"
+          }
+        },
+        {
+          "id": "opaque-133",
+          "type": "hook.end",
+          "parentId": "opaque-131",
+          "timestamp": "2026-10-23T00:00:00.120Z",
+          "data": {
+            "hookInvocationId": "opaque-132",
+            "hookType": "preToolUse",
+            "success": true
+          }
+        },
+        {
+          "id": "opaque-134",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-133",
+          "timestamp": "2026-10-23T00:00:00.121Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-135",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-133",
+          "timestamp": "2026-10-23T00:00:00.122Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-136",
+          "type": "permission.requested",
+          "parentId": "opaque-133",
+          "timestamp": "2026-10-23T00:00:00.123Z",
+          "data": {
+            "requestId": "opaque-137",
+            "agentMode": "interactive",
+            "permissionMode": "manual",
+            "permissionRequest": {
+              "kind": "shell",
+              "fullCommandText": "printf 'V8_COPILOT_TERMINAL_OK\\n'; sleep 1; printf 'V8_COPILOT_TERMINAL_DONE\\n'",
+              "hasWriteFileRedirection": false,
+              "possiblePaths": [],
+              "possibleUrls": [],
+              "toolCallId": "opaque-032"
+            }
+          }
+        },
+        {
+          "id": "opaque-138",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-136",
+          "timestamp": "2026-10-23T00:00:00.124Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-139",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-136",
+          "timestamp": "2026-10-23T00:00:00.125Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-140",
+          "type": "permission.completed",
+          "parentId": "opaque-136",
+          "timestamp": "2026-10-23T00:00:00.126Z",
+          "data": {
+            "requestId": "opaque-137",
+            "toolCallId": "opaque-032",
+            "result": {
+              "kind": "approved"
+            }
+          }
+        },
+        {
+          "id": "opaque-141",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.127Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-142",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.128Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-143",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.129Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-144",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.130Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-145",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.131Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-146",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.132Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-147",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.133Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-148",
+          "type": "sandbox.decision",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.134Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "enforcement_state",
+            "control": "process",
+            "outcome": "inactive",
+            "toolCallId": "opaque-032",
+            "platform": "linux",
+            "backend": "unsupported",
+            "enforcementPoint": "shell"
+          }
+        },
+        {
+          "id": "opaque-149",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.135Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-150",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.136Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-151",
+          "type": "tool.shell_output",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.137Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "stream": "stdout",
+            "text": "V8_COPILOT_TERMINAL_OK\n",
+            "sequence": 0
+          }
+        },
+        {
+          "id": "opaque-152",
+          "type": "tool.execution_partial_result",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.138Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "partialOutput": "V8_COPILOT_TERMINAL_OK\n"
+          }
+        },
+        {
+          "id": "opaque-153",
+          "type": "tool.shell_output",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.139Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "stream": "stdout",
+            "text": "V8_COPILOT_TERMINAL_DONE\n",
+            "sequence": 1
+          }
+        },
+        {
+          "id": "opaque-154",
+          "type": "tool.execution_partial_result",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.140Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "partialOutput": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n"
+          }
+        },
+        {
+          "id": "opaque-155",
+          "type": "tool.execution_partial_result",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.141Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-032",
+            "partialOutput": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n"
+          }
+        },
+        {
+          "id": "opaque-156",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.142Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-157",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.143Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-158",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.144Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-159",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.145Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-160",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.146Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-161",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.147Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-162",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.148Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-163",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.149Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-164",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.150Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-165",
+          "type": "session.background_tasks_changed",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.151Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-166",
+          "type": "hook.start",
+          "parentId": "opaque-140",
+          "timestamp": "2026-10-23T00:00:00.152Z",
+          "data": {
+            "hookInvocationId": "opaque-167",
+            "hookType": "postToolUse"
+          }
+        },
+        {
+          "id": "opaque-168",
+          "type": "hook.end",
+          "parentId": "opaque-166",
+          "timestamp": "2026-10-23T00:00:00.153Z",
+          "data": {
+            "hookInvocationId": "opaque-167",
+            "hookType": "postToolUse",
+            "success": true
+          }
+        },
+        {
+          "id": "opaque-169",
+          "type": "model.message",
+          "parentId": "opaque-168",
+          "timestamp": "2026-10-23T00:00:00.154Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "message",
+            "turn": 0
+          }
+        },
+        {
+          "id": "opaque-170",
+          "type": "tool.execution_complete",
+          "parentId": "opaque-168",
+          "timestamp": "2026-10-23T00:00:00.155Z",
+          "data": {
+            "toolCallId": "opaque-032",
+            "success": true,
+            "turnId": "opaque-018",
+            "model": "gpt-6-luna",
+            "result": {
+              "content": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n<shellId: 0 completed with exit code 0>",
+              "detailedContent": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n<shellId: 0 completed with exit code 0>"
+            }
+          }
+        },
+        {
+          "id": "opaque-171",
+          "type": "model.tool_execution",
+          "parentId": "opaque-170",
+          "timestamp": "2026-10-23T00:00:00.156Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "tool_execution",
+            "turn": 0,
+            "toolCallId": "opaque-032"
+          }
+        },
+        {
+          "id": "opaque-172",
+          "type": "model.turn_ended",
+          "parentId": "opaque-170",
+          "timestamp": "2026-10-23T00:00:00.157Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "turn_ended",
+            "turn": 0,
+            "model": "gpt-6-luna"
+          }
+        }
+      ]
+    },
+    {
+      "name": "successful root completion excerpt",
+      "provenance": {
+        "trace": "live-2026-10-22T23-34-21-903Z/observations.scrubbed.json",
+        "rawTraceSha256": "e873e4a3600a61c9104de0e5b57ac3925a3d7a38d2f7d1fa11e56a73b4b4665f",
+        "originalNotifications": 203,
+        "retainedNotifications": 27,
+        "selection": "Body and lifecycle events plus the two unimplemented final model diagnostics; other sideband deliveries omitted."
+      },
+      "knownStart": false,
+      "expectedFinal": "V8_COPILOT_ROOT_OK",
+      "events": [
+        {
+          "id": "opaque-001",
+          "type": "user.message",
+          "parentId": "opaque-002",
+          "timestamp": "2026-10-23T00:00:00.000Z",
+          "data": {
+            "messageId": "opaque-003",
+            "turnId": "opaque-004",
+            "interactionId": "opaque-005",
+            "delivery": "idle",
+            "content": "Fixture request (original model prompt omitted)."
+          }
+        },
+        {
+          "id": "opaque-006",
+          "type": "assistant.turn_start",
+          "parentId": "opaque-007",
+          "timestamp": "2026-10-23T00:00:00.001Z",
+          "data": {
+            "turnId": "opaque-004",
+            "interactionId": "opaque-005"
+          }
+        },
+        {
+          "id": "opaque-008",
+          "type": "assistant.message",
+          "parentId": "opaque-009",
+          "timestamp": "2026-10-23T00:00:00.002Z",
+          "data": {
+            "messageId": "opaque-010",
+            "originatingMessageId": "opaque-003",
+            "model": "gpt-6-luna",
+            "content": "",
+            "interactionId": "opaque-005",
+            "turnId": "opaque-004",
+            "apiCallId": "opaque-011",
+            "toolRequests": [
+              {
+                "toolCallId": "opaque-012",
+                "name": "bash",
+                "arguments": {
+                  "command": "printf 'V8_COPILOT_TERMINAL_OK\\n'; sleep 1; printf 'V8_COPILOT_TERMINAL_DONE\\n'",
+                  "description": "Run requested terminal qualification"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "opaque-013",
+          "type": "tool.execution_start",
+          "parentId": "opaque-008",
+          "timestamp": "2026-10-23T00:00:00.003Z",
+          "data": {
+            "toolCallId": "opaque-012",
+            "toolName": "bash",
+            "arguments": {
+              "command": "printf 'V8_COPILOT_TERMINAL_OK\\n'; sleep 1; printf 'V8_COPILOT_TERMINAL_DONE\\n'",
+              "description": "Run requested terminal qualification"
+            },
+            "turnId": "opaque-004",
+            "model": "gpt-6-luna"
+          }
+        },
+        {
+          "id": "opaque-014",
+          "type": "tool.shell_output",
+          "parentId": "opaque-015",
+          "timestamp": "2026-10-23T00:00:00.004Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-012",
+            "stream": "stdout",
+            "text": "V8_COPILOT_TERMINAL_OK\n",
+            "sequence": 0
+          }
+        },
+        {
+          "id": "opaque-016",
+          "type": "tool.execution_partial_result",
+          "parentId": "opaque-015",
+          "timestamp": "2026-10-23T00:00:00.005Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-012",
+            "partialOutput": "V8_COPILOT_TERMINAL_OK\n"
+          }
+        },
+        {
+          "id": "opaque-017",
+          "type": "tool.shell_output",
+          "parentId": "opaque-015",
+          "timestamp": "2026-10-23T00:00:00.006Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-012",
+            "stream": "stdout",
+            "text": "V8_COPILOT_TERMINAL_DONE\n",
+            "sequence": 1
+          }
+        },
+        {
+          "id": "opaque-018",
+          "type": "tool.execution_partial_result",
+          "parentId": "opaque-015",
+          "timestamp": "2026-10-23T00:00:00.007Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-012",
+            "partialOutput": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n"
+          }
+        },
+        {
+          "id": "opaque-019",
+          "type": "tool.execution_partial_result",
+          "parentId": "opaque-015",
+          "timestamp": "2026-10-23T00:00:00.008Z",
+          "ephemeral": true,
+          "data": {
+            "toolCallId": "opaque-012",
+            "partialOutput": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n"
+          }
+        },
+        {
+          "id": "opaque-020",
+          "type": "tool.execution_complete",
+          "parentId": "opaque-021",
+          "timestamp": "2026-10-23T00:00:00.009Z",
+          "data": {
+            "toolCallId": "opaque-012",
+            "success": true,
+            "turnId": "opaque-004",
+            "model": "gpt-6-luna",
+            "result": {
+              "content": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n<shellId: 0 completed with exit code 0>",
+              "detailedContent": "V8_COPILOT_TERMINAL_OK\nV8_COPILOT_TERMINAL_DONE\n<shellId: 0 completed with exit code 0>"
+            }
+          }
+        },
+        {
+          "id": "opaque-022",
+          "type": "assistant.turn_end",
+          "parentId": "opaque-020",
+          "timestamp": "2026-10-23T00:00:00.010Z",
+          "data": {
+            "turnId": "opaque-004"
+          }
+        },
+        {
+          "id": "opaque-023",
+          "type": "assistant.turn_start",
+          "parentId": "opaque-022",
+          "timestamp": "2026-10-23T00:00:00.011Z",
+          "data": {
+            "turnId": "opaque-024",
+            "interactionId": "opaque-005"
+          }
+        },
+        {
+          "id": "opaque-025",
+          "type": "assistant.message_start",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.012Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "phase": "final_answer"
+          }
+        },
+        {
+          "id": "opaque-027",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.013Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "V"
+          }
+        },
+        {
+          "id": "opaque-028",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.014Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "8"
+          }
+        },
+        {
+          "id": "opaque-029",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.015Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "_C"
+          }
+        },
+        {
+          "id": "opaque-030",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.016Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "OP"
+          }
+        },
+        {
+          "id": "opaque-031",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.017Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "IL"
+          }
+        },
+        {
+          "id": "opaque-032",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.018Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "OT"
+          }
+        },
+        {
+          "id": "opaque-033",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.019Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "_ROOT"
+          }
+        },
+        {
+          "id": "opaque-034",
+          "type": "assistant.message_delta",
+          "parentId": "opaque-023",
+          "timestamp": "2026-10-23T00:00:00.020Z",
+          "ephemeral": true,
+          "data": {
+            "messageId": "opaque-026",
+            "deltaContent": "_OK"
+          }
+        },
+        {
+          "id": "opaque-035",
+          "type": "assistant.message",
+          "parentId": "opaque-036",
+          "timestamp": "2026-10-23T00:00:00.021Z",
+          "data": {
+            "messageId": "opaque-026",
+            "originatingMessageId": "opaque-003",
+            "model": "gpt-6-luna",
+            "content": "V8_COPILOT_ROOT_OK",
+            "interactionId": "opaque-005",
+            "turnId": "opaque-024",
+            "phase": "final_answer",
+            "apiCallId": "opaque-037",
+            "toolRequests": []
+          }
+        },
+        {
+          "id": "opaque-038",
+          "type": "model.response",
+          "parentId": "opaque-035",
+          "timestamp": "2026-10-23T00:00:00.022Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "response",
+            "turn": 1
+          }
+        },
+        {
+          "id": "opaque-039",
+          "type": "assistant.turn_end",
+          "parentId": "opaque-035",
+          "timestamp": "2026-10-23T00:00:00.023Z",
+          "data": {
+            "turnId": "opaque-024"
+          }
+        },
+        {
+          "id": "opaque-040",
+          "type": "model.messages_snapshot",
+          "parentId": "opaque-039",
+          "timestamp": "2026-10-23T00:00:00.024Z",
+          "ephemeral": true,
+          "data": {
+            "kind": "messages_snapshot"
+          }
+        },
+        {
+          "id": "opaque-041",
+          "type": "assistant.idle",
+          "parentId": "opaque-042",
+          "timestamp": "2026-10-23T00:00:00.025Z",
+          "ephemeral": true,
+          "data": {}
+        },
+        {
+          "id": "opaque-043",
+          "type": "session.idle",
+          "parentId": "opaque-042",
+          "timestamp": "2026-10-23T00:00:00.026Z",
+          "ephemeral": true,
+          "data": {}
+        }
+      ]
+    }
+  ]
+}

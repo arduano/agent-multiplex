@@ -9,10 +9,10 @@ audit. These findings do not qualify native model behavior or Windows. Public
 npm metadata reported these as the latest stable versions on 2026-09-23; SDK
 `1.0.15-preview.1` was a prerelease and was not selected.
 
-The read-only evidence inputs in
-`/home/arduano/.local/state/leo-agents-tasks/copilot-lifecycle-vnext-20260922/`
-passed their supplied `SHA256SUMS`: `BRIEF.md`, `CURRENT-AUDIT.md`, and
-`STABILITY-CONTEXT.md`. They remain external evidence, not copied source.
+The separately retained read-only evidence inputs passed their supplied
+`SHA256SUMS`: `BRIEF.md`, `CURRENT-AUDIT.md`, and `STABILITY-CONTEXT.md`.
+The historical directory locator is omitted from public prose; the exact
+original remains separately retained. These are external evidence, not copied source.
 
 ## Findings and corrections
 

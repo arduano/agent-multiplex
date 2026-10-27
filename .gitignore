@@ -1,6 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+/.build/
 .agent-multiplex/
 *.sqlite
 *.sqlite-shm
@@ -13,4 +14,15 @@ coverage/
 receipts/
 release-artifacts/
 *.tgz
+/.cache/
 transport-candidate/artifact.json
+primitives/v8-mcp/.build/
+primitives/v8-mcp/artifacts/
+primitives/v8-organization/.build/
+
+primitives/v8-gateway/.cache/
+
+# V8 qualification/build outputs are never authored release inputs.
+primitives/**/.cache/
+primitives/**/.build/
+primitives/**/artifacts/

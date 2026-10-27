@@ -1,0 +1,12 @@
+{
+  "name": "@multiplex-v8/host-assembly",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "build": "tsc --project tsconfig.json",
+    "test": "node qualification/run.mjs"
+  },
+  "description": "Shared harness custody, media bounds and exact containment facilities; concrete adapters and lifecycle are separately installed plugins."
+}

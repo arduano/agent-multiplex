@@ -7,7 +7,7 @@
 This opt-in acceptance harness starts one canonical Agent Multiplex host and 10
 isolated worker containers. Each worker starts one SDK-managed Copilot runtime
 and owns 10 real Copilot sessions, giving a fixed 10-worker/100-session fleet.
-It uses the codex-lb endpoint and token already configured on the Docker host.
+It uses explicitly selected provider configuration and a read-only token file.
 
 The workload has two deliberately separate parts:
 
@@ -24,6 +24,21 @@ That client-RPC overlap is not evidence that all 100 provider turns overlapped
 in wall-clock time. The suite also does not claim 100 separate Copilot runtime
 processes. It records exact native events and observed timings so the receipt
 says what was actually tested.
+
+## Explicit inputs
+
+Both dry-run and live branches require the existing source configuration/token
+variables and an explicit provider ID; there are no user-home credential defaults:
+
+```bash
+export AGENT_MULTIPLEX_SOURCE_PROVIDER=selected-provider
+export AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG=/path/to/provider-config.toml
+export AGENT_MULTIPLEX_COPILOT_SOURCE_TOKEN=/path/to/provider-api-key
+```
+
+The provider ID allows letters, digits, underscores or hyphens (1–64 characters).
+The runner normalizes its isolated route as `qualification-provider`. These
+interface examples do not rerun or relabel historical receipts.
 
 ## Safe validation
 
@@ -44,9 +59,7 @@ AGENT_MULTIPLEX_COPILOT_SCALE_CONFIRM=I_UNDERSTAND_THIS_RUNS_100_REAL_SESSIONS \
   npm run test:docker:copilot:scale
 ```
 
-Defaults can be overridden with
-`AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG`,
-`AGENT_MULTIPLEX_COPILOT_SOURCE_TOKEN`,
+Optional workload settings are
 `AGENT_MULTIPLEX_COPILOT_SCALE_MODEL`,
 `AGENT_MULTIPLEX_COPILOT_SCALE_REASONING_EFFORT`,
 `AGENT_MULTIPLEX_COPILOT_SCALE_STAGE_WIDTH`,
@@ -74,6 +87,6 @@ resources and lifecycle state, removes the exact topology, scans receipts for
 the token/provider endpoint/fleet secret/raw p2prpc ticket, and writes
 `SHA256SUMS` last.
 
-The host API key is bind-mounted read-only at `/run/secrets/codex-lb` in each
+The host API key is bind-mounted read-only at `/run/secrets/provider-api-key` in each
 worker. It is never copied into the image, worker state, or receipt tree.
 Receipts are written under `receipts/copilot-real-scale/<run-id>/`.

@@ -5,8 +5,9 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 DOCKER_NPMRC=${AGENT_MULTIPLEX_DOCKER_NPMRC:-}
-SOURCE_CONFIG=${AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_CONFIG:-"${HOME}/.codex/config.toml"}
-SOURCE_KEY=${AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY:-"${HOME}/.codex/codex-lb-api-key"}
+SOURCE_CONFIG=${AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_CONFIG:-}
+SOURCE_KEY=${AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY:-}
+SOURCE_PROVIDER=${AGENT_MULTIPLEX_SOURCE_PROVIDER:-}
 RECEIPT_ROOT=${AGENT_MULTIPLEX_COPILOT_ONLY_RECEIPT_ROOT:-"$REPO_ROOT/receipts/protocol-v6-copilot-only"}
 TIMEOUT_MS=${AGENT_MULTIPLEX_COPILOT_ONLY_TIMEOUT_MS:-600000}
 LIVE_OPT_IN=${AGENT_MULTIPLEX_COPILOT_ONLY_RUN:-}
@@ -43,6 +44,10 @@ if [[ "$LIVE_OPT_IN" != I_UNDERSTAND_ONE_GPT_6_LUNA_REQUEST ]]; then
   echo "copilot-only-v6: refusing live run without AGENT_MULTIPLEX_COPILOT_ONLY_RUN=I_UNDERSTAND_ONE_GPT_6_LUNA_REQUEST" >&2
   exit 2
 fi
+for source_name in SOURCE_CONFIG SOURCE_KEY SOURCE_PROVIDER; do
+  [[ -n "${!source_name}" ]] || { echo "copilot-only-v6: explicit $source_name is required" >&2; exit 2; }
+done
+[[ "$SOURCE_PROVIDER" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo "Invalid explicit provider ID" >&2; exit 2; }
 if [[ ! "$TIMEOUT_MS" =~ ^[1-9][0-9]*$ ]]; then
   echo "copilot-only-v6: timeout must be a positive integer" >&2
   exit 2
@@ -241,12 +246,12 @@ if ! API_KEY_LITERAL=$(node -e '
   process.stdout.write(raw.replace(/\r?\n$/, ""));
 ' "$SOURCE_KEY"); then fail "provider key must be exactly one non-empty line"; fi
 (( ${#API_KEY_LITERAL} >= 16 )) || fail "provider key is unexpectedly short"
-PROVIDER_URL=$(awk '
-  /^\[model_providers\.codex-lb\]$/ {inside=1; next}
+PROVIDER_URL=$(awk -v selected="$SOURCE_PROVIDER" '
+  $0 == "[model_providers." selected "]" {inside=1; next}
   inside && /^\[/ {exit}
   inside && /^[[:space:]]*base_url[[:space:]]*=/ {sub(/^[^=]*=[[:space:]]*/,""); gsub(/^"|"$/,""); print; exit}
 ' "$SOURCE_CONFIG")
-[[ -n "$PROVIDER_URL" ]] || fail "codex-lb base_url not found"
+[[ -n "$PROVIDER_URL" ]] || fail "qualification-provider base_url not found"
 node -e 'const u=new URL(process.argv[1]); if(!/^https?:$/.test(u.protocol)||u.username||u.password||u.search||u.hash) process.exit(1)' "$PROVIDER_URL" \
   || fail "provider base URL must be credential-free HTTP(S) without query or fragment"
 PROVIDER_ORIGIN=$(node -e 'process.stdout.write(new URL(process.argv[1]).origin)' "$PROVIDER_URL")
@@ -370,11 +375,11 @@ docker run --detach --name "$RUNTIME_CONTAINER" --hostname copilot-only-runtime 
   --init --user 1000:100 --read-only --cap-drop ALL --security-opt no-new-privileges \
   "${LOCAL_RUN_ARGS[@]}" \
   --mount type=bind,src="$RUNTIME_DIR/runtime-state",dst=/state \
-  --mount type=bind,src="$RUNTIME_DIR/copilot-home",dst=/home/arduano/.copilot \
+  --mount type=bind,src="$RUNTIME_DIR/copilot-home",dst=/home/multiplex/.copilot \
   --mount type=bind,src="$RUNTIME_DIR/workspace",dst=/workspace/project \
-  --mount type=bind,src="$SOURCE_KEY",dst=/run/secrets/codex-lb-api-key,readonly \
+  --mount type=bind,src="$SOURCE_KEY",dst=/run/secrets/provider-api-key,readonly \
   --tmpfs /tmp:rw,exec,nosuid,nodev,mode=1777 \
-  --env HOME=/home/arduano --env XDG_CACHE_HOME=/tmp/cache \
+  --env HOME=/home/multiplex --env XDG_CACHE_HOME=/tmp/cache \
   --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$CONTROL_ENDPOINT_ID" \
   --env AGENT_MULTIPLEX_CONTROL_NODE_TICKET="$CONTROL_TICKET" \
@@ -385,7 +390,7 @@ docker run --detach --name "$RUNTIME_CONTAINER" --hostname copilot-only-runtime 
   --env AGENT_MULTIPLEX_RUNTIME_NODE_HEARTBEAT_MS=1000 \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_INVENTORY_REFRESH_MS=3000 \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_RECONNECT_MAX_MS=1000 \
-  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/arduano/.copilot \
+  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/multiplex/.copilot \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_LOG_LEVEL=none \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TYPE=openai \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_BASE_URL="$PROXIED_PROVIDER_URL" \
@@ -393,14 +398,14 @@ docker run --detach --name "$RUNTIME_CONTAINER" --hostname copilot-only-runtime 
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TRANSPORT=http \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL="$MODEL" \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODELS="$COPILOT_MODELS" \
-  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/codex-lb-api-key \
+  --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/provider-api-key \
   --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_EXPERIMENTAL_UI_SERVER=0 \
   "$IMAGE_TAG" node apps/runtime-node/dist/main.js >/dev/null
 RUNTIME_ID=$(docker container inspect --format '{{.Id}}' "$RUNTIME_CONTAINER")
 wait_for_log "$RUNTIME_CONTAINER" '^Connected to control node ' 'Copilot runtime'
 
 docker inspect "$RUNTIME_CONTAINER" | jq '
-  .[0] as $c | ($c.Mounts | map(select(.Destination=="/run/secrets/codex-lb-api-key"))[0]) as $key |
+  .[0] as $c | ($c.Mounts | map(select(.Destination=="/run/secrets/provider-api-key"))[0]) as $key |
   {readOnlyKeyMount:($key.Type=="bind" and ($key.RW|not)),isolatedCopilotHome:true,
    onlyHarness:(($c.Config.Env|map(select(startswith("AGENT_MULTIPLEX_RUNTIME_NODE_HARNESSES="))))==["AGENT_MULTIPLEX_RUNTIME_NODE_HARNESSES=copilot"]),
    providerEndpointRecorded:false,secretValuesRecorded:false}

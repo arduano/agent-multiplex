@@ -6,8 +6,10 @@ umask 077
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/../.." && pwd)
 P2PRPC_CORE=${AGENT_MULTIPLEX_P2PRPC_CORE:-"$REPO_ROOT/../p2prpc/packages/core"}
-SOURCE_CONFIG=${AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG:-"${HOME}/.codex/config.toml"}
-SOURCE_TOKEN=${AGENT_MULTIPLEX_COPILOT_SOURCE_TOKEN:-"${HOME}/.codex/codex-lb-api-key"}
+SOURCE_CONFIG=${AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG:?Explicit AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG is required}
+SOURCE_TOKEN=${AGENT_MULTIPLEX_COPILOT_SOURCE_TOKEN:?Explicit AGENT_MULTIPLEX_COPILOT_SOURCE_TOKEN is required}
+SOURCE_PROVIDER=${AGENT_MULTIPLEX_SOURCE_PROVIDER:?Explicit AGENT_MULTIPLEX_SOURCE_PROVIDER is required}
+[[ "$SOURCE_PROVIDER" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || { echo "Invalid explicit provider ID" >&2; exit 2; }
 RECEIPT_ROOT=${AGENT_MULTIPLEX_COPILOT_SCALE_RECEIPT_ROOT:-"$REPO_ROOT/receipts/copilot-real-scale"}
 MODEL=${AGENT_MULTIPLEX_COPILOT_SCALE_MODEL:-gpt-5.6-luna}
 REASONING_EFFORT=${AGENT_MULTIPLEX_COPILOT_SCALE_REASONING_EFFORT:-none}
@@ -77,25 +79,25 @@ TOKEN_LITERAL=$(node -e '
   process.stdout.write(require("node:fs").readFileSync(process.argv[1], "utf8").trim());
 ' "$SOURCE_TOKEN")
 if (( ${#TOKEN_LITERAL} < 16 )); then
-  echo "real Copilot scale: codex-lb token is unexpectedly short" >&2
+  echo "real Copilot scale: qualification-provider token is unexpectedly short" >&2
   exit 1
 fi
-PROVIDER_URL=$(awk '
-  /^\[model_providers\.codex-lb\]$/ { in_provider = 1; next }
+PROVIDER_URL=$(awk -v selected="$SOURCE_PROVIDER" '
+  $0 == "[model_providers." selected "]" { in_provider = 1; next }
   in_provider && /^\[/ { exit }
   in_provider && /^[[:space:]]*base_url[[:space:]]*=/ {
     sub(/^[^=]*=[[:space:]]*/, ""); gsub(/^"|"$/, ""); print; exit
   }
 ' "$SOURCE_CONFIG")
 if [[ -z "$PROVIDER_URL" ]]; then
-  echo "real Copilot scale: codex-lb base_url was not found" >&2
+  echo "real Copilot scale: qualification-provider base_url was not found" >&2
   exit 1
 fi
 if ! node -e '
   const url = new URL(process.argv[1]);
   if (!/^https?:$/.test(url.protocol) || url.username || url.password) process.exit(1);
 ' "$PROVIDER_URL"; then
-  echo "real Copilot scale: codex-lb base_url is not a credential-free HTTP(S) URL" >&2
+  echo "real Copilot scale: qualification-provider base_url is not a credential-free HTTP(S) URL" >&2
   exit 1
 fi
 SOURCE_TOKEN_ABS=$(node -e '
@@ -211,7 +213,7 @@ redact_stream() {
         @pairs = (
           [$ENV{AM_REDACT_SHARED} // "", "<redacted-shared-secret>"],
           [$ENV{AM_REDACT_TICKET} // "", "<redacted-p2p-ticket>"],
-          [$ENV{AM_REDACT_TOKEN} // "", "<redacted-codex-lb-token>"],
+          [$ENV{AM_REDACT_TOKEN} // "", "<redacted-qualification-provider-token>"],
           [$ENV{AM_REDACT_PROVIDER} // "", "<redacted-provider-endpoint>"],
         );
       }
@@ -432,9 +434,9 @@ for (( index = 0; index < WORKER_COUNT; index++ )); do
     --tmpfs /state:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
     --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
     --tmpfs /workspace:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
-    --tmpfs /home/arduano/.copilot:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
-    --mount "type=bind,src=$SOURCE_TOKEN_ABS,dst=/run/secrets/codex-lb,readonly" \
-    --env HOME=/home/arduano \
+    --tmpfs /home/multiplex/.copilot:rw,nosuid,nodev,mode=0700,uid=1000,gid=100 \
+    --mount "type=bind,src=$SOURCE_TOKEN_ABS,dst=/run/secrets/provider-api-key,readonly" \
+    --env HOME=/home/multiplex \
     --env XDG_CACHE_HOME=/tmp/cache \
     --env AGENT_MULTIPLEX_SHARED_SECRET="$SHARED_SECRET" \
     --env AGENT_MULTIPLEX_CONTROL_NODE_ENDPOINT_ID="$P2P_ENDPOINT_ID" \
@@ -447,7 +449,7 @@ for (( index = 0; index < WORKER_COUNT; index++ )); do
     --env AGENT_MULTIPLEX_RUNTIME_NODE_INVENTORY_REFRESH_MS=2000 \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_METADATA_FLUSH_MS=500 \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_RECONNECT_MAX_MS=2000 \
-    --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/arduano/.copilot \
+    --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_HOME=/home/multiplex/.copilot \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_LOG_LEVEL=none \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_SCOPE="copilot:scale:$suffix" \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TYPE=openai \
@@ -456,7 +458,7 @@ for (( index = 0; index < WORKER_COUNT; index++ )); do
     --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_TRANSPORT=http \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODEL="$MODEL" \
     --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_MODELS="$MODELS_JSON" \
-    --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/codex-lb \
+    --env AGENT_MULTIPLEX_RUNTIME_NODE_COPILOT_PROVIDER_API_KEY_FILE=/run/secrets/provider-api-key \
     "$IMAGE_TAG" \
     node apps/runtime-node/dist/main.js >/dev/null
   WORKERS_STARTED=$(( index + 1 ))
@@ -466,7 +468,7 @@ done
 docker inspect "${WORKER_CONTAINERS[@]}" | jq --arg source "$SOURCE_TOKEN_ABS" '
   map(
     . as $container |
-    ($container.Mounts | map(select(.Destination == "/run/secrets/codex-lb"))) as $mounts |
+    ($container.Mounts | map(select(.Destination == "/run/secrets/provider-api-key"))) as $mounts |
     {
       containerName: ($container.Name | ltrimstr("/")),
       mountCount: ($mounts | length),
@@ -482,7 +484,7 @@ docker inspect "${WORKER_CONTAINERS[@]}" | jq --arg source "$SOURCE_TOKEN_ABS" '
 assert_json "worker token mounts are not narrowly scoped and read-only" '
   length == 10 and all(.[];
     .mountCount == 1 and
-    .destination == "/run/secrets/codex-lb" and
+    .destination == "/run/secrets/provider-api-key" and
     .mountType == "bind" and
     .readOnly == true and
     .sourcePathMatchesExpected == true and
@@ -937,7 +939,7 @@ done
 jq -n '
   {
     passed: true,
-    scanned: ["raw codex-lb token", "provider endpoint",
+    scanned: ["raw qualification-provider token", "provider endpoint",
       "fleet shared secret", "raw p2prpc ticket"],
     exactSecretMatches: 0,
     note: "A second scan runs after all human-readable and derived receipts are written."

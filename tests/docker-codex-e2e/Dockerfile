@@ -17,8 +17,8 @@ RUN npm install \
     && npm ci --include=dev \
     && npm run build \
     && npm prune --omit=dev \
-    && mkdir -p /home/arduano/.codex /state /workspace/e2e \
-    && chown -R 1000:100 /home/arduano /state /workspace
+    && mkdir -p /home/multiplex/.codex /state /workspace/e2e \
+    && chown -R 1000:100 /home/multiplex /state /workspace
 
 COPY --chmod=0755 tests/docker-codex-e2e/runtime-node-entrypoint.sh \
   /usr/local/bin/agent-multiplex-e2e-runtime-node

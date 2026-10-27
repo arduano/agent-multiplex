@@ -48,7 +48,7 @@ try {
   const command = sessionCommand(session, { harness: "codex", command: { type: "send", input: prompt } });
   assert((await client.sessions.execute.mutate(command)).state === "succeeded", "Markdown fixture send failed");
   await poll(async () => (await client.sessions.get.query(session.sessionId))?.runtimeStatus === "idle");
-  browser = await chromium.launch({ headless: true, executablePath: process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ?? "/home/arduano/.nix-profile/bin/google-chrome" });
+  browser = await chromium.launch({ headless: true, executablePath: process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ?? "/run/current-system/sw/bin/chromium" });
   const context = await browser.newContext({ viewport: { width: 1720, height: 1180 }, extraHTTPHeaders: { Authorization: `Bearer ${token}` }, reducedMotion: "reduce" });
   await context.route("https://image-fixture.invalid/**", async (route) => { findings.externalRequests.push(route.request().url()); await route.abort(); });
   const page = await context.newPage();

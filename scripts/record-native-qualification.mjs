@@ -877,7 +877,7 @@ function validateSecurityEvidence(
 
   assert(
     provider.credentialsRecorded === false &&
-      provider.codex?.provider === "codex-lb" &&
+      provider.codex?.provider === "qualification-provider" &&
       provider.codex.endpointRecorded === false &&
       provider.copilot?.providerType === "openai" &&
       provider.copilot.wireApi === "responses" &&
@@ -905,7 +905,7 @@ function validateSecurityEvidence(
       codexAuth.authJsonCopied === false &&
       codexAuth.fullHostCodexHomeMounted === false &&
       isPlainObject(codexAuth.files) &&
-      sameStringSet(Object.keys(codexAuth.files), ["config.toml", "codex-lb-api-key"]) &&
+      sameStringSet(Object.keys(codexAuth.files), ["config.toml", "provider-api-key"]) &&
       Object.values(codexAuth.files).every((file) =>
         file?.present === true && file.mode === "600" && file.uid === 1000 && file.gid === 100
       ),
@@ -913,7 +913,7 @@ function validateSecurityEvidence(
   );
   assert(
     copilotAuth.secretValuesRecorded === false &&
-      copilotAuth.destination === "/run/secrets/codex-lb-api-key" &&
+      copilotAuth.destination === "/run/secrets/provider-api-key" &&
       copilotAuth.mountType === "bind" &&
       copilotAuth.readOnly === true &&
       copilotAuth.isolatedCopilotHome === true &&

@@ -59,9 +59,14 @@ checkout's Root or Gateway:
 
 | Role | Exact package/version |
 | --- | --- |
-| NAS Root | `796b9m5137202q93xb9fh8pd7m8hqnvy-leo-multiplex-v6-0.1.0`, control core `0.2.4-hotfix.22` |
-| NAS Gateway | `b5g2zbqszhcdqm0qlvfk88r4b2rvyxf7-leo-multiplex-v6-0.1.0`, gateway core `0.2.4-hotfix.23` |
+| Retained Root artifact | Immutable installed control core `0.2.4-hotfix.22`; historical deployment locator omitted |
+| Retained Gateway artifact | Immutable installed gateway core `0.2.4-hotfix.23`; historical deployment locator omitted |
 | Candidate Host | The reviewed runtime and local control source at `90bd210`; source graph is still `.23` pending coordinated release preparation |
+
+The original immutable deployment locators are separately retained. Package
+versions alone do not identify those historical bytes; the receipt's module
+inventory/hashes below retain the original evidence boundary. Placeholder paths
+in the repeat command are explicit inputs, not replacement acceptance evidence.
 
 Real runtime/store/event hub, local control/catalog, the reverse event pump,
 old Root service/catalog and old Gateway projection run against a synthetic
@@ -72,7 +77,7 @@ no vendor processes, provider calls, real tickets or transport connections.
 Eight mixed cases cover synthetic Codex and Copilot, each after Stop, native
 stopped status, Archive and replacement Resume. Each confirms three exact
 native sequences, live delivery after child resynchronization, fresh history
-agreement, online/reachable routing and the NAS Root authority/provenance.
+agreement, online/reachable routing and the retained Root authority/provenance.
 The original replay and added race/security regressions also pass:
 **16 tests / two files, one worker**.
 
@@ -104,8 +109,8 @@ Provide two explicit immutable package directories. Without them the mixed
 test is skipped; it never silently uses new local peers.
 
 ```bash
-MUX_MIXED_ROOT_PACKAGE=/nix/store/796b9m5137202q93xb9fh8pd7m8hqnvy-leo-multiplex-v6-0.1.0/lib/leo-multiplex/node_modules/@arduano/agent-multiplex-control-node-core \
-MUX_MIXED_GATEWAY_PACKAGE=/nix/store/b5g2zbqszhcdqm0qlvfk88r4b2rvyxf7-leo-multiplex-v6-0.1.0/lib/leo-multiplex/node_modules/@arduano/agent-multiplex-gateway-core \
+MUX_MIXED_ROOT_PACKAGE=/path/to/retained-immutable-control-node-core \
+MUX_MIXED_GATEWAY_PACKAGE=/path/to/retained-immutable-gateway-core \
 node node_modules/vitest/vitest.mjs run \
   tests/qualification/runtime-replay-mixed.test.ts \
   packages/transport-p2prpc/test/runtime-replay-starvation.test.ts \

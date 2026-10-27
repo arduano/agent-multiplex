@@ -1,0 +1,47 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "sourceMap": true,
+    "types": [
+      "node"
+    ],
+    "rootDir": "../..",
+    "outDir": ".build",
+    "skipLibCheck": false,
+    "paths": {
+      "ws": [
+        "../../node_modules/@types/ws/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../v8-harness-codex/src/**/*.ts",
+    "../v8-harness-copilot/src/**/*.ts",
+    "../v8-harness-codex/qualification/**/*.ts",
+    "../v8-harness-copilot/qualification/**/*.ts",
+    "../v8-session/qualification/native-invocation.test.ts",
+    "../v8-session/qualification/native-validation.test.ts",
+    "../v8-host/qualification/native-runtime.test.ts",
+    "../v8-host/qualification/native-copilot.test.ts",
+    "../v8-host/qualification/types.ts",
+    "../v8-lifecycle-default/src/session/journal-worker.ts",
+    "../v8-files/src/host/worker.ts"
+  ],
+  "exclude": [
+    ".build",
+    "artifacts"
+  ]
+}

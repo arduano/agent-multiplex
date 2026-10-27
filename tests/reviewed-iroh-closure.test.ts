@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertReviewedIrohLock,
   assertReviewedIrohManifest,
+  readJson,
   reviewedIrohClosure,
   rootManifest,
 } from "../scripts/release-config.mjs";
@@ -25,7 +26,15 @@ function reviewedLock() {
 describe("reviewed Iroh release closure", () => {
   it("requires exact root URL pins and transitive overrides", () => {
     expect(() => assertReviewedIrohManifest(rootManifest)).not.toThrow();
+    expect(() => assertReviewedIrohLock(readJson("package-lock.json"))).not.toThrow();
     expect(() => assertReviewedIrohManifest({ ...rootManifest, overrides: {} })).toThrow(/override/);
+    expect(() => assertReviewedIrohManifest({
+      ...rootManifest,
+      dependencies: {
+        ...rootManifest.dependencies,
+        "@momics/iroh-http-node": "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-node-0.6.2-fork-linux-win-x64.tgz",
+      },
+    })).toThrow(/reviewed/);
   });
 
   it("rejects public and nested Iroh substitutions in isolated consumers", () => {

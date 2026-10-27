@@ -21,8 +21,8 @@ RUN npm install \
     && npm ci --include=dev \
     && npm run build \
     && npm prune --omit=dev \
-    && mkdir -p /home/arduano/.copilot /state /workspace \
-    && chown -R 1000:100 /home/arduano /state /workspace
+    && mkdir -p /home/multiplex/.copilot /state /workspace \
+    && chown -R 1000:100 /home/multiplex /state /workspace
 
 LABEL org.opencontainers.image.title="Agent Multiplex real Copilot scale acceptance"
 LABEL org.opencontainers.image.description="Credential-free shared image for one host and ten Copilot BYOK workers"

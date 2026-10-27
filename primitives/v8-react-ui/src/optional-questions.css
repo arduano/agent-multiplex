@@ -1,0 +1,10 @@
+.mpx-chat__optional-questions { display: grid; gap: 12px; margin-top: 12px; min-width: 0; }
+.mpx-chat__optional-label { color: var(--mpx-ui-muted); }
+.mpx-chat__optional-question { min-width: 0; }
+.mpx-chat__optional-title { font-weight: 500; margin-bottom: 8px !important; overflow-wrap: anywhere; }
+.mpx-chat__optional-choices { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.mpx-chat__optional-choices > button { max-width: 100%; height: auto; min-height: 36px; white-space: normal; text-align: left; overflow-wrap: anywhere; }
+.mpx-chat__optional-question > ul { margin: 0; padding-left: 20px; }
+.mpx-chat__optional-omitted { color: var(--mpx-ui-muted); font-size: 12px; }
+@container (max-width: 680px) { .mpx-chat__optional-choices > button { min-height: 44px; } }
+@media (pointer: coarse) { .mpx-chat__optional-choices > button { min-height: 44px; } }

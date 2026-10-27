@@ -1,0 +1,100 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "sourceMap": true,
+    "types": [
+      "node"
+    ],
+    "rootDir": "../..",
+    "outDir": ".build",
+    "skipLibCheck": false,
+    "paths": {
+      "react": [
+        "../../node_modules/@types/react/index.d.ts"
+      ],
+      "react/*": [
+        "../../node_modules/@types/react/*"
+      ],
+      "react-dom/*": [
+        "../../node_modules/@types/react-dom/*"
+      ],
+      "ws": [
+        "../../node_modules/@types/ws/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "qualification/**/*.ts",
+    "../v8-catalog/src/**/*.ts",
+    "../v8-catalog/qualification/**/*.ts",
+    "../v8-interactions/src/**/*.ts",
+    "../v8-interactions/qualification/**/*.ts",
+    "../v8-gateway/src/**/*.ts",
+    "../v8-gateway/qualification/**/*.ts",
+    "../v8-mcp/src/**/*.ts",
+    "../v8-mcp/qualification/**/*.ts",
+    "../v8-runtime/src/**/*.ts",
+    "../v8-runtime/qualification/**/*.ts",
+    "../v8-organization/src/**/*.ts",
+    "../v8-organization/qualification/**/*.ts",
+    "../v8-host/src/**/*.ts",
+    "../v8-host/qualification/**/*.ts",
+    "../v8-workspace/src/**/*.ts",
+    "../v8-workspace/qualification/**/*.ts",
+    "application/**/*.ts",
+    "../v8-history/src/**/*.ts",
+    "../v8-files/src/**/*.ts",
+    "../v8-session/src/**/*.ts",
+    "../v8-history/qualification/acquisition.test.ts",
+    "../v8-history/qualification/acquisition-host.test.ts",
+    "../v8-history/qualification/acquisition-boundaries.test.ts",
+    "../v8-history/qualification/acquisition-codex.test.ts",
+    "../v8-history/qualification/acquisition-copilot.test.ts",
+    "../v8-history/qualification/media.test.ts",
+    "../v8-history/qualification/host.test.ts",
+    "../v8-history/qualification/codex.test.ts",
+    "../v8-history/qualification/copilot.test.ts",
+    "../v8-session/qualification/opening-ready.test.ts",
+    "../v8-session/qualification/opening-custody.test.ts",
+    "../v8-session/qualification/client-opening.test.ts",
+    "../v8-session/qualification/client-originals.test.ts",
+    "../v8-session/qualification/client.test.ts",
+    "../v8-session/qualification/native-invocation.test.ts",
+    "../v8-session/qualification/native-validation.test.ts",
+    "../v8-session/qualification/native-types.ts",
+    "../v8-session/qualification/host.test.ts",
+    "../v8-files/qualification/composer.test.ts",
+    "../v8-files/qualification/native-capture.test.ts",
+    "../v8-files/qualification/client.test.ts",
+    "../v8-files/qualification/host.test.ts",
+    "../v8-files/qualification/client-fixture.ts",
+    "../v8-lifecycle-default/src/**/*.ts",
+    "../v8-plugins/src/**/*.ts",
+    "../v8-plugins/qualification/**/*.ts",
+    "../v8-lifecycle-default/qualification/**/*.ts",
+    "../v8-harness-codex/src/**/*.ts",
+    "../v8-harness-codex/qualification/**/*.ts",
+    "../v8-harness-copilot/src/**/*.ts",
+    "../v8-harness-copilot/qualification/**/*.ts",
+    "../v8-harness-defaults/src/**/*.ts",
+    "../v8-harness-defaults/qualification/**/*.ts"
+  ],
+  "exclude": [
+    ".build",
+    "artifacts"
+  ]
+}

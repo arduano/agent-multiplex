@@ -1,0 +1,14 @@
+{
+  "name": "@multiplex-v8/history-primitives",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated V8 history primitives; default scripted checks and explicit finite opt-in native qualification",
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "build": "tsc --project tsconfig.json",
+    "test": "node qualification/run.mjs",
+    "qualify": "node qualification/run.mjs",
+    "qualify:live": "node qualification/live/run.mjs"
+  }
+}

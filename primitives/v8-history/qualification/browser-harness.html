@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isolated V8 history browser fixture</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.4 sans-serif; background: #eef1f4; color: #15202b; }
+  main { width: min(900px, 100%); padding: 12px; margin: auto; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-bottom: 10px; }
+  button { min-height: 42px; padding: 6px 12px; font: inherit; }
+  #status { margin-left: auto; }
+  #viewport { height: min(55vh, 440px); min-height: 240px; overflow-y: auto; overflow-x: hidden; overflow-anchor: none; background: white; border: 1px solid #aab4bd; }
+  article { min-height: 82px; margin: 0; padding: 12px; border-bottom: 1px solid #d7dee5; overflow-wrap: anywhere; }
+  article p { margin: 4px 0 0; white-space: pre-wrap; }
+  article.expanded { min-height: 150px; }
+  label { display: block; margin-top: 10px; }
+  textarea { display: block; width: 100%; min-height: 80px; resize: vertical; font: inherit; }
+  @media(max-width: 480px) { main { padding: 8px; } nav { gap: 6px; } #status { width: 100%; margin-left: 0; } }
+</style>
+<main>
+  <nav aria-label="Fixture session controls">
+    <button id="session-a" type="button">Session A</button>
+    <button id="session-b" type="button">Session B</button>
+    <button id="pin" type="button" aria-pressed="false">Pin</button>
+    <button id="follow" type="button">Follow latest</button>
+    <span id="status" role="status"></span>
+  </nav>
+  <section id="viewport" tabindex="0" aria-label="Conversation history"><div id="rows"></div></section>
+  <label for="draft">Retained draft</label><textarea id="draft"></textarea>
+</main>
+<script type="module">
+// A small DOM renderer, not React, virtualization, a network transport or native qualification.
+// Real browser layout consumes the actual built Host/client modules and native-shaped scripted facts.
+import { HistoryWorkspace } from "/src/client/index.js";
+import { HistoryHub } from "/src/host/history-owner.js";
+
+const viewport = document.querySelector("#viewport"), rowsElement = document.querySelector("#rows");
+const draft = document.querySelector("#draft"), status = document.querySelector("#status");
+const workspace = new HistoryWorkspace({ connection: "browser-fixture", principal: "fixture-owner" });
+const hub = new HistoryHub();
+const scopes = Object.fromEntries(["a", "b"].map(name => [name, {
+  kind: "codex", threadId: `thread-${name}`, origin: {
+    connection: "browser-fixture", principal: "fixture-owner", host: "fixture-host",
+    nativeSession: `native-${name}`, attachment: "capture-1",
+  },
+}]));
+const sessions = Object.fromEntries(["a", "b"].map(name => [name, workspace.session(scopes[name])]));
+const nodes = new Map(), sizes = new Map(), scrollHints = new Map(), feeds = new Map();
+let selected = null, lease = null, unsubscribe = () => {}, structuralKey = "", epoch = 0;
+let queuedRestore = false, activeToken = null, heldToken = null, pageNumber = 0, liveNumber = 0;
+let userGesture = 0, pendingGestureReport = false, lastCorrection = null;
+const nextFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+const completedRow = (id, text = id) => ({ id, kind: "assistant", lifecycle: "completed",
+  body: { kind: "complete", text, evidence: "nativeFullBody" }, native: {}, version: 1, contentVersion: 1 });
+const maximum = () => Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+const top = () => viewport.getBoundingClientRect().top + viewport.clientTop;
+const nodeFor = id => [...rowsElement.children].find(node => node.dataset.rowid === id);
+const currentView = () => lease.view;
+const currentSession = () => sessions[selected];
+
+for (const name of ["a", "b"]) {
+  hub.open(scopes[name], { knownStart: true });
+  hub.emit(scopes[name], Array.from({ length: 28 }, (_, index) => ({
+    type: "finish", id: `${name}-${index}`, kind: "assistant", lifecycle: "completed",
+    text: `${name.toUpperCase()} message ${index}. Retained native identity, ordinary wrapping content.`,
+  })));
+  hub.emit(scopes[name], [{ type: "edge", edge: { state: "available", cursor: `older-${name}-0` } }]);
+}
+
+function syncFeeds() {
+  for (const name of ["a", "b"]) {
+    const wanted = workspace.connected && sessions[name].observationReferences > 0;
+    if (!wanted && feeds.has(name)) { const feed = feeds.get(name); feeds.delete(name); void feed.return(); }
+    if (wanted && !feeds.has(name)) {
+      const feed = hub.watch(scopes[name]); feeds.set(name, feed);
+      void (async () => {
+        for await (const frame of feed) {
+          if (feeds.get(name) !== feed) return;
+          sessions[name].client.apply(frame);
+        }
+      })().catch(error => { window.fixtureError = String(error); });
+    }
+  }
+}
+function geometry(id) {
+  const row = nodeFor(id); if (!row) throw new Error("Exact DOM anchor is absent");
+  return { rowTop: row.getBoundingClientRect().top, viewportTop: top(), scrollTop: viewport.scrollTop, maximum: maximum() };
+}
+function requestRestore() {
+  if (queuedRestore || pendingGestureReport || !lease || currentView().viewport.state.intent !== "readingHistory" || !currentView().viewport.state.anchor) return;
+  queuedRestore = true;
+  const renderEpoch = epoch, gesture = userGesture, view = currentView();
+  requestAnimationFrame(() => {
+    queuedRestore = false;
+    if (renderEpoch !== epoch || gesture !== userGesture || pendingGestureReport || currentView() !== view) return;
+    const token = view.viewport.beginRestore(); if (!token) return; activeToken = token;
+    function correct() {
+      if (renderEpoch !== epoch || gesture !== userGesture || pendingGestureReport || currentView() !== view || activeToken !== token) return;
+      const anchor = view.viewport.state.anchor; if (!anchor || !nodeFor(anchor.rowId)) return;
+      lastCorrection = view.viewport.correct(token, geometry(anchor.rowId));
+      if (lastCorrection.kind === "adjust") { viewport.scrollTop = lastCorrection.scrollTop; requestAnimationFrame(correct); }
+    }
+    correct();
+  });
+}
+const resize = new ResizeObserver(() => requestRestore());
+function renderRows() {
+  if (!lease) return;
+  const view = currentView(), snapshot = view.getSnapshot();
+  const meaning = JSON.stringify([snapshot.rows.map(row => [row.id, row.version, row.contentVersion]), snapshot.expansions]);
+  if (meaning !== structuralKey) {
+    structuralKey = meaning;
+    const fragment = document.createDocumentFragment();
+    for (const row of snapshot.rows) {
+      const identity = `${selected}/${row.id}`; let node = nodes.get(identity);
+      if (!node) {
+        node = document.createElement("article"); node.dataset.rowid = row.id;
+        node.addEventListener("dblclick", () => {
+          const expanded = currentView().getSnapshot().expansions.includes(row.id);
+          currentView().expand(row.id, !expanded);
+        });
+        nodes.set(identity, node);
+      }
+      node.textContent = "";
+      const title = document.createElement("strong"); title.textContent = row.id;
+      const text = document.createElement("p"); text.textContent = row.body.kind === "unavailable" ? "Unavailable" : row.body.text;
+      node.append(title, text); node.classList.toggle("expanded", snapshot.expansions.includes(row.id));
+      node.style.height = sizes.has(identity) ? `${sizes.get(identity)}px` : "";
+      fragment.append(node);
+    }
+    rowsElement.replaceChildren(fragment); resize.disconnect();
+    for (const node of rowsElement.children) resize.observe(node);
+    if (view.viewport.state.intent === "followingLive") viewport.scrollTop = view.viewport.tailPosition(viewport.scrollTop, maximum(), document.activeElement === draft);
+    else requestRestore();
+  }
+  status.textContent = `${selected.toUpperCase()} · ${workspace.connected ? "Connected" : "Reconnecting"} · ${view.viewport.state.intent}`;
+  document.querySelector("#pin").setAttribute("aria-pressed", String(currentSession().pinned));
+}
+function reportVisibleAnchor() {
+  if (!lease) return;
+  const visible = [...rowsElement.children].find(node => node.getBoundingClientRect().bottom > top());
+  if (visible) currentView().viewport.report({ rowId: visible.dataset.rowid, offsetPx: top() - visible.getBoundingClientRect().top });
+}
+function select(name) {
+  if (selected === name) return;
+  if (selected) scrollHints.set(selected, viewport.scrollTop);
+  unsubscribe(); epoch++; activeToken = null; heldToken = null; queuedRestore = false; pendingGestureReport = false;
+  selected = name; lease = workspace.select(scopes[name], "main"); structuralKey = "";
+  unsubscribe = lease.view.subscribe(renderRows); draft.value = typeof sessions[name].draft === "string" ? sessions[name].draft : "";
+  renderRows();
+  if (scrollHints.has(name)) viewport.scrollTop = scrollHints.get(name);
+  if (lease.view.viewport.state.intent === "readingHistory") requestRestore();
+  syncFeeds();
+}
+viewport.addEventListener("wheel", event => {
+  userGesture++; activeToken = null; pendingGestureReport = true;
+  const gesture = userGesture, renderEpoch = epoch;
+  currentView().viewport.userScroll(event.deltaY < 0 ? "earlier" : "later", viewport.scrollTop >= maximum() - 2);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (renderEpoch !== epoch || gesture !== userGesture) return;
+    reportVisibleAnchor(); pendingGestureReport = false;
+  }));
+}, { passive: true });
+draft.addEventListener("input", () => currentSession().setDraft(draft.value));
+document.querySelector("#session-a").addEventListener("click", () => select("a"));
+document.querySelector("#session-b").addEventListener("click", () => select("b"));
+document.querySelector("#pin").addEventListener("click", () => { currentSession().setPinned(!currentSession().pinned); syncFeeds(); renderRows(); });
+document.querySelector("#follow").addEventListener("click", () => { currentView().viewport.followLatest(); viewport.scrollTop = maximum(); renderRows(); });
+
+window.fixture = {
+  workspace, hub, sessions, scopes,
+  async ready() { await nextFrame(); await nextFrame(); },
+  state() {
+    const view = currentView().getSnapshot();
+    return { selected, draft: currentSession().draft, ids: view.rows.map(row => row.id), expansions: view.expansions,
+      anchor: view.viewport.anchor, intent: view.viewport.intent, scrollTop: viewport.scrollTop, maximum: maximum(),
+      rowTop: view.viewport.anchor && nodeFor(view.viewport.anchor.rowId) ? nodeFor(view.viewport.anchor.rowId).getBoundingClientRect().top - top() : null,
+      references: sessions.a.observationReferences, pin: sessions.a.pinned, userGesture, lastCorrection };
+  },
+  readAt(id, offset = 18) {
+    const row = nodeFor(id); if (!row) throw new Error("Fixture row is absent");
+    viewport.scrollTop += row.getBoundingClientRect().top - top() + offset;
+    currentView().viewport.userScroll("earlier", false);
+    currentView().viewport.report({ rowId: id, offsetPx: top() - row.getBoundingClientRect().top });
+  },
+  prependOlder() {
+    const view = currentView(), token = view.beginOlderRead(); pageNumber++;
+    const older = Array.from({ length: 6 }, (_, index) => completedRow(`older-${selected}-${pageNumber}-${index}`, `Older ${index}: exact scripted page item. ` + "A wrapping paragraph for physical browser layout. ".repeat(3)));
+    view.applyPage({ scope: scopes[selected], generation: sessions[selected].client.current.generation, rows: older,
+      olderEdge: { state: "available", cursor: `older-${selected}-${pageNumber}` } }, token);
+    return older[0].id;
+  },
+  growEarlier(id, pixels = 180) {
+    const name = selected;
+    return new Promise(resolve => setTimeout(() => {
+      const node = nodeFor(id); if (!node) throw new Error("Growth row is absent");
+      const height = node.getBoundingClientRect().height + pixels;
+      sizes.set(`${name}/${id}`, height); node.style.height = `${height}px`; resolve(height);
+    }, 25));
+  },
+  holdRestore() { heldToken = currentView().viewport.beginRestore(); return !!heldToken; },
+  applyHeldRestore() {
+    const anchor = currentView().viewport.state.anchor;
+    if (!heldToken || !anchor) throw new Error("Held restore is absent");
+    const result = currentView().viewport.correct(heldToken, geometry(anchor.rowId));
+    if (result.kind === "adjust") viewport.scrollTop = result.scrollTop;
+    return result.kind;
+  },
+  publish(name, text = "Scripted Host final") {
+    const id = `${name}-live-${++liveNumber}`;
+    hub.emit(scopes[name], [{ type: "finish", id, kind: "assistant", text, lifecycle: "completed" }]); return id;
+  },
+  expand(id) { currentView().expand(id, true); },
+  setConnected(connected) { workspace.setConnected(connected); syncFeeds(); renderRows(); },
+  sessionState(name) {
+    return { ids: sessions[name].client.view("main").getSnapshot().rows.map(row => row.id),
+      draft: sessions[name].draft, mounted: sessions[name].mountedReferences,
+      references: sessions[name].observationReferences, pinned: sessions[name].pinned, operations: sessions[name].operations };
+  },
+};
+select("a"); window.fixtureReady = true;
+</script>
+</html>

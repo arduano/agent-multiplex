@@ -14,7 +14,8 @@ application containers:
 Playwright runs directly on the Docker host, so screenshots do not require a
 third application container. The worker has a fresh container-local Codex home.
 After the container exists, the runner copies only a generated minimal
-`codex-lb` provider config and the host's `codex-lb-api-key` into it. It does not
+`qualification-provider` config and the explicitly selected provider key into it.
+It does not
 copy `auth.json`, Codex histories, databases, or the complete host Codex home.
 
 ## What the suite proves
@@ -55,13 +56,17 @@ minutes:
 npm run test:docker:codex:interactive
 ```
 
-Defaults target the checkout's sibling `../p2prpc/packages/core`, the current
-user's `~/.codex/config.toml`, and `~/.codex/codex-lb-api-key`. Overrides:
+The historical core build context defaults to `../p2prpc/packages/core`.
+Provider ID, source configuration and key must be supplied explicitly; there
+are no user-home credential defaults. Set these inputs before the command above,
+or invoke it with the current explicit interface below. This documentation edit
+does not rerun or relabel historical receipts:
 
 ```bash
 AGENT_MULTIPLEX_P2PRPC_CORE=/path/to/p2prpc/packages/core \
-AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG=/path/to/config.toml \
-AGENT_MULTIPLEX_CODEX_SOURCE_KEY=/path/to/codex-lb-api-key \
+AGENT_MULTIPLEX_SOURCE_PROVIDER=selected-provider \
+AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG=/path/to/provider-config.toml \
+AGENT_MULTIPLEX_CODEX_SOURCE_KEY=/path/to/provider-api-key \
 AGENT_MULTIPLEX_INTERACTIVE_E2E_MODEL=gpt-5.6-sol \
 npm run test:docker:codex:interactive
 ```

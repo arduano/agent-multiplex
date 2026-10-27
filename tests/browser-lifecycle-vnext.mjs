@@ -28,7 +28,7 @@ const server = await createServer({
 await server.listen();
 const address = server.httpServer.address();
 const browser = await chromium.launch({
-  executablePath: process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ?? "/home/arduano/.nix-profile/bin/google-chrome",
+  executablePath: process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ?? "/run/current-system/sw/bin/chromium",
   headless: true,
 });
 const artifacts = [];

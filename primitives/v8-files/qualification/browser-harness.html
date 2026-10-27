@@ -1,0 +1,45 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>V8 isolated file client qualification</title>
+<style>body{font:15px sans-serif}#viewport{height:200px;width:400px;overflow:auto;overflow-anchor:none}article{height:70px}img{display:block}</style>
+<div id="viewport"><div id="rows"><div id="media"></div></div></div>
+<script type="module">
+import {FileWorkspace,IndexedDbDraftPersistence,BrowserExclusiveLock,ResourceCache,createHttpFilePort,svgInputToPng} from '/modules/primitives/v8-files/src/client/index.js';
+import {HistoryWorkspace} from '/modules/primitives/v8-history/src/client/workspace.js';
+const scope={connection:'browser-files',principal:'fixture-owner',host:'fixture-host',session:'a'};
+const historyScope=name=>({kind:'codex',threadId:name,origin:{connection:scope.connection,principal:scope.principal,host:scope.host,nativeSession:name,attachment:'scripted'}});
+const history=new HistoryWorkspace({connection:scope.connection,principal:scope.principal});
+const persistence=await IndexedDbDraftPersistence.open('v8-files-browser');
+const http=createHttpFilePort(location.origin); let fault=null;
+const port={async call(method,input){const result=await http.call(method,input);if(fault===method){fault=null;throw new Error('scripted lost reply')}return result}};
+const files=new FileWorkspace({history,persistence,port,lock:new BrowserExclusiveLock(),chunkBytes:2});
+await files.bind(scope,historyScope('a'));await files.bind({...scope,session:'b'},historyScope('b'));
+let selection=history.select(historyScope('a'));let selected='a';
+const cache=new ResourceCache(port);const revoked=[];const revoke=URL.revokeObjectURL.bind(URL);URL.revokeObjectURL=url=>{revoked.push(url);revoke(url)};
+const records=()=>files.getSnapshot().records;
+const save=async(id)=>files.saveDraft(scope,{name:'sample.bin',mediaType:'text/html',blob:new Blob([new Uint8Array([0,255,17,21])]),...(id?{id}:{})});
+const rows=document.querySelector('#rows'),viewport=document.querySelector('#viewport'),media=document.querySelector('#media');
+for(let i=0;i<20;i++){const row=document.createElement('article');row.dataset.id=`row-${i}`;row.textContent=`History row ${i}`;rows.append(row)}
+const nextFrame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+const getRow=()=>rows.querySelector('[data-id="row-8"]');
+const top=()=>viewport.getBoundingClientRect().top+viewport.clientTop;
+window.fixture={scope,history,files,persistence,port,cache,records,save,revoked,
+ select(name){selection.release();selection=history.select(historyScope(name));selected=name;return selected},
+ async lost(method,id){fault=method;try{await files.upload(scope,id)}catch{}return (await persistence.get(scope,id)).phase},
+ async upload(id){return files.upload(scope,id)},
+ async recordRequest(id){return files.recordRequest(scope,id,'original-request')},
+ async reloadState(){return {records:records().map(r=>({id:r.manifest.id,phase:r.phase,operationIds:r.operationIds,bytes:r.blob.size})),selected,pinned:history.session(historyScope('a')).pinned}},
+ async image(){const source=new Blob(['<svg xmlns="http://www.w3.org/2000/svg" width="200" height="180"><script>window.svgRan=true<\/script><rect width="200" height="180" fill="blue"/></svg>'],{type:'image/svg+xml'});const draft=await files.saveDraft(scope,{name:'image.svg',mediaType:'image/svg+xml',blob:source});const artifact=await files.upload(scope,draft.manifest.id);return {artifact,converted:await svgInputToPng(source)}},
+ async delayedAnchor(artifact){
+   const [left,right]=await Promise.all([cache.acquire(artifact),cache.acquire(artifact)]);
+   const controller=selection.view.viewport;viewport.scrollTop=580;controller.userScroll('earlier',false);controller.report({rowId:'row-8',offsetPx:top()-getRow().getBoundingClientRect().top});
+   const before=getRow().getBoundingClientRect().top;const token=controller.beginRestore();
+   const image=new Image();media.append(image);image.src=left.preview.url;await image.decode();await nextFrame();
+   const correction=controller.correct(token,{rowTop:getRow().getBoundingClientRect().top,viewportTop:top(),scrollTop:viewport.scrollTop,maximum:viewport.scrollHeight-viewport.clientHeight});viewport.scrollTop=correction.scrollTop;await nextFrame();
+   const after=getRow().getBoundingClientRect().top;cache.markExpired(artifact);let rejected=false;try{await cache.acquire(artifact)}catch(error){rejected=error.code==='EXPIRED'};
+   const beforeRelease=revoked.length;left.release();const afterOne=revoked.length;right.release();
+   return {before,after,correction:correction.kind,shared:left.blob===right.blob,rejected,beforeRelease,afterOne,afterBoth:revoked.length,svgRan:window.svgRan===true,usage:cache.usage};
+ },
+ async staleEdit(id){return save(id)},
+ async close(){cache.close();files.close();persistence.close()},
+};
+window.fixtureReady=true;
+</script></html>

@@ -36,10 +36,10 @@ locator rotation, and the 45-minute three-generation observation pass.
 | Area | Delete or retire | State and boundary |
 | --- | --- | --- |
 | Transport candidate overlay | Local patch, preparation/install scripts, Docker reinstall steps, release block, candidate receipt branches | Deleted in framework source; the lockfile now identifies the independently published package. Historical candidate receipts remain labeled as historical evidence. |
-| Browser lifecycle inference | Text/image equality, catalog idle, queue disappearance, generic receipt success, and local completion markers as proof of native completion | Removed from the v6 host/reference and companion Leo lifecycle paths. The UI consumes the compact host view and original command observation. |
-| Leo gateway task polling | Separate Copilot task-count poller in `apps/server/src/copilot-task-activity.ts` and observer wiring | Deleted at Leo `c2ba0cf`; exact task details and controls remain for users who open them. |
-| Leo mobile completion | Native-event-derived completion notices and legacy mobile Copilot markers | Replaced with host lifecycle notices; an append-only migration clears legacy markers without touching Codex entries or device settings. |
-| Leo browser status helpers | Dead composer-intent and task-status helper paths and their mirror tests | Deleted at Leo `c2ba0cf`; the remaining task view reports exact native details without inventing overall completion. |
+| Browser lifecycle inference | Text/image equality, catalog idle, queue disappearance, generic receipt success, and local completion markers as proof of native completion | Removed from the v6 host/reference and downstream application lifecycle paths. The UI consumes the compact host view and original command observation. |
+| Downstream gateway task polling | Separate Copilot task-count poller in `apps/server/src/copilot-task-activity.ts` and observer wiring | Deleted in the downstream application at `c2ba0cf`; exact task details and controls remain for users who open them. |
+| Downstream mobile completion | Native-event-derived completion notices and legacy mobile Copilot markers | Replaced with host lifecycle notices; an append-only migration clears legacy markers without touching Codex entries or device settings. |
+| Downstream browser status helpers | Dead composer-intent and task-status helper paths and their mirror tests | Deleted in the downstream application at `c2ba0cf`; the remaining task view reports exact native details without inventing overall completion. |
 | Cutover configuration | Old ALPN-bound signed tickets, configured/bootstrap locators, and renewed-ticket caches | Rotate only during the stopped, coordinated window; preserve endpoint identity pins and matching backups. Retire old installed graph after rollback safety is established. |
 
 The SDK read timeout, `Unknown` projection, degraded admission, and exact-ID
@@ -51,7 +51,7 @@ Retain them until upstream SDK evidence supports a simpler truthful state.
 | Repository/boundary | Exact audited state | What passed |
 | --- | --- | --- |
 | Agent Multiplex | Clean `de0ca6dc0bf285adaa78ec6b5b30273bdcc3511c`; implementation at `1af20f651e8d5733946154178d8c7f51b738d605`; base `c28811b320f436acbec332b00199716a3c62cfa7` | 1,041 tests/114 files, typecheck, checkpoint/docs/release/secret gates, deterministic control tree and 100-session mock scale. See the [checkpoint](../checkpoint-v4.md#unpublished-protocol-v6-copilot-lifecycle-and-consumer-candidate--2026-09-23). |
-| Leo Multiplex | Clean `21280febf603e7c8e5eb398a32f074500dfc5c82`, branch `feat/copilot-lifecycle-vnext-20260923` | Disposable staged graph: typecheck, build, 1,163 tests/one skip, and 13 browser checks across six viewports with no serious/critical axe finding. Local checksummed receipt: `receipts/copilot-lifecycle-packed-graph/qualification-1af20f6-21280fe/`. |
+| Downstream application | Clean `21280febf603e7c8e5eb398a32f074500dfc5c82`, branch `feat/copilot-lifecycle-vnext-20260923` | Disposable staged graph: typecheck, build, 1,163 tests/one skip, and 13 browser checks across six viewports with no serious/critical axe finding. Local checksummed receipt: `receipts/copilot-lifecycle-packed-graph/qualification-1af20f6-21280fe/`. |
 | p2prpc | Independent `main` remained at `6f0bac778d8944e846e50151b5e42a4a7f9982b0`; renewal was a reviewed local patch, not yet a commit or release in that repository | The patch applied cleanly to that upstream. Candidate `0.3.0-renewal.0` tarball SHA-256 was `789da942e6902121a86a12f644c747acb2454dcb8e6bd2448803e16cfbfe05d5`. A fresh local run passed 413 unit tests/15 files and 26 local Iroh integration tests/2 files. Local checksummed receipt: `receipts/maintenance-window-audit-20260923/`. |
 
 The local packed test physically extracted all 16 framework packages and the
@@ -91,11 +91,11 @@ transport tests used local Iroh connections, not the live fleet.
 3. **There is no releasable dependency graph yet.** The framework's
    [`transport-p2prpc` manifest](../../packages/transport-p2prpc/package.json)
    and lockfile still pin public core `0.2.1`, while the new integration
-   requires renewal contract 1. Leo's manifest and lockfile still point to
+   requires renewal contract 1. The downstream application's manifest and lockfile still point to
    released framework `.15` tarballs and core `0.2.1`. The local injection is
    intentionally refused by `release:pack`. The p2prpc patch first needs an
    independently reviewed commit/publication; then exact pins, lockfiles, all
-   16 Multiplex artifacts and every Leo/direct consumer need a clean-install
+   16 Multiplex artifacts and every direct consumer need a clean-install
    qualification without local links or copied native binaries. Old signed
    tickets bind the prior ALPN; every listener and saved bootstrap/renewed
    locator must be rotated in dependency order while preserving endpoint pins.
@@ -127,16 +127,16 @@ transport tests used local Iroh connections, not the live fleet.
   native notification loss; it should be bounded and visible in Windows UAT.
 - A timed-out native task/queue read keeps its SDK lane occupied until that
   underlying call settles ([read coordinator](../../packages/adapter-copilot/src/reads.ts)).
-  After 45 seconds the runtime rejects new Copilot mutations; the Leo
+  After 45 seconds the runtime rejects new Copilot mutations; the downstream application's
   supervisor retries processes that stop, not a still-running degraded runtime.
   The historical Windows read stall could therefore become prolonged safe
   unavailability rather than an automatically repaired session.
-- Leo's `apps/host/src/manage.ts` Windows supervisor
+- The downstream application's `apps/host/src/manage.ts` Windows supervisor
   retries a fully stopped runtime and fails closed when native termination is
   unproved. Portable tests do not establish Task Scheduler, job-object, ACL,
   sign-in, endpoint-security or installed CLI behavior. The historical
   session-specific Windows task-read failures have no proven native cause.
-- Leo's `apps/web/src/client/session-status.ts` status copy
+- The downstream application's `apps/web/src/client/session-status.ts` status copy
   describes Finished as a turn that "finished successfully". The lifecycle
   contract establishes only observed non-aborted session settlement, not the
   user's objective or per-command success. Correct that wording before operator

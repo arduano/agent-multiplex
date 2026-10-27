@@ -1,0 +1,18 @@
+{
+  "name": "@multiplex-v8/harness-codex",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./node": "./src/node.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "build": "tsc --project tsconfig.json",
+    "test": "node ../v8-harness-defaults/qualification/run.mjs codex"
+  },
+  "dependencies": {
+    "@openai/codex": "0.162.1"
+  }
+}

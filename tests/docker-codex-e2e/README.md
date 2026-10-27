@@ -13,8 +13,8 @@ Multiplex API with exactly two application containers:
 Playwright runs on the Docker host, so browser capture does not add a third
 container. The runner creates a fresh Codex home, starts the worker waiting for
 credentials, and then uses `docker cp -a` to copy only a generated minimal
-`codex-lb` provider config and the host's `codex-lb-api-key` into that running
-container. It never copies `auth.json`, Codex history, state databases, or the
+`qualification-provider` config and the explicitly selected provider key into
+that running container. It never copies `auth.json`, Codex history, state databases, or the
 complete host Codex home.
 
 The worker runs as a non-root user with all Linux capabilities dropped and
@@ -29,14 +29,17 @@ Run it from the repository root:
 npm run test:docker:codex
 ```
 
-The defaults target this checkout's sibling `../p2prpc/packages/core`, the
-current user's `~/.codex/config.toml`, and
-`~/.codex/codex-lb-api-key`. Override them when necessary:
+The historical core build context defaults to `../p2prpc/packages/core`.
+Provider ID, source configuration and key must be supplied explicitly; there
+are no user-home credential defaults. Set these inputs before the command above,
+or invoke it with the current interface below. No historical receipt is rerun
+or relabeled by this documentation edit:
 
 ```bash
 AGENT_MULTIPLEX_P2PRPC_CORE=/path/to/p2prpc/packages/core \
-AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG=/path/to/config.toml \
-AGENT_MULTIPLEX_CODEX_SOURCE_KEY=/path/to/codex-lb-api-key \
+AGENT_MULTIPLEX_SOURCE_PROVIDER=selected-provider \
+AGENT_MULTIPLEX_CODEX_SOURCE_CONFIG=/path/to/provider-config.toml \
+AGENT_MULTIPLEX_CODEX_SOURCE_KEY=/path/to/provider-api-key \
 npm run test:docker:codex
 ```
 

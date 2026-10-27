@@ -1,0 +1,56 @@
+{
+  "name": "@multiplex-v8/react-ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "peerDependencies": {
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "1.3.1",
+    "@radix-ui/react-dropdown-menu": "2.2.1",
+    "@radix-ui/react-popover": "1.3.1",
+    "@radix-ui/react-select": "2.4.1",
+    "@radix-ui/react-slot": "1.5.0",
+    "@radix-ui/react-tabs": "1.2.1",
+    "@radix-ui/react-tooltip": "1.4.1",
+    "@tanstack/react-virtual": "3.14.10",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "katex": "0.16.47",
+    "mermaid": "12.0.0",
+    "pdfjs-dist": "6.3.289",
+    "react-markdown": "10.1.0",
+    "rehype-katex": "7.0.1",
+    "remark-gfm": "4.0.1",
+    "remark-math": "6.0.0",
+    "tailwind-merge": "3.7.0",
+    "type-fest": "4.41.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./chat.css": "./.build/browser/chat.css",
+    "./markdown.css": "./src/renderers/markdown.css",
+    "./build/styles": "./build/styles.mjs",
+    "./build/pdf-assets": "./build/pdf-assets.mjs",
+    "./build/notices": "./build/notices.mjs",
+    "./ui": "./src/ui/index.ts",
+    "./ui.css": "./.build/browser/ui.css"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "build": "node qualification/build.mjs",
+    "test": "node --test --test-concurrency=1 .build/primitives/v8-react-ui/qualification/*.test.js",
+    "test:browser": "node qualification/browser.mjs"
+  },
+  "overrides": {
+    "mermaid": {
+      "lodash-es": "4.18.1",
+      "dompurify": "3.4.16"
+    }
+  },
+  "devDependencies": {
+    "tailwindcss": "4.3.3"
+  }
+}

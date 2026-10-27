@@ -1,0 +1,62 @@
+{
+  "retrieved": "2026-10-27",
+  "style": "new-york",
+  "adaptations": "Scoped tokens, explicit portal containers, fixed control density, no global reset or document mutation.",
+  "sources": [
+    {
+      "name": "button",
+      "url": "https://ui.shadcn.com/r/styles/new-york/button.json",
+      "sha256": "4d8f39c3bd25e630b5962667722e8707e7b18122ad6842a5c22acf8a3ff9f93a"
+    },
+    {
+      "name": "input",
+      "url": "https://ui.shadcn.com/r/styles/new-york/input.json",
+      "sha256": "4d1a3b126cc62485b225e3da32d4a56df851c95c5a24035af1f1c80f33726cfa"
+    },
+    {
+      "name": "textarea",
+      "url": "https://ui.shadcn.com/r/styles/new-york/textarea.json",
+      "sha256": "95a734124c9184947f6ec7c5f03a59f5dd246e305d54d91f46fefc339da2f105"
+    },
+    {
+      "name": "dialog",
+      "url": "https://ui.shadcn.com/r/styles/new-york/dialog.json",
+      "sha256": "e240f8eaa9e9e626dffa1a340469c6bace9c631e78b7b10e7d0f178a32a1c71c"
+    },
+    {
+      "name": "popover",
+      "url": "https://ui.shadcn.com/r/styles/new-york/popover.json",
+      "sha256": "112f3cc3836f6b37823c55b794d3484b160bb450dd40963858874fb9ae314fd1"
+    },
+    {
+      "name": "dropdown-menu",
+      "url": "https://ui.shadcn.com/r/styles/new-york/dropdown-menu.json",
+      "sha256": "dbd4c0a23be34f2709108597c992528659df65c39b7a0afd17e1701d3ea5c361"
+    },
+    {
+      "name": "tabs",
+      "url": "https://ui.shadcn.com/r/styles/new-york/tabs.json",
+      "sha256": "b608b427c8d640165083e54369c25e738d72d8cf7a80984ffc8fc0c2ff134a2f"
+    },
+    {
+      "name": "tooltip",
+      "url": "https://ui.shadcn.com/r/styles/new-york/tooltip.json",
+      "sha256": "aef6ec3c142b054ebcd6daaf9e0b46e67f0d50e51eefbd7b392c83845a3f1926"
+    },
+    {
+      "name": "label",
+      "url": "https://ui.shadcn.com/r/styles/new-york/label.json",
+      "sha256": "ea924e70d496cbd6986591ad75f2cbfeb9649f1ce2750cd6dbfb522833e4bcdb"
+    },
+    {
+      "name": "separator",
+      "url": "https://ui.shadcn.com/r/styles/new-york/separator.json",
+      "sha256": "01173bde1937c35da6f84f92bb85f7e882a9091064b4532a058177fe1a96d17f"
+    },
+    {
+      "name": "select",
+      "url": "https://ui.shadcn.com/r/styles/new-york/select.json",
+      "sha256": "574c730b6dc8b37e5cfa8e19159e4a1d2ee54c17b927bd4003ff26c8b7a6edfb"
+    }
+  ]
+}

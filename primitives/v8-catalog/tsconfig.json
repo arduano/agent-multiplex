@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "declaration": true,
+    "types": [
+      "node"
+    ],
+    "rootDir": "../..",
+    "outDir": ".build",
+    "skipLibCheck": false,
+    "paths": {
+      "ws": [
+        "../../node_modules/@types/ws/index.d.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "qualification/**/*.ts",
+    "../v8-session/src/**/*.ts",
+    "../v8-history/src/**/*.ts",
+    "../v8-files/src/**/*.ts",
+    "../v8-lifecycle-default/src/session/journal-worker.ts"
+  ],
+  "exclude": [
+    ".build",
+    "artifacts"
+  ]
+}

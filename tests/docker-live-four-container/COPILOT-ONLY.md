@@ -10,7 +10,7 @@ bridge network:
 3. one zero-authority bearer-authenticated gateway, the only published port.
 
 The provider relay is credential-blind host test plumbing bound only to the
-per-run Docker bridge. The runtime receives the existing codex-lb key as one
+per-run Docker bridge. The runtime receives the explicitly selected provider key as one
 read-only file mount; no full Codex home, Copilot home, key value, bearer token,
 provider endpoint, shared secret, or P2P ticket is written to the receipt. The
 live source must equal `HEAD` outside the explicitly unrelated `tmp/` scratch
@@ -57,9 +57,18 @@ Run only after reviewing the files and intentionally opting into the one model
 request:
 
 ```bash
+AGENT_MULTIPLEX_SOURCE_PROVIDER=selected-provider \
+AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_CONFIG=/path/to/provider-config.toml \
+AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY=/path/to/provider-api-key \
 AGENT_MULTIPLEX_COPILOT_ONLY_RUN=I_UNDERSTAND_ONE_GPT_6_LUNA_REQUEST \
   bash tests/docker-live-four-container/copilot-only-run.sh
 ```
+
+The three provider/config/key inputs above are required for live execution;
+provider IDs use letters, digits, underscores or hyphens (1–64 characters).
+They have no personal defaults. `--static` remains credential-free. The isolated
+provider is named `qualification-provider`; its read-only key mount uses
+`/run/secrets/provider-api-key`. These input-name changes imply no new native run.
 
 Optional non-secret settings:
 
@@ -81,8 +90,6 @@ Optional non-secret settings:
   credential. It tests the exact local source graph but does **not** claim
   the independent Dockerfile `npm ci` packaging path passed. Owned image,
   addon overlay, containers, network and relay are identity-fenced on cleanup.
-- `AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_CONFIG`
-- `AGENT_MULTIPLEX_COPILOT_ONLY_SOURCE_KEY`
 
 Receipts default to `receipts/protocol-v6-copilot-only/<run-id>/`.
 

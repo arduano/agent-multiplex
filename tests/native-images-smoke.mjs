@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { statSync, existsSync, readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, readdirSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,11 @@ import { CopilotAgentAdapter } from '@arduano/agent-multiplex-adapter-copilot';
 import { RuntimeNodeService, RuntimeNodeStore } from '@arduano/agent-multiplex-runtime-node-core';
 import { newRuntimeNodeId, newRuntimeNodeBootId, newSessionId, newLaunchId, newCommandId } from '@arduano/agent-multiplex-protocol';
 
+const sourceConfig=process.env.AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG;
+const sourceKey=process.env.AGENT_MULTIPLEX_LIVE_SOURCE_KEY;
+const sourceProvider=process.env.AGENT_MULTIPLEX_SOURCE_PROVIDER;
+assert(sourceConfig&&sourceKey,'Explicit source config and key files are required');
+assert.match(sourceProvider??'',/^[A-Za-z0-9_-]{1,64}$/,'Explicit source provider ID is required');
 const selectedHarnesses=process.argv.includes('--copilot-only')?['copilot']:process.argv.includes('--codex-only')?['codex']:['codex','copilot'];
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const receipt = resolve(process.argv[2] ?? join(root, 'receipts', `native-images-${new Date().toISOString().replaceAll(':', '-')}`));
@@ -44,8 +49,6 @@ const before = boundary();
 save('source-manifest.json', sourceManifest());
 save('tested-boundary.json', before);
 const work = mkdtempSync(join(tmpdir(), 'multiplex-native-images-'));
-const sourceConfig = process.env.AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG ?? join(homedir(), '.codex', 'config.toml');
-const sourceKey = process.env.AGENT_MULTIPLEX_LIVE_SOURCE_KEY ?? join(homedir(), '.codex', 'codex-lb-api-key');
 let providerUrl = ''; let key = '';
 const manifest = { schema:'native-image-smoke-v1', startedAt:new Date().toISOString(), status:'running', protocolVersion:6, gitHead:execFileSync('git', ['rev-parse','HEAD'], { cwd:root, encoding:'utf8' }).trim(), node:process.version, dependencyLockSha256:sha(readFileSync(join(root,'package-lock.json'))), testedBoundarySha256:before.sha256, maximumAuthorizedTurnsPerHarness:4, selectedHarnesses, calls:counts, credentialMaterialRecorded:false, providerEndpointRecorded:false, nativeAuthHomesRecorded:false, nativePackages:Object.fromEntries(['@openai/codex','@github/copilot','@github/copilot-sdk'].map((name)=>[name,JSON.parse(readFileSync(join(root,'node_modules',name,'package.json'),'utf8')).version])), harnesses:{}, limitations:['Targeted native runtime check; control-tree transport and browser display are qualified separately.'] };
 const redact = (error) => String(error instanceof Error ? error.message : error).replaceAll(work,'<test-workdir>').replaceAll(key || '\0','<redacted>').replaceAll(providerUrl || '\0','<redacted-endpoint>').replace(/https?:\/\/[^\s"']+/g,'<redacted-endpoint>').replace(/\b(?:sk-[A-Za-z0-9_-]{15,}|gh[pousr]_[A-Za-z0-9_]{20,})\b/g,'<redacted>');
@@ -77,7 +80,7 @@ async function qualify(harness) {
   mkdirSync(workspace,{mode:0o700});mkdirSync(auth,{mode:0o700});
   writeFileSync(join(workspace,'shapes.png'),bytes);
   execFileSync('git',['init','--quiet',workspace]);
-  if(harness==='codex') writeFileSync(join(auth,'config.toml'), `model_provider = "codex-lb"\nmodel = ${JSON.stringify(result.model)}\napproval_policy = "never"\nsandbox_mode = "read-only"\n[model_providers.codex-lb]\nname = "native image test provider"\nbase_url = ${JSON.stringify(providerUrl)}\nwire_api = "responses"\nenv_key = "MULTIPLEX_NATIVE_SMOKE_PROVIDER_KEY"\n`,{mode:0o600});
+  if(harness==='codex') writeFileSync(join(auth,'config.toml'), `model_provider = "qualification-provider"\nmodel = ${JSON.stringify(result.model)}\napproval_policy = "never"\nsandbox_mode = "read-only"\n[model_providers.qualification-provider]\nname = "native image test provider"\nbase_url = ${JSON.stringify(providerUrl)}\nwire_api = "responses"\nenv_key = "MULTIPLEX_NATIVE_SMOKE_PROVIDER_KEY"\n`,{mode:0o600});
   const createAdapter=()=>harness==='codex'
     ? new CodexAdapter({binary:join(root,'node_modules','.bin','codex'),cwd:workspace,environment:{...process.env,CODEX_HOME:auth,MULTIPLEX_NATIVE_SMOKE_PROVIDER_KEY:key}})
     : new CopilotAgentAdapter({defaultModel:result.model,provider:{type:'openai',baseUrl:providerUrl,apiKey:key,wireApi:'responses'},providerModels:[result.model],clientOptions:{baseDirectory:auth,workingDirectory:workspace,logLevel:'none',useLoggedInUser:false}});
@@ -165,7 +168,7 @@ async function qualify(harness) {
 }
 try {
   const config=readFileSync(sourceConfig,'utf8');
-  const section=config.match(/^\[model_providers\.codex-lb\]\s*\n([\s\S]*?)(?=^\[|(?![\s\S]))/m)?.[1];
+  const section=config.match(new RegExp('^\\[model_providers\\.'+sourceProvider+'\\]\\s*\\n([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))','m'))?.[1];
   providerUrl=JSON.parse(section?.match(/^\s*base_url\s*=\s*("[^"\n]+")/m)?.[1]??'null');
   assert(typeof providerUrl==='string'&&/^https?:/.test(providerUrl),'configured test provider unavailable');
   key=readFileSync(sourceKey,'utf8').trim();assert(key.length>=16&&!/[\r\n]/.test(key),'configured provider key invalid');

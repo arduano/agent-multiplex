@@ -24,8 +24,8 @@ RUN apt-get update \
     && npm ci --include=dev \
     && npm run build \
     && npm prune --omit=dev \
-    && mkdir -p /home/arduano/.copilot /state /workspace/e2e \
-    && chown -R 1000:100 /home/arduano /state /workspace
+    && mkdir -p /home/multiplex/.copilot /state /workspace/e2e \
+    && chown -R 1000:100 /home/multiplex /state /workspace
 
 LABEL org.opencontainers.image.title="Agent Multiplex Copilot Interactive Docker E2E"
 LABEL org.opencontainers.image.description="Shared acceptance image for the Multiplex host and interactive Copilot BYOK worker"

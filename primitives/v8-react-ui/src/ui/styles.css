@@ -1,0 +1,74 @@
+/* Shared, scoped design tokens. Legacy chat theme variables remain supported. */
+:where(.mpx-ui, .multiplex-chat) {
+  --mpx-ui-canvas: var(--mpx-chat-canvas, #141615); --mpx-ui-shell: #191b1a;
+  --mpx-ui-surface: var(--mpx-chat-surface, #202321); --mpx-ui-raised: var(--mpx-chat-raised, #282c29);
+  --mpx-ui-hover: var(--mpx-chat-hover, #303631); --mpx-ui-border: var(--mpx-chat-border, #343a35); --mpx-ui-border-strong: #515b53;
+  --mpx-ui-text: var(--mpx-chat-text, #eff1eb); --mpx-ui-secondary: var(--mpx-chat-secondary, #b6bdb3); --mpx-ui-muted: var(--mpx-chat-muted, #929b90);
+  --mpx-ui-accent: var(--mpx-chat-accent, #a4c5ad); --mpx-ui-accent-hover: color-mix(in srgb, var(--mpx-ui-accent) 94%, #000); --mpx-ui-accent-ink: var(--mpx-chat-accent-ink, #17241b);
+  --mpx-ui-success: var(--mpx-chat-success, #9ac4a5); --mpx-ui-working: #a9c9ec; --mpx-ui-waiting: var(--mpx-chat-waiting, #e6ad52); --mpx-ui-error: var(--mpx-chat-error, #f5838c);
+  --mpx-ui-font: var(--mpx-chat-font, ui-sans-serif, system-ui, sans-serif); --mpx-ui-mono: var(--mpx-chat-mono, ui-monospace, monospace);
+  --mpx-ui-space-1: 4px; --mpx-ui-space-2: 8px; --mpx-ui-space-3: 12px; --mpx-ui-space-4: 16px; --mpx-ui-space-6: 24px; --mpx-ui-space-8: 32px;
+  --mpx-ui-radius-sm: 4px; --mpx-ui-radius-md: 6px; --mpx-ui-radius-lg: 12px;
+  --mpx-ui-control-height: 36px; --mpx-ui-control-small: 32px;
+  color: var(--mpx-ui-text); font-family: var(--mpx-ui-font);
+}
+:where(.mpx-ui, .multiplex-chat) :where(.mpx-ui-button,.mpx-ui-control,.mpx-ui-dialog,.mpx-ui-popover,.mpx-ui-menu,.mpx-ui-sheet) { box-sizing: border-box; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button {
+  min-height: var(--mpx-ui-control-height); padding: 6px 12px; border: 1px solid transparent; color: var(--mpx-ui-text);
+  background: transparent; line-height: 20px; font-family: inherit; cursor: pointer; flex-shrink: 0; text-decoration: none;
+}
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button:disabled { cursor: default; opacity: .48; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button:hover:enabled { background: var(--mpx-ui-hover); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--primary { background: var(--mpx-ui-accent); color: var(--mpx-ui-accent-ink); font-weight: 600; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--primary:hover:enabled { background: var(--mpx-ui-accent-hover); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--secondary { background: var(--mpx-ui-raised); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--outline { border-color: var(--mpx-ui-border); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--destructive { color: var(--mpx-ui-error); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--link { color: var(--mpx-ui-accent); text-decoration: underline; text-underline-offset: 3px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--small { min-height: var(--mpx-ui-control-small); padding: 4px 8px; font-size: 12px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button--icon { width: var(--mpx-ui-control-height); min-width: var(--mpx-ui-control-height); padding: 0; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-button svg { width: 16px; height: 16px; flex: none; pointer-events: none; }
+:where(.mpx-ui, .multiplex-chat) :is(.mpx-ui-button,.mpx-ui-control,.mpx-ui-menu-item,.mpx-ui-tab):focus-visible { outline: 2px solid var(--mpx-ui-accent); outline-offset: 2px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-control { display: block; width: 100%; min-width: 0; min-height: var(--mpx-ui-control-height); padding: 6px 8px; border: 1px solid var(--mpx-ui-border); border-radius: var(--mpx-ui-radius-md); background: var(--mpx-ui-canvas); color: var(--mpx-ui-text); font: inherit; line-height: 22px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-control:disabled { opacity: .5; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-control::placeholder { color: var(--mpx-ui-muted); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-textarea { min-height: 80px; resize: vertical; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-root { display: contents; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: start; cursor: pointer; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-trigger svg { display: block; flex: none; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-content { box-sizing: border-box; z-index: 1020; min-width: min(var(--radix-select-trigger-width),var(--radix-select-content-available-width)); max-width: min(calc(100vw - 16px),var(--radix-select-content-available-width)); max-height: min(320px,var(--radix-select-content-available-height)); overflow: hidden; border: 1px solid var(--mpx-ui-border); border-radius: var(--mpx-ui-radius-md); background: var(--mpx-ui-raised); color: var(--mpx-ui-text); box-shadow: 0 8px 24px #0005; font: 14px/20px var(--mpx-ui-font); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-viewport { padding: 4px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: var(--mpx-ui-control-height); padding: 8px; border-radius: var(--mpx-ui-radius-sm); box-sizing: border-box; outline: none; cursor: pointer; overflow-wrap: anywhere; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-option[data-highlighted] { background: var(--mpx-ui-hover); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-option[data-disabled] { opacity: .48; cursor: default; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-select-scroll { display: flex; align-items: center; justify-content: center; height: 24px; color: var(--mpx-ui-secondary); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-label { font-size: 14px; font-weight: 500; line-height: 20px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-field { display: grid; min-width: 0; gap: 8px; margin: 0; color: var(--mpx-ui-secondary); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-hint { color: var(--mpx-ui-muted); font-size: 12px; line-height: 18px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-field-error { color: var(--mpx-ui-error); font-size: 12px; line-height: 18px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-choice { display: flex; align-items: flex-start; gap: 8px; min-height: var(--mpx-ui-control-height); padding: 8px; border-radius: var(--mpx-ui-radius-md); cursor: pointer; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-choice:has(input:checked) { background: var(--mpx-ui-raised); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-choice input { flex: none; margin: 4px 0 0; min-height: 0; accent-color: var(--mpx-ui-accent); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-separator { height: 1px; background: var(--mpx-ui-border); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-separator[aria-orientation=vertical] { height: auto; width: 1px; align-self: stretch; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-overlay { position: fixed; inset: 0; z-index: 1000; background: #0009; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-dialog { position: fixed; z-index: 1001; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(620px,calc(100% - 24px)); max-height: calc(var(--mpx-ui-visible-height,100dvh) - 24px); overflow: auto; overscroll-behavior: contain; padding: 24px; border: 1px solid var(--mpx-ui-border); border-radius: var(--mpx-ui-radius-lg); background: var(--mpx-ui-surface); color: var(--mpx-ui-text); box-shadow: 0 16px 48px #0005; font: 14px/1.5 var(--mpx-ui-font); }
+:where(.mpx-ui, .multiplex-chat) dialog.mpx-ui-dialog { margin: 0; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-sheet { inset: 0 0 0 auto; transform: none; height: var(--mpx-ui-visible-height,100dvh); max-height: none; width: min(480px,100%); border-radius: 0; }
+:where(.mpx-ui, .multiplex-chat) :is(.mpx-ui-popover,.mpx-ui-menu) { z-index: 1010; width: min(360px,calc(100vw - 24px),var(--radix-popover-content-available-width,100vw),var(--radix-dropdown-menu-content-available-width,100vw)); max-height: min(var(--radix-popover-content-available-height,70dvh),var(--radix-dropdown-menu-content-available-height,70dvh)); overflow: auto; overscroll-behavior: contain; border: 1px solid var(--mpx-ui-border); border-radius: var(--mpx-ui-radius-lg); background: var(--mpx-ui-raised); color: var(--mpx-ui-text); padding: 16px; box-shadow: 0 8px 28px #0005; font: 14px/1.5 var(--mpx-ui-font); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-menu { width: max-content; min-width: 180px; max-width: min(calc(100vw - 24px),var(--radix-dropdown-menu-content-available-width,100vw)); padding: 4px; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-menu-item { display: flex; align-items: center; gap: 8px; min-height: var(--mpx-ui-control-height); padding: 8px 12px; border-radius: var(--mpx-ui-radius-md); cursor: pointer; outline: none; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-menu-item[data-highlighted] { background: var(--mpx-ui-hover); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-menu-item[data-disabled] { opacity: .48; cursor: default; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--mpx-ui-border); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-tab { min-height: var(--mpx-ui-control-height); padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; color: var(--mpx-ui-muted); background: none; cursor: pointer; }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-tab[data-state=active] { color: var(--mpx-ui-accent); border-bottom-color: var(--mpx-ui-accent); }
+:where(.mpx-ui, .multiplex-chat) .mpx-ui-tooltip { z-index: 1020; max-width: min(320px,var(--radix-tooltip-content-available-width,100vw)); padding: 8px 12px; border-radius: var(--mpx-ui-radius-md); background: var(--mpx-ui-raised); border: 1px solid var(--mpx-ui-border); color: var(--mpx-ui-text); font-size: 12px; }
+@media (pointer: coarse) {
+  :where(.mpx-ui, .multiplex-chat) { --mpx-ui-control-height: 44px; --mpx-ui-control-small: 44px; }
+  :where(.mpx-ui, .multiplex-chat) .mpx-ui-control { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :where(.mpx-ui, .multiplex-chat) [class*=mpx-ui-] { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

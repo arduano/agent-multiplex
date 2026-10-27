@@ -41,16 +41,16 @@ export const repositoryUrl = "git+https://github.com/arduano/agent-multiplex.git
 export const homepageUrl = "https://github.com/arduano/agent-multiplex#readme";
 export const bugsUrl = "https://github.com/arduano/agent-multiplex/issues";
 
-const irohRelease = "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/";
+// Byte-level review, including unchanged native binaries: docs/audits/iroh-application-signals-20261025.md.
 export const reviewedIrohClosure = Object.freeze([
   Object.freeze({
     name: "@momics/iroh-http-node",
-    url: `${irohRelease}iroh-http-node-0.6.2-fork-linux-win-x64.tgz`,
-    integrity: "sha512-CPRn15sDElYcARIbGcdJJtQj1jH9er3ytl7xkXqUSSk6GjsL8xwLrrGKi2izP58XZMjkCQKJA7xi7Be2Z8Q99Q==",
+    url: "https://github.com/arduano/iroh-http/releases/download/leo-v7-iroh-0.6.2-js-lifecycle-20261022.1/iroh-http-node-0.6.2-fork-application-signals-linux-win-x64.tgz",
+    integrity: "sha512-688hGCTDXBvgCuQnTMdm8DfsdsVH8ekWq23EYNXFNU63vLlnNw5tSBHFN4z2XDrf67JcJRWgsVheFy8d7xiM6w==",
   }),
   Object.freeze({
     name: "@momics/iroh-http-shared",
-    url: `${irohRelease}iroh-http-shared-0.6.2-fork.tgz`,
+    url: "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-shared-0.6.2-fork.tgz",
     integrity: "sha512-LI6vNhKQQZBJV+pC3w/yNxXQoP+pMpmYVHrOo9Y3IHFbMnvkWhV1qzArOn34lQ8JU/pbEMdHVHgZYwmTFnDIDQ==",
   }),
 ]);

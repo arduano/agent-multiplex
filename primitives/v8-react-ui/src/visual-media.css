@@ -1,0 +1,19 @@
+/* Fixed inline reservation prevents visibility and decode from moving history. */
+.multiplex-chat .mpx-chat__inline-media { display: inline-flex; width: min(100%, 320px); height: 160px; vertical-align: top; margin: 8px 0; }
+.multiplex-chat .mpx-chat__visual-trigger { display: flex; align-items: center; justify-content: center; width: 100%; height: 160px; min-height: 160px; overflow: hidden; padding: 8px; border: 1px solid var(--mpx-ui-border); border-radius: 8px; background: var(--mpx-ui-surface); }
+.multiplex-chat .mpx-chat__visual-trigger img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.multiplex-chat .mpx-chat__media-placeholder { display: flex; align-items: center; justify-content: center; width: 100%; height: 160px; border: 1px solid var(--mpx-ui-border); border-radius: 8px; padding: 16px; font-size: 12px; color: var(--mpx-ui-muted); }
+.multiplex-chat .mpx-chat__visual-dialog { display: flex; flex-direction: column; gap: 16px; width: min(1100px, calc(100% - 24px)); height: calc(var(--mpx-ui-visible-height, 100dvh) - 24px); max-width: calc(100% - 24px); overflow: hidden; }
+.multiplex-chat .mpx-chat__visual-dialog > h2 { overflow-wrap: anywhere; }
+.multiplex-chat .mpx-chat__visual-controls { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.multiplex-chat .mpx-chat__image-preview { display: flex; flex-direction: column; gap: 8px; min-height: 0; flex: 1; }
+.multiplex-chat .mpx-chat__image-viewport { display: grid; place-items: center; position: relative; flex: 1; min-height: 120px; height: min(58dvh, 700px); overflow: hidden; touch-action: none; cursor: grab; }
+.multiplex-chat .mpx-chat__image-viewport:active { cursor: grabbing; }
+.multiplex-chat .mpx-chat__image-viewport img { display: block; max-width: none; max-height: none; object-fit: contain; transform-origin: center; user-select: none; }
+.multiplex-chat .mpx-chat__row-media { display: flex; flex-wrap: wrap; gap: 8px; }
+.multiplex-chat .mpx-chat__diagram-visual { display: flex; align-items: center; justify-content: center; width: min(100%, 640px); height: 240px; }
+.multiplex-chat .mpx-chat__diagram-visual .mpx-chat__visual-trigger { height: 240px; }
+@container (max-width: 500px) {
+  .multiplex-chat .mpx-chat__visual-dialog { gap: 8px; padding: 16px; }
+  .multiplex-chat .mpx-chat__visual-controls button { min-height: 44px; min-width: 44px; }
+}

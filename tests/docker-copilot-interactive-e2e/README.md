@@ -10,11 +10,11 @@ are used: one host/dashboard and one worker whose SDK starts the real bundled
 Copilot runtime. Playwright runs on the Docker host.
 
 The worker is configured through `AGENT_MULTIPLEX_COPILOT_PROVIDER_*` and uses
-GitHub Copilot SDK BYOK with an OpenAI-compatible provider. By default, the
-runner extracts only the `codex-lb` base URL from `~/.codex/config.toml` and
-bind-mounts `~/.codex/codex-lb-api-key` read-only at
-`/run/secrets/codex-lb-api-key`. The key is never copied into the image or
-receipt. The adapter passes it to the SDK as `apiKey` with
+GitHub Copilot SDK BYOK with an OpenAI-compatible provider. The caller must
+supply the provider ID, source configuration and key file explicitly. The runner
+uses an isolated `qualification-provider` configuration and a read-only key
+mount at `/run/secrets/provider-api-key`; there is no user-home credential
+default. The key is never copied into the image or receipt. The adapter passes it to the SDK as `apiKey` with
 `wireApi: "responses"`, `transport: "http"`, and logged-in-user authentication
 disabled.
 
@@ -47,12 +47,16 @@ This consumes real model credits and usually takes several minutes:
 npm run test:docker:copilot:interactive
 ```
 
-Defaults and overrides:
+The required provider inputs must already be exported for that command, or
+supplied using the current interface below. Provider IDs use letters, digits,
+underscores or hyphens (1–64 characters). Model settings remain optional.
+These documentation edits imply no new native run:
 
 ```bash
 AGENT_MULTIPLEX_P2PRPC_CORE=/path/to/p2prpc/packages/core \
-AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG=/path/to/codex/config.toml \
-AGENT_MULTIPLEX_COPILOT_SOURCE_KEY=/path/to/codex-lb-api-key \
+AGENT_MULTIPLEX_SOURCE_PROVIDER=selected-provider \
+AGENT_MULTIPLEX_COPILOT_SOURCE_CONFIG=/path/to/provider-config.toml \
+AGENT_MULTIPLEX_COPILOT_SOURCE_KEY=/path/to/provider-api-key \
 AGENT_MULTIPLEX_COPILOT_E2E_MODEL=gpt-5.6-sol \
 AGENT_MULTIPLEX_COPILOT_E2E_SECOND_MODEL=gpt-5.6-terra \
 npm run test:docker:copilot:interactive

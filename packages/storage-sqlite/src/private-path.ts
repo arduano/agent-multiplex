@@ -78,7 +78,7 @@ export function assertPrivateFilesSync(filenames: readonly string[]): void {
     if (status.isSymbolicLink() || !status.isFile()) {
       throw new PrivatePathError("private state path must be a regular non-symlink file");
     }
-    chmodSync(filename, 0o600);
+    if ((status.mode & 0o7777) !== 0o600) chmodSync(filename, 0o600);
   }
 }
 

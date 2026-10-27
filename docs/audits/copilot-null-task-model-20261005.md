@@ -2,14 +2,14 @@
 
 ## Reproducer and scope
 
-Two owner-authorized disposable child fixtures on Leo's installed Windows/WSL
+Two owner-authorized disposable child fixtures on a downstream application's Windows/WSL
 `.31` Hosts produced eight current-revision `snapshotMalformed` failures each:
 native `tasks[0/1].model` was explicitly null, while admission required an
 optional string. Exact unchanged installed-module offline reproduction agrees.
 Four actual Luna children completed uncancelled and streamed; both parents
 reached native idle but failed healthy Finished. Fixtures were stopped/archived,
-retaining all 17 original bindings/five intended Hosts. Consumer evidence is
-`docs/Copilot-Luna31-Task-Metadata-Reproduction-20261005.md` in Leo Multiplex.
+retaining all 17 original bindings/five intended Hosts. Consumer evidence is separately retained in the downstream application as
+`docs/Copilot-Luna31-Task-Metadata-Reproduction-20261005.md`.
 This establishes those fixtures' rejection, not every historical incident.
 
 Only agent-task requested `model` changes to `z.string().nullable().optional()`.
@@ -31,7 +31,7 @@ for healthy Finished/Send, retain genuine pending user input, and reject delayed
 observations after native invalidation or explicit Stop/Resume. A read-only Vite
 transform supplies the old-schema negative control without changing source.
 No SDK/network/model call is used by these tests. Independent final review finds
-no blocker and confirms the Leo task parser already treats null requested-model
+no blocker and confirms the downstream task parser already treats null requested-model
 metadata as unknown without rejecting the task or inventing a model.
 
 Local receipts are under `receipts/copilot-null-model32/` and remain ignored.

@@ -6,14 +6,14 @@ deployment:
 1. one durable authority control node;
 2. one zero-authority access gateway serving the browser UI;
 3. one runtime node owning a real `codex app-server` child;
-4. one runtime node owning the real Copilot SDK/CLI runtime using codex-lb BYOK.
+4. one runtime node owning the real Copilot SDK/CLI runtime using explicitly configured BYOK.
 
 The browser and verifier connect only to the bearer-authenticated gateway. The
 control node publishes no host port, and the two runtime nodes publish no
 ports. Playwright runs on the Docker host and is not a fifth application
 container.
 
-On hosts where codex-lb is reachable only through a private overlay interface,
+When the selected provider is reachable only through a private overlay interface,
 the runner also creates a credential-file-blind reverse relay as a transient
 `systemd --user` service. It binds only to the isolated Docker bridge, is not a
 container or public ingress, and remains available when a retained run exits.
@@ -82,30 +82,29 @@ paths remain deterministic-suite qualifications.
 
 ## Run
 
-The test consumes real model credits:
+The test consumes real model credits and requires explicit provider inputs.
+`AGENT_MULTIPLEX_SOURCE_PROVIDER` selects one source configuration provider ID
+using only letters, digits, underscores or hyphens (1–64 characters). Source
+configuration/key files are required; there is no user-home credential default.
+The runner generates an isolated `qualification-provider` configuration and
+mounts the selected key at its generic secret destination.
 
 ```bash
-npm run test:docker:v4:live:four
-```
-
-The root script should map that command to:
-
-```bash
-bash tests/docker-live-four-container/run.sh
-```
-
-The Docker build installs the exact published `@arduano/p2prpc-core` version
-pinned in the workspace lockfile. Defaults use `~/.codex/config.toml` and
-`~/.codex/codex-lb-api-key`. Relevant overrides are:
-
-```bash
-AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG=/path/to/codex/config.toml \
-AGENT_MULTIPLEX_LIVE_SOURCE_KEY=/path/to/codex-lb-api-key \
+AGENT_MULTIPLEX_SOURCE_PROVIDER=selected-provider \
+AGENT_MULTIPLEX_LIVE_SOURCE_CONFIG=/path/to/provider-config.toml \
+AGENT_MULTIPLEX_LIVE_SOURCE_KEY=/path/to/provider-api-key \
 AGENT_MULTIPLEX_LIVE_CODEX_MODEL=gpt-5.6-sol \
 AGENT_MULTIPLEX_LIVE_CODEX_SECOND_MODEL=gpt-5.6-terra \
 AGENT_MULTIPLEX_LIVE_COPILOT_MODEL=gpt-5.6-sol \
 npm run test:docker:v4:live:four
 ```
+
+That command runs `bash tests/docker-live-four-container/run.sh`. The Docker
+build uses the exact published transport pinned in the workspace lockfile.
+Browser capture resolves framework-owned `playwright-core`; the existing
+`AGENT_MULTIPLEX_CHROME_EXECUTABLE` override selects another executable when the
+standard Chromium path is unsuitable. Input-name documentation changes do not
+rerun or relabel any historical native receipt.
 
 Receipts are stored under `receipts/protocol-v4-live-four-container/<run-id>/`.
 A failed run is deliberately retained. By default the exact containers,

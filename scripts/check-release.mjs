@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { extname, relative, resolve } from "node:path";
 
+import { authoredSourceFiles } from "./authored-source-files.mjs";
 import {
   assert,
   assertReviewedIrohManifest,
@@ -276,7 +277,7 @@ for (const entry of releasePackages) {
   }
 }
 
-for (const source of walk(repositoryRoot)) {
+for (const source of authoredSourceFiles(repositoryRoot)) {
   const path = relative(repositoryRoot, source);
   if (
     path === "scripts/check-release.mjs" ||

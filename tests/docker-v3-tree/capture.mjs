@@ -18,7 +18,7 @@ const bearerToken = (await readFile(tokenFile, "utf8")).trim();
 const playwrightModule = process.env.AGENT_MULTIPLEX_PLAYWRIGHT_MODULE ??
   "playwright-core";
 const chromeExecutable = process.env.AGENT_MULTIPLEX_CHROME_EXECUTABLE ??
-  "/home/arduano/.nix-profile/bin/google-chrome";
+  "/run/current-system/sw/bin/chromium";
 const moduleSpecifier = playwrightModule.startsWith("/")
   ? pathToFileURL(playwrightModule).href
   : playwrightModule;

@@ -1,0 +1,1077 @@
+{
+  "kind": "minimized-captured-native-notifications",
+  "model": "gpt-6-luna",
+  "provider": "fixture-provider",
+  "transformations": [
+    "opaque identifiers consistently renamed",
+    "disposable paths and process IDs replaced",
+    "timestamps removed",
+    "moderation metadata minimized to its valid envelope"
+  ],
+  "cases": [
+    {
+      "name": "startup-output-prefix",
+      "sourceTraceSha256": "437dbb596bddfa27afd7b5f204f114f44a7f565ce15aaab611dfe8d2bd88aa02",
+      "nativeVersion": "0.162.1",
+      "rootThreadId": "thread-root",
+      "children": 0,
+      "events": [
+        {
+          "method": "thread/started",
+          "params": {
+            "thread": {
+              "id": "thread-root",
+              "environments": [
+                {
+                  "environmentId": "local",
+                  "cwd": "/fixture/workspace",
+                  "runtimeWorkspaceRoots": [
+                    "/fixture/workspace"
+                  ]
+                }
+              ],
+              "extra": null,
+              "sessionId": "thread-root",
+              "forkedFromId": null,
+              "parentThreadId": null,
+              "preview": "",
+              "ephemeral": false,
+              "section": null,
+              "sectionEnteredAt": null,
+              "projectId": null,
+              "historyMode": "paginated",
+              "modelProvider": "fixture-provider",
+              "model": "gpt-6-luna",
+              "reasoningEffort": "low",
+              "status": {
+                "type": "idle"
+              },
+              "cwd": "/fixture/workspace",
+              "cliVersion": "0.162.1",
+              "originator": "multiplex_v8_history_live",
+              "source": "vscode",
+              "canAcceptDirectInput": true,
+              "threadSource": null,
+              "agentNickname": null,
+              "agentRole": null,
+              "name": null,
+              "daybreakEnabled": null,
+              "turns": []
+            }
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-root",
+            "status": {
+              "type": "active",
+              "activeFlags": []
+            }
+          }
+        },
+        {
+          "method": "turn/started",
+          "params": {
+            "threadId": "thread-root",
+            "turn": {
+              "id": "turn-1",
+              "rootTurnId": "turn-1",
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "inProgress",
+              "error": null
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "userMessage",
+              "id": "item-1",
+              "clientId": "v8-original-first",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run exactly this harmless shell command once: printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'. Then reply exactly V8_CDX_DONE. Do not use any other tool, inspect any file, access networks or spawn agents.",
+                  "text_elements": []
+                }
+              ]
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "userMessage",
+              "id": "item-1",
+              "clientId": "v8-original-first",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run exactly this harmless shell command once: printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'. Then reply exactly V8_CDX_DONE. Do not use any other tool, inspect any file, access networks or spawn agents.",
+                  "text_elements": []
+                }
+              ]
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "commandExecution",
+              "id": "item-2",
+              "pluginId": null,
+              "scriptPath": null,
+              "command": "/run/current-system/sw/bin/bash -lc \"printf 'V8_CDX_FIRST\\\\n'; sleep 1; printf 'V8_CDX_SECOND\\\\n'\"",
+              "cwd": "/fixture/workspace",
+              "processId": "fixture-process",
+              "source": "unifiedExecStartup",
+              "status": "inProgress",
+              "commandActions": [
+                {
+                  "type": "unknown",
+                  "command": "printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'"
+                }
+              ],
+              "aggregatedOutput": null,
+              "exitCode": null
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/commandExecution/outputDelta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-2",
+            "delta": "V8_CDX_SECOND\n"
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "commandExecution",
+              "id": "item-2",
+              "pluginId": null,
+              "scriptPath": null,
+              "command": "/run/current-system/sw/bin/bash -lc \"printf 'V8_CDX_FIRST\\\\n'; sleep 1; printf 'V8_CDX_SECOND\\\\n'\"",
+              "cwd": "/fixture/workspace",
+              "processId": "fixture-process",
+              "source": "unifiedExecStartup",
+              "status": "completed",
+              "commandActions": [
+                {
+                  "type": "unknown",
+                  "command": "printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'"
+                }
+              ],
+              "aggregatedOutput": "V8_CDX_FIRST\nV8_CDX_SECOND\n",
+              "exitCode": 0
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 12459,
+                "inputTokens": 12404,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 55,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12459,
+                "inputTokens": 12404,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 55,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "agentMessage",
+              "id": "item-3",
+              "text": "",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-3",
+            "delta": "V"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-3",
+            "delta": "8"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-3",
+            "delta": "_C"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-3",
+            "delta": "DX"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-3",
+            "delta": "_DONE"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "agentMessage",
+              "id": "item-3",
+              "text": "V8_CDX_DONE",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 24962,
+                "inputTokens": 24898,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 64,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12503,
+                "inputTokens": 12494,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 9,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-root",
+            "status": {
+              "type": "idle"
+            }
+          }
+        },
+        {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "thread-root",
+            "turn": {
+              "id": "turn-1",
+              "rootTurnId": "turn-1",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "item-3",
+                  "text": "V8_CDX_DONE",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "command-and-native-child",
+      "sourceTraceSha256": "5f5d3751a1de7b6bccc740bcc6342cb838706e359b98322ea5e899a821e3b666",
+      "nativeVersion": "0.162.1",
+      "rootThreadId": "thread-root",
+      "children": 1,
+      "events": [
+        {
+          "method": "thread/started",
+          "params": {
+            "thread": {
+              "id": "thread-root",
+              "environments": [
+                {
+                  "environmentId": "local",
+                  "cwd": "/fixture/workspace",
+                  "runtimeWorkspaceRoots": [
+                    "/fixture/workspace"
+                  ]
+                }
+              ],
+              "extra": null,
+              "sessionId": "thread-root",
+              "forkedFromId": null,
+              "parentThreadId": null,
+              "preview": "",
+              "ephemeral": false,
+              "section": null,
+              "sectionEnteredAt": null,
+              "projectId": null,
+              "historyMode": "paginated",
+              "modelProvider": "fixture-provider",
+              "model": "gpt-6-luna",
+              "reasoningEffort": "low",
+              "status": {
+                "type": "idle"
+              },
+              "cwd": "/fixture/workspace",
+              "cliVersion": "0.162.1",
+              "originator": "multiplex_v8_history_live",
+              "source": "vscode",
+              "canAcceptDirectInput": true,
+              "threadSource": null,
+              "agentNickname": null,
+              "agentRole": null,
+              "name": null,
+              "daybreakEnabled": null,
+              "turns": []
+            }
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-root",
+            "status": {
+              "type": "active",
+              "activeFlags": []
+            }
+          }
+        },
+        {
+          "method": "turn/started",
+          "params": {
+            "threadId": "thread-root",
+            "turn": {
+              "id": "turn-1",
+              "rootTurnId": "turn-1",
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "inProgress",
+              "error": null
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "userMessage",
+              "id": "item-1",
+              "clientId": "v8-original-first",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run exactly this harmless shell command once: printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'. Then spawn exactly one native child agent using model gpt-6-luna. Ask it to reply exactly V8_CDX_CHILD_DONE without tools or further agents, and wait for it. Then reply exactly V8_CDX_DONE. Do not inspect files or access networks, and do not perform any unrelated work.",
+                  "text_elements": []
+                }
+              ]
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "userMessage",
+              "id": "item-1",
+              "clientId": "v8-original-first",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run exactly this harmless shell command once: printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'. Then spawn exactly one native child agent using model gpt-6-luna. Ask it to reply exactly V8_CDX_CHILD_DONE without tools or further agents, and wait for it. Then reply exactly V8_CDX_DONE. Do not inspect files or access networks, and do not perform any unrelated work.",
+                  "text_elements": []
+                }
+              ]
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "commandExecution",
+              "id": "item-2",
+              "pluginId": null,
+              "scriptPath": null,
+              "command": "/run/current-system/sw/bin/bash -lc \"printf 'V8_CDX_FIRST\\\\n'; sleep 1; printf 'V8_CDX_SECOND\\\\n'\"",
+              "cwd": "/fixture/workspace",
+              "processId": "fixture-process",
+              "source": "unifiedExecStartup",
+              "status": "inProgress",
+              "commandActions": [
+                {
+                  "type": "unknown",
+                  "command": "printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'"
+                }
+              ],
+              "aggregatedOutput": null,
+              "exitCode": null
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/commandExecution/outputDelta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-2",
+            "delta": "V8_CDX_SECOND\n"
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "commandExecution",
+              "id": "item-2",
+              "pluginId": null,
+              "scriptPath": null,
+              "command": "/run/current-system/sw/bin/bash -lc \"printf 'V8_CDX_FIRST\\\\n'; sleep 1; printf 'V8_CDX_SECOND\\\\n'\"",
+              "cwd": "/fixture/workspace",
+              "processId": "fixture-process",
+              "source": "unifiedExecStartup",
+              "status": "completed",
+              "commandActions": [
+                {
+                  "type": "unknown",
+                  "command": "printf 'V8_CDX_FIRST\\n'; sleep 1; printf 'V8_CDX_SECOND\\n'"
+                }
+              ],
+              "aggregatedOutput": "V8_CDX_FIRST\nV8_CDX_SECOND\n",
+              "exitCode": 0
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 12496,
+                "inputTokens": 12441,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 55,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12496,
+                "inputTokens": 12441,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 55,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "subAgentActivity",
+              "model": "gpt-6-luna",
+              "reasoningEffort": "medium",
+              "id": "item-3",
+              "kind": "started",
+              "agentThreadId": "thread-child-1",
+              "agentPath": "/root/requested_child"
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-child-1",
+            "status": {
+              "type": "idle"
+            }
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "subAgentActivity",
+              "model": "gpt-6-luna",
+              "reasoningEffort": "medium",
+              "id": "item-3",
+              "kind": "started",
+              "agentThreadId": "thread-child-1",
+              "agentPath": "/root/requested_child"
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 25083,
+                "inputTokens": 24972,
+                "cachedInputTokens": 16896,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 111,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12587,
+                "inputTokens": 12531,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 56,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-child-1",
+            "status": {
+              "type": "active",
+              "activeFlags": []
+            }
+          }
+        },
+        {
+          "method": "turn/started",
+          "params": {
+            "threadId": "thread-child-1",
+            "turn": {
+              "id": "turn-2",
+              "rootTurnId": "turn-1",
+              "items": [],
+              "itemsView": "notLoaded",
+              "status": "inProgress",
+              "error": null
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "collabAgentToolCall",
+              "id": "item-4",
+              "tool": "wait",
+              "status": "inProgress",
+              "senderThreadId": "thread-root",
+              "receiverThreadIds": [],
+              "prompt": null,
+              "model": null,
+              "reasoningEffort": null,
+              "agentsStates": {}
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "agentMessage",
+              "id": "item-5",
+              "text": "",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            },
+            "threadId": "thread-child-1",
+            "turnId": "turn-2"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "itemId": "item-5",
+            "delta": "V"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "itemId": "item-5",
+            "delta": "8"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "itemId": "item-5",
+            "delta": "_C"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "itemId": "item-5",
+            "delta": "DX"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "itemId": "item-5",
+            "delta": "_CHILD"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "itemId": "item-5",
+            "delta": "_DONE"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "agentMessage",
+              "id": "item-5",
+              "text": "V8_CDX_CHILD_DONE",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            },
+            "threadId": "thread-child-1",
+            "turnId": "turn-2"
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-child-1",
+            "turnId": "turn-2",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 12178,
+                "inputTokens": 12168,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 10,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12178,
+                "inputTokens": 12168,
+                "cachedInputTokens": 0,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 10,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-child-1",
+            "status": {
+              "type": "idle"
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "subAgentActivity",
+              "model": null,
+              "reasoningEffort": null,
+              "id": "item-6",
+              "kind": "completed",
+              "agentThreadId": "thread-child-1",
+              "agentPath": "/root/requested_child"
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "thread-child-1",
+            "turn": {
+              "id": "turn-2",
+              "rootTurnId": "turn-1",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "item-5",
+                  "text": "V8_CDX_CHILD_DONE",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null
+            }
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "subAgentActivity",
+              "model": null,
+              "reasoningEffort": null,
+              "id": "item-6",
+              "kind": "completed",
+              "agentThreadId": "thread-child-1",
+              "agentPath": "/root/requested_child"
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "collabAgentToolCall",
+              "id": "item-4",
+              "tool": "wait",
+              "status": "completed",
+              "senderThreadId": "thread-root",
+              "receiverThreadIds": [],
+              "prompt": null,
+              "model": null,
+              "reasoningEffort": null,
+              "agentsStates": {}
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 37839,
+                "inputTokens": 37706,
+                "cachedInputTokens": 25344,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 133,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12756,
+                "inputTokens": 12734,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 22,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "item/started",
+          "params": {
+            "item": {
+              "type": "agentMessage",
+              "id": "item-7",
+              "text": "",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-7",
+            "delta": "V"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-7",
+            "delta": "8"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-7",
+            "delta": "_C"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-7",
+            "delta": "DX"
+          }
+        },
+        {
+          "method": "item/agentMessage/delta",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "itemId": "item-7",
+            "delta": "_DONE"
+          }
+        },
+        {
+          "method": "turn/moderationMetadata",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "metadata": {}
+          }
+        },
+        {
+          "method": "item/completed",
+          "params": {
+            "item": {
+              "type": "agentMessage",
+              "id": "item-7",
+              "text": "V8_CDX_DONE",
+              "phase": "final_answer",
+              "memoryCitation": null,
+              "delivery": null,
+              "questions": null
+            },
+            "threadId": "thread-root",
+            "turnId": "turn-1"
+          }
+        },
+        {
+          "method": "thread/tokenUsage/updated",
+          "params": {
+            "threadId": "thread-root",
+            "turnId": "turn-1",
+            "tokenUsage": {
+              "total": {
+                "totalTokens": 50669,
+                "inputTokens": 50527,
+                "cachedInputTokens": 33792,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 142,
+                "reasoningOutputTokens": 0
+              },
+              "last": {
+                "totalTokens": 12830,
+                "inputTokens": 12821,
+                "cachedInputTokens": 8448,
+                "cacheWriteInputTokens": 0,
+                "outputTokens": 9,
+                "reasoningOutputTokens": 0
+              },
+              "modelContextWindow": 258400
+            }
+          }
+        },
+        {
+          "method": "thread/status/changed",
+          "params": {
+            "threadId": "thread-root",
+            "status": {
+              "type": "idle"
+            }
+          }
+        },
+        {
+          "method": "turn/completed",
+          "params": {
+            "threadId": "thread-root",
+            "turn": {
+              "id": "turn-1",
+              "rootTurnId": "turn-1",
+              "items": [
+                {
+                  "type": "agentMessage",
+                  "id": "item-7",
+                  "text": "V8_CDX_DONE",
+                  "phase": "final_answer",
+                  "memoryCitation": null,
+                  "delivery": null,
+                  "questions": null
+                }
+              ],
+              "itemsView": "summary",
+              "status": "completed",
+              "error": null
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

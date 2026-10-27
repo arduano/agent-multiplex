@@ -1,0 +1,10 @@
+export { AgentHost, openHost } from "./assembly.js";
+export type { HostOptions } from "./assembly.js";
+export { SessionHost } from "./session/index.js";
+export type { SessionHostOptions } from "./session/index.js";
+export { defaultLifecycle, DefaultLifecycleSessions, defaultLifecycleIdentity } from "./plugin.js";
+export type { DefaultLifecycleOptions, NativeHarnessDefinition, HostModelCatalog } from "./plugin.js";
+export { existingDirectoryWorkspace } from "./workspace.js";
+export type { WorkspaceStrategy, WorkspaceRequest, WorkspaceAllocation, WorkspaceAllocationResult, WorkspaceRefusal, WorkspaceOriginal } from "./workspace.js";
+export { sessionCreationHost, lifecycleCreationHost } from "./catalog.js";
+export { lifecycleSessionRoute } from "./gateway.js";

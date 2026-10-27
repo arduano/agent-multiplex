@@ -1,29 +1,30 @@
-# V8 clean break owner lane
+# V8 source handoff
 
-The owner explicitly requested a new full rewrite to preserve useful Multiplex
-capabilities while reducing defect surface, redundant tests and coupling.
+V8 is an isolated clean-break implementation under `primitives/`, separate from
+the maintained released workspace graph. Start with [repository instructions](../../AGENTS.md),
+[current state](Current-State.md), the [architecture contract](../design/v8-architecture.md)
+and [module map](../design/v8-rewrite-map.md).
 
-This worktree is `/home/arduano/programming/multiplex-v8-20261022/agent-multiplex`,
-branch `rewrite/v8-clean-break-20261022`, based on exact published framework `.44`
-commit `ecb4e1b2c85b1ee80f5e9e275c04ac4287fcd420`. The matching application
-worktree is `/home/arduano/programming/multiplex-v8-20261022/leo-multiplex`,
-which includes the current working-source overlay rather than stale HEAD alone.
-One durable Multiplex V8 owner agent owns both isolated worktrees.
+The framework baseline is published `.44` source
+`ecb4e1b2c85b1ee80f5e9e275c04ac4287fcd420`. This is a source provenance reference,
+not qualification of later V8 changes. Existing released package and dependency
+facts remain with their maintained owners.
 
-Read AGENTS.md, leading Current-State.md and the full V8 owner brief at
-`/home/arduano/programming/multiplex-v8-20261022/leo-multiplex/docs/V8-Rewrite-Handoff-20261022.md`.
-Historical V5/V6/V7 generation/layout proposals do not veto the owner's V8 clean
-break. Retain native ownership, private state, explicit effect certainty and
-published dependency/process policies while deliberately redesigning V8.
+Select one explicit lifecycle and harness per Host. Preserve exact native
+custody, original-operation evidence, history semantics, privacy and trusted
+permission behavior while reducing redundant state and coupling. UI selection,
+Gateway routing and observer cancellation never decide native execution.
+Applications supply their own accounts, profiles, deployment policy and external
+domain integration outside this public repository.
 
-First produce the feature/test/state-ownership map and a small architectural
-decision, then implement an isolated mocked/scripted vertical slice. Reduce
-redundant mechanisms and tests through explicit invariants and unique oracles.
-Do not inherit V7 topology or file structure by accident. p2prpc/Iroh remain
-published pinned dependencies unless a specific isolated change is justified.
+Use bounded focused checks and the [composed source gate](../../primitives/v8-integration/README.md).
+A unique invariant/oracle determines retained coverage; moving an implementation
+does not justify cloning its suite. Historical ignored artifacts retain their
+original inputs and failures; they are not portable public evidence for a later
+source tree. Source qualification does not imply native/model acceptance,
+publication, deployment or permission to modify existing runtimes.
 
-Existing source trees and all installed roles/native sessions/providers remain
-untouched. No production deployment, native-state import, VM task mutation or
-live/model qualification campaign belongs to this bootstrap. Fresh model-test
-calls require a separate bounded owner allowance. The existing V7 maintenance
-agent and VM Orchestrator retain their independent responsibilities.
+Native/model work requires fresh finite authorization and disposable exact-owned
+resources. No application checkout, private plan, credential/home, service or
+external workflow is an implicit dependency of this handoff or the public
+framework's build and tests.
