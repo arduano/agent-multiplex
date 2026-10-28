@@ -7,6 +7,7 @@ import type { NativeMcpReadPort } from "../../v8-mcp/src/contracts.js";
 import type { OwnedAttachment, RuntimeEvent, RuntimeHalt } from "../../v8-runtime/src/contracts.js";
 import { halt, identity, requireThat } from "../../v8-runtime/src/validation.js";
 import type { ControllerBinding, HostController, HostHistoryFacet, NativeCapture, TrustedContainment } from "./contracts.js";
+import type { CaptureDiagnostic } from "../../v8-history/src/contracts/types.js";
 
 /** Shared custody only. Native requests/configuration remain concrete subclasses. */
 export abstract class Controller implements HostController {
@@ -18,7 +19,7 @@ export abstract class Controller implements HostController {
   #emit: ((event: RuntimeEvent) => void) | undefined; #capture: ((capture: NativeCapture) => void) | undefined;
   #buffer: (() => void)[] = []; #bytes = 0; #lost = false; #halted = false; #opening: number | null = null; #uncertain = false;
   #openingOwner: NativeOpening | undefined; #retiredOpening = 0;
-  #activityRevision = 0; #captureLost = false;
+  #activityRevision = 0; #captureLost: CaptureDiagnostic | undefined;
   readonly cleanups: (() => void)[] = [];
   constructor(readonly kind: Harness, containment: TrustedContainment, catalog: () => Promise<Catalog>, commands: readonly ControlCommand["type"][], reads: readonly NativeRead["type"][] = []) {
     this.#containment = containment; this.#catalog = catalog; this.placement = containment.placement;
@@ -48,29 +49,29 @@ export abstract class Controller implements HostController {
   protected capture(value: unknown): void {
     const held = this.#held; if (!held) return;
     try { this.#capture?.({ kind: this.kind, run: held.binding.run, value }); }
-    catch { this.observationLost(); }
+    catch { this.observationLost("captureConsumerFailed", "capture"); }
   }
   /** An explicit effect or native change invalidates evidence without rereading. */
   protected mcpChanged(run: RunRef): void { const held = this.#held; if (held && !this.#halted && sameRun(held.binding.run, run)) this.#capture?.({ kind: "mcpChanged", run }); }
   /** Reverse capabilities have their own strict bounded staging. Dropping one
    * loses confirmation continuity even if later transcript events look healthy. */
   protected stage(value: unknown, apply: (frozen: unknown) => void): void {
-    this.#stage(value, apply, () => this.gap());
+    this.#stage(value, apply, reason => this.gap(reason, "reverseRequest"));
   }
   /** Live notifications are consumed synchronously at their native transport's
    * bound. Only startup buffering has the smaller staging bound. */
   protected stageObservation(value: unknown, apply: (frozen: unknown) => void): void {
     if (this.#held && (!this.#opening || this.#held.binding.run.generation === this.#opening)) {
-      try { apply(copy(value)); } catch { this.observationLost(); }
-    } else this.#stage(value, apply, () => this.observationLost());
+      try { apply(copy(value)); } catch { this.observationLost("notificationProjectionFailed", "notification"); }
+    } else this.#stage(value, apply, reason => this.observationLost(reason, "notification"));
   }
-  #stage(value: unknown, apply: (frozen: unknown) => void, lost: () => void): void {
+  #stage(value: unknown, apply: (frozen: unknown) => void, lost: (reason: "startupCapacity" | "stagingRejected") => void): void {
     try {
       const fixed = copy(value), bytes = canonical(fixed, 65536).length;
       if (this.#held && (!this.#opening || this.#held.binding.run.generation === this.#opening)) { apply(fixed); return; }
-      if (this.#buffer.length >= 64 || this.#bytes + bytes > 65536) { lost(); return; }
+      if (this.#buffer.length >= 64 || this.#bytes + bytes > 65536) { lost("startupCapacity"); return; }
       this.#buffer.push(() => apply(fixed)); this.#bytes += bytes;
-    } catch { lost(); }
+    } catch { lost("stagingRejected"); }
   }
   /** Large closed media is never queued before a positive live binding. Only
    * its small control projection is copied; raw capture stays synchronous. */
@@ -80,17 +81,20 @@ export abstract class Controller implements HostController {
       requireThat(held && !this.#halted && !held.stop && (!this.#opening || held.binding.run.generation === this.#opening));
       canonical(projection, 65536); const fixed = copy(projection); apply(fixed);
       requireThat(this.#held === held && !this.#halted && !held.stop); this.capture(value);
-    } catch { this.observationLost(); }
+    } catch { this.observationLost("mediaProjectionFailed", "media"); }
   }
   /** One pending pre-binding loss fact belongs to history/progress, never the
    * reverse-capability baseline. A later native fact may prove activity again. */
-  protected observationLost(): void {
-    const held = this.#held;
-    if (!held || this.#opening && held.binding.run.generation !== this.#opening) { this.#captureLost = true; return; }
-    this.native({ type: "activity", run: held.binding.run, activity: "unknown" }); this.observationGap();
-    try { this.#capture?.({ kind: "historyGap", run: held.binding.run }); } catch { /* Capture failure cannot retire reverse capabilities. */ }
+  protected observationLost(reason: CaptureDiagnostic["reason"] = "unspecified", stage: CaptureDiagnostic["stage"] = "controller"): void {
+    this.#observationLost({ at: Date.now(), stage, reason });
   }
-  protected gap(): void { this.#lost = true; this.#held?.interactions.gap(); this.observationLost(); }
+  #observationLost(diagnostic: CaptureDiagnostic): void {
+    const held = this.#held;
+    if (!held || this.#opening && held.binding.run.generation !== this.#opening) { this.#captureLost ??= diagnostic; return; }
+    this.native({ type: "activity", run: held.binding.run, activity: "unknown" }); this.observationGap();
+    try { this.#capture?.({ kind: "historyGap", run: held.binding.run, diagnostic }); } catch { /* Capture failure cannot retire reverse capabilities. */ }
+  }
+  protected gap(reason: CaptureDiagnostic["reason"] = "reverseRequestLost", stage: CaptureDiagnostic["stage"] = "reverseRequest"): void { this.#lost = true; this.#held?.interactions.gap(); this.observationLost(reason, stage); }
   /** Native-specific root progress may lose continuity with the same captured
    * event. Reuse this existing loss boundary; never infer a native outcome. */
   protected observationGap(): void {}
@@ -98,7 +102,7 @@ export abstract class Controller implements HostController {
   protected retireTransient(): void {}
   /** Observation loss never supplies native halt or licenses another opening. */
   protected controllerLost(): void {
-    this.gap(); const held = this.#held; if (!held || this.#halted) return;
+    this.gap("transportDisconnected", "transport"); const held = this.#held; if (!held || this.#halted) return;
     this.#activityRevision++;
     const observation = { ...held.owned.observation, controller: "lost" as const, transport: "lost" as const };
     held.owned = { ...held.owned, observation };
@@ -119,7 +123,7 @@ export abstract class Controller implements HostController {
   async open(input: NativeStart, emit: (event: RuntimeEvent) => void, onOwned?: (attachment: OwnedAttachment) => Promise<void>, onOpening?: (owner: NativeOpening) => Promise<void>): Promise<OwnedAttachment> {
     requireThat(!this.#opening && !this.#uncertain && (!this.#held || this.#halted));
     requireThat(supportsNativeOpening(this.capabilities, input.nativeSession));
-    this.#opening = input.generation; this.#emit = emit; this.#lost = false; this.#captureLost = false;
+    this.#opening = input.generation; this.#emit = emit; this.#lost = false; this.#captureLost = undefined;
     try {
       if (this.#containment.prepareOpening) {
         const opening = await this.#containment.prepareOpening(input), capsule = openingCapsule({ opening: opening.opening, identity: opening.identity });
@@ -142,7 +146,7 @@ export abstract class Controller implements HostController {
       const owned: OwnedAttachment = { identity: owner, native: { ...native, initializationComplete: false }, observation: { controller: "connected", transport: "connected", leader: "unknown" }, stopTree };
       held = { binding, owned, interactions, mcp: value.mcp }; this.#held = held; this.#halted = false;
       this.#capture?.({ kind: "binding", binding });
-      if (this.#captureLost) { this.#captureLost = false; this.observationLost(); }
+      if (this.#captureLost) { const diagnostic = this.#captureLost; this.#captureLost = undefined; this.#observationLost(diagnostic); }
       for (const queued of this.#buffer.splice(0)) queued(); this.#bytes = 0;
       await onOwned?.(held.owned);
       const active = (): void => requireThat(this.#held === held && !this.#halted && !this.#uncertain, "Native initialization was retired by exact halt");
@@ -164,7 +168,7 @@ export abstract class Controller implements HostController {
       // one response invoke owner while returning the certified current summary.
       return { ...held.owned, native: { ...held.owned.native, interactionsComplete: view.baseline === "complete", interactions: view.items.filter(item => item.state === "pending").map(({ prompt }) => ({ id: prompt.id, owner: prompt.owner.nativeAgent, kind: prompt.type.endsWith("question") ? "userInput" : prompt.type.endsWith("elicitation") ? "elicitation" : prompt.type.endsWith("plan") ? "exitPlan" : prompt.type.endsWith("permission") ? "permission" : "approval", choices: interactionChoices(prompt) })) } };
     } catch {
-      if (this.#retiredOpening < input.generation && (!this.#held || this.#held.binding.run.generation === input.generation)) { if (!this.#halted || !this.#held) this.#uncertain = true; this.gap(); }
+      if (this.#retiredOpening < input.generation && (!this.#held || this.#held.binding.run.generation === input.generation)) { if (!this.#halted || !this.#held) this.#uncertain = true; this.gap("openingFailed", "opening"); }
       throw new SessionError("IO", "Original native open remains owned or uncertain; do not replay");
     } finally { if (this.#opening === input.generation) this.#opening = null; }
   }

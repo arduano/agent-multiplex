@@ -67,7 +67,7 @@ export class CodexController extends Controller {
         const projection = projectCodexMediaNotification(message);
         if (projection) this.stageMedia(message, projection, frozen => this.#notification(frozen as CodexNotification, false));
         else this.stageObservation(message, frozen => this.#notification(frozen as CodexNotification));
-      } catch { this.observationLost(); }
+      } catch { this.observationLost("notificationProjectionFailed", "notification"); }
     }));
     this.cleanups.push(options.transport.onRequest(request => {
       const token = request.token, respond = request.respond.bind(request), settled = request.settled;
@@ -176,7 +176,7 @@ export class CodexController extends Controller {
       }
       if (message.method === "thread/closed" && typeof params.threadId === "string") { const node = this.#lineage.get(params.threadId); if (node) node.closed = true; this.#pruneClosed(); }
       if (root) this.#projectAttention(this.#attention.observe(message.method, params));
-    } catch { this.observationLost(); }
+    } catch { this.observationLost("notificationProjectionFailed", "notification"); }
     finally { if (capture) this.capture(message); }
   }
   protected override observationGap(): void { this.#projectAttention(this.#attention.invalidate()); }
@@ -210,7 +210,7 @@ export class CodexController extends Controller {
     const affected = new Set([id]); let changed = true;
     while (changed) { changed = false; for (const [child, node] of this.#lineage) if (node.parent && affected.has(node.parent) && !affected.has(child)) { affected.add(child); changed = true; } }
     for (const child of affected) if (this.#lineage.get(child)?.parent !== null) { this.#lineage.delete(child); this.#blocked.add(child); }
-    this.observationLost();
+    this.observationLost("lineageQuarantined", "lineage");
     const run = this.current()?.run;
     if (run && this.interactions(run).current().items.some(item => affected.has(item.prompt.owner.nativeAgent))) this.gap();
   }
@@ -222,12 +222,12 @@ export class CodexController extends Controller {
     const parent = proof.type === "metadata" ? proof.value.parent : proof.parent;
     if (proof.type === "metadata" && existing && (existing.parent !== parent || existing.context !== undefined && existing.context !== proof.value.context)) { this.#quarantine(child); return true; }
     if (!parent || !this.#owned(parent)) return false;
-    if (parent === child || existing?.parent === null) { this.observationLost(); return true; }
+    if (parent === child || existing?.parent === null) { this.observationLost("lineageConflict", "lineage"); return true; }
     if (existing && (existing.parent !== parent || proof.type === "metadata" && existing.context !== undefined && existing.context !== proof.value.context)) { this.#quarantine(child); return true; }
-    if (proof.type === "metadata" && !this.#context(proof.value)) { if (existing) this.#quarantine(child); else this.observationLost(); return true; }
+    if (proof.type === "metadata" && !this.#context(proof.value)) { if (existing) this.#quarantine(child); else this.observationLost("lineageContext", "lineage"); return true; }
     if (existing?.closed) {
       // Do not substitute a new ancestor underneath an existing descendant.
-      if ([...this.#lineage.values()].some(node => node.parent === child)) { this.observationLost(); return true; }
+      if ([...this.#lineage.values()].some(node => node.parent === child)) { this.observationLost("lineageRetired", "lineage"); return true; }
       existing = undefined;
     }
     requireThat(previous || this.#lineage.size + this.#blocked.size < 32, "Bounded live native ancestry is full");

@@ -123,7 +123,12 @@ test("initial baseline failure stays observed once and Stop fences a later attac
   } finally { late.resolve(); await host.terminate(); await rm(directory, { recursive: true, force: true }); }
 });
 
-test("actual capture failure reports unknown transcript progress without rewriting independent native activity", async () => {
+test("actual capture failure reports unknown transcript progress without rewriting independent native activity", async t => {
+  const diagnostics: Record<string, unknown>[] = [];
+  t.mock.method(process.stderr, "write", (chunk: unknown) => {
+    if (typeof chunk === "string") { const value = JSON.parse(chunk) as Record<string, unknown>; if (value.source === "multiplex.history") diagnostics.push(value); }
+    return true;
+  });
   const directory = await mkdtemp(join(tmpdir(), "v8-capture-failure-")), scope: SessionScope = { connection: "capture-failure", principal: "owner", host: "codex", session: "logical" };
   const driver = scriptedHost("codex", { cwd: directory });
   const host = await openHost({ directory, cwd: directory, scope, policy: { kind: "codex", provider: "copilot-only", access: { approval: "on-request", sandbox: "danger-full-access" } }, controller: driver.controller });
@@ -133,15 +138,34 @@ test("actual capture failure reports unknown transcript progress without rewriti
     const attached = (await host.binding())!.history, threadId = attached.origin.nativeSession;
     driver.notify("turn/started", { threadId, turn: { id: "active-turn", status: "inProgress" } });
     assert.deepEqual(host.history.snapshot(attached).activity, { turnId: "active-turn", state: "working" });
+    driver.notify("item/completed", { threadId, turnId: "active-turn", item: { id: "bad-tool", type: "commandExecution", status: "invalid-status",
+      command: "private-command-not-for-diagnostics", aggregatedOutput: "private-output-not-for-diagnostics" } });
+    const rejected = diagnostics.find(value => value.reason === "invalidNativeEvent"); assert.ok(rejected);
+    assert.equal(rejected.errorCode, "CODEX_ITEM_STATUS_INVALID"); assert.equal(rejected.stage, "codec");
+    assert.equal(rejected.observedThreadId, threadId); assert.equal(rejected.observedTurnId, "active-turn");
+    assert.equal(rejected.lastCapturedTurnId, "active-turn"); assert.equal(rejected.canonicalGapPresent, false);
+    for (let index = 0; index < 65; index++) driver.notify("turn/started", { threadId: "unproved-child", turn: { id: "unproved-turn", status: "inProgress" } });
+    const overflow = diagnostics.find(value => value.reason === "unownedBufferCapacity"); assert.ok(overflow);
+    assert.equal(overflow.bufferedEvents, 64); assert.equal(overflow.observedThreadId, "unproved-child");
+    assert.ok((overflow.bufferedBytes as number) > 0);
     host.history.emit(attached, Array.from({ length: host.history.limits.maxRows }, (_, index) => ({ type: "start" as const, id: `running-${index}`, kind: "tool" as const })));
     driver.notify("item/started", { threadId, turnId: "active-turn", item: { id: "over-capacity", type: "agentMessage", text: "" } });
     const failed = host.history.snapshot(attached);
     assert.ok(failed.coverage.gaps.some(gap => gap.id === CAPTURE_GAP_ID && gap.kind === "nativeGap"));
     assert.deepEqual(failed.activity, { turnId: "active-turn", state: "unknown" });
     assert.equal(failed.rows.length, host.history.limits.maxRows);
+    const capture = diagnostics.find(value => value.reason === "codecCaptureRejected"); assert.ok(capture);
+    assert.equal(capture.stage, "capture"); assert.equal(capture.errorCode, "PROTECTED_ROW_CAPACITY"); assert.equal(capture.canonicalGapPresent, false);
+    assert.deepEqual(capture.run, { scope, generation: 1, nativeSession: threadId });
+    assert.ok(typeof capture.at === "number" && capture.at <= (capture.recordedAt as number));
+    assert.equal(JSON.stringify(diagnostics).includes("private-command-not-for-diagnostics"), false);
+    assert.equal(JSON.stringify(diagnostics).includes("private-output-not-for-diagnostics"), false);
+    assert.equal(JSON.stringify(diagnostics).includes(directory), false);
     driver.notify("turn/completed", { threadId, turn: { id: "active-turn", status: "completed" } });
     await until(async () => (await host.session.snapshot(scope)).activity === "idle");
     assert.deepEqual(host.history.snapshot(attached).activity, { turnId: "active-turn", state: "unknown" });
+    assert.equal(diagnostics.filter(value => value.reason === "codecCaptureRejected").length, 1, "Repeated frozen-codec failure logs once per reason/code and does not heal the retained marker");
+    assert.ok(host.history.snapshot(attached).coverage.gaps.some(gap => gap.id === CAPTURE_GAP_ID));
     assert.equal(driver.counts.sends, 0); assert.equal(driver.counts.resumes, 0);
   } finally { await host.terminate(); await rm(directory, { recursive: true, force: true }); }
 });

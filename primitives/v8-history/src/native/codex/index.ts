@@ -1,4 +1,4 @@
-import type { Action, CapturePort, CodexScope, Json, Lifecycle, NativeCodec, Origin, RowKind } from "../../contracts/types.js";
+import type { Action, CaptureDiagnostic, CapturePort, CodexScope, Json, Lifecycle, NativeCodec, Origin, RowKind } from "../../contracts/types.js";
 import { canonical } from "../../contracts/validation.js";
 import { mediaMeaning, type NativeMediaHandler, type NativeMediaOccurrence } from "../../contracts/media.js";
 import { codexMediaItem } from "./media.js";
@@ -109,6 +109,7 @@ export class CodexCodec implements NativeCodec {
     // never continue from codec state whose transaction the Host rejected.
     const call = (run: () => void): void => { try { run(); } catch (error) { this.#captureFailure = error; throw error; } };
     this.#capture = {
+      ...(options.capture.diagnostic ? { diagnostic: options.capture.diagnostic.bind(options.capture) } : {}),
       open: (scope, input) => call(() => options.capture.open(scope, input)),
       emit: (scope, actions) => call(() => options.capture.emit(scope, actions)),
       reset: (scope, reason) => call(() => options.capture.reset(scope, reason)),
@@ -135,17 +136,20 @@ export class CodexCodec implements NativeCodec {
     if (this.#blocked.has(threadId)) { this.#reject(this.#root, "retiredLiveAncestry", "nativeGap"); return; }
     let event: Event | undefined;
     try { event = this.#decode(method, params, threadId); }
-    catch {
+    catch (error) {
       const turnId = identity(params.turnId), itemId = identity(params.itemId) ?? identity(record(params.item)?.id);
+      const detail = { observedThreadId: threadId, ...(turnId ? { observedTurnId: turnId } : {}),
+        errorCode: error instanceof TypeError && /^CODEX_[A-Z0-9_]{1,64}$/.test(error.message) ? error.message : "DECODE_REJECTED" };
       const item = owner && turnId && itemId ? owner.items.get(JSON.stringify([turnId, itemId])) : undefined;
       // A rejected chunk breaks that accumulator's chain. A later nullable
       // completion cannot promote the bytes we happened to retain to complete.
       if (owner && item && !item.completed) {
         item.anchored = false;
         this.#rejected++;
+        this.#diagnose(owner, "invalidNativeEvent", detail);
         this.#capture.emit(owner.scope, [...item.segments.values()].map(segment => ({ type: "gap",
           gap: { id: `nativeGap:${segment.id}`, kind: "nativeGap", rowId: segment.id } })));
-      } else this.#reject(owner ?? this.#root, "invalidNativeEvent");
+      } else this.#reject(owner ?? this.#root, "invalidNativeEvent", "unsupported", detail);
       return;
     }
     if (!event) return;
@@ -176,8 +180,14 @@ export class CodexCodec implements NativeCodec {
     return { ownership: Object.freeze(ownership), ...(metadata ? { metadata } : {}), scope: Object.freeze({ kind: "codex", origin: this.#origin, threadId: id }),
       items: new Map(), completedTurns: new Set(), activeTurn: null, closed: false };
   }
-  #reject(thread: Thread, key: string, kind: "unsupported" | "nativeGap" | "truncated" = "unsupported"): void {
+  #diagnose(thread: Thread, reason: CaptureDiagnostic["reason"], detail: Pick<CaptureDiagnostic, "errorCode" | "observedThreadId" | "observedTurnId"> = {}): void {
+    try { this.#capture.diagnostic?.(thread.scope, { at: Date.now(), stage: "codec", reason, ...detail,
+      rejected: this.#rejected, bufferedEvents: this.#buffer.length, bufferedBytes: this.#bufferedBytes }); }
+    catch { /* Diagnostic consumers cannot change capture or native ownership. */ }
+  }
+  #reject(thread: Thread, key: CaptureDiagnostic["reason"], kind: "unsupported" | "nativeGap" | "truncated" = "unsupported", detail: Pick<CaptureDiagnostic, "errorCode" | "observedThreadId" | "observedTurnId"> = {}): void {
     this.#rejected++;
+    this.#diagnose(thread, key, detail);
     this.#capture.emit(thread.scope, [{ type: "gap", gap: { id: `codex:${key}`, kind } }]);
   }
   #gap(thread: Thread, kind: "missingPrefix" | "missingFinal" | "identity", rowId: string): Action {
@@ -360,7 +370,8 @@ export class CodexCodec implements NativeCodec {
   #enqueue(event: Event): void {
     const bytes = utf8.encode(JSON.stringify(event)).byteLength;
     if (this.#buffer.length >= this.#limits.maxBufferedEvents || this.#bufferedBytes + bytes > this.#limits.maxBufferedBytes) {
-      this.#reject(this.#root, "unownedBufferCapacity", "nativeGap"); return;
+      this.#reject(this.#root, "unownedBufferCapacity", "nativeGap", { observedThreadId: event.threadId,
+        ...("turnId" in event ? { observedTurnId: event.turnId } : {}) }); return;
     }
     this.#buffer.push({ event, bytes }); this.#bufferedBytes += bytes;
     this.#capture.emit(this.#root.scope, [{ type: "gap", gap: { id: "codex:unownedEvents", kind: "nativeGap" } }]);

@@ -24,6 +24,7 @@ type PendingRead={start():void;reject(error:GatewayError):void};
 export type GatewayLimits=Readonly<{routes:number;forward:number;urgent:number;reads:number;readQueue:number;subscribers:number;frames:number;bytes:number}>;
 const defaults:GatewayLimits={routes:64,forward:8,urgent:4,reads:4,readQueue:64,subscribers:128,frames:16,bytes:1048576};
 const gatewayActions: readonly GatewayAction[] = ['read', 'control', 'catalogWrite', 'fileWrite', 'mcpRefresh'];
+const catalogKey = (scope: CatalogScope): string => JSON.stringify([scope.connection, scope.principal, scope.authority]);
 /** Snapshot before registration can retire an old route or await a verifier. */
 function routeActions(value: readonly GatewayAction[] | undefined): readonly GatewayAction[] | undefined {
   if (value === undefined) return undefined;
@@ -76,9 +77,14 @@ export class GatewayCoordinator {
   registerCatalog(input:CatalogRoute):void {
     this.#open(); canonical(input.scope); id(input.owner);
     const actions=routeActions(input.actions);
-    const key=JSON.stringify([input.scope.connection,input.scope.principal,input.scope.authority]);
+    const key=catalogKey(input.scope);
     if(this.#catalogs.has(key) || this.#catalogs.size>=this.#limits.routes) throw new GatewayError("FENCED");
     this.#catalogs.set(key,Object.freeze({...input,scope:copy(input.scope),...(actions===undefined?{}:{actions})}));
+  }
+  /** Ends current observations only; the retained owner restores its transport. */
+  unavailableCatalog(scope: CatalogScope): void {
+    const key = `catalog:${catalogKey(scope)}`;
+    for (const watch of [...this.#watches]) if (watch.key === key) watch.queue.fail(new GatewayError('UNAVAILABLE'));
   }
   /** Trusted configured Host/Peer binding. Browser requests cannot register routes. */
   registerHostRpc(input: HostRpcRegistration): () => void {
@@ -371,7 +377,7 @@ export class GatewayCoordinator {
   async #mutation<T>(work:()=>Promise<T>):Promise<T>{this.#open();if(this.#active>=this.#limits.forward)throw new GatewayError("FULL");this.#active++;try{return await work();}finally{this.#active--;}}
   #catalog(identity:Identity,scope:CatalogScope,action:GatewayAction="read"):CatalogRoute {
     this.#open();if(identity.connection!==scope.connection||identity.principal!==scope.principal||!Array.isArray(identity.authorities)||!identity.authorities.includes(scope.authority)||!Array.isArray(identity.actions)||!identity.actions.includes(action))throw new GatewayError("FORBIDDEN");
-    const route=this.#catalogs.get(JSON.stringify([scope.connection,scope.principal,scope.authority]));if(!route)throw new GatewayError("UNAVAILABLE");if(route.actions&&!route.actions.includes(action))throw new GatewayError("FORBIDDEN");return route;
+    const route=this.#catalogs.get(catalogKey(scope));if(!route)throw new GatewayError("UNAVAILABLE");if(route.actions&&!route.actions.includes(action))throw new GatewayError("FORBIDDEN");return route;
   }
   #readCatalog<T>(identity:Identity,input:CatalogScope,work:(route:CatalogRoute,scope:CatalogScope)=>Promise<T>):Promise<T> {
     const caller=copy(identity),scope=copy(input),route=this.#catalog(caller,scope);
@@ -386,7 +392,7 @@ export class GatewayCoordinator {
   catalogMetadataOriginal(identity:Identity,scope:CatalogScope,operationId:string):Promise<MetadataOriginal|null> {id(operationId);return this.#readCatalog(identity,scope,(r,s)=>r.port.metadataOriginal(s,operationId));}
   catalogPublishArchive(identity:Identity,request:ArchivePublication):Promise<CatalogEntry> {const r=this.#catalog(identity,request.scope,"catalogWrite"),original=copy(request);if(!r.port.publishArchive)throw new GatewayError("UNAVAILABLE");return this.#mutation(()=>r.port.publishArchive!(original));}
   watchCatalog(identity:Identity,scope:CatalogScope):ViewerQueue<CatalogEntry> {
-    const r=this.#catalog(identity,scope),queue=this.#queue<CatalogEntry>(`catalog:${JSON.stringify(scope)}`);let unsubscribe:()=>void;try{unsubscribe=r.port.subscribe(copy(scope),v=>queue.push(copy(v)));}catch(e){queue.fail(e);throw e;}
+    const r=this.#catalog(identity,scope),queue=this.#queue<CatalogEntry>(`catalog:${catalogKey(scope)}`);let unsubscribe:()=>void;try{unsubscribe=r.port.subscribe(copy(scope),v=>queue.push(copy(v)));}catch(e){queue.fail(e);throw e;}
     queue.setCleanup(this.#release(queue,unsubscribe));return queue;
   }
   get observation():ForwardObservation {return Object.freeze({active:this.#active,urgent:this.#urgent,optionalReads:this.#reads,subscribers:this.#watches.size});}

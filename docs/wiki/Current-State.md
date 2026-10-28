@@ -9,6 +9,25 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 
 ## Isolated V8 source lane
 
+The October28 capture diagnostics preserve bounded cause metadata across the
+existing controller and history owners. The actual Node Host writes structured
+private stderr records for decoder rejection, ancestry-buffer refusal, native
+transport loss and failed capture, with fixed reasons/codes and contextual run
+identities. Startup loss keeps its original observation time; repeated causes
+are bounded per run. Payloads, procedures, paths and free error text are excluded.
+The retained capture marker and its recovery/completeness meaning are unchanged.
+Previously installed undated warnings still have unknown historical causes;
+new source diagnostics cannot retrospectively attribute them to an outage.
+Focused actual-owner regressions pass; installed acceptance remains separate.
+
+The same source pass adds exact-catalog observation invalidation to the existing
+Gateway coordinator. It ends only that catalog's current queues with unavailable,
+preserving registration, other catalog/Host routes and already-forwarded originals.
+The consuming connection owner restores observations; this seam adds no retry or
+native lifetime owner. Focused scope-isolation, HTTP and resubscription checks
+pass. The separate maintained broad test remains failed, with its latest run
+recording 1788 passed, 59 failed and 8 skipped; focused evidence does not waive it.
+
 The October28 Working/capture follow-up separates confirmed native work from
 transcript completeness. A retained capture gap no longer hides the generic
 Working footer; row animation and compaction retain their stricter captured-work

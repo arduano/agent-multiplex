@@ -123,7 +123,24 @@ export type Action =
   | Readonly<{ type: "readBoundary"; factId: string; reason: string }>
   | Readonly<{ type: "edge"; edge: OlderEdge }>
   | Readonly<{ type: "retire"; rowIds: readonly string[]; evidence: string; replacementId?: string }>;
+/** Private metadata only. Never contains a native payload, procedure or error text. */
+export type CaptureDiagnostic = Readonly<{
+  at: number;
+  stage: "controller" | "notification" | "media" | "lineage" | "reverseRequest" | "transport" | "opening" | "codec" | "capture";
+  reason: "unspecified" | "captureConsumerFailed" | "notificationProjectionFailed" | "stagingRejected" | "startupCapacity" | "mediaProjectionFailed" |
+    "reverseRequestLost" | "transportDisconnected" | "openingFailed" | "lineageQuarantined" | "lineageConflict" | "lineageContext" | "lineageRetired" |
+    "codecCaptureRejected" | "envelope" | "scope" | "retiredLiveAncestry" | "invalidNativeEvent" | "unverifiedLiveAncestry" | "unownedBufferCapacity" |
+    "threadCapacity" | "changedLiveAncestry" | "conflictingActivityOwner" | "unverifiedActivityOwner" | "unverifiedBufferedAncestry" | "itemCapacity" |
+    "segmentCapacity" | "conflictingFinal";
+  errorCode?: string;
+  observedThreadId?: string;
+  observedTurnId?: string;
+  rejected?: number;
+  bufferedEvents?: number;
+  bufferedBytes?: number;
+}>;
 export interface CapturePort {
+  diagnostic?(scope: Scope, diagnostic: CaptureDiagnostic): void;
   /** Native ownership/authorization must be established before open. No native work is performed. */
   open(scope: Scope, options?: Readonly<{ knownStart?: boolean; native?: ScopeFacts }>): void;
   emit(scope: Scope, actions: readonly Action[]): void;

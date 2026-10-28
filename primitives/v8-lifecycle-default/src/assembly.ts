@@ -14,7 +14,7 @@ import { ReadCoordinator, type ReadHandle, type ReadObservation } from "../../v8
 import { scopeKey as historyKey } from "../../v8-history/src/contracts/identity.js";
 import { PrimitiveError, validateScope } from "../../v8-history/src/contracts/validation.js";
 import { rowMedia } from "../../v8-history/src/contracts/media.js";
-import { CAPTURE_GAP_ID, type Action, type CapturedScope, type CapturePort, type HistoryPage, type Json, type NativeCodec, type Scope as HistoryScope, type ScopeFacts } from "../../v8-history/src/contracts/types.js";
+import { CAPTURE_GAP_ID, type Action, type CaptureDiagnostic, type CapturedScope, type CapturePort, type HistoryPage, type Json, type NativeCodec, type Scope as HistoryScope, type ScopeFacts } from "../../v8-history/src/contracts/types.js";
 import { validateScopeFacts } from "../../v8-history/src/contracts/validation.js";
 import { FileHost, type FileHostOptions } from "../../v8-files/src/host/index.js";
 import { NativeFileCapture, type NativeCapturePort } from "../../v8-files/src/native/capture.js";
@@ -28,7 +28,7 @@ import { SendPreparation } from "../../v8-host/src/send-preparation.js";
 import { defaultLimits as fileLimits } from "../../v8-files/src/contracts/limits.js";
 type HistoryReader = { context: string; lease: string; acquisition: HistoryAcquisition };
 type HostRecord = { run: RunRef; history: HistoryScope; codec: NativeCodec; acquisitions: Map<string, HistoryReader>; halted: boolean; mcp?: McpOwner; unsubscribe?: () => void;
-  initial?: { attachment: string; work: Promise<void> } };
+  initial?: { attachment: string; work: Promise<void> }; diagnostics: Set<string> };
 
 export interface HostOptions {
   scope: SessionScope; directory: string; cwd: string; policy: ManagedPolicy; controller: HostController;
@@ -343,7 +343,7 @@ export class AgentHost {
     if (prior && sameRun(prior.run, run)) { this.#attachOwners(prior); return prior; }
     if (prior) prior.unsubscribe?.();
     const history = this.#options.controller.historyFacet.scope(run, `host-observation-${this.#epoch}`);
-    const capture: CapturePort = { open: (scope, options) => {
+    const capture: CapturePort = { diagnostic: (scope, detail) => this.#diagnoseCapture(run, scope, detail), open: (scope, options) => {
       const native = options?.native === undefined ? undefined : copy(validateScopeFacts(options.native));
       this.history.open(scope, options);
       const prior = this.#historyScopes.get(historyKey(scope));
@@ -364,7 +364,7 @@ export class AgentHost {
       }
     }, reset: (scope, reason) => this.history.reset(scope, reason) };
     const codec = this.#options.controller.historyFacet.codec(history, capture, fresh && !this.#captureOverflow, this.#media.handler);
-    const record: HostRecord = { run: copy(run), history, codec, acquisitions: new Map(), halted: false };
+    const record: HostRecord = { run: copy(run), history, codec, acquisitions: new Map(), halted: false, diagnostics: new Set() };
     this.#record = record; this.#attachOwners(record); return record;
   }
   #publishScopeInventory(run: RunRef, root: HistoryScope): void {
@@ -431,10 +431,38 @@ export class AgentHost {
     if (value.kind === "binding") { this.#ensure(value.binding.run, value.binding.fresh && !cold); return; }
     const current = this.#record; if (!current || !sameRun(current.run, value.run)) return;
     if (value.kind === "mcpChanged") { if (!current.halted) current.mcp?.invalidate(value.run); return; }
-    if (value.kind === "historyGap") { this.#captureGap(current); return; }
-    try { current.codec.observe(value.value); } catch { this.#captureGap(current); }
+    if (value.kind === "historyGap") { this.#captureGap(current, value.diagnostic ?? { at: Date.now(), stage: "controller", reason: "unspecified" }); return; }
+    try { current.codec.observe(value.value); } catch (error) {
+      this.#captureGap(current, { at: Date.now(), stage: "capture", reason: "codecCaptureRejected",
+        errorCode: error instanceof PrimitiveError ? error.code : error instanceof SessionError ? error.code : "CAPTURE_REJECTED" });
+    }
   }
-  #captureGap(current: HostRecord): void {
+  #diagnoseCapture(run: RunRef, scope: HistoryScope, detail: CaptureDiagnostic): void {
+    // This Node owner is the actual installed Host process. Metadata reaches its
+    // private stderr/journal; no raw native frames, procedures or error text do.
+    try {
+      const current = this.#record; if (!current || !sameRun(current.run, run)) return;
+      const errorCode = detail.errorCode && /^[A-Z][A-Z0-9_]{0,79}$/.test(detail.errorCode) ? detail.errorCode : undefined;
+      const key = JSON.stringify([detail.stage, detail.reason, errorCode]);
+      if (current.diagnostics.has(key)) return;
+      if (current.diagnostics.size >= 32) {
+        if (!current.diagnostics.has("limit")) { current.diagnostics.add("limit"); process.stderr.write(JSON.stringify({ source: "multiplex.history", event: "capture-diagnostic-limit", at: Date.now(), run, limit: 32 }) + "\n"); }
+        return;
+      }
+      current.diagnostics.add(key);
+      const snapshot = this.history.snapshot(scope);
+      process.stderr.write(JSON.stringify({ source: "multiplex.history", event: "capture-diagnostic", at: detail.at, recordedAt: Date.now(),
+        stage: detail.stage, reason: detail.reason, ...(errorCode ? { errorCode } : {}), run,
+        lastCapturedTurnId: snapshot.activity.turnId, canonicalGapPresent: snapshot.coverage.gaps.some(gap => gap.id === CAPTURE_GAP_ID),
+        ...(detail.observedThreadId ? { observedThreadId: detail.observedThreadId.slice(0, 1024) } : {}),
+        ...(detail.observedTurnId ? { observedTurnId: detail.observedTurnId.slice(0, 1024) } : {}),
+        ...(detail.rejected !== undefined ? { rejected: detail.rejected } : {}),
+        ...(detail.bufferedEvents !== undefined ? { bufferedEvents: detail.bufferedEvents } : {}),
+        ...(detail.bufferedBytes !== undefined ? { bufferedBytes: detail.bufferedBytes } : {}) }) + "\n");
+    } catch { /* Diagnostic failure cannot change history, activity or custody. */ }
+  }
+  #captureGap(current: HostRecord, detail: CaptureDiagnostic): void {
+    this.#diagnoseCapture(current.run, current.history, detail);
     // The transcript owner reports its own failure. It cannot revoke an intact
     // native reverse-request baseline merely because a codec/consumer failed.
     const gap = { id: CAPTURE_GAP_ID, kind: "nativeGap" as const };

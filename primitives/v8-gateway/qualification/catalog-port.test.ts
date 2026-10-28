@@ -6,7 +6,52 @@ import { createGatewayCatalogPort } from '../src/client/catalog-port.js';
 import { GatewayCoordinator } from '../src/gateway/coordinator.js';
 import { createP2pGatewayRouter, P2pGatewayTransport, type GatewayP2pRouter } from '../src/node/p2prpc.js';
 import type { PeerObserver } from '../src/node/peer-observer.js';
-import { alice, target, until } from './fixture.js';
+import { HttpGatewayTransport } from '../src/client/http.js';
+import { alice, target, until, fixture, deferred, FixtureSession } from './fixture.js';
+
+test('catalog reachability loss ends only exact-scope observations and preserves registration, HTTP and admitted mutations', { timeout: 10000 }, async () => {
+  const f = await fixture(), scope: CatalogScope = { connection: alice.connection, principal: alice.principal, authority: 'root' };
+  const other = { ...scope, authority: 'other-root' }, identity = { ...alice, authorities: ['root', 'other-root'] };
+  const entry: CatalogEntry = { scope, session: target.session, target: { host: target.host, owner: target.owner, kind: 'codex', placement: 'shared' },
+    createId: 'created-once', version: 1, revision: 1, metadata: { name: null, cwd: null }, binding: null };
+  const otherEntry = { ...entry, scope: other }, gate = deferred<CatalogEntry>();
+  const listeners = new Set<(value: CatalogEntry) => void>(), otherListeners = new Set<(value: CatalogEntry) => void>();
+  let forwards = 0;
+  const unexpected = async (): Promise<never> => { throw Error('Unexpected catalog mutation'); };
+  const port = (row: CatalogEntry, observers: Set<(value: CatalogEntry) => void>): CatalogPort => ({
+    list: async () => [row], get: async () => row, creation: async () => null, metadataOriginal: async () => null,
+    create: unexpected, setWatched: unexpected,
+    rename: async () => { forwards++; return gate.promise; },
+    subscribe(_scope, listener) { observers.add(listener); return () => { observers.delete(listener); }; },
+  });
+  f.coordinator.registerCatalog({ scope, owner: 'root-owner', port: port(entry, listeners) });
+  f.coordinator.registerCatalog({ scope: other, owner: 'other-owner', port: port(otherEntry, otherListeners) });
+  const affected = f.coordinator.watchCatalog(identity, { authority: scope.authority, connection: scope.connection, principal: scope.principal });
+  const healthy = f.coordinator.watchCatalog(identity, other), session = f.coordinator.watchSession(alice, target);
+  const transport = new HttpGatewayTransport({ url: f.server.url, authorization: 'Bearer fixture-alice' });
+  const mutation = f.coordinator.catalogRename(identity, { scope, session: entry.session, id: 'one-rename', revision: 1, name: 'Renamed' });
+  let restored: typeof affected | undefined;
+  try {
+    assert.equal((await session.next()).value?.phase, 'running'); assert.equal(forwards, 1);
+    f.coordinator.unavailableCatalog({ principal: scope.principal, authority: scope.authority, connection: scope.connection });
+    await assert.rejects(affected.next(), { code: 'UNAVAILABLE' });
+    assert.equal(listeners.size, 0); assert.equal(otherListeners.size, 1); assert.equal((f.session as FixtureSession).listeners.size, 1);
+    assert.equal(f.coordinator.observation.active, 1, 'Already forwarded mutation retains its original owner');
+    for (const emit of otherListeners) emit(otherEntry);
+    assert.deepEqual((await healthy.next()).value, otherEntry);
+    (f.session as FixtureSession).emit(); assert.equal((await session.next()).value?.phase, 'running');
+    assert.equal((await transport.snapshot(target)).phase, 'running', 'HTTP and session routing remain usable');
+    assert.deepEqual(await transport.list(scope), [entry], 'The exact catalog registration remains usable');
+    restored = f.coordinator.watchCatalog(identity, scope); assert.equal(listeners.size, 1);
+    for (const emit of listeners) emit(entry);
+    assert.deepEqual((await restored.next()).value, entry, 'The same scope can subscribe again without registration or mutation replay');
+    gate.resolve(entry); assert.deepEqual(await mutation, entry); assert.equal(forwards, 1);
+  } finally {
+    gate.resolve(entry); await mutation.catch(() => {});
+    await Promise.all([affected.return(), healthy.return(), session.return(), restored?.return()]);
+    transport.close(); await f.close();
+  }
+});
 
 test('exact-scope catalog bridge forwards the P2P catalog vocabulary once and owns only cancellable observation leases', { timeout: 10000 }, async () => {
   const scope: CatalogScope = { connection: alice.connection, principal: alice.principal, authority: 'root' };

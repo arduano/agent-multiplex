@@ -377,11 +377,16 @@ test("Codex startup observation overflow preserves callback certificate, while a
     const f = fixture;
     try {
       f.controller.observe(value => { captures.push(value); });
+      const beforeOpen = Date.now();
       await f.controller.open({ scope: hostScope, generation: 1, placement: "dedicated", operationId: "create", nativeSession: null, policy: policy("codex") }, () => {});
       const owner = f.controller.interactions(f.controller.current()!.run);
       if (loss === "disconnect") { assert.equal(owner.current().baseline, "complete"); f.disconnect(); }
       assert.equal(owner.current().baseline, loss === "observation-overflow" ? "complete" : "partial", loss);
       assert.ok(captures.some(value => value.kind === "historyGap"), "all actual observation loss remains visible to history");
+      const gap = captures.find(value => value.kind === "historyGap"); assert.ok(gap?.kind === "historyGap" && gap.diagnostic);
+      assert.equal(gap.diagnostic.reason, loss === "observation-overflow" ? "startupCapacity" : loss === "reverse-overflow" ? "stagingRejected" : "transportDisconnected");
+      assert.equal(gap.diagnostic.stage, loss === "observation-overflow" ? "notification" : loss === "reverse-overflow" ? "reverseRequest" : "transport");
+      assert.ok(gap.diagnostic.at >= beforeOpen && gap.diagnostic.at <= Date.now(), "Pre-binding loss retains its original observation timestamp");
       assert.equal(f.counts.replies, 0); assert.equal(f.counts.sends, 0); assert.equal(f.counts.resumes, 0);
     } finally { if (f.containment.identities.length) f.containment.halt(); f.controller.dispose(); await f.rpc.close(); }
   }

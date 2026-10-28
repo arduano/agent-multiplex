@@ -1,5 +1,5 @@
 import type { NativeProtocol } from "../../v8-session/src/contracts/native-protocol.js";
-import type { Scope as HistoryScope, CapturePort, NativeCodec } from "../../v8-history/src/contracts/types.js";
+import type { Scope as HistoryScope, CapturePort, NativeCodec, CaptureDiagnostic } from "../../v8-history/src/contracts/types.js";
 import type { AcquisitionPort } from "../../v8-history/src/acquisition/types.js";
 import type { AcquisitionLimits } from "../../v8-history/src/acquisition/owner.js";
 import type { NativeMediaHandler } from "../../v8-history/src/contracts/media.js";
@@ -40,7 +40,7 @@ export type ControllerBinding = Readonly<{ run: RunRef; identity: RuntimeIdentit
 export type NativeCapture = Readonly<{ kind: "binding"; binding: ControllerBinding }> |
   Readonly<{ kind: "mcpChanged"; run: RunRef }> |
   /** Transcript/metadata loss is not evidence of a lost reverse callback. */
-  Readonly<{ kind: "historyGap"; run: RunRef }> |
+  Readonly<{ kind: "historyGap"; run: RunRef; diagnostic?: CaptureDiagnostic }> |
   Readonly<{ kind: "codex" | "copilot"; run: RunRef; value: unknown }>;
 export type OpeningObservation = Readonly<{ run: RunRef; callbacksComplete: boolean; continuous: boolean; activity?: Activity }> &
   (Readonly<{ kind: "created"; noAutomaticContinuation: true }> | Readonly<{ kind: "reopened" }>);
