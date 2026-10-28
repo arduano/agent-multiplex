@@ -20,16 +20,28 @@ import { codexErrorRow, type CodexErrorRow } from '../../v8-history/src/native/c
 import { OptionalQuestions, type OptionalReply } from './optional-questions.js';
 export type TranscriptView = Pick<WorkspaceView, 'viewport' | 'setExpanded' | 'loadOlder' | 'recoverHistory'> & Partial<Pick<WorkspaceView, 'implementPlan'>> & Readonly<{ getSnapshot(): AgentSnapshot | ReadonlyHistorySnapshot }>;
 
-function HistoryRow({ row, expanded, toggle, preview, fileAdapters, previewOptions, archived, inProgress, nativeError, planAction, optionalQuestions, duplicateQuestionBody = false }: Readonly<{ row: Row; expanded: boolean; toggle(expanded: boolean): void; preview(id: string): Promise<ResourceLease>; fileAdapters: MarkdownFileAdapters; previewOptions: PreviewOptions; archived: boolean; inProgress: boolean; nativeError?: CodexErrorRow; planAction?: ReactNode; optionalQuestions?: ReactNode; duplicateQuestionBody?: boolean }>) {
+function CompactionNotice({ row, inProgress }: Readonly<{ row: Row; inProgress: boolean }>) {
+  let text = 'Compaction status unavailable';
+  if (row.lifecycle === 'completed' && row.native.compactionCompleted === true) text = 'Context compacted';
+  else if (row.lifecycle === 'failed') text = 'Context compaction failed';
+  else if (row.lifecycle === 'interrupted') text = 'Context compaction interrupted';
+  else if (inProgress) text = 'Compacting context…';
+  else if (row.lifecycle === 'running') text = 'Last observed: compacting context';
+  return h('p', { className: `mpx-chat__compaction${inProgress ? ' mpx-chat__working' : ''}`, 'data-action': 'compaction-status', ...(inProgress ? { role: 'status' } : {}) }, text);
+}
+function HistoryRow({ row, expanded, toggle, preview, fileAdapters, previewOptions, archived, inProgress, compaction = false, nativeError, planAction, optionalQuestions, duplicateQuestionBody = false }: Readonly<{ row: Row; expanded: boolean; toggle(expanded: boolean): void; preview(id: string): Promise<ResourceLease>; fileAdapters: MarkdownFileAdapters; previewOptions: PreviewOptions; archived: boolean; inProgress: boolean; compaction?: boolean; nativeError?: CodexErrorRow; planAction?: ReactNode; optionalQuestions?: ReactNode; duplicateQuestionBody?: boolean }>) {
+  if (compaction) return h('article', { className: 'mpx-chat__row mpx-chat__row--notice', 'data-row': row.id, 'data-kind': row.kind, 'data-lifecycle': row.lifecycle }, h('div', { className: 'mpx-chat__row-body' }, h(CompactionNotice, { row, inProgress })));
   const { diagramRendererUrl, cspNonce } = previewOptions;
   const activity = ['tool', 'reasoning', 'delegation'].includes(row.kind), open = expanded;
   const errorLabel = nativeError ? nativeError.willRetry ? 'Retry notice' : 'Agent error' : undefined;
-  const body = nativeError ? h('p', { className: 'mpx-chat__native-error-message' }, nativeError.message) : row.body.kind === 'unavailable' ? h('p', { className: 'mpx-chat__muted' }, `Content unavailable (${row.body.reason})`) :
+  const emptyTool = row.kind === 'tool' && row.body.kind === 'partial' && row.body.text.length === 0;
+  const body = nativeError ? h('p', { className: 'mpx-chat__native-error-message' }, nativeError.message) : emptyTool ? null : row.body.kind === 'unavailable' ? h('p', { className: 'mpx-chat__muted' }, `Content unavailable (${row.body.reason})`) :
     row.kind === 'tool' ? h('pre', { className: 'mpx-chat__terminal', tabIndex: 0, role: 'region', 'aria-label': 'Tool output' }, row.body.text) : h(ChatMarkdown, { text: row.body.text, streaming: inProgress, ...(!archived ? fileAdapters : {}), ...(diagramRendererUrl ? { diagramRendererUrl } : {}), ...(cspNonce ? { cspNonce } : {}) });
   const missing = row.body.kind === 'partial' ? row.body.missing.filter(value => !inProgress || value !== 'final') : [];
   const missingText = { prefix: 'Beginning not captured', interior: 'Some content not captured', final: 'Final content not captured', truncated: 'Content truncated' };
+  const partialLabel = emptyTool ? 'Tool output not captured' : row.kind === 'tool' ? 'Partial output' : row.kind === 'user' || row.kind === 'assistant' ? 'Message excerpt' : row.kind === 'reasoning' ? 'Reasoning excerpt' : 'Partial capture';
   const content = h('div', { className: 'mpx-chat__row-body' }, duplicateQuestionBody ? null : body, optionalQuestions,
-    missing.length ? h('details', { className: 'mpx-chat__partial', 'data-action': 'partial-content' }, h('summary', null, 'Incomplete content'), h('p', null, missing.map(value => missingText[value]).join('. ') + '.')) : null);
+    missing.length ? h('details', { className: 'mpx-chat__partial', 'data-action': 'partial-content' }, h('summary', null, partialLabel), h('p', null, missing.map(value => missingText[value]).join('. ') + '.')) : null);
   // Native image output remains visible when its textual tool output is folded.
   const mediaContent = rowMedia(row).length ? h('div', { className: 'mpx-chat__row-media' }, ...rowMedia(row).map(media => h('div', { key: media.id, 'data-media': media.id },
     media.state === 'available' && media.artifactId ? h(InlineMedia, { identity: media.artifactId, load: () => preview(media.artifactId!), label: 'Agent image', disabled: archived }) : h('small', null, `Agent image · ${archived ? 'resource access retired' : media.state}`)))) : null;
@@ -51,6 +63,8 @@ export function Transcript({ view, history, preview, previewLocal, previewOption
     const origin = history.origins[row.id];
     return row.lifecycle === 'running' && !!origin && origin.source === 'current' && origin.generation === current.generation && sameScope(origin.scope, current.scope) && !!current.activity.turnId && row.native.turnId === current.activity.turnId;
   };
+  const compaction = (row: Row) => (history.origins[row.id]?.scope ?? current?.scope)?.kind === 'codex' && row.kind === 'notice' && row.native.type === 'contextCompaction';
+  const compacting = history.rows.some(row => compaction(row) && inProgress(row));
   const planAction = (row: Row) => {
     if (archived || !view.implementPlan || snapshot.kind !== 'codex' || row.native.type !== 'plan') return undefined;
     const native = snapshot.session.native, original = snapshot.planActions.find(value => value.rowId === row.id);
@@ -88,8 +102,8 @@ export function Transcript({ view, history, preview, previewLocal, previewOption
           ...(previewOptions.fileAddress ? { localFileAddress: (href: string) => { const source = reference(href); return source && typeof location !== 'undefined' ? authenticatedFileAddress(previewOptions.fileAddress!({ sessionId: previewOptions.sessionId, source }), location.href) : undefined; } } : {}),
         };
         const nativeError = scope?.kind === 'codex' ? codexErrorRow(row) : undefined;
-        return h(HistoryRow, { key: row.id, row, archived, inProgress: inProgress(row), ...(nativeError ? { nativeError } : {}), previewOptions, planAction: planAction(row), optionalQuestions, duplicateQuestionBody, expanded: history.expansions.includes(row.id), toggle: (expanded: boolean) => view.setExpanded(row.id, expanded), preview, fileAdapters });
-      }), h('div', { ref: footerElement, className: 'mpx-chat__transcript-footer' }, working ? h('div', { className: 'mpx-chat__working', role: 'status', 'data-action': 'working-indicator' }, 'Working…') : null, footer)),
+        return h(HistoryRow, { key: row.id, row, archived, inProgress: inProgress(row), compaction: compaction(row), ...(nativeError ? { nativeError } : {}), previewOptions, planAction: planAction(row), optionalQuestions, duplicateQuestionBody, expanded: history.expansions.includes(row.id), toggle: (expanded: boolean) => view.setExpanded(row.id, expanded), preview, fileAdapters });
+      }), h('div', { ref: footerElement, className: 'mpx-chat__transcript-footer' }, working && !compacting ? h('div', { className: 'mpx-chat__working', role: 'status', 'data-action': 'working-indicator' }, 'Working…') : null, footer)),
     !archived ? h(LocalFilePreview, { selected, close: () => setSelected(null) }) : null,
     history.viewport.intent === 'readingHistory' ? h('button', { className: 'mpx-chat__jump', type: 'button', onClick: () => view.viewport.followLatest() }, 'Jump to latest') : null);
 }

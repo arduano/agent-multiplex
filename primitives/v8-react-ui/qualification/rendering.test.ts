@@ -16,7 +16,7 @@ import { CodexGoals } from '../src/native-goal.js';
 import { ToolConnections } from '../src/tools.js';
 import { RequestArea } from '../src/prompts.js';
 import { sessionStatus } from '../src/status.js';
-import { CAPTURE_GAP_ID, type Gap } from '../../v8-history/src/contracts/types.js';
+import { CAPTURE_GAP_ID, type Gap, type Row } from '../../v8-history/src/contracts/types.js';
 import { installPlan } from '../../v8-workspace/qualification/goal-plan-fixture.js';
 
 type ControlProps = { children?: ReactNode; 'data-action'?: string; disabled?: boolean; value?: string; onClick?: () => void; onValueChange?: (value: string) => void; options?: readonly Readonly<{ value: string; label: string; disabled?: boolean }>[] };
@@ -124,6 +124,38 @@ test('native turn errors remain exact accessible history content without inferri
       client.apply({ kind: 'snapshot', snapshot: { ...latest, revision: latest.revision + 1, rows: [...latest.rows, { ...error, id: 'native-retry-error', native: { ...error.native, willRetry: true } }] } });
       assert.match(render(), /aria-label="Retry notice"/);
       assert.deepEqual(f.counts(), before, 'History error rendering and observation changes never submit, retry or read native state');
+    } finally { lease.release(); }
+  } finally { f.workspace.close(); }
+});
+test('bodyless compaction callouts require positive item completion and fresh exact-turn work without changing captured evidence', async () => {
+  const f = workspaceFixture();
+  try {
+    const { a } = await f.open(), lease = a.observe(), binding = f.bindings.get('a')!, client = f.history.session(binding.history).client;
+    try {
+      const render = () => renderToStaticMarkup(h(MultiplexChat, { view: a }));
+      const native = f.snapshot('a'); let version = 0;
+      const publish = (lifecycle: Row['lifecycle'], completed: boolean, working: boolean, matchingTurn = true, body: Row['body'] = { kind: 'unavailable', reason: 'nativeOmitted' }) => {
+        const current = client.current!, row: Row = { id: 'compaction-callout', kind: 'notice', lifecycle, body, native: { type: 'contextCompaction', turnId: 'compaction-turn', ...(completed ? { compactionCompleted: true } : {}) }, version: ++version, contentVersion: version };
+        client.apply({ kind: 'snapshot', snapshot: { ...current, revision: current.revision + 1, rows: [row], activity: { state: working ? 'working' : 'idle', turnId: working ? matchingTurn ? 'compaction-turn' : 'another-turn' : null }, scopeInventory: { nativeGeneration: binding.run.generation, entries: [{ scope: binding.history }] } } });
+        f.observation({ scope: native.scope, kind: 'session', state: 'live' });
+        f.observation({ scope: native.scope, kind: 'history', history: binding.history, state: 'live' });
+        f.native.publish(native.scope, { phase: 'running', activity: working ? 'working' : 'idle' });
+        return row;
+      };
+      publish('running', false, true);
+      const before = f.counts(), running = render();
+      assert.match(running, /Compacting context…/); assert.equal(running.split('mpx-chat__working').length - 1, 1);
+      assert.doesNotMatch(running, /data-action="working-indicator"|Content unavailable|Final content not captured|data-action="partial-content"/);
+      const terminalWithoutProof = publish('completed', false, false, true, { kind: 'partial', text: '', missing: ['final'] });
+      assert.match(render(), /Compaction status unavailable/); assert.doesNotMatch(render(), /Context compacted|mpx-chat__working|Final content not captured/);
+      assert.deepEqual(client.current!.rows[0], terminalWithoutProof, 'Purpose-built display never fills an absent native body or completion fact');
+      publish('completed', true, false); assert.match(render(), /Context compacted/); assert.doesNotMatch(render(), /mpx-chat__working/);
+      publish('interrupted', false, false); assert.match(render(), /Context compaction interrupted/);
+      publish('failed', false, false); assert.match(render(), /Context compaction failed/);
+      publish('running', false, true, false); assert.match(render(), /Last observed: compacting context/); assert.doesNotMatch(render().match(/<p[^>]+data-action="compaction-status"[^>]*>/)![0], /mpx-chat__working/);
+      publish('running', false, true); f.observation({ scope: native.scope, kind: 'history', history: binding.history, state: 'disconnected' });
+      assert.match(render(), /Last observed: compacting context/); assert.doesNotMatch(render(), /mpx-chat__working/);
+      assert.deepEqual(f.counts(), before, 'Render and observation-only transitions never dispatch, fetch history or allocate drafts');
     } finally { lease.release(); }
   } finally { f.workspace.close(); }
 });

@@ -154,6 +154,19 @@ one cursor, including itemless failures. Error text belongs to those scoped
 history rows, not a second error store, and a diagnostic never settles native
 turn activity or an original request.
 
+Codex compaction remains an ordinary bodyless history item. Positive native
+item-completion provenance, rather than terminal parent-turn state, controls the
+successful callout. Fresh exact-turn activity controls its live loader; stale
+capture has no spinner. The existing history row, read-boundary and activity
+owners suffice. A compaction start carries explicit omitted text and never
+becomes an empty message with a missing-final warning. Real partial message/tool
+bytes retain their evidence behind a specific excerpt/output disclosure.
+The pinned native [manual task](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/tasks/compact.rs)
+starts a turn before compaction; ordinary automatic pre/post-turn compaction
+runs within the [regular turn task](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/core/src/session/turn.rs).
+This supports the existing exact-turn guard without introducing another
+compaction lifetime. Separate native context-reset paths have no new claim.
+
 The [retained workspace](../../primitives/v8-workspace/README.md) owns session
 state independently of React selection. Views retain pages, anchors and
 expansions; sessions retain drafts and originals. A UI pin holds background

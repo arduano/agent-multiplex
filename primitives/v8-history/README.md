@@ -223,6 +223,16 @@ The 1024-entry evidence window can retain up to 64 MiB of UTF8 body text per
 scope under the production body setting, plus bounded metadata and object
 overhead; it is not an additional durable transcript store.
 
+Codex `contextCompaction` is a bodyless native item, not an incomplete message.
+Live starts explicitly retain omitted text; actual item completion adds
+`native.compactionCompleted:true`. The native item-list completion envelope or
+canonical completed timeline item supplies the same fact on reads. Parent-turn
+settlement alone supplies no such proof and does not rotate the read boundary.
+The existing generic terminal settlement still permits bounded row eviction;
+no separate compaction job, timer or retained status owner is introduced.
+Completion-only capture can retain missing-start evidence, which does not mean
+that compaction has an absent textual final answer.
+
 Acquisition targets100 native entries/events per active request within a512KiB
 normalized batch. Existing same-input shrinking preserves the hard byte bound;
 large records can return fewer entries. Persisted single-use native cursors keep

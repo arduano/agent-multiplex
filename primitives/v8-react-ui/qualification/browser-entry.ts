@@ -224,6 +224,21 @@ Object.assign(window, { chatFixture: { ready: true, ssr, counts: f.counts, choos
     f.native.publish(native.scope, { phase: mode === 'stopped' ? 'stopped' : 'running', activity: working ? 'working' : 'idle', capabilities: { ...native.capabilities, commands: [...new Set([...native.capabilities.commands, 'codex.steer', 'codex.queue.add'] as const)] } });
     return row.id;
   },
+  compaction(mode: 'working' | 'completed' | 'unconfirmed' | 'disconnected' | 'foreign-turn' | 'failed' | 'interrupted') {
+    const binding = f.bindings.get('a')!, client = f.history.session(binding.history).client, current = client.current!, native = f.snapshot('a');
+    const serial = ++progressRevision, turnId = `compaction-turn-${serial}`, working = ['working', 'disconnected', 'foreign-turn'].includes(mode);
+    const row: Row = { id: `compaction-${serial}`, kind: 'notice', lifecycle: working ? 'running' : mode === 'failed' || mode === 'interrupted' ? mode : 'completed', body: mode === 'unconfirmed' ? { kind: 'partial', text: '', missing: ['final'] } : { kind: 'unavailable', reason: 'nativeOmitted' }, native: { type: 'contextCompaction', turnId, ...(mode === 'completed' ? { compactionCompleted: true } : {}) }, version: 1, contentVersion: 1 };
+    client.apply({ kind: 'snapshot', snapshot: { ...current, revision: current.revision + 1, rows: [...current.rows, row], activity: { state: working ? 'working' : 'idle', turnId: working ? mode === 'foreign-turn' ? 'a-different-turn' : turnId : null }, scopeInventory: { nativeGeneration: binding.run.generation, entries: [{ scope: binding.history }] }, coverage: { ...current.coverage, gaps: [] } } });
+    f.observation({ scope: native.scope, kind: 'session', state: mode === 'disconnected' ? 'disconnected' : 'live' });
+    f.observation({ scope: native.scope, kind: 'history', history: binding.history, state: mode === 'disconnected' ? 'disconnected' : 'live' });
+    f.native.publish(native.scope, { phase: 'running', activity: working ? 'working' : 'idle' });
+    return row.id;
+  },
+  partialTool(empty: boolean) {
+    const binding = f.bindings.get('a')!, client = f.history.session(binding.history).client, current = client.current!;
+    const row: Row = { id: `partial-tool-${++progressRevision}`, kind: 'tool', lifecycle: 'completed', body: { kind: 'partial', text: empty ? '' : 'Positively retained tool output', missing: empty ? ['prefix', 'final'] : ['truncated'] }, native: { type: 'commandExecution' }, version: 1, contentVersion: 1 };
+    client.apply({ kind: 'snapshot', snapshot: { ...current, revision: current.revision + 1, rows: [...current.rows, row] } }); return row.id;
+  },
   readAt(rowId: string, offset = 16) {
     const container = document.querySelector<HTMLElement>('#chat-container [data-action=history]')!, row = [...container.querySelectorAll<HTMLElement>('[data-row]')].find(value => value.dataset.row === rowId)!;
     container.scrollTop += row.getBoundingClientRect().top - container.getBoundingClientRect().top + offset;

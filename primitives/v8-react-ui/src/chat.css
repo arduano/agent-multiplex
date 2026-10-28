@@ -59,6 +59,7 @@
 .mpx-chat__row--native-error { border-left-color: var(--mpx-ui-error); }
 .mpx-chat__row--native-error .mpx-chat__speaker { color: var(--mpx-ui-error); }
 .mpx-chat__native-error-message { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mpx-chat__row-body > .mpx-chat__compaction { margin: 0; }
 .mpx-chat__terminal { max-height: min(360px, 45cqh); overflow: auto; }
 .mpx-chat__row-body > p { margin-top: 8px; }
 .mpx-chat__markdown { min-width: 0; }

@@ -347,6 +347,9 @@ export class CodexCodec implements NativeCodec {
       }
     } else if (type === "contextCompaction") {
       kind = "notice"; segments = [{ channel: "body", text: null }];
+      // A terminal parent turn can settle this row without completing the
+      // compaction. Only the native item completion proves success.
+      if (completed) native.compactionCompleted = true;
     } else throw new TypeError("CODEX_ITEM_TYPE_UNSUPPORTED");
     if (segments.length > this.#limits.maxSegments || JSON.stringify(native).length > 8_192 ||
         segments.reduce((bytes, segment) => bytes + (typeof segment.text === "string" ? utf8.encode(segment.text).byteLength : 0), 0) > this.#limits.maxTextBytes)
@@ -591,7 +594,7 @@ export class CodexCodec implements NativeCodec {
         } else if (tracked.fresh) {
           actions.push({ type: "start", id: state.id, kind: item.kind,
             ...(typeof segment.text === "string" || (segment.text === null &&
-              ["subAgentActivity", "collabAgentToolCall", "imageView", "imageGeneration", "image_generation_call"].includes(item.nativeType)) ? { text: segment.text } : {}),
+              ["subAgentActivity", "collabAgentToolCall", "imageView", "imageGeneration", "image_generation_call", "contextCompaction"].includes(item.nativeType)) ? { text: segment.text } : {}),
             native: this.#native(thread, item, state, event.item.native) });
           // Observed .162.1 command callbacks can omit startup output even when
           // item/started preceded execution. A raw delta chain has no proved

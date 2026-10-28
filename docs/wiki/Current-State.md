@@ -9,6 +9,15 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 
 ## Isolated V8 source lane
 
+The follow-up October28 compaction correction treats the native bodyless item
+as metadata and carries positive item-completion provenance separately from
+parent-turn settlement. Shared React gives compaction a purposeful callout,
+with a live loader only for fresh exact-turn work and successful completion
+only after native proof. Partial text/output remains honestly inspectable with
+specific labels; empty partial tool output has one disclosure. Existing activity,
+history, viewport and read-boundary owners remain unchanged. Source/browser
+qualification and installed activation are separate evidence.
+
 The October28 conversation corrections retain turn-scoped Codex error messages
 as ordinary history notices and render escaped inline Agent error / Retry notice
 entries. Production reads use the pinned native timeline cursor so failed turns

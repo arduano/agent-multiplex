@@ -222,7 +222,10 @@ function itemHistoryPort(options: CodexHistoryOptions & Readonly<{ list: (reques
           if (item.prompt !== undefined) native.prompt = item.prompt === null ? null : string(item.prompt);
           if (item.agentsStates !== undefined) native.agentsStates = cloneJson(object(item.agentsStates)) as Json;
           add("tool", null);
-        } else if (item.type === "contextCompaction") add("notice", null);
+        } else if (item.type === "contextCompaction") {
+          if (completedItems || entry.completedAtMs !== null) native.compactionCompleted = true;
+          add("notice", null);
+        }
         else unsupported();
         invariant(bytes(canonical(native)) <= 16_384, "CODEX_HISTORY_METADATA_BOUND");
         invariant(records.length <= 1024, "CODEX_HISTORY_RECORD_BOUND");

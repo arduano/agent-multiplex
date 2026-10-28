@@ -2,6 +2,65 @@ import assert from 'node:assert/strict';
 import {writeFile} from 'node:fs/promises';
 import {resolve} from 'node:path';
 
+/** The full transcript journey and focused callout gate share these assertions. */
+export async function qualifyCaptureCallouts(page, chat, cases, out) {
+  const history=chat.locator('[data-action=history]'),loader=chat.locator('[data-action=working-indicator]'),facts=[];
+  const frames=()=>page.evaluate(()=>new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(done)))));
+  await page.locator('#session-a').click();await frames();
+  const before=await page.evaluate(()=>window.chatFixture.counts());
+  try{
+    const live=await page.evaluate(()=>window.chatFixture.progress('working'));await frames();
+    assert.equal(await loader.count(),1);assert.equal(await history.locator(`[data-row="${live}"] [data-action=partial-content]`).count(),0);
+    const excerpt=await page.evaluate(()=>window.chatFixture.progress('working',['prefix','interior','final','truncated']));await frames();
+    const loss=history.locator(`[data-row="${excerpt}"] [data-action=partial-content]`);
+    assert.equal(await loader.count(),1);await loss.locator('summary').click();
+    await loss.getByText('Beginning not captured. Some content not captured. Content truncated.',{exact:true}).waitFor();
+    for(const mode of ['idle','stopped','disconnected','gap']){
+      const id=await page.evaluate(mode=>window.chatFixture.progress(mode),mode);await frames();
+      assert.equal(await loader.count(),0,mode);const retained=history.locator(`[data-row="${id}"] [data-action=partial-content]`);
+      assert.equal(await retained.count(),1,mode);await retained.locator('summary').click();await retained.getByText('Final content not captured.',{exact:true}).waitFor();
+    }
+    cases.push('Only positively current work has a loader; message excerpts retain exact capture gaps');
+    const active=await page.evaluate(()=>window.chatFixture.compaction('working'));await frames();
+    const activeRow=history.locator(`[data-row="${active}"]`);
+    await activeRow.getByText('Compacting context…',{exact:true}).waitFor();
+    assert.equal(await chat.locator('.mpx-chat__working').count(),1,'The compaction row replaces the generic working spinner');
+    assert.equal(await loader.count(),0);assert.equal(await activeRow.locator('[data-action=partial-content],.mpx-chat__speaker').count(),0);
+    await activeRow.scrollIntoViewIfNeeded();await page.screenshot({path:resolve(out,'compacting-context.png')});
+    await page.locator('#session-b').click();await page.locator('#session-a').click();await frames();
+    assert.equal(await activeRow.locator('.mpx-chat__working').count(),1);
+    for(const [mode,label] of [['completed','Context compacted'],['unconfirmed','Compaction status unavailable'],['disconnected','Last observed: compacting context'],['foreign-turn','Last observed: compacting context'],['failed','Context compaction failed'],['interrupted','Context compaction interrupted']]){
+      const id=await page.evaluate(mode=>window.chatFixture.compaction(mode),mode);await frames();
+      const row=history.locator(`[data-row="${id}"]`);await row.getByText(label,{exact:true}).waitFor();
+      assert.equal(await row.locator('.mpx-chat__working,[data-action=partial-content]').count(),0,mode);
+      assert.equal(await row.locator('.mpx-chat__muted,.mpx-chat__speaker').count(),0,mode);
+      const captured=await page.evaluate(id=>window.chatFixture.snapshot('a').history.rows.find(row=>row.id===id),id);
+      facts.push({mode,lifecycle:captured.lifecycle,body:captured.body,native:captured.native,label});
+      if(mode==='unconfirmed'){assert.equal(captured.native.compactionCompleted,undefined);assert.equal(captured.body.kind,'partial');}
+    }
+    cases.push('Compaction needs exact active-turn proof for a spinner and positive item completion for success');
+    assert.equal(await loss.locator('summary').innerText(),'Message excerpt');
+    for(const empty of [false,true]){
+      const id=await page.evaluate(empty=>window.chatFixture.partialTool(empty),empty);await frames();
+      const row=history.locator(`[data-row="${id}"]`);await row.locator('details').first().locator('summary').first().click();
+      const detail=row.locator('[data-action=partial-content]');assert.equal(await detail.count(),1);
+      const label=empty?'Tool output not captured':'Partial output';assert.equal(await detail.locator('summary').innerText(),label);
+      assert.equal(await row.locator('pre').count(),empty?0:1,'Empty output has no empty terminal region');
+      await detail.locator('summary').click();await detail.getByText(empty?'Beginning not captured. Final content not captured.':'Content truncated.',{exact:true}).waitFor();
+      if(!empty)assert.equal(await row.locator('pre').innerText(),'Positively retained tool output');
+      assert.equal(await row.getByText(label,{exact:true}).count(),1);
+    }
+    cases.push('Tool excerpts keep their bytes and loss details without empty terminal blocks or duplicate warnings');
+    assert.equal(await chat.getByText('Incomplete content',{exact:true}).count(),0);
+    await page.setViewportSize({width:390,height:844});await frames();await page.screenshot({path:resolve(out,'capture-callouts-mobile.png')});
+    assert.equal(await chat.evaluate(element=>element.scrollWidth>element.clientWidth+1),false);
+    const after=await page.evaluate(()=>window.chatFixture.counts());
+    assert.equal(after.submitted,before.submitted);assert.equal(after.older,before.older);
+    await writeFile(resolve(out,'callout-facts.json'),JSON.stringify({facts,before,after,nativeModelCalls:0},null,2)+'\n');
+    return{facts,submitted:after.submitted-before.submitted,olderReads:after.older-before.older};
+  }finally{await page.evaluate(()=>window.chatFixture.progress('idle'));await frames();}
+}
+
 /** Actual Transcript + retained workspace; no replacement viewport implementation. */
 export async function qualifyTranscriptScrolling(page, chat, cases, out) {
   const history=chat.locator('[data-action=history]'),facts=[],failures=[];
@@ -138,20 +197,7 @@ export async function qualifyTranscriptScrolling(page, chat, cases, out) {
     }finally{await page.mouse.up();}
   });
   await check('Only positively current work has a loader; incomplete capture stays quietly inspectable',async()=>{
-    const loader=chat.locator('[data-action=working-indicator]');
-    try{
-      const live=await page.evaluate(()=>window.chatFixture.progress('working'));await frames();
-      assert.equal(await loader.count(),1);assert.equal(await history.locator(`[data-row="${live}"] [data-action=partial-content]`).count(),0);
-      const excerpt=await page.evaluate(()=>window.chatFixture.progress('working',['prefix','interior','final','truncated']));await frames();
-      const loss=history.locator(`[data-row="${excerpt}"] [data-action=partial-content]`);
-      assert.equal(await loader.count(),1);await loss.locator('summary').click();
-      await loss.getByText('Beginning not captured. Some content not captured. Content truncated.',{exact:true}).waitFor();
-      for(const mode of ['idle','stopped','disconnected','gap']){
-        const id=await page.evaluate(mode=>window.chatFixture.progress(mode),mode);await frames();
-        assert.equal(await loader.count(),0,mode);const retained=history.locator(`[data-row="${id}"] [data-action=partial-content]`);
-        assert.equal(await retained.count(),1,mode);await retained.locator('summary').click();await retained.getByText('Final content not captured.',{exact:true}).waitFor();
-      }
-    }finally{await page.evaluate(()=>window.chatFixture.progress('idle'));await frames();}
+    await qualifyCaptureCallouts(page,chat,cases,out);
   });
   await check('Admitted composer actions follow once before native events and preserve later reading or retired views',async()=>{
     await page.setViewportSize({width:1440,height:900});await frames();

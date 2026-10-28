@@ -63,8 +63,17 @@ browser cannot scroll beyond the content's end; no trailing spacer is invented,
 and the loaded earlier rows remain reachable above it. A canonical Host capture
 gap surfaces a notice even while the transport remains connected.
 The working indicator requires fresh native and current-history work evidence.
-Incomplete capture remains inspectable; an old running row alone never starts
-a loader. Missing-final decoration is omitted only for a proved current turn.
+Incomplete text capture remains inspectable; an old running row alone never
+starts a loader. Its missing-final decoration is omitted only for a proved
+current turn.
+Codex compaction uses its own small callout rather than a generic Notice/text
+block. Fresh exact-turn work shows `Compacting context…` with one loader in place
+of the generic Working footer. `Context compacted` additionally requires positive
+native item-completion provenance; terminal parent work alone is insufficient.
+Failed/interrupted and stale/unconfirmed markers remain distinct without a live
+spinner. Ordinary partial text uses meaningful excerpt/output labels and retains
+its exact missing-content reasons behind disclosure; empty partial tool output
+has one `Tool output not captured` disclosure rather than an empty terminal.
 An admitted composer action follows once in its initiating view. A newer gesture
 or an unmounted chat suppresses that follow, including during attachment
 preparation; later receipts never change reading intent.

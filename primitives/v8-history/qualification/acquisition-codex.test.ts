@@ -14,6 +14,40 @@ const entry = (item: unknown, turnId = "turn") => ({ turnId, item, startedAtMs: 
 const page = (data: CodexItemsPage["data"], nextCursor: string | null = null): CodexItemsPage => ({ data, nextCursor, backwardsCursor: data.length ? "backwards-only" : null });
 const input = (cursor: string | null = null, count = 16) => ({ scope, cursor, count });
 
+test("Codex compaction read provenance requires native item completion, including canonical timeline completion", async () => {
+  const item = { type: "contextCompaction", id: "compact" };
+  for (const completedAtMs of [null, 21]) {
+    const port = createCodexHistoryPort({ scope, authorize: async () => {}, list: async () => page([{ ...entry(item), completedAtMs }]) });
+    const read = await port.read(input()), row = read.records[0]!;
+    assert.equal(row.lifecycle, completedAtMs === null ? "unknown" : "completed");
+    assert.equal(row.native.compactionCompleted, completedAtMs === null ? undefined : true);
+    assert.deepEqual(row.body, { kind: "unavailable", reason: "nativeOmitted" });
+    assert.deepEqual(read.gaps, []);
+  }
+  const timeline = createCodexTimelineHistoryPort({ scope, authorize: async () => {}, list: async () => ({
+    data: [{ type: "item", position: 1, turnId: "turn", item }], nextCursor: null, activeRealtimeSessionAtPageStart: null,
+  }) });
+  for (const readFirst of [true, false]) {
+    const hub = new HistoryHub(), codec = createCodexCodec({ origin: scope.origin, rootThreadId: scope.threadId, capture: hub });
+    const live = () => {
+      codec.observe({ method: "item/started", params: { threadId: "root", turnId: "turn", item } });
+      codec.observe({ method: "item/completed", params: { threadId: "root", turnId: "turn", item } });
+    };
+    if (!readFirst) live();
+    const result = await new HistoryAcquisition(hub.owner(scope), timeline).baseline("E01", "compaction-baseline").wait(1000);
+    assert.equal(result.state, "value");
+    if (readFirst) live();
+    const rows = hub.snapshot(scope).rows;
+    assert.equal(rows.length, 1); assert.equal(rows[0]!.lifecycle, "completed");
+    assert.equal(rows[0]!.native.compactionCompleted, true);
+    assert.deepEqual(rows[0]!.body, { kind: "unavailable", reason: "nativeOmitted" });
+    assert.equal(hub.snapshot(scope).coverage.gaps.some(gap => gap.kind === "missingFinal"), false);
+  }
+  const normalized = (await timeline.read(input())).records[0]!;
+  assert.equal(normalized.native.completedAtMs, null, "Canonical item completion is evidence, never a fabricated timestamp");
+  assert.equal(normalized.native.compactionCompleted, true);
+});
+
 test("Codex canonical timeline retains zero-item failed turns, complete items and one native paging frontier", async () => {
   const calls: CodexTimelineRequest[] = [], error = { message: "Selected model is at capacity. Please try a different model.", codexErrorInfo: "serverOverloaded", additionalDetails: "not retained" };
   const port = createCodexTimelineHistoryPort({ scope, context: "attachment:timeline-v1", authorize: async () => {}, list: async request => {

@@ -12,13 +12,13 @@ import { AxeBuilder } from '@axe-core/playwright';
 import { buildPdfAssets } from '../build/pdf-assets.mjs';
 import { qualifyDocumentPreviews } from './preview-cases.mjs';
 import { qualifyChildHistories } from './child-cases.mjs';
-import { qualifyTranscriptScrolling } from './transcript-cases.mjs';
+import { qualifyCaptureCallouts, qualifyTranscriptScrolling } from './transcript-cases.mjs';
 import { qualifyInlineVisuals } from './visual-cases.mjs';
 import { qualifyOptionalQuestions } from './optional-question-cases.mjs';
 import { qualifyNativeErrors } from './native-error-cases.mjs';
 import { qualifyCodexQuestions } from './question-cases.mjs';
 const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, '../../..');
-export async function runBrowserQualification({ previewOnly = false, childOnly = false, firstClickOnly = false, promptOnly = false, codexQuestionsOnly = false, scrollOnly = false, visualOnly = false, optionalQuestionsOnly = false, nativeErrorsOnly = false, transcriptSource, outputDirectory = resolve(here, '../artifacts/browser') } = {}) {
+export async function runBrowserQualification({ previewOnly = false, childOnly = false, firstClickOnly = false, promptOnly = false, codexQuestionsOnly = false, scrollOnly = false, calloutsOnly = false, visualOnly = false, optionalQuestionsOnly = false, nativeErrorsOnly = false, transcriptSource, outputDirectory = resolve(here, '../artifacts/browser') } = {}) {
   const out = resolve(outputDirectory);
   await mkdir(out, { recursive: true });
   const require = createRequire(resolve(root, 'package.json'));
@@ -85,12 +85,12 @@ export async function runBrowserQualification({ previewOnly = false, childOnly =
       const result = { passed: failure === undefined, cases, ...(failure ? { error: failure } : {}), sourceHash: sha(JSON.stringify(sourceInputs)), errors, externalRequests, nativeModelCalls: 0, cleanup: { context: true } };
       await writeFile(resolve(out, 'result.json'), JSON.stringify(result, null, 2) + '\n'); if (failure) throw Error(failure); return result;
     }
-    if(scrollOnly){
+    if(scrollOnly||calloutsOnly){
       let observation,failure;
-      try{observation=await qualifyTranscriptScrolling(page,page.locator('#chat-container .multiplex-chat'),cases,out);assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);}catch(error){failure=String(error.stack??error);}
+      try{observation=await (calloutsOnly?qualifyCaptureCallouts:qualifyTranscriptScrolling)(page,page.locator('#chat-container .multiplex-chat'),cases,out);assert.deepEqual(errors,[]);assert.deepEqual(externalRequests,[]);}catch(error){failure=String(error.stack??error);await page.screenshot({path:resolve(out,'failure.png')}).catch(()=>{});}
       await page.evaluate(()=>window.chatFixture.close());const streams=await page.evaluate(()=>window.chatFixture.counts().streams);await context.close();
       for(const input of sourceInputs)if(!input.override&&sha(await readFile(input.path))!==input.sha256)failure='Source changed during transcript qualification: '+input.path;
-      const result={passed:failure===undefined,cases,...(observation?{observation}:{}),...(failure?{error:failure}:{}),errors,externalRequests,nativeModelCalls:0,sourceHash:sha(JSON.stringify(sourceInputs)),cleanup:{context:true,workspaceStreams:streams}};
+      const result={passed:failure===undefined,scope:calloutsOnly?'focused capture and compaction callouts':'transcript scrolling',cases,...(observation?{observation}:{}),...(failure?{error:failure}:{}),errors,externalRequests,nativeModelCalls:0,sourceHash:sha(JSON.stringify(sourceInputs)),cleanup:{context:true,workspaceStreams:streams}};
       await writeFile(resolve(out,'result.json'),JSON.stringify(result,null,2)+'\n');if(failure)throw Error(failure);return result;
     }
     if (promptOnly) {
@@ -197,7 +197,7 @@ export async function runBrowserQualification({ previewOnly = false, childOnly =
   })(),new Promise((_,reject) => { timer = setTimeout(() => reject(Error('Chat browser qualification exceeded 75 seconds')),75000); })]); }
   finally { clearTimeout(timer); await browser?.close(); server.closeAllConnections(); await new Promise(accept => server.close(accept)); }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runBrowserQualification({ previewOnly: process.argv.includes('--preview-only'), childOnly: process.argv.includes('--child-only'), promptOnly: process.argv.includes('--prompt-only'), codexQuestionsOnly: process.argv.includes('--codex-questions-only'), scrollOnly: process.argv.includes('--scroll-only'), visualOnly: process.argv.includes('--visual-only'), optionalQuestionsOnly: process.argv.includes('--optional-questions-only'), nativeErrorsOnly: process.argv.includes('--native-errors-only') }).then(value => process.stdout.write(JSON.stringify(value)+'\n')).catch(error => { process.stderr.write(error.stack+'\n'); process.exitCode=1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runBrowserQualification({ previewOnly: process.argv.includes('--preview-only'), childOnly: process.argv.includes('--child-only'), promptOnly: process.argv.includes('--prompt-only'), codexQuestionsOnly: process.argv.includes('--codex-questions-only'), scrollOnly: process.argv.includes('--scroll-only'), calloutsOnly: process.argv.includes('--callouts-only'), visualOnly: process.argv.includes('--visual-only'), optionalQuestionsOnly: process.argv.includes('--optional-questions-only'), nativeErrorsOnly: process.argv.includes('--native-errors-only') }).then(value => process.stdout.write(JSON.stringify(value)+'\n')).catch(error => { process.stderr.write(error.stack+'\n'); process.exitCode=1; });
 
 
 async function qualifyInteractionRequests(page, chat, cases, out) {

@@ -23,6 +23,50 @@ function rig(limits?: Partial<CodexCodecLimits>) {
 function text(row: Row): string { assert.notEqual(row.body.kind, "unavailable"); return row.body.kind === "unavailable" ? "" : row.body.text; }
 const meta = (id: string, context = id, parent?: string) => ({ id, sessionId: context, ...(parent ? { parentThreadId: parent } : {}) });
 
+test("Codex bodyless compaction captures start and completion without missing text and rotates one read boundary", () => {
+  for (const started of [true, false]) {
+    const r = rig(), item = { type: "contextCompaction", id: "compact" }, id = codexRowId("root", "t1", item.id);
+    r.turn("t1");
+    if (started) {
+      r.emit("item/started", { threadId: "root", turnId: "t1", item });
+      assert.equal(r.row(id).lifecycle, "running");
+      assert.deepEqual(r.row(id).body, { kind: "unavailable", reason: "nativeOmitted" });
+      assert.deepEqual(r.hub.snapshot(scope()).coverage.gaps, []);
+    }
+    assert.equal(r.hub.owner(scope()).readBoundary, undefined);
+    r.emit("item/completed", { threadId: "root", turnId: "t1", item });
+    const snapshot = r.hub.snapshot(scope());
+    assert.equal(r.row(id).lifecycle, "completed");
+    assert.deepEqual(r.row(id).body, { kind: "unavailable", reason: "nativeOmitted" });
+    assert.equal(r.row(id).native.type, "contextCompaction");
+    assert.equal(r.row(id).native.turnId, "t1");
+    assert.equal(r.row(id).native.compactionCompleted, true);
+    const boundary = JSON.stringify(["nativeReadBoundary", JSON.stringify(["codex", "root", "t1", item.id])]);
+    assert.equal(snapshot.coverage.gaps.filter(gap => gap.id === boundary).length, 1);
+    assert.equal(snapshot.coverage.gaps.some(gap => gap.kind === "missingFinal"), false);
+    assert.equal(snapshot.coverage.gaps.length, started ? 1 : 2, "A completion-only capture retains the Host's missing-start evidence");
+    assert.deepEqual(snapshot.activity, { turnId: "t1", state: "working" });
+    r.emit("item/completed", { threadId: "root", turnId: "t1", item });
+    r.emit("thread/compacted", { threadId: "root", turnId: "t1" });
+    assert.deepEqual(r.hub.snapshot(scope()), snapshot);
+    assert.equal(r.codec.diagnostics().rejected, 0);
+  }
+});
+
+test("Codex terminal turn settles its open bodyless compaction without certifying compaction success", () => {
+  for (const status of ["completed", "failed", "interrupted"] as const) {
+    const r = rig(), item = { type: "contextCompaction", id: "compact" }, id = codexRowId("root", "t1", item.id);
+    r.turn("t1"); r.emit("item/started", { threadId: "root", turnId: "t1", item });
+    r.turn("t1", status);
+    assert.equal(r.row(id).lifecycle, status);
+    assert.deepEqual(r.row(id).body, { kind: "unavailable", reason: "nativeOmitted" });
+    assert.equal(r.row(id).native.compactionCompleted, undefined);
+    assert.deepEqual(r.hub.snapshot(scope()).coverage.gaps, [{ id: `missingFinal:${id}`, kind: "missingFinal", rowId: id }]);
+    assert.equal(r.hub.owner(scope()).readBoundary, undefined);
+    assert.deepEqual(r.hub.snapshot(scope()).activity, { turnId: "t1", state: status === "failed" ? "failed" : "idle" });
+  }
+});
+
 test("Codex directly captured text, command and MCP final use the real Host without native read surfaces", () => {
   const r = rig(); r.turn("t1"); r.item("answer", "");
   r.emit("item/agentMessage/delta", { threadId: "root", turnId: "t1", itemId: "answer", delta: "Hello " });
