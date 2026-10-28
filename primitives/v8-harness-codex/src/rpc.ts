@@ -118,7 +118,7 @@ export class CodexStdioRpc {
     request(method: string, params: unknown): Promise<unknown> {
         requireThat(!this.#failed && this.#pending.size < 32, "Owned Codex request unavailable");
         const id = ++this.#next;
-        const label = ["initialize", "model/list", "thread/start", "thread/resume", "thread/settings/update", "turn/settings/update", "turn/start", "turn/interrupt", "turn/steer", "thread/queue/add", "thread/compact/start", "thread/goal/get", "thread/goal/set", "thread/goal/clear", "thread/backgroundTerminals/list", "thread/backgroundTerminals/terminate", "thread/backgroundTerminals/clean", "mcpServerStatus/list", "config/mcpServer/reload", "thread/read", "thread/items/list"].includes(method) ? method : "other";
+        const label = ["initialize", "model/list", "thread/start", "thread/resume", "thread/settings/update", "turn/settings/update", "turn/start", "turn/interrupt", "turn/steer", "thread/queue/add", "thread/compact/start", "thread/goal/get", "thread/goal/set", "thread/goal/clear", "thread/backgroundTerminals/list", "thread/backgroundTerminals/terminate", "thread/backgroundTerminals/clean", "mcpServerStatus/list", "config/mcpServer/reload", "thread/read", "thread/items/list", "thread/timeline/list"].includes(method) ? method : "other";
         this.#requests[label] = (this.#requests[label] ?? 0) + 1;
         return new Promise((resolve, reject) => { this.#pending.set(id, { method: label, emptyInput: method === "turn/start" && !!params && typeof params === "object" && Array.isArray((params as { input?: unknown }).input) && (params as { input: readonly unknown[] }).input.length === 0, resolve, reject }); void this.#wire.write(JSON.stringify({ id, method, params }) + "\n").catch(() => this.#fail()); });
     }

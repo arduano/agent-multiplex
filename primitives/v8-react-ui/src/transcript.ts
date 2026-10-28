@@ -1,7 +1,7 @@
 import { createElement as h, useState, type ReactNode } from 'react';
 import type { AgentSnapshot, WorkspaceView } from '../../v8-workspace/src/contracts.js';
 import type { ReadonlyHistorySnapshot } from '../../v8-workspace/src/history-view.js';
-import { rootPlan } from '../../v8-workspace/src/plan-action.js';
+import { rootPlan, planImplementationText } from '../../v8-workspace/src/plan-action.js';
 import { operationLabel } from './operations.js';
 import type { ViewSnapshot } from '../../v8-history/src/client/history-client.js';
 import { CAPTURE_GAP_ID, type Row } from '../../v8-history/src/contracts/types.js';
@@ -16,13 +16,15 @@ import { conversationKey, sameScope } from '../../v8-history/src/contracts/ident
 import { useTranscriptViewport } from './transcript-viewport.js';
 import { HistoryBoundary, historyBoundaryKey } from './history-boundary.js';
 import { codexOptionalQuestions } from '../../v8-history/src/native/codex/questions.js';
+import { codexErrorRow, type CodexErrorRow } from '../../v8-history/src/native/codex/errors.js';
 import { OptionalQuestions, type OptionalReply } from './optional-questions.js';
 export type TranscriptView = Pick<WorkspaceView, 'viewport' | 'setExpanded' | 'loadOlder' | 'recoverHistory'> & Partial<Pick<WorkspaceView, 'implementPlan'>> & Readonly<{ getSnapshot(): AgentSnapshot | ReadonlyHistorySnapshot }>;
 
-function HistoryRow({ row, expanded, toggle, preview, fileAdapters, previewOptions, archived, inProgress, planAction, optionalQuestions, duplicateQuestionBody = false }: Readonly<{ row: Row; expanded: boolean; toggle(expanded: boolean): void; preview(id: string): Promise<ResourceLease>; fileAdapters: MarkdownFileAdapters; previewOptions: PreviewOptions; archived: boolean; inProgress: boolean; planAction?: ReactNode; optionalQuestions?: ReactNode; duplicateQuestionBody?: boolean }>) {
+function HistoryRow({ row, expanded, toggle, preview, fileAdapters, previewOptions, archived, inProgress, nativeError, planAction, optionalQuestions, duplicateQuestionBody = false }: Readonly<{ row: Row; expanded: boolean; toggle(expanded: boolean): void; preview(id: string): Promise<ResourceLease>; fileAdapters: MarkdownFileAdapters; previewOptions: PreviewOptions; archived: boolean; inProgress: boolean; nativeError?: CodexErrorRow; planAction?: ReactNode; optionalQuestions?: ReactNode; duplicateQuestionBody?: boolean }>) {
   const { diagramRendererUrl, cspNonce } = previewOptions;
   const activity = ['tool', 'reasoning', 'delegation'].includes(row.kind), open = expanded;
-  const body = row.body.kind === 'unavailable' ? h('p', { className: 'mpx-chat__muted' }, `Content unavailable (${row.body.reason})`) :
+  const errorLabel = nativeError ? nativeError.willRetry ? 'Retry notice' : 'Agent error' : undefined;
+  const body = nativeError ? h('p', { className: 'mpx-chat__native-error-message' }, nativeError.message) : row.body.kind === 'unavailable' ? h('p', { className: 'mpx-chat__muted' }, `Content unavailable (${row.body.reason})`) :
     row.kind === 'tool' ? h('pre', { className: 'mpx-chat__terminal', tabIndex: 0, role: 'region', 'aria-label': 'Tool output' }, row.body.text) : h(ChatMarkdown, { text: row.body.text, streaming: inProgress, ...(!archived ? fileAdapters : {}), ...(diagramRendererUrl ? { diagramRendererUrl } : {}), ...(cspNonce ? { cspNonce } : {}) });
   const missing = row.body.kind === 'partial' ? row.body.missing.filter(value => !inProgress || value !== 'final') : [];
   const missingText = { prefix: 'Beginning not captured', interior: 'Some content not captured', final: 'Final content not captured', truncated: 'Content truncated' };
@@ -31,10 +33,10 @@ function HistoryRow({ row, expanded, toggle, preview, fileAdapters, previewOptio
   // Native image output remains visible when its textual tool output is folded.
   const mediaContent = rowMedia(row).length ? h('div', { className: 'mpx-chat__row-media' }, ...rowMedia(row).map(media => h('div', { key: media.id, 'data-media': media.id },
     media.state === 'available' && media.artifactId ? h(InlineMedia, { identity: media.artifactId, load: () => preview(media.artifactId!), label: 'Agent image', disabled: archived }) : h('small', null, `Agent image · ${archived ? 'resource access retired' : media.state}`)))) : null;
-  return h('article', { className: `mpx-chat__row mpx-chat__row--${row.kind}`, 'data-row': row.id, 'data-kind': row.kind, 'data-lifecycle': row.lifecycle },
+  return h('article', { className: `mpx-chat__row mpx-chat__row--${row.kind}${nativeError ? ' mpx-chat__row--native-error' : ''}`, ...(nativeError ? { role: 'note', 'aria-label': errorLabel, 'data-action': 'native-error' } : {}), 'data-row': row.id, 'data-kind': row.kind, 'data-lifecycle': row.lifecycle },
     activity ? h('details', { open, onToggle: (event: { currentTarget: HTMLDetailsElement }) => { if (event.currentTarget.open !== open) toggle(event.currentTarget.open); } },
       h('summary', null, h('span', null, row.kind === 'delegation' ? 'Subagent' : row.kind === 'reasoning' ? 'Reasoning' : 'Tool / terminal'), h('small', null, row.lifecycle === 'running' ? 'Last captured: running' : row.lifecycle)), content)
-      : h('div', null, h('div', { className: 'mpx-chat__speaker' }, row.native.type === 'plan' ? 'Plan' : row.kind === 'user' ? 'You' : row.kind === 'assistant' ? 'Agent' : 'Notice'), content, planAction), mediaContent);
+      : h('div', null, h('div', { className: 'mpx-chat__speaker' }, errorLabel ?? (row.native.type === 'plan' ? 'Plan' : row.kind === 'user' ? 'You' : row.kind === 'assistant' ? 'Agent' : 'Notice')), content, planAction), mediaContent);
 }
 export function Transcript({ view, history, preview, previewLocal, previewOptions, run, emptyLabel = 'Start a conversation', emptyContent, footer, archived = false, nativeWorking = false, onOptionalReply }: Readonly<{ view: TranscriptView; history: ViewSnapshot; preview(id: string): Promise<ResourceLease>; previewLocal(reference: LocalFileReference): Promise<ResourceLease>; previewOptions: PreviewOptions; run(work: () => Promise<unknown>): void; emptyLabel?: string; emptyContent?: ReactNode; footer?: ReactNode; archived?: boolean; nativeWorking?: boolean; onOptionalReply?: OptionalReply }>) {
   const { element, boundaryElement, footerElement, beforeHistoryRead, ...input } = useTranscriptViewport(view, history);
@@ -53,9 +55,13 @@ export function Transcript({ view, history, preview, previewLocal, previewOption
     if (archived || !view.implementPlan || snapshot.kind !== 'codex' || row.native.type !== 'plan') return undefined;
     const native = snapshot.session.native, original = snapshot.planActions.find(value => value.rowId === row.id);
     const operation = original?.originalId ? snapshot.operations.find(value => value.id === original.originalId) : undefined;
-    const allowed = !!native?.nativeSession && snapshot.sendReady && !snapshot.session.activeJobs && snapshot.sendPreparation.state !== 'preparing' && native.activity === 'idle' && native.interactions.length === 0 && native.selection.kind === 'codex' && native.selection.collaboration?.mode === 'plan' && !!history.current && !!rootPlan(history, history.current.scope, { scope: native.scope, generation: native.generation, nativeSession: native.nativeSession }, row.id);
-    if (!allowed && !original) return undefined;
-    return h('div', { 'data-action': 'plan-actions' }, h(Button, { type: 'button', variant: 'outline', 'data-action': 'implement-plan', disabled: !allowed || !!original, title: 'Leave Plan mode and ask Codex to implement this plan. Your message draft and files stay here.', onClick: () => run(async () => { const action = await view.implementPlan!(row.id); await action.result; }) }, 'Implement plan'),
+    const visible = !!native?.nativeSession && native.selection.kind === 'codex' && native.selection.collaboration?.mode === 'plan' && !!history.current && !!rootPlan(history, history.current.scope, { scope: native.scope, generation: native.generation, nativeSession: native.nativeSession }, row.id);
+    let issue: string | undefined;
+    if (visible) try { planImplementationText(row); } catch (error) { issue = error instanceof Error ? error.message : 'This plan cannot be sent automatically.'; }
+    const allowed = visible && !issue && snapshot.sendReady && !snapshot.session.activeJobs && snapshot.sendPreparation.state !== 'preparing' && native!.activity === 'idle' && native!.interactions.length === 0;
+    if (!visible && !original) return undefined;
+    return h('div', { 'data-action': 'plan-actions' }, h(Button, { type: 'button', variant: 'outline', 'data-action': 'implement-plan', disabled: !allowed || !!original, title: issue ?? 'Leave Plan mode and ask Codex to implement this plan. Your message draft and files stay here.', onClick: () => run(async () => { const action = await view.implementPlan!(row.id); await action.result; }) }, 'Implement plan'),
+      issue && !original ? h('p', { className: 'mpx-chat__muted' }, issue) : null,
       original ? h('p', { role: 'status' }, operation ? operationLabel(operation) : original.originalId ? 'Check the saved original implementation request.' : 'Preparing implementation request…') : null);
   };
   return h('div', { className: 'mpx-chat__transcript-wrap' },
@@ -81,7 +87,8 @@ export function Transcript({ view, history, preview, previewLocal, previewOption
           },
           ...(previewOptions.fileAddress ? { localFileAddress: (href: string) => { const source = reference(href); return source && typeof location !== 'undefined' ? authenticatedFileAddress(previewOptions.fileAddress!({ sessionId: previewOptions.sessionId, source }), location.href) : undefined; } } : {}),
         };
-        return h(HistoryRow, { key: row.id, row, archived, inProgress: inProgress(row), previewOptions, planAction: planAction(row), optionalQuestions, duplicateQuestionBody, expanded: history.expansions.includes(row.id), toggle: (expanded: boolean) => view.setExpanded(row.id, expanded), preview, fileAdapters });
+        const nativeError = scope?.kind === 'codex' ? codexErrorRow(row) : undefined;
+        return h(HistoryRow, { key: row.id, row, archived, inProgress: inProgress(row), ...(nativeError ? { nativeError } : {}), previewOptions, planAction: planAction(row), optionalQuestions, duplicateQuestionBody, expanded: history.expansions.includes(row.id), toggle: (expanded: boolean) => view.setExpanded(row.id, expanded), preview, fileAdapters });
       }), h('div', { ref: footerElement, className: 'mpx-chat__transcript-footer' }, working ? h('div', { className: 'mpx-chat__working', role: 'status', 'data-action': 'working-indicator' }, 'Working…') : null, footer)),
     !archived ? h(LocalFilePreview, { selected, close: () => setSelected(null) }) : null,
     history.viewport.intent === 'readingHistory' ? h('button', { className: 'mpx-chat__jump', type: 'button', onClick: () => view.viewport.followLatest() }, 'Jump to latest') : null);

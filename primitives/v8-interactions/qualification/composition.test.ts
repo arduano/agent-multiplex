@@ -10,7 +10,7 @@ import {InteractionOwner} from "../src/owner.js";
 import {InteractionWorkspace} from "../src/client.js";
 test("actual worker-SQLite SessionHost journals one original private answer and bridge preserves native acknowledgement semantics",async()=>{
  const directory=await mkdtemp(join(tmpdir(),"v8-interactions-")),scope:SessionScope={connection:"c",principal:"p",host:"h",session:"logical"};let owner!:InteractionOwner,proofRun!:RunRef,calls=0;const secret="INTERACTION_PRIVATE_532af";
- const port:NativePort={kind:"copilot",protocol:copilotProtocol,placement:"shared",capabilities:{commands:["answer"],fullStop:true,reopen:true},catalog:async()=>({available:true,choices:[]}),inspect:async()=>null,start:async(input,emit)=>{
+ const port:NativePort={kind:"copilot",protocol:copilotProtocol,placement:"shared",capabilities:{commands:["answer"],fullStop:true,reopen:true,createAndWait:true},catalog:async()=>({available:true,choices:[]}),inspect:async()=>null,start:async(input,emit)=>{
   const run:RunRef={scope:input.scope,generation:input.generation,nativeSession:"native"};proofRun=run;owner=new InteractionOwner({run,kind:"copilot",epoch:1});owner.certifyBaseline({run,complete:true,continuous:true});
   owner.registerCopilot({token:{},requestId:null,owner:{nativeAgent:"native",relation:"root"},method:"userInput",payload:{question:"Private?",allowFreeform:true},respond:async native=>{calls++;assert.deepEqual(native,{answer:secret,wasFreeform:true});return{kind:"ack",success:true};}});
   const native:NativeRun={run,selection:{kind:"copilot"},interactionsComplete:true,interactions:[],stop:async()=>({run,state:"stopped",scope:"nativeTree",noAutomaticContinuation:true}),invoke:async()=>{throw Error("No other calls");}};return owner.wrap({run:native,emit});

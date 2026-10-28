@@ -56,6 +56,9 @@
 .mpx-chat__working::before { content: ''; width: 12px; height: 12px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: mpx-chat-working-spin 1s linear infinite; }
 @keyframes mpx-chat-working-spin { to { transform: rotate(360deg); } }
 .mpx-chat__row--notice { font-size: 12px; color: var(--mpx-ui-secondary); padding-left: 12px; border-left: 2px solid var(--mpx-ui-border); }
+.mpx-chat__row--native-error { border-left-color: var(--mpx-ui-error); }
+.mpx-chat__row--native-error .mpx-chat__speaker { color: var(--mpx-ui-error); }
+.mpx-chat__native-error-message { white-space: pre-wrap; overflow-wrap: anywhere; }
 .mpx-chat__terminal { max-height: min(360px, 45cqh); overflow: auto; }
 .mpx-chat__row-body > p { margin-top: 8px; }
 .mpx-chat__markdown { min-width: 0; }

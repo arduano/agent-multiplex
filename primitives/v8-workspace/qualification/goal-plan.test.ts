@@ -36,13 +36,20 @@ test('goal editor retains separate A/B/A intent, defaults blank budget, and neve
   } finally { f.workspace.close(); }
 });
 
-test('completed current root plan uses one Send across views and reload; lost reply only restores receipt lookup', async () => {
+test('completed retained root plan uses one Send across views and reload; lost reply only restores receipt lookup', async () => {
   const persistence = new MemoryDraftPersistence(), f = workspaceFixture({ persistence });
-  const plans = ['Earlier plan: preserve the selected design', 'Latest plan: a different design'];
+  const plans = ['é'.repeat(16) + 'x'.repeat(4380), 'Latest plan: a different design'];
   let fresh: ReturnType<typeof workspaceFixture> | undefined;
   try {
     const { a } = await f.open(), capture = installPlan(f, a, 'a', plans), second = f.workspace.view('a', 'second');
     assert.equal(capture.snapshot.rows.filter(row => row.native.type === 'plan').length, 2);
+    assert.equal(new TextEncoder().encode(plans[0]).byteLength, 4412, 'Reported-size completed native plans fit the ordinary exact-body Send');
+    const later = capture.rollWindow();
+    assert.equal(later.rows.some(row => row.id === capture.row.id), false, 'The actual Host window has rolled beyond the completed plan');
+    f.history.session(capture.root).client.apply({ kind: 'snapshot', snapshot: later });
+    const retained = a.getSnapshot(); if (retained.kind !== 'codex') assert.fail('Wrong family');
+    assert.equal(retained.history.origins[capture.row.id]!.source, 'retainedCurrent');
+    assert.equal(retained.history.origins[capture.row.id]!.generation, retained.history.current!.generation);
     const file = await a.saveFile({ name: 'keep.txt', mediaType: 'text/plain', blob: new Blob(['keep attachment']) });
     a.setDraft({ text: 'Keep my composer', fileIds: [file.manifest.id] }); await f.workspace.composer('a').flush();
     f.native.invoke = async request => {
@@ -77,11 +84,13 @@ test('plan admission rejects child/incomplete/prior-run facts and fences delayed
     assert.throws(() => a.implementPlan(capture.row.id), { code: 'FENCED' });
     apply({ ...capture.row, version: capture.row.version + 2, native: { ...capture.row.native, threadId: 'foreign-child' } });
     assert.throws(() => a.implementPlan(capture.row.id), { code: 'FENCED' });
+    apply({ ...capture.row, version: capture.row.version + 3, native: { ...capture.row.native, type: 'agentMessage' } });
+    assert.throws(() => a.implementPlan(capture.row.id), { code: 'FENCED' }, 'Plan-like assistant prose is not a native plan item');
     if (capture.row.body.kind !== 'complete') assert.fail('Completed plan body required');
-    apply({ ...capture.row, version: capture.row.version + 3, contentVersion: capture.row.contentVersion + 1, body: { ...capture.row.body, text: 'x'.repeat(8192) } });
+    apply({ ...capture.row, version: capture.row.version + 4, contentVersion: capture.row.contentVersion + 1, body: { ...capture.row.body, text: 'x'.repeat(8192) } });
     assert.throws(() => a.implementPlan(capture.row.id), { code: 'INVALID' });
     assert.equal(f.workspace.originalReferences('a').length, 0, 'An oversized selected plan creates no protected original');
-    apply({ ...capture.row, version: capture.row.version + 4, contentVersion: capture.row.contentVersion + 2 });
+    apply({ ...capture.row, version: capture.row.version + 5, contentVersion: capture.row.contentVersion + 2 });
     const work = a.implementPlan(capture.row.id); await entered.promise;
     f.advance('a'); gate.resolve(); await assert.rejects(work, { code: 'FENCED' });
     assert.equal(f.native.submitted.length, 0); assert.throws(() => a.implementPlan(capture.row.id), { code: 'FENCED' });

@@ -4,6 +4,7 @@ import { HistoryHub } from "../src/host/history-owner.js";
 import type { CodexScope, Origin, Row } from "../src/contracts/types.js";
 import { codexRowId, createCodexCodec, proveCodexLineage, type CodexCodecLimits } from "../src/native/codex/index.js";
 import { codexOptionalQuestions } from "../src/native/codex/questions.js";
+import { codexErrorRow } from "../src/native/codex/errors.js";
 
 const origin: Origin = { connection: "scripted", principal: "owner", host: "host", nativeSession: "root", attachment: "epoch-1" };
 const scope = (threadId = "root"): CodexScope => ({ kind: "codex", origin, threadId });
@@ -172,18 +173,39 @@ test("Codex global account and MCP sidebands do not require a transcript scope o
   assert.equal(text(r.row(codexRowId("root", "t1", "answer"))), "native text");
 });
 
-test("Codex native error sideband preserves actual turn outcome authority and rejects malformed scoped errors", () => {
+test("Codex native errors retain exact turn-scoped diagnostics without taking turn outcome authority", () => {
   const r = rig(); r.turn("t1");
   const before = r.hub.snapshot(scope());
   const error = { message: "fixture provider unavailable", codexErrorInfo: "other", additionalDetails: null, misalignment: null };
   for (const willRetry of [true, false]) r.emit("error", { threadId: "root", turnId: "t1", error, willRetry });
-  assert.strictEqual(r.hub.snapshot(scope()), before);
-  assert.deepEqual(before.activity, { turnId: "t1", state: "working" });
-  assert.deepEqual(before.coverage.gaps, []);
-  r.turn("t1", "failed");
+  const notices = r.hub.snapshot(scope());
+  assert.equal(notices.rows.length, 2);
+  assert.deepEqual(notices.rows.map(row => [row.kind, text(row), row.native.type, row.native.turnId, row.native.willRetry]),
+    [["notice", error.message, "turnError", "t1", true], ["notice", error.message, "turnError", "t1", false]]);
+  assert.deepEqual(notices.activity, before.activity);
+  assert.deepEqual(notices.coverage.gaps, []);
+  r.emit("turn/completed", { threadId: "root", turn: { id: "t1", status: "failed", error } });
+  assert.equal(r.hub.snapshot(scope()).rows.length, 2);
   assert.deepEqual(r.hub.snapshot(scope()).activity, { turnId: "t1", state: "failed" });
+  r.turn("t2");
+  assert.equal(r.hub.snapshot(scope()).rows.length, 2);
   r.emit("error", { threadId: "root", turnId: "t1", error, willRetry: "false" });
   assert.ok(r.hub.snapshot(scope()).coverage.gaps.some(gap => gap.id === "codex:invalidNativeEvent"));
+});
+
+test("Codex terminal turn errors survive missed sidebands, duplicate completions and later turns", () => {
+  const r = rig(), message = "Selected model is at capacity. Please try a different model.";
+  const error = { message, codexErrorInfo: "serverOverloaded", additionalDetails: "private provider diagnostic", misalignment: null };
+  r.turn("failed-turn");
+  const failure = { threadId: "root", turn: { id: "failed-turn", status: "failed", error } };
+  r.emit("turn/completed", failure); r.emit("turn/completed", failure);
+  r.turn("new-turn"); r.item("new-answer", "A later answer", true, "new-turn"); r.turn("new-turn", "completed");
+  const rows = r.hub.snapshot(scope()).rows;
+  assert.equal(rows.length, 2); assert.deepEqual(codexErrorRow(rows[0]!), { message, willRetry: false });
+  assert.equal(rows[0]!.native.turnId, "failed-turn"); assert.equal(rows[0]!.native.codexErrorInfo, "serverOverloaded");
+  assert.equal(JSON.stringify(rows).includes(error.additionalDetails), false);
+  assert.deepEqual(r.hub.snapshot(scope()).coverage.gaps, []);
+  assert.equal(codexErrorRow(rows[1]!), undefined);
 });
 
 test("Codex reasoning indexes and summary/content channels never concatenate", () => {

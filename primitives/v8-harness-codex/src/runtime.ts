@@ -10,7 +10,7 @@ import type { NativeMediaHandler } from "../../v8-history/src/contracts/media.js
 import type { AcquisitionPort, AcquisitionRequest } from "../../v8-history/src/acquisition/types.js";
 import { validateScope as validateHistoryScope } from "../../v8-history/src/contracts/validation.js";
 import { codexThreadMetadata, proveCodexLineage } from "../../v8-history/src/native/codex/lineage.js";
-import { createCodexHistoryPort, type CodexItemsPage } from "../../v8-history/src/native/codex/history.js";
+import { createCodexTimelineHistoryPort, type CodexTimelinePage } from "../../v8-history/src/native/codex/history.js";
 import type { TrustedContainment } from "../../v8-host/src/contracts.js";
 import { CodexController, type CodexTransport, type CodexNotification, type CodexReverseRequest } from "./controller.js";
 import { CodexStdioRpc, spawnCodexWire, type CodexWireFactory } from "./rpc.js";
@@ -298,8 +298,8 @@ export function createCodexRuntime(options: CodexRuntimeOptions) {
     requireThat(held.rpc, "No connected exact native history reader"); const rpc = held.rpc;
     const assertCurrent = () => requireThat(active === held && !held.owner.sealed && same(held.run, run));
     requireThat(held.owner.identity);
-    return createCodexHistoryPort({ scope, context: `${held.owner.identity.attachment}:active`, ...(media ? { media } : {}), assertCurrent, authorize: async () => { await authorizePage(rpc, run, scope, assertCurrent); },
-      discover: (ids, current) => discoverPage(rpc, run, scope, ids, () => { assertCurrent(); current(); }), list: async request => await rpc.request("thread/items/list", request) as CodexItemsPage });
+    return createCodexTimelineHistoryPort({ scope, context: `${held.owner.identity.attachment}:active:timeline-v1`, ...(media ? { media } : {}), assertCurrent, authorize: async () => { await authorizePage(rpc, run, scope, assertCurrent); },
+      discover: (ids, current) => discoverPage(rpc, run, scope, ids, () => { assertCurrent(); current(); }), list: async request => await rpc.request("thread/timeline/list", request) as CodexTimelinePage });
   };
   async function prepareHistoryReader(runInput: RunRef, scopeInput: CodexScope, custody?: ReaderCustodyPort): Promise<CodexPreparedReader> {
     const run = copy(runInput), scope = copy(validateHistoryScope(copy(scopeInput))) as CodexScope;
@@ -335,12 +335,12 @@ export function createCodexRuntime(options: CodexRuntimeOptions) {
         const metadata = record(await rpc.request("thread/read", { threadId: run.nativeSession, includeTurns: false })); assertCurrent(); requireThat(record(metadata.thread).id === run.nativeSession);
         let calls = 0;
         requireThat(owner.identity);
-        const context = `${owner.identity.attachment}:reader`;
+        const context = `${owner.identity.attachment}:reader:timeline-v1`;
         state.authorize = async (attached, outer) => { authorize(run, attached); assertCurrent(); outer(); requireThat(rpc); await authorizePage(rpc, run, attached, () => { assertCurrent(); outer(); }); };
         state.pathContext = async (attached, outer) => { authorize(run, attached); assertCurrent(); outer(); requireThat(rpc); return authorizePage(rpc, run, attached, () => { assertCurrent(); outer(); }); };
-        state.makePort = (attached, media) => { authorize(run, attached); return createCodexHistoryPort({ scope: attached, context, ...(media ? { media } : {}), assertCurrent, authorize: () => state.authorize!(attached, () => {}),
+        state.makePort = (attached, media) => { authorize(run, attached); return createCodexTimelineHistoryPort({ scope: attached, context, ...(media ? { media } : {}), assertCurrent, authorize: () => state.authorize!(attached, () => {}),
           discover: (ids, current) => { requireThat(rpc); return discoverPage(rpc, run, attached, ids, () => { assertCurrent(); current(); }); },
-          list: async request => { requireThat(rpc && ++calls <= 32, "Prepared native history-reader read bound exceeded"); return await rpc.request("thread/items/list", request) as CodexItemsPage; } }); };
+          list: async request => { requireThat(rpc && ++calls <= 32, "Prepared native history-reader read bound exceeded"); return await rpc.request("thread/timeline/list", request) as CodexTimelinePage; } }); };
         const port = state.makePort(scope);
         state.port = port; return { port, close };
       } catch (error) { if (acquiring) await close().catch(() => { poisoned = true; }); else if (reader === state) reader = undefined; throw error; }

@@ -9,6 +9,21 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 
 ## Isolated V8 source lane
 
+The October28 conversation corrections retain turn-scoped Codex error messages
+as ordinary history notices and render escaped inline Agent error / Retry notice
+entries. Production reads use the pinned native timeline cursor so failed turns
+without message items survive reload; canonical item-completion provenance,
+ancestry and media bounds remain explicit. Retry-only sidebands are retained in
+the current capture, without inventing native persistence. The default lifecycle
+keeps complete bodies up to64KiB within a512KiB serialized current-row window;
+protected baseline pages remain atomic and use the existing page-size reduction.
+Codex question forms retain per-question extra context and encode it after the
+selected native answer. Completed root plans remain actionable after current
+window eviction, with visible disabled controls while busy and explicit Send
+limits. Exact originals, native completion and permission authority are unchanged.
+Focused owner/component/browser checks and consuming-application gates have
+separate evidence; source correction is not an installed activation claim.
+
 The October28 T3-informed hardening keeps the existing owners: compact durable
 receipts are separate from active admission, Codex callback/live-child capacity
 recycles after positive settlement, and recent terminal evidence fences old

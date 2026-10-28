@@ -7,6 +7,7 @@ import { CodexGoalControl } from '../src/native-goal.js';
 import { operationLabel } from '../src/operations.js';
 import type { Snapshot } from '../../v8-history/src/contracts/types.js';
 declare const CAPTURED_PLAN: Snapshot;
+declare const CAPTURED_LATER: Snapshot;
 import { Transcript } from '../src/transcript.js';
 
 const f = workspaceFixture(), views = await f.open(); let reads = 0;
@@ -47,6 +48,9 @@ function App() {
 }
 const root = createRoot(document.getElementById('root')!); root.render(h(App));
 Object.assign(window, { actionFixture: { counts: () => ({ reads, submissions: f.native.submitted.length }), commands: () => f.native.submitted.map(request => request.command),
+  planBusy(working: boolean) { f.native.publish(f.snapshot('a').scope, { activity: working ? 'working' : 'idle' }); },
+  rollPlanWindow() { f.history.session(f.bindings.get('a')!.history).client.apply({ kind: 'snapshot', snapshot: CAPTURED_LATER }); const snapshot = views.a.getSnapshot(); if (snapshot.kind !== 'codex') throw Error('Codex fixture required'); return snapshot.history.origins[CAPTURED_PLAN.rows[0]!.id]?.source; },
+  operations() { const snapshot = views.a.getSnapshot(); return snapshot.kind === 'codex' ? snapshot.operations.map(({ id, type, state }) => ({ id, type, state })) : []; },
   disconnect() { f.observation({ scope: f.snapshot('b').scope, kind: 'session', state: 'connecting' }); f.observation({ scope: f.snapshot('b').scope, kind: 'session', state: 'live' }); },
   stopped() { f.native.publish(f.snapshot('b').scope, { phase: 'stopped' }); },
   close() { root.unmount(); planLease.release(); f.workspace.close(); return f.counts(); } } });

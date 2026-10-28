@@ -10,8 +10,10 @@ const base = resolve(here, '../.cache/native-actions'); await mkdir(base, { recu
 // Prepare one actual codec/Host frame outside the browser dependency graph.
 const producer = await build({ entryPoints: [resolve(framework, 'primitives/v8-workspace/qualification/goal-plan-fixture.ts')], bundle: true, write: false, platform: 'node', format: 'esm', metafile: true, target: 'es2023', logLevel: 'warning' });
 const { capturePlan } = await import('data:text/javascript;base64,' + Buffer.from(producer.outputFiles[0].contents).toString('base64'));
-const captured = capturePlan({ kind: 'codex', origin: { connection: 'fixture', principal: 'owner', host: 'host', nativeSession: 'native-a', attachment: 'attachment-a' }, threadId: 'native-a' }, 1).snapshot;
-const bundle = await build({ entryPoints: [resolve(here, 'native-actions-entry.ts')], bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2023', metafile: true, alias: { react: dirname(require.resolve('react')), 'react-dom/client': require.resolve('react-dom/client') }, define: { 'process.env.NODE_ENV': '"production"', CAPTURED_PLAN: JSON.stringify(captured) }, logLevel: 'warning' });
+const planText = 'The completed native plan\n\n' + 'Preserve exact data and verify the result.\n'.repeat(110);
+assert.ok(Buffer.byteLength(planText) > 4096 && planText.length + 'Implement this plan:\n\n'.length < 8192);
+const capture = capturePlan({ kind: 'codex', origin: { connection: 'fixture', principal: 'owner', host: 'host', nativeSession: 'native-a', attachment: 'attachment-a' }, threadId: 'native-a' }, 1, [planText]), captured = capture.snapshot, later = capture.rollWindow();
+const bundle = await build({ entryPoints: [resolve(here, 'native-actions-entry.ts')], bundle: true, write: false, platform: 'browser', format: 'esm', target: 'es2023', metafile: true, alias: { react: dirname(require.resolve('react')), 'react-dom/client': require.resolve('react-dom/client') }, define: { 'process.env.NODE_ENV': '"production"', CAPTURED_PLAN: JSON.stringify(captured), CAPTURED_LATER: JSON.stringify(later) }, logLevel: 'warning' });
 const paths = [...new Set([...Object.keys(bundle.metafile.inputs).filter(path => !path.startsWith('<define:')).map(path => resolve(path)), fileURLToPath(import.meta.url)])].sort();
 for (const path of paths) assert.equal(path.includes('storage-sqlite') || /\/src\/(?:host|node|authority|gateway|http)\//.test(path), false, 'Node domain owner in browser');
 const allPaths = [...new Set([...paths, ...Object.keys(producer.metafile.inputs).map(path => resolve(path))])].sort();
@@ -25,6 +27,7 @@ try {
   const page = await context.newPage(); page.setDefaultTimeout(7000); page.on('pageerror', error => errors.push(error.message)); await page.goto(origin); await page.getByText('Native actions', { exact: true }).click();
   assert.deepEqual(await page.evaluate(() => window.actionFixture.counts()), { reads: 0, submissions: 0 });
   await page.getByLabel('Message draft').fill('Keep this ordinary message draft');
+  if (!process.argv.includes('--plan-only')) {
   await page.locator('[data-action=goal-control]').click();
   assert.deepEqual(await page.evaluate(() => window.actionFixture.counts()), { reads: 0, submissions: 0 }, 'Opening the goal editor does not read native state');
   await page.getByRole('button', { name: 'Refresh goal', exact: true }).click(); await page.getByRole('dialog', { name: 'Agent goal', exact: true }).getByText('Full native goal', { exact: true }).waitFor(); await page.getByText('Goal · Budget reached', { exact: true }).waitFor(); await page.getByText('1800 tokens used of 2000 · 125 seconds elapsed', { exact: true }).waitFor();
@@ -54,11 +57,20 @@ try {
   await page.evaluate(() => window.actionFixture.stopped()); await page.getByText('Agent stopped · last observed running', { exact: true }).first().waitFor(); assert.equal(await page.locator('[data-action=cancel-task-0]').isDisabled(), true);
   cases.push('Task/queue mutations use exact IDs and truthful false outcomes; all three progress variants render, stale data disables selected actions, and only positive root Stop changes running presentation');
   await page.getByRole('button', { name: 'Codex', exact: true }).click();
+  }
+  const implement = page.getByRole('button', { name: 'Implement plan', exact: true });
+  await implement.waitFor();
+  await page.evaluate(() => window.actionFixture.planBusy(true));
+  await page.waitForFunction(() => document.querySelector('[data-action=implement-plan]')?.disabled === true);
+  await page.evaluate(() => window.actionFixture.planBusy(false));
+  assert.equal(await page.evaluate(() => window.actionFixture.rollPlanWindow()), 'retainedCurrent');
+  await page.waitForFunction(() => document.querySelector('[data-action=implement-plan]')?.disabled === false);
   const submissions = await page.evaluate(() => window.actionFixture.counts().submissions);
-  await page.getByRole('button', { name: 'Implement plan', exact: true }).click(); await page.waitForFunction(count => window.actionFixture.counts().submissions === count + 1, submissions);
-  assert.deepEqual(await page.evaluate(() => window.actionFixture.commands().at(-1)), { type: 'send', text: 'Implement this plan:\n\nThe completed native plan', selection: { kind: 'codex', collaboration: { mode: 'default', model: 'original', effort: 'low' } } });
+  await implement.click(); await page.waitForFunction(count => window.actionFixture.counts().submissions === count + 1, submissions);
+  await page.waitForFunction(() => window.actionFixture.operations().some(operation => operation.type === 'send' && operation.state === 'acknowledged'));
+  assert.deepEqual(await page.evaluate(() => window.actionFixture.commands().at(-1)), { type: 'send', text: 'Implement this plan:\n\n' + planText, selection: { kind: 'codex', collaboration: { mode: 'default', model: 'original', effort: 'low' } } });
   assert.equal(await page.getByLabel('Message draft').inputValue(), 'Keep this ordinary message draft'); assert.equal(await page.getByRole('button', { name: 'Implement plan', exact: true }).isDisabled(), true);
-  cases.push('Actual completed codec plan has one owner-bound Implement action using a default-mode Send; its original disables repeats while the ordinary draft remains retained');
+  cases.push('Actual completed codec plan stays visible but disabled while busy, survives current Host window eviction, then uses one acknowledged default-mode Send; its original disables repeats while the ordinary draft remains retained');
   assert.deepEqual(errors, []); assert.deepEqual(outside, []); const cleanup = await page.evaluate(() => window.actionFixture.close()); assert.equal(cleanup.streams, 0);
   for (const source of sources) assert.equal(sha(await readFile(resolve(framework, source.path))), source.sha256);
   result = { status: 'qualified-native-action-presentation', sourceHash: sha(JSON.stringify(sources)), capturedPlanSha256: sha(JSON.stringify(captured)), cases, cleanup, nativeCalls: 0, modelCalls: 0, limits: ['Actual retained workspace and mounted Chromium; scripted native reads/receipts, no SDK/native/provider processes', 'Concrete adapter-to-retained-read metadata projection qualified separately in the SSR owner oracle'] };

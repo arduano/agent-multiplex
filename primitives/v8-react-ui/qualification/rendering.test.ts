@@ -17,6 +17,7 @@ import { ToolConnections } from '../src/tools.js';
 import { RequestArea } from '../src/prompts.js';
 import { sessionStatus } from '../src/status.js';
 import { CAPTURE_GAP_ID, type Gap } from '../../v8-history/src/contracts/types.js';
+import { installPlan } from '../../v8-workspace/qualification/goal-plan-fixture.js';
 
 type ControlProps = { children?: ReactNode; 'data-action'?: string; disabled?: boolean; value?: string; onClick?: () => void; onValueChange?: (value: string) => void; options?: readonly Readonly<{ value: string; label: string; disabled?: boolean }>[] };
 function preparedViewContract(view: WorkspaceView): MultiplexChatProps {
@@ -29,6 +30,43 @@ function control(node: ReactNode, action: string): ControlProps | undefined {
   if (node.props['data-action'] === action) return node.props;
   return Children.toArray(node.props.children).map(child => control(child, action)).find(Boolean);
 }
+
+test('native root plan action remains discoverable while busy and after the current Host window rolls', async () => {
+  const f = workspaceFixture();
+  try {
+    const { a } = await f.open(), capture = installPlan(f, a), native = f.snapshot('a');
+    const render = () => renderToStaticMarkup(h(MultiplexChat, { view: a }));
+    const button = () => render().match(/<button[^>]*data-action="implement-plan"[^>]*>/)?.[0];
+    assert.ok(button()); assert.doesNotMatch(button()!, /disabled/);
+    f.native.publish(native.scope, { activity: 'working' });
+    assert.match(button() ?? '', /disabled/, 'A current completed plan stays visible with a busy admission guard');
+    f.native.publish(native.scope, { activity: 'idle' });
+    f.history.session(capture.root).client.apply({ kind: 'snapshot', snapshot: capture.rollWindow() });
+    const state = a.getSnapshot(); if (state.kind !== 'codex') assert.fail('Wrong family');
+    assert.equal(state.history.origins[capture.row.id]!.source, 'retainedCurrent');
+    assert.ok(button()); assert.doesNotMatch(button()!, /disabled/);
+    f.native.publish(native.scope, { selection: { kind: 'codex', model: 'original', effort: 'low', collaboration: { mode: 'default', model: 'original', effort: 'low' } } });
+    assert.equal(button(), undefined, 'Default mode does not acquire a plan-mode action');
+    f.advance('a'); await a.rebind();
+    assert.equal(button(), undefined, 'Old native generation cannot grant an implementation action');
+    assert.equal(f.native.submitted.length, 0, 'Rendering never dispatches a native command');
+    capture.release();
+  } finally { f.workspace.close(); }
+});
+
+test('a complete native plan beyond the Send text limit has a visible disabled action and explanation', async () => {
+  const f = workspaceFixture();
+  try {
+    const { a } = await f.open(), capture = installPlan(f, a, 'a', ['x'.repeat(8192)]);
+    const markup = renderToStaticMarkup(h(MultiplexChat, { view: a }));
+    assert.equal(capture.row.body.kind, 'complete');
+    assert.match(markup.match(/<button[^>]*data-action="implement-plan"[^>]*>/)?.[0] ?? '', /disabled/);
+    assert.match(markup, /The complete plan exceeds the 8,192-character message limit\./);
+    assert.equal(f.native.submitted.length, 0);
+    assert.equal(f.workspace.originalReferences('a').length, 0);
+    capture.release();
+  } finally { f.workspace.close(); }
+});
 
 test('actual SSR uses the prepared view without observing, reading, effects or draft allocation', async () => {
   const fixture = workspaceFixture(), views = await fixture.open(), before = fixture.counts();
@@ -57,6 +95,35 @@ test('connected chat warns only for the canonical live capture gap without readi
       assert.equal(render().split(notice).length - 1, 1, 'The canonical capture gap remains visible on a healthy connection');
       capture([]); assert.equal(render().includes(notice), false);
       assert.deepEqual(f.counts(), before, 'Rendering neither reads history nor changes native state');
+    } finally { lease.release(); }
+  } finally { f.workspace.close(); }
+});
+test('native turn errors remain exact accessible history content without inferring turn completion or interpreting message markup', async () => {
+  const f = workspaceFixture();
+  try {
+    const { a } = await f.open(), lease = a.observe(), binding = f.bindings.get('a')!, client = f.history.session(binding.history).client;
+    try {
+      if (binding.history.kind !== 'codex') assert.fail('Expected Codex history');
+      const message = 'The provider rejected this turn.\n**Exact native text** <private-detail> [do not navigate](https://outside.invalid/error)';
+      const current = client.current!, error = { id: 'native-turn-error', kind: 'notice' as const, lifecycle: 'completed' as const, body: { kind: 'complete' as const, text: message, evidence: 'nativeFullBody' as const }, native: { type: 'turnError', threadId: binding.history.threadId, turnId: 'failed-turn', willRetry: false }, version: 1, contentVersion: 1 };
+      client.apply({ kind: 'snapshot', snapshot: { ...current, revision: current.revision + 1, rows: [...current.rows, error] } });
+      const before = f.counts(), render = () => renderToStaticMarkup(h(MultiplexChat, { view: a }));
+      const initial = render();
+      assert.match(initial, /role="note" aria-label="Agent error"/);
+      assert.match(initial, /\*\*Exact native text\*\* &lt;private-detail&gt;/);
+      assert.doesNotMatch(initial, /<a[^>]+outside\.invalid|<strong>Exact native text|Turn failed/);
+      assert.equal(initial.split('data-action="native-error"').length - 1, 1);
+      f.observation({ scope: binding.run.scope, kind: 'history', history: binding.history, state: 'disconnected' });
+      f.observation({ scope: binding.run.scope, kind: 'history', history: binding.history, state: 'live' });
+      const captured = client.current!;
+      client.apply({ kind: 'snapshot', snapshot: { ...captured, revision: captured.revision + 1, activity: { state: 'working', turnId: 'next-turn' } } });
+      f.native.publish(binding.run.scope, { activity: 'working' });
+      const subsequent = render(); assert.match(subsequent, /aria-label="Agent error"/); assert.match(subsequent, /Working/);
+      assert.deepEqual(client.current!.rows.find(row => row.id === error.id), error, 'A new turn never rewrites or hides the previous diagnostic');
+      const latest = client.current!;
+      client.apply({ kind: 'snapshot', snapshot: { ...latest, revision: latest.revision + 1, rows: [...latest.rows, { ...error, id: 'native-retry-error', native: { ...error.native, willRetry: true } }] } });
+      assert.match(render(), /aria-label="Retry notice"/);
+      assert.deepEqual(f.counts(), before, 'History error rendering and observation changes never submit, retry or read native state');
     } finally { lease.release(); }
   } finally { f.workspace.close(); }
 });

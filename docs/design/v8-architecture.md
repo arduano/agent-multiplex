@@ -145,6 +145,15 @@ client validates whole frames before publication. Body completeness, native
 activity, stream freshness and Send receipt remain independent facts. Historical
 records cannot replay callbacks or settle original requests.
 
+The default lifecycle admits complete bodies up to 64 KiB while the Host rolls
+old non-running rows out of a 512 KiB serialized current window (also bounded
+to 128 rows); retained views and explicit native pages keep their own bounded
+residency. Frame validation still caps the wire at 1 MiB. Codex's bounded native
+timeline supplies completed-item evidence and terminal-turn error notices through
+one cursor, including itemless failures. Error text belongs to those scoped
+history rows, not a second error store, and a diagnostic never settles native
+turn activity or an original request.
+
 The [retained workspace](../../primitives/v8-workspace/README.md) owns session
 state independently of React selection. Views retain pages, anchors and
 expansions; sessions retain drafts and originals. A UI pin holds background

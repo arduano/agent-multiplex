@@ -122,10 +122,28 @@ Host versions. Historical lifecycle without positive completion stays `unknown`;
 historical activity, permissions, edits and delegation cannot replay callbacks.
 See the framework [history ownership contract](../../docs/design/v8-architecture.md#history-and-retained-views).
 
+Production Codex `.162.1` reads use one bounded `thread/timeline/list` cursor,
+with a distinct `timeline-v1` read context. Native windows arrive newest first,
+with entries ordered inside each window by ordinal, kind and ID; an item and a
+turn boundary can share an ordinal. The pinned
+[canonical projection](https://github.com/openai/codex/blob/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d/codex-rs/app-server-protocol/src/protocol/thread_history_projection.rs)
+stores `ItemCompleted` records, so timeline items provide positive completion
+evidence without fabricated timestamps or inference from turn idleness. The
+existing items-list port remains available with its original item-envelope
+completion rules. Both reuse the same item/media normalization.
+
+Live error notifications and native terminal-turn errors become exact
+thread/turn-scoped notice rows with the native message. A complete diagnostic
+does not certify turn completion or alter retry/Send behavior. Terminal errors
+also survive reload through timeline boundaries, including turns with no items.
+Captured retry-only notifications cannot be reconstructed after Host restart
+unless native history itself retained that diagnostic. Arbitrary additional
+provider details are not copied into row metadata.
+
 One acquisition action skips empty continuing native pages until it reaches a
 projected record, an explicit gap, a proved native end, or its finite native-call
 budget. Copilot persisted reads still request one event at a time. The default
-budget is 128 calls per action, each admitted decoded batch at most 64 KiB; the
+budget is 128 calls per action, each admitted decoded batch at most 512 KiB; the
 owner holds one batch at a time and does not concatenate body pages. A scan-limit
 page retains its exact available continuation, never an invented end. Unknown
 native event types remain visible gaps rather than becoming ignored metadata.
@@ -190,14 +208,29 @@ could overwrite forgotten newer capture; the admitted native read remains owned
 until it settles. A fence also retires if its changed-row set exceeds the evidence
 bound. This does not change native cursors, cancel work or replay a read. Settled
 stale/failed facts retain the existing explicit-reobservation limitations.
+
+The generic Host body default remains 4 KiB; the production default lifecycle
+selects 64 KiB per body and at most 128 current rows. A separate 512 KiB serialized
+current-row budget includes JSON escaping and native metadata. Old non-running
+rows leave shared residency rather than forcing ordinary complete plans and
+messages to truncate. Previously observed client rows remain retained; neither
+residency eviction nor evidence eviction establishes semantic deletion. Bodies
+beyond 64 KiB remain explicitly truncated, and protected running work can still
+exhaust bounded capacity. Full frames retain their separate 1 MiB wire bound.
+Incoming read batches remain protected: a batch still exceeding current
+capacity fails atomically rather than silently omitting rows from its cursor.
+The 1024-entry evidence window can retain up to 64 MiB of UTF8 body text per
+scope under the production body setting, plus bounded metadata and object
+overhead; it is not an additional durable transcript store.
+
 Acquisition targets100 native entries/events per active request within a512KiB
 normalized batch. Existing same-input shrinking preserves the hard byte bound;
 large records can return fewer entries. Persisted single-use native cursors keep
 their one-event request semantics. Expanded reasoning
 segments can force same-input shrink; singleton overflow remains unavailable.
 `counters.portCalls` includes attempts rejected before a concrete native RPC;
-injected RPC counters independently measure actual calls. These are fixture
-budgets, not production retention selections. The same ReadCoordinator spans
+injected RPC counters independently measure actual calls. Scripted counters do
+not establish native conformance. The same ReadCoordinator spans
 native resets, so an old hung read cannot free admission for its replacement.
 
 The Host snapshot revision proves ordering of retained Host evidence. It is not

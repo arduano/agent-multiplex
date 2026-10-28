@@ -89,6 +89,7 @@ class Wire implements CodexWire {
   userAgent = "codex/0.162.1 (offline)";
   read: ((params: Record<string, unknown>) => unknown | Promise<unknown>) | undefined;
   list: ((params: Record<string, unknown>) => unknown | Promise<unknown>) | undefined;
+  timeline: ((params: Record<string, unknown>) => unknown | Promise<unknown>) | undefined;
   onData(listener: (text: string) => void) { this.data.add(listener); return () => this.data.delete(listener); }
   onClose(listener: () => void) { this.closed.add(listener); return () => this.closed.delete(listener); }
   frame(value: unknown) { for (const listener of this.data) listener(JSON.stringify(value) + "\n"); }
@@ -97,11 +98,50 @@ class Wire implements CodexWire {
     const result = message.method === "initialize" ? { userAgent: this.userAgent }
       : ["thread/start", "thread/resume"].includes(message.method) ? { thread: { id: "native-thread", status: { type: "idle" } }, model: params.model, modelProvider: "guard", approvalPolicy: params.approvalPolicy, sandbox: { type: "dangerFullAccess" }, reasoningEffort: "low" }
       : message.method === "thread/read" ? this.read ? await this.read(params) : { thread: { id: "native-thread", sessionId: "native-thread" } }
-      : message.method === "thread/items/list" ? this.list ? await this.list(params) : { data: [], nextCursor: null, backwardsCursor: null } : { turn: { id: "turn" } };
+      : message.method === "thread/items/list" ? this.list ? await this.list(params) : { data: [], nextCursor: null, backwardsCursor: null }
+      : message.method === "thread/timeline/list" ? this.timeline ? await this.timeline(params) : await (async () => {
+        const page = this.list ? await this.list(params) as { data: { turnId: string; item: unknown }[]; nextCursor: string | null } : { data: [], nextCursor: null };
+        return { data: [...page.data].reverse().map((entry, position) => ({ type: "item", position, turnId: entry.turnId, item: entry.item })), nextCursor: page.nextCursor, activeRealtimeSessionAtPageStart: null };
+      })() : { turn: { id: "turn" } };
     this.frame({ id: message.id, result });
   }
   async close() { for (const listener of this.closed) listener(); }
 }
+
+test("Codex production active and cold history select bounded canonical timeline including itemless failures", async () => {
+  const f = await fixture(), wires: Wire[] = [], message = "Selected model is at capacity. Please try a different model.";
+  const runtime = createCodexRuntime({ ...f.options, model: "gpt-6-luna", provider: { id: "guard", baseUrl: "http://127.0.0.1/v1", environmentKey: "TEST_KEY", copilotOnly: true },
+    catalog: async () => ({ available: false, choices: [] }), commands: f.docker, wire: () => {
+      const wire = new Wire(); wires.push(wire);
+      wire.timeline = params => {
+        assert.deepEqual(Object.keys(params).sort(), ["cursor", "limit", "threadId"]);
+        assert.equal(params.threadId, "native-thread"); assert.equal(params.limit, 1);
+        return { data: params.cursor === null ? [{ type: "turnCompleted", position: 22, turnId: "failed-turn", status: "failed", error: { message, codexErrorInfo: "serverOverloaded" } }]
+          : [{ type: "item", position: 21, turnId: "earlier", item: { type: "agentMessage", id: "answer", text: "Earlier complete native answer" } }],
+          nextCursor: params.cursor === null ? "previous-timeline-window" : null, activeRealtimeSessionAtPageStart: null };
+      }; return wire;
+    } });
+  try {
+    const attachment = await runtime.controller.open(input, () => {}), run = attachment.identity.run;
+    const history: CodexScope = { kind: "codex", origin: { connection: scope.connection, principal: scope.principal, host: scope.host, nativeSession: run.nativeSession, attachment: "host-epoch" }, threadId: run.nativeSession };
+    const port = runtime.history.port(run, history);
+    const failed = await port.read({ scope: history, cursor: null, count: 1 });
+    assert.equal(failed.records.length, 1); assert.equal(failed.records[0]!.native.type, "turnError");
+    assert.deepEqual(failed.records[0]!.body, { kind: "complete", text: message, evidence: "nativeFullBody" });
+    assert.match(port.context!, /:timeline-v1$/);
+    const older = await port.read({ scope: history, cursor: failed.nextCursor, count: 1 });
+    assert.equal(older.records[0]!.lifecycle, "completed"); assert.equal(older.records[0]!.native.completedAtMs, null);
+    await attachment.stopTree();
+    const reader = await runtime.prepareHistoryReader(run, history);
+    const cold = await reader.port.read({ scope: history, cursor: null, count: 1 });
+    assert.deepEqual(cold.records, failed.records); assert.notEqual(reader.port.context, port.context);
+    await reader.close(); await assert.rejects(reader.port.read({ scope: history, cursor: null, count: 1 }));
+    const methods = wires.flatMap(wire => wire.sent).map(frame => frame.method);
+    assert.equal(methods.filter(method => method === "thread/timeline/list").length, 3);
+    assert.equal(methods.some(method => ["thread/resume", "thread/items/list", "thread/turns/list", "turn/start", "turn/steer"].includes(String(method))), false);
+    assert.equal(f.docker.containers.size, 0);
+  } finally { await runtime.close(); await f.dispose(); }
+});
 
 test("Codex concrete factory is inert, installs custody before exact .162 open, preserves policy, and explicit cold reader never resumes", async () => {
   const f = await fixture(), wires: Wire[] = []; const wire: CodexWireFactory = () => { const value = new Wire(); wires.push(value); return value; };
@@ -133,7 +173,7 @@ test("Codex concrete factory is inert, installs custody before exact .162 open, 
     assert.equal(await readFile(join(f.options.home, "config.toml"), "utf8"), config + projectTrust, "native trust metadata is retained, not overwritten");
     assert.ok(reader.port.context); assert.notEqual(reader.port.context, activeContext); assert.notEqual(reader.port.context, inactive.context);
     await reader.port.read({ scope: history, cursor: null, count: 2 });
-    assert.deepEqual(wires[1]!.sent.filter(message => message.id !== undefined).map(message => message.method), ["initialize", "thread/read", "thread/items/list"]);
+    assert.deepEqual(wires[1]!.sent.filter(message => message.id !== undefined).map(message => message.method), ["initialize", "thread/read", "thread/timeline/list"]);
     await reader.close(); await assert.rejects(reader.port.read({ scope: history, cursor: null, count: 2 }));
     const otherReader = await runtime.prepareHistoryReader(run, history); assert.ok(otherReader.port.context); assert.notEqual(otherReader.port.context, reader.port.context); await otherReader.close();
     const resumed = await runtime.controller.open({ ...input, nativeSession: run.nativeSession, generation: 2, operationId: "resume-new-original" }, () => {});
@@ -211,12 +251,12 @@ test("Codex actual runtime proves every explicit nested child page and cold read
     assert.equal((await port.read({ scope: child, cursor: null, count: 2 })).nextCursor, "older");
     await port.read({ scope: child, cursor: "older", count: 2 });
     assert.equal(wires[0]!.sent.filter(value => value.method === "thread/read").length, 6);
-    assert.equal(wires[0]!.sent.filter(value => value.method === "thread/items/list").length, 2);
+    assert.equal(wires[0]!.sent.filter(value => value.method === "thread/timeline/list").length, 2);
     assert.equal(runtime.controller.current()!.run.nativeSession, run.nativeSession);
     assert.deepEqual(await runtime.history.pathContext(run, child, () => {}), { cwd: join(f.options.cwd, "grandchild"), dialect: "posix" });
     wires[0]!.read = params => ({ thread: { id: params.threadId, sessionId: params.threadId === "native-thread" ? "native-thread" : "foreign", ...(params.threadId === "native-thread" ? {} : { parentThreadId: "native-thread" }) } });
     await assert.rejects(port.read({ scope: child, cursor: "older", count: 2 }), /LINEAGE/);
-    assert.equal(wires[0]!.sent.filter(value => value.method === "thread/items/list").length, 2, "shared context without lineage cannot dispatch a page");
+    assert.equal(wires[0]!.sent.filter(value => value.method === "thread/timeline/list").length, 2, "shared context without lineage cannot dispatch a page");
     await attachment.stopTree();
     const root = { ...child, threadId: run.nativeSession }, reader = await runtime.prepareHistoryReader(run, root), childReader = await runtime.prepareHistoryReader(run, child);
     assert.equal(wires.length, 2, "Root and child share the one sessionless RPC/allocation");
@@ -224,10 +264,10 @@ test("Codex actual runtime proves every explicit nested child page and cold read
     await assert.rejects(runtime.prepareHistoryReader({ ...run, generation: run.generation + 1 }, child)); assert.equal(wires.length, 2);
     await runtime.history.authorize(run, child, () => {});
     await reader.port.read({ scope: root, cursor: null, count: 2 }); await childReader.port.read({ scope: child, cursor: null, count: 2 });
-    const pages = wires[1]!.sent.filter(value => value.method === "thread/items/list").length;
+    const pages = wires[1]!.sent.filter(value => value.method === "thread/timeline/list").length;
     wires[1]!.read = params => ({ thread: { id: params.threadId, sessionId: params.threadId === "native-thread" ? "native-thread" : "foreign", ...(params.threadId === "native-thread" ? {} : { parentThreadId: "native-thread" }) } });
     await assert.rejects(childReader.port.read({ scope: child, cursor: "older", count: 2 }));
-    assert.equal(wires[1]!.sent.filter(value => value.method === "thread/items/list").length, pages, "Each child page re-proves genuine ancestry before its body RPC");
+    assert.equal(wires[1]!.sent.filter(value => value.method === "thread/timeline/list").length, pages, "Each child page re-proves genuine ancestry before its body RPC");
     await reader.close(); await assert.rejects(childReader.port.read({ scope: child, cursor: null, count: 2 }));
     assert.equal(wires[1]!.sent.some(value => value.method === "thread/resume" || value.method === "thread/start" || value.method === "turn/start"), false);
     assert.equal(f.docker.containers.size, 0);
@@ -325,7 +365,7 @@ test("Codex child metadata retained across Stop cannot dispatch or publish a lat
     wire.read = async params => { entered.resolve(); await release.promise; return { thread: { id: params.threadId, sessionId: "native-thread", parentThreadId: "native-thread" } }; };
     const pending = runtime.history.port(run, child).read({ scope: child, cursor: null, count: 2 }); void pending.catch(() => {});
     await entered.promise; await attachment.stopTree(); release.resolve(); await assert.rejects(pending);
-    assert.equal(wire.sent.some(value => value.method === "thread/items/list"), false);
+    assert.equal(wire.sent.some(value => value.method === "thread/timeline/list"), false);
   } finally { release.resolve(); await runtime.close(); runtime.controller.dispose(); await f.dispose(); }
 });
 

@@ -3,10 +3,13 @@ import { canonical } from "../../contracts/validation.js";
 import { mediaMeaning, type NativeMediaHandler, type NativeMediaOccurrence } from "../../contracts/media.js";
 import { codexMediaItem } from "./media.js";
 import { codexOptionalQuestionMetadata } from "./questions.js";
+import { codexErrorRecord } from "./errors.js";
+import type { HistoryRecord } from "../../acquisition/types.js";
 import { CodexLineageError, codexThreadMetadata, identity, proveCodexLineage, record, type CodexThreadMetadata } from "./lineage.js";
 
 export { CodexLineageError, proveCodexLineage, type CodexLineageProof } from "./lineage.js";
 export { codexOptionalQuestions, type CodexOptionalQuestion, type CodexOptionalQuestions } from "./questions.js";
+export { codexErrorRow, type CodexErrorRow } from "./errors.js";
 
 export interface CodexCodecLimits {
   readonly maxThreads: number;
@@ -38,7 +41,8 @@ type Item = {
 };
 type Event =
   | { readonly type: "thread"; readonly threadId: string; readonly metadata: CodexThreadMetadata }
-  | { readonly type: "turn"; readonly threadId: string; readonly turnId: string; readonly status: string }
+  | { readonly type: "turn"; readonly threadId: string; readonly turnId: string; readonly status: string; readonly error?: HistoryRecord }
+  | { readonly type: "error"; readonly threadId: string; readonly error: HistoryRecord }
   | { readonly type: "item"; readonly threadId: string; readonly turnId: string; readonly completed: boolean; readonly item: Item }
   | { readonly type: "delta"; readonly threadId: string; readonly turnId: string; readonly itemId: string;
       readonly nativeType: string; readonly kind: RowKind; readonly channel: string; readonly index?: number; readonly text: string }
@@ -209,19 +213,19 @@ export class CodexCodec implements NativeCodec {
       const turn = record(params.turn), turnId = identity(turn?.id), status = turn?.status;
       if (!turnId || (method === "turn/started" ? status !== "inProgress" : !["completed", "failed", "interrupted"].includes(String(status))))
         throw new TypeError("CODEX_TURN_INVALID");
-      return { type: "turn", threadId, turnId, status: status as string };
+      return { type: "turn", threadId, turnId, status: status as string,
+        ...(turn?.error == null ? {} : { error: codexErrorRecord(threadId, turnId, turn.error, false) }) };
     }
     const turnId = identity(params.turnId);
     if (method === "error") {
-      // Retry/failure attention belongs to the controller. Only an actual
-      // turn/completed notification can finish the history turn. Validate the
-      // scoped sideband without retaining its diagnostic text as transcript.
+      // Retain the diagnostic without finishing the turn. Retry/failure
+      // attention still belongs to the native controller.
       const error = record(params.error);
       if (!turnId || typeof params.willRetry !== "boolean" || !error || typeof error.message !== "string" ||
           Object.keys(params).some(key => !["threadId", "turnId", "willRetry", "error"].includes(key)) ||
           utf8.encode(canonical(error)).byteLength > this.#limits.maxBufferedBytes)
         throw new TypeError("CODEX_ERROR_NOTIFICATION_INVALID");
-      return undefined;
+      return { type: "error", threadId, error: codexErrorRecord(threadId, turnId, error, params.willRetry) };
     }
     if (method === "turn/moderationMetadata") {
       // Native .162.1 emits this JSON sideband independently of transcript
@@ -505,6 +509,10 @@ export class CodexCodec implements NativeCodec {
   }
   #apply(thread: Thread, event: Exclude<Event, { type: "thread" }>): void {
     const actions: Action[] = [];
+    const diagnostic = (row: HistoryRecord) => {
+      actions.push({ type: "finish", id: row.id, kind: row.kind, lifecycle: "completed",
+        text: row.body.kind === "unavailable" ? null : row.body.text, native: row.native });
+    };
     if (event.type === "revert") {
       thread.items.clear(); thread.completedTurns.clear(); thread.activeTurn = null;
       this.#capture.reset(thread.scope, "codex:thread/reverted"); return;
@@ -530,7 +538,10 @@ export class CodexCodec implements NativeCodec {
       if (event.status === "active") actions.push({ type: "activity", activity: { turnId: thread.activeTurn, state: "working" } });
       else if (event.status === "systemError") actions.push({ type: "activity", activity: { turnId: thread.activeTurn, state: "failed" } });
       else if (!thread.activeTurn) actions.push({ type: "activity", activity: { turnId: null, state: "idle" } });
+    } else if (event.type === "error") {
+      diagnostic(event.error);
     } else if (event.type === "turn") {
+      if (event.error) diagnostic(event.error);
       if (event.status === "inProgress") {
         if (thread.completedTurns.has(event.turnId)) return;
         thread.activeTurn = event.turnId; actions.push({ type: "activity", activity: { turnId: event.turnId, state: "working" } });

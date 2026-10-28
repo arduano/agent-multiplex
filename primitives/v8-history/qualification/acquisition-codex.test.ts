@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import type { CodexScope, Row } from "../src/contracts/types.js";
-import { createCodexHistoryPort, type CodexItemsPage, type CodexItemsRequest } from "../src/native/codex/history.js";
+import { createCodexHistoryPort, createCodexTimelineHistoryPort, type CodexItemsPage, type CodexItemsRequest, type CodexTimelineRequest } from "../src/native/codex/history.js";
+import { codexErrorRow } from "../src/native/codex/errors.js";
 import { codexRowId, createCodexCodec } from "../src/native/codex/index.js";
 import { HistoryHub } from "../src/host/history-owner.js";
 import { HistoryAcquisition } from "../src/acquisition/owner.js";
@@ -12,6 +13,86 @@ const scope: CodexScope = { kind: "codex", threadId: "root", origin: {
 const entry = (item: unknown, turnId = "turn") => ({ turnId, item, startedAtMs: null, completedAtMs: null });
 const page = (data: CodexItemsPage["data"], nextCursor: string | null = null): CodexItemsPage => ({ data, nextCursor, backwardsCursor: data.length ? "backwards-only" : null });
 const input = (cursor: string | null = null, count = 16) => ({ scope, cursor, count });
+
+test("Codex canonical timeline retains zero-item failed turns, complete items and one native paging frontier", async () => {
+  const calls: CodexTimelineRequest[] = [], error = { message: "Selected model is at capacity. Please try a different model.", codexErrorInfo: "serverOverloaded", additionalDetails: "not retained" };
+  const port = createCodexTimelineHistoryPort({ scope, context: "attachment:timeline-v1", authorize: async () => {}, list: async request => {
+    calls.push(request);
+    return { data: request.cursor === null ? [
+      { type: "item", position: 100, turnId: "good", item: { type: "agentMessage", id: "answer", text: "Completed native item", phase: "final_answer" } },
+      { type: "turnCompleted", position: 101, turnId: "empty-failed", status: "failed", error },
+    ] : [{ type: "item", position: 98, turnId: "older", item: { type: "userMessage", id: "question", content: [{ type: "text", text: "Older native prompt" }] } },
+      { type: "turnCompleted", position: 99, turnId: "older", status: "completed", error: null }],
+      nextCursor: request.cursor === null ? "earlier-window" : null, activeRealtimeSessionAtPageStart: null };
+  } });
+  const latest = await port.read(input(null, 2));
+  assert.deepEqual(calls, [{ threadId: "root", cursor: null, limit: 2 }]);
+  assert.deepEqual(latest.records.map(row => row.native.turnId), ["good", "empty-failed"]);
+  assert.deepEqual(latest.records[0]!.body, { kind: "complete", text: "Completed native item", evidence: "nativeFullBody" });
+  assert.equal(latest.records[0]!.native.completedAtMs, null, "Canonical ItemCompleted provenance does not fabricate a timestamp or depend on a turn boundary");
+  assert.deepEqual(codexErrorRow(latest.records[1]!), { message: error.message, willRetry: false });
+  assert.equal(JSON.stringify(latest).includes(error.additionalDetails), false);
+  assert.equal(latest.nextCursor, "earlier-window");
+  const older = await port.read(input(latest.nextCursor, 2));
+  assert.equal(older.nextCursor, null); assert.equal(older.hasMore, false);
+  assert.equal(older.records[0]!.native.turnId, "older");
+
+  // Both acquisition orders preserve the same diagnostic identity and bytes.
+  for (const readFirst of [false, true]) {
+    const hub = new HistoryHub(), codec = createCodexCodec({ origin: scope.origin, rootThreadId: scope.threadId, capture: hub });
+    const acquisition = new HistoryAcquisition(hub.owner(scope), port);
+    const live = () => codec.observe({ method: "turn/completed", params: { threadId: "root", turn: { id: "empty-failed", status: "failed", error } } });
+    if (!readFirst) live();
+    const settled = await acquisition.baseline("E01", "error-baseline").wait(1000);
+    assert.equal(settled.state, "value");
+    if (readFirst) live();
+    const notices = hub.snapshot(scope).rows.filter(row => codexErrorRow(row));
+    assert.equal(notices.length, 1); assert.equal(notices[0]!.id, latest.records[1]!.id);
+    assert.deepEqual(codexErrorRow(notices[0]!), { message: error.message, willRetry: false });
+    assert.deepEqual(hub.snapshot(scope).coverage.gaps, []);
+  }
+});
+
+test("Codex timeline rejects reordered entries and retires a stale read before native error publication", async () => {
+  const turn = { type: "turnCompleted", position: 10, turnId: "failed", status: "failed", error: { message: "native error" } };
+  const wrongOrder = createCodexTimelineHistoryPort({ scope, authorize: async () => {}, list: async () => ({ data: [turn, { ...turn, position: 9 }], nextCursor: null, activeRealtimeSessionAtPageStart: null }) });
+  await assert.rejects(wrongOrder.read(input()), /CODEX_TIMELINE_ORDER/);
+  const foreign = createCodexTimelineHistoryPort({ scope, authorize: async () => {}, list: async () => ({ data: [{ ...turn, threadId: "foreign" }], nextCursor: null, activeRealtimeSessionAtPageStart: null }) });
+  await assert.rejects(foreign.read(input()), /CODEX_HISTORY_FOREIGN_THREAD/);
+  let current = true, calls = 0;
+  const stale = createCodexTimelineHistoryPort({ scope, authorize: async () => {}, assertCurrent: () => { assert.ok(current, "retired attachment"); }, list: async () => {
+    calls++; current = false; return { data: [turn], nextCursor: null, activeRealtimeSessionAtPageStart: null };
+  } });
+  await assert.rejects(stale.read(input()), /retired attachment/); assert.equal(calls, 1);
+});
+
+test("Codex native timeline preserves tied rollout item and turn boundary order without accepting duplicate entries", async () => {
+  const item = { type: "item", position: 7, turnId: "turn", item: { type: "agentMessage", id: "answer", text: "Native body at the same rollout ordinal" } };
+  const completed = { type: "turnCompleted", position: 7, turnId: "turn", status: "failed", error: { message: "Native error at the same rollout ordinal" } };
+  const port = (data: readonly unknown[]) => createCodexTimelineHistoryPort({ scope, authorize: async () => {}, list: async () => ({ data, nextCursor: null, activeRealtimeSessionAtPageStart: null }) });
+  const page = await port([item, completed]).read(input());
+  assert.deepEqual(page.records.map(row => row.body.kind !== "unavailable" && row.body.text), [item.item.text, completed.error.message]);
+  assert.equal(page.records[0]!.lifecycle, "completed"); assert.equal(page.records[1]!.native.type, "turnError");
+  await assert.rejects(port([item, item]).read(input()), /CODEX_TIMELINE_ORDER/);
+  await assert.rejects(port([completed, item]).read(input()), /CODEX_TIMELINE_ORDER/);
+  const unsupported = port([{ type: "realtime", position: 5, item: { id: "voice-a" } }, { type: "realtime", position: 6, item: { id: "voice-b" } }, completed]);
+  const hub = new HistoryHub(); hub.open(scope);
+  const result = await new HistoryAcquisition(hub.owner(scope), unsupported).baseline("E01", "native-page-with-realtime").wait(1000);
+  assert.equal(result.state, "value");
+  assert.deepEqual(hub.snapshot(scope).coverage.gaps, [{ id: "codex:history:unsupported:realtime", kind: "unsupported" }]);
+  assert.deepEqual(codexErrorRow(hub.snapshot(scope).rows[0]!), { message: completed.error.message, willRetry: false });
+});
+
+test("Codex canonical timeline completion admits generated media without fabricating item timestamps", async () => {
+  let captured = 0;
+  const port = createCodexTimelineHistoryPort({ scope, authorize: async () => {}, media: ({ bytes }) => {
+    captured++; assert.deepEqual(bytes, new TextEncoder().encode("scripted-image")); return { state: "available", artifactId: "owned-image" };
+  }, list: async () => ({ data: [{ type: "item", position: 1, turnId: "turn", item: { type: "imageGeneration", id: "generated", status: "completed", result: btoa("scripted-image") } }], nextCursor: null, activeRealtimeSessionAtPageStart: null }) });
+  const page = await port.read(input());
+  assert.equal(captured, 1); assert.equal(page.records[0]!.native.completedAtMs, null);
+  const media = page.records[0]!.native.media as readonly { state: string; artifactId: string }[];
+  assert.equal(media[0]!.state, "available"); assert.equal(media[0]!.artifactId, "owned-image");
+});
 
 test("Codex native page preserves exact identities and direction without claiming an atomic/final assistant body", async () => {
   const calls: CodexItemsRequest[] = [];

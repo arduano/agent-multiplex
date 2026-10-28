@@ -13,6 +13,25 @@ import { PrimitiveError } from "../../v8-history/src/contracts/validation.js";
 import type { ManagedPolicy, SessionScope } from "../../v8-session/src/contracts/types.js";
 import type { CopilotSessionConfig } from "../../v8-harness-copilot/src/controller.js";
 
+test("production Host preserves the complete 4412-byte native plan instead of truncating at four KiB", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "v8-plan-body-")), scope: SessionScope = { connection: "plan-body", principal: "owner", host: "codex", session: "logical" };
+  const driver = scriptedHost("codex", { cwd: directory });
+  const host = await openHost({ directory, cwd: directory, scope, controller: driver.controller,
+    policy: { kind: "codex", provider: "copilot-only", access: { approval: "on-request", sandbox: "danger-full-access" } } });
+  try {
+    await host.session.submit({ scope, id: "create", generation: 0, command: { type: "create" } });
+    const binding = (await host.binding())!, plan = "é".repeat(16) + "p".repeat(4379) + "\n";
+    assert.equal(new TextEncoder().encode(plan).byteLength, 4412); assert.equal(plan.length, 4396);
+    driver.notify("turn/started", { threadId: binding.run.nativeSession, turn: { id: "plan-turn", status: "inProgress" } });
+    driver.notify("item/completed", { threadId: binding.run.nativeSession, turnId: "plan-turn", item: { type: "plan", id: "native-plan", text: plan } });
+    driver.notify("turn/completed", { threadId: binding.run.nativeSession, turn: { id: "plan-turn", status: "completed" } });
+    await until(() => host.history.snapshot(binding.history).rows.length > 0);
+    const snapshot = host.history.snapshot(binding.history);
+    assert.deepEqual(snapshot.rows[0]!.body, { kind: "complete", text: plan, evidence: "nativeFullBody" });
+    assert.deepEqual(snapshot.coverage.gaps, []); assert.equal(driver.counts.bodyReads, 0); assert.equal(driver.counts.sends, 0);
+  } finally { await host.terminate(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test("explicit native reopening establishes one shared hundred-entry initial baseline before any viewer and pages without replay", async () => {
   const directory = await mkdtemp(join(tmpdir(), "v8-initial-history-")), scope: SessionScope = { connection: "initial-history", principal: "owner", host: "codex", session: "logical" };
   const driver = scriptedHost("codex", { cwd: directory }), gate = deferred<void>();

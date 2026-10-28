@@ -7,10 +7,10 @@ import { mediaMeaning, rowMedia } from "../contracts/media.js";
 
 export interface HostLimits {
   maxReadRows: number; maxReadFences: number;
-  maxRetirements: number; maxRows: number; maxBodyBytes: number; maxScopes: number; maxGaps: number;
+  maxRetirements: number; maxRows: number; maxBodyBytes: number; maxCurrentBytes: number; maxScopes: number; maxGaps: number;
   maxReplayFrames: number; maxReplayBytes: number; maxSubscribers: number; maxQueuedFrames: number;
 }
-const defaults: HostLimits = { maxReadRows: 1024, maxReadFences: 8, maxRetirements: 256, maxRows: 64, maxBodyBytes: 4096, maxScopes: 32, maxGaps: 128,
+const defaults: HostLimits = { maxReadRows: 1024, maxReadFences: 8, maxRetirements: 256, maxRows: 64, maxBodyBytes: 4096, maxCurrentBytes: 524_288, maxScopes: 32, maxGaps: 128,
   maxReplayFrames: 32, maxReplayBytes: 1_048_576, maxSubscribers: 16, maxQueuedFrames: 8 };
 interface HeldRow { row: Row; knownStart: boolean; fromRead?: boolean; sequence: Map<string, { next: number; seen: Map<number, string> }> }
 export type HistoryReadFence = Readonly<{ scope: Scope; generation: string; revision: number; readContext?: string; olderEdge: OlderEdge; nonce: symbol }>;
@@ -186,10 +186,16 @@ export class HistoryOwner {
   }
   private evictCurrent(previous: State, state: State, protectedIds: ReadonlySet<string> = new Set()): Row[] {
     const evicted: Row[] = [];
-    while (state.order.length > this.limits.maxRows) {
+    // Count serialized bytes, including native metadata and JSON escaping. A
+    // large complete body stays intact; residency rolls instead of truncating
+    // every message to make a fixed row count fit a wire frame.
+    const sizes = new Map(state.order.map(id => [id, new TextEncoder().encode(JSON.stringify(state.rows.get(id)!.row)).byteLength]));
+    let bytes = 2 + Math.max(0, state.order.length - 1) + [...sizes.values()].reduce((sum, size) => sum + size, 0);
+    while (state.order.length > this.limits.maxRows || bytes > this.limits.maxCurrentBytes) {
       const id = state.order.find(id => previous.rows.has(id) && !protectedIds.has(id) && state.rows.get(id)!.row.lifecycle !== "running");
       invariant(id !== undefined, "PROTECTED_ROW_CAPACITY");
-      evicted.push(state.rows.get(id)!.row); state.order = state.order.filter(value => value !== id); state.rows.delete(id);
+      evicted.push(state.rows.get(id)!.row); bytes -= sizes.get(id)! + Number(state.order.length > 1);
+      state.order = state.order.filter(value => value !== id); state.rows.delete(id);
     }
     return evicted;
   }

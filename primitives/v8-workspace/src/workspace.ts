@@ -13,11 +13,11 @@ import { SessionPins, type PinRestore, type PinWrite } from '../../v8-organizati
 import { queryCatalog, type CatalogQuery, type CatalogListing } from '../../v8-organization/src/query.js';
 import { SessionWorkspace, type SessionEntry, type SessionView, type OperationHandle, type OriginalReceiptReference } from '../../v8-session/src/client/workspace.js';
 import { SessionError, scopeKey, sameRun, type RunRef, type NativeRead, type SessionScope, type SessionPort, type SessionCommand, type SendCommandFor, type MessageCommandFor, type Harness, type Receipt, type Catalog } from '../../v8-session/src/contracts/types.js';
-import { validateCatalog, text as validateNativeText } from '../../v8-session/src/native/validation.js';
+import { validateCatalog } from '../../v8-session/src/native/validation.js';
 import { canonical, copy, id } from '../../v8-session/src/contracts/validation.js';
 import { RetainedComposer } from './composer.js';
 import { GoalForm } from './goal-form.js';
-import { PlanActions, rootPlan, type PlanPreparation, type PlanOriginal } from './plan-action.js';
+import { PlanActions, rootPlan, planImplementationText, type PlanPreparation, type PlanOriginal } from './plan-action.js';
 import { SendPreparation, type SendContext, type DraftAction } from './send.js';
 import { ReadonlyHistories, type ReadonlyHistoryView } from './history-view.js';
 import { validateScope as validateHistoryScope } from '../../v8-history/src/contracts/validation.js';
@@ -504,9 +504,7 @@ export class MultiplexWorkspace {
     if (!row) throw new SessionError('FENCED', 'Choose a completed plan from the current root conversation');
     // The clicked occurrence supplies the Send meaning; a newer plan cannot
     // silently replace it. Validate the existing Send limit before any original.
-    if (row.body.kind !== 'complete') throw new SessionError('FENCED');
-    const text = 'Implement this plan:\n\n' + row.body.text;
-    validateNativeText(text, 8192);
+    const text = planImplementationText(row);
     const model = native.selection.collaboration.model, effort = native.selection.collaboration.effort;
     return { run, epoch: native.epoch, row, text, owner: this.#ports.receiptOwner!(prepared.scope), selection: { kind: 'codex' as const, collaboration: { mode: 'default' as const, model, effort } } };
   }

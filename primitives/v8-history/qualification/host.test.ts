@@ -4,6 +4,8 @@ import { CAPTURE_GAP_ID, type CodexScope, type Frame } from "../src/contracts/ty
 import { HistoryHub } from "../src/host/history-owner.js";
 import { HistoryClient } from "../src/client/history-client.js";
 import { rowMedia, type NativeMediaOccurrence } from "../src/contracts/media.js";
+import { validateFrame } from "../src/contracts/validation.js";
+import { HistoryAcquisition } from "../src/acquisition/owner.js";
 
 const scope: CodexScope = { kind: "codex", threadId: "root", origin: { connection: "fixture", principal: "alice", host: "host", nativeSession: "root", attachment: "owned-1" } };
 function setup(options: ConstructorParameters<typeof HistoryHub>[0] = {}) {
@@ -13,6 +15,59 @@ function complete(hub: HistoryHub, id: string, text: string) {
   hub.emit(scope, [{ type: "start", id, kind: "assistant" }, { type: "finish", id, kind: "assistant", lifecycle: "completed", text }]);
 }
 function deliver(client: HistoryClient, frames: readonly Frame[]) { return frames.map(frame => client.apply(frame)); }
+
+test("current byte residency rolls complete long bodies while existing consumers retain exact rows and bounded frames", async () => {
+  const hub = setup({ maxRows: 128, maxBodyBytes: 65_536 }), client = new HistoryClient(scope), view = client.view(), stream = hub.watch(scope);
+  try {
+    deliver(client, stream.drain());
+    const text = "é".repeat(30_000);
+    for (let index = 0; index < 12; index++) {
+      complete(hub, `large-${index}`, text);
+      const frames = stream.drain(); for (const frame of frames) validateFrame(frame); deliver(client, frames);
+      assert.ok(new TextEncoder().encode(JSON.stringify(hub.snapshot(scope).rows)).byteLength <= 524_288);
+    }
+    assert.equal(hub.snapshot(scope).rows.length, 8);
+    assert.equal(view.getSnapshot().rows.length, 12);
+    assert.ok(view.getSnapshot().rows.every(row => row.body.kind === "complete" && row.body.text === text));
+    assert.deepEqual(hub.snapshot(scope).retirements, []); assert.equal(hub.snapshot(scope).olderEdge.state, "unknown");
+    complete(hub, "beyond-body-bound", "é".repeat(40_000)); deliver(client, stream.drain());
+    const last = hub.snapshot(scope).rows.at(-1)!;
+    assert.equal(last.body.kind, "partial"); assert.ok(last.body.kind === "partial" && last.body.missing.includes("truncated"));
+    assert.ok(hub.snapshot(scope).coverage.gaps.some(gap => gap.rowId === last.id && gap.kind === "truncated"));
+  } finally { await stream.return(); }
+});
+
+test("oversized shared baselines refuse atomically while acquisition shrinks and preserves the earlier native cursor", async () => {
+  const hub = setup({ maxRows: 128, maxBodyBytes: 65_536 }), owner = hub.owner(scope), client = new HistoryClient(scope), view = client.view(), stream = hub.watch(scope);
+  try {
+    deliver(client, stream.drain());
+    const records = Array.from({ length: 12 }, (_, index) => ({ id: `read-${index}`, kind: "assistant" as const, lifecycle: "completed" as const,
+      body: { kind: "complete" as const, text: "x".repeat(60_000), evidence: "nativeFullBody" as const }, native: {} }));
+    const fence = owner.beginRead(), before = hub.snapshot(scope);
+    try { assert.throws(() => owner.mergeRead(fence, records, { state: "end", evidence: "nativeBoundary" }, [], true), /PROTECTED_ROW_CAPACITY/); }
+    finally { owner.endRead(fence); }
+    assert.strictEqual(hub.snapshot(scope), before); assert.deepEqual(stream.drain(), []);
+    const calls: { cursor: string | null; count: number }[] = [];
+    const acquisition = new HistoryAcquisition(owner, { scope, mode: "active", read: async request => {
+      calls.push({ cursor: request.cursor, count: request.count });
+      const end = request.cursor === null ? 12 : 6, start = Math.max(0, end - request.count);
+      return { scope, status: "ok", records: records.slice(start, end), gaps: [], hasMore: start > 0, nextCursor: start > 0 ? "remaining-6" : null };
+    } }, undefined, { count: 12 });
+    const baseline = await acquisition.baseline("E01", "bounded-baseline").wait(1000);
+    assert.equal(baseline.state, "value"); deliver(client, stream.drain());
+    assert.equal(hub.snapshot(scope).rows.length, 6); assert.equal(view.getSnapshot().rows.length, 6);
+    assert.deepEqual(calls, [{ cursor: null, count: 12 }, { cursor: null, count: 6 }]);
+    const token = view.beginOlderRead(), currentRows = hub.snapshot(scope).rows;
+    const earlier = await acquisition.older({ scope, generation: token.generation, cursor: token.cursor }).wait(1000);
+    deliver(client, stream.drain());
+    assert.equal(earlier.state, "value");
+    if (earlier.state !== "value" || earlier.value.status !== "ready") throw Error("EXPECTED_BOUNDED_OLDER_PAGE");
+    assert.equal(earlier.value.page.rows.length, 6); assert.equal(view.applyPage(earlier.value.page, token), "applied");
+    assert.equal(view.getSnapshot().rows.length, 12); assert.deepEqual(hub.snapshot(scope).rows, currentRows);
+    assert.ok(view.getSnapshot().rows.every(row => row.body.kind === "complete" && row.body.text.length === 60_000));
+    assert.equal(acquisition.counters.oversized, 1); assert.equal(calls.length, 3);
+  } finally { await stream.return(); }
+});
 
 test("scope inventory-only commits share replay/validation and never rewrite rows or an older-page fence", async () => {
   const hub = setup(), client = new HistoryClient(scope), stream = hub.watch(scope), owner = hub.owner(scope);

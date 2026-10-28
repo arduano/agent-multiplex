@@ -15,8 +15,10 @@ import { qualifyChildHistories } from './child-cases.mjs';
 import { qualifyTranscriptScrolling } from './transcript-cases.mjs';
 import { qualifyInlineVisuals } from './visual-cases.mjs';
 import { qualifyOptionalQuestions } from './optional-question-cases.mjs';
+import { qualifyNativeErrors } from './native-error-cases.mjs';
+import { qualifyCodexQuestions } from './question-cases.mjs';
 const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, '../../..');
-export async function runBrowserQualification({ previewOnly = false, childOnly = false, firstClickOnly = false, promptOnly = false, scrollOnly = false, visualOnly = false, optionalQuestionsOnly = false, transcriptSource, outputDirectory = resolve(here, '../artifacts/browser') } = {}) {
+export async function runBrowserQualification({ previewOnly = false, childOnly = false, firstClickOnly = false, promptOnly = false, codexQuestionsOnly = false, scrollOnly = false, visualOnly = false, optionalQuestionsOnly = false, nativeErrorsOnly = false, transcriptSource, outputDirectory = resolve(here, '../artifacts/browser') } = {}) {
   const out = resolve(outputDirectory);
   await mkdir(out, { recursive: true });
   const require = createRequire(resolve(root, 'package.json'));
@@ -26,7 +28,7 @@ export async function runBrowserQualification({ previewOnly = false, childOnly =
   await buildPdfAssets({ outdir: staticDir });
   const css = await readFile(resolve(staticDir, 'chat.css'), 'utf8');
   const sha=value=>createHash('sha256').update(value).digest('hex');
-  const inputPaths=[...new Set([...Object.keys(bundle.metafile.inputs),...Object.keys(styles.metafile.inputs),'package.json','package-lock.json'].map(path=>resolve(path)).concat([fileURLToPath(import.meta.url),resolve(here,'transcript-cases.mjs'),resolve(here,'visual-cases.mjs'),resolve(here,'optional-question-cases.mjs')]))].sort();
+  const inputPaths=[...new Set([...Object.keys(bundle.metafile.inputs),...Object.keys(styles.metafile.inputs),'package.json','package-lock.json'].map(path=>resolve(path)).concat([fileURLToPath(import.meta.url),resolve(here,'transcript-cases.mjs'),resolve(here,'visual-cases.mjs'),resolve(here,'optional-question-cases.mjs'),resolve(here,'native-error-cases.mjs'),resolve(here,'question-cases.mjs')]))].sort();
   const sourceInputs=await Promise.all(inputPaths.map(async path=>({path,sha256:sha(transcriptSource!==undefined&&path===resolve(here,'../src/transcript.ts')?transcriptSource:await readFile(path)),...(transcriptSource!==undefined&&path===resolve(here,'../src/transcript.ts')?{override:true}:{})})));
   await writeFile(resolve(out,'sources.json'),JSON.stringify(sourceInputs,null,2)+'\n');
   await build({ entryPoints: [resolve(here, '../src/renderers/mermaid-frame.ts')], bundle: true, outfile: resolve(staticDir, 'mermaid-frame.js'), platform: 'browser', format: 'iife', target: 'es2023', minify: true, logLevel: 'warning' });
@@ -48,6 +50,24 @@ export async function runBrowserQualification({ previewOnly = false, childOnly =
     const page = await context.newPage(); page.setDefaultTimeout(7000); page.on('pageerror', error => errors.length < 30 && errors.push(error.message)); page.on('console', message => { if (['error','warning'].includes(message.type())) browserDiagnostics.length < 30 && browserDiagnostics.push(message.text()); });
     await page.goto(origin); await page.waitForFunction(() => window.chatFixture?.ready && window.chatFixture.refs().a === 2);
     const ssr = await page.evaluate(() => window.chatFixture.ssr); assert.equal(ssr.htmlHasComposer, true); assert.deepEqual(ssr.before, ssr.after); assert.equal(ssr.references, 0);
+    if (codexQuestionsOnly) {
+      let failure;
+      try { await qualifyCodexQuestions(page, page.locator('#chat-container .multiplex-chat'), cases, out); assert.deepEqual(errors, []); assert.deepEqual(externalRequests, []); }
+      catch (error) { failure = String(error.stack ?? error); await page.screenshot({ path: resolve(out, 'failure.png') }).catch(() => {}); }
+      await page.evaluate(() => window.chatFixture.close()); const streams = await page.evaluate(() => window.chatFixture.counts().streams); await context.close();
+      for (const input of sourceInputs) if (!input.override && sha(await readFile(input.path)) !== input.sha256) failure = 'Source changed during Codex-question qualification: ' + input.path;
+      const result = { passed: failure === undefined, cases, ...(failure ? { error: failure } : {}), sourceHash: sha(JSON.stringify(sourceInputs)), errors, externalRequests, nativeModelCalls: 0, cleanup: { context: true, workspaceStreams: streams } };
+      await writeFile(resolve(out, 'result.json'), JSON.stringify(result, null, 2) + '\n'); if (failure) throw Error(failure); return result;
+    }
+    if (nativeErrorsOnly) {
+      let failure;
+      try { await qualifyNativeErrors(page, page.locator('#chat-container .multiplex-chat'), cases, out); assert.deepEqual(errors, []); assert.deepEqual(externalRequests, []); }
+      catch (error) { failure = String(error.stack ?? error); await page.screenshot({ path: resolve(out, 'failure.png') }).catch(() => {}); }
+      await page.evaluate(() => window.chatFixture.close()); const streams = await page.evaluate(() => window.chatFixture.counts().streams); await context.close();
+      for (const input of sourceInputs) if (!input.override && sha(await readFile(input.path)) !== input.sha256) failure = 'Source changed during native-error qualification: ' + input.path;
+      const result = { passed: failure === undefined, cases, ...(failure ? { error: failure } : {}), sourceHash: sha(JSON.stringify(sourceInputs)), errors, externalRequests, nativeModelCalls: 0, cleanup: { context: true, workspaceStreams: streams } };
+      await writeFile(resolve(out, 'result.json'), JSON.stringify(result, null, 2) + '\n'); if (failure) throw Error(failure); return result;
+    }
     if (optionalQuestionsOnly) {
       let failure;
       try { await qualifyOptionalQuestions(page, page.locator('#chat-container .multiplex-chat'), cases, out); assert.deepEqual(errors, []); assert.deepEqual(externalRequests, []); }
@@ -165,6 +185,7 @@ export async function runBrowserQualification({ previewOnly = false, childOnly =
       viewportFacts.push({ width, height, ...geometry });
     }
     cases.push('Seven desktop/tablet/phone/landscape viewports retain hittable composer, primary, Stop, model/settings, Add and More controls with 44px actions; mode/reasoning stay direct at680px chat width and explicitly disclosed below it');
+    await qualifyNativeErrors(page, chat, cases, out);
     await qualifyOptionalQuestions(page, chat, cases, out);
     const accessibility = await new AxeBuilder({ page }).include('.multiplex-chat').analyze();
     const serious = accessibility.violations.filter(item => item.impact === 'serious' || item.impact === 'critical');
@@ -176,7 +197,7 @@ export async function runBrowserQualification({ previewOnly = false, childOnly =
   })(),new Promise((_,reject) => { timer = setTimeout(() => reject(Error('Chat browser qualification exceeded 75 seconds')),75000); })]); }
   finally { clearTimeout(timer); await browser?.close(); server.closeAllConnections(); await new Promise(accept => server.close(accept)); }
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runBrowserQualification({ previewOnly: process.argv.includes('--preview-only'), childOnly: process.argv.includes('--child-only'), promptOnly: process.argv.includes('--prompt-only'), scrollOnly: process.argv.includes('--scroll-only'), visualOnly: process.argv.includes('--visual-only'), optionalQuestionsOnly: process.argv.includes('--optional-questions-only') }).then(value => process.stdout.write(JSON.stringify(value)+'\n')).catch(error => { process.stderr.write(error.stack+'\n'); process.exitCode=1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) runBrowserQualification({ previewOnly: process.argv.includes('--preview-only'), childOnly: process.argv.includes('--child-only'), promptOnly: process.argv.includes('--prompt-only'), codexQuestionsOnly: process.argv.includes('--codex-questions-only'), scrollOnly: process.argv.includes('--scroll-only'), visualOnly: process.argv.includes('--visual-only'), optionalQuestionsOnly: process.argv.includes('--optional-questions-only'), nativeErrorsOnly: process.argv.includes('--native-errors-only') }).then(value => process.stdout.write(JSON.stringify(value)+'\n')).catch(error => { process.stderr.write(error.stack+'\n'); process.exitCode=1; });
 
 
 async function qualifyInteractionRequests(page, chat, cases, out) {
@@ -301,17 +322,9 @@ async function qualifyInteractionRequests(page, chat, cases, out) {
   await choose(planAction, 'Continue interactively (recommended)');
   await request(approvedPlan).getByRole('button', { name: 'Approve selected action', exact: true }).click(); await request(approvedPlan).waitFor({ state: 'detached' });
   assert.deepEqual(await page.evaluate(() => window.chatFixture.promptAnswers().plan), { approved: true, selectedAction: 'interactive' });
-  await page.locator('#session-a').click(); const question = await page.evaluate(() => window.chatFixture.codexQuestion()); await expand(question);
-  await request(question).getByText('Native choice description', { exact: true }).waitFor();
-  await request(question).getByRole('button', { name: 'Send answers', exact: true }).click();
-  const choice = request(question).getByRole('group', { name: 'Choice', exact: true });
-  assert.equal(await choice.getAttribute('aria-invalid'), 'true');
-  assert.equal(await choice.evaluate(element => document.getElementById(element.getAttribute('aria-describedby'))?.textContent), 'Choose an answer or enter your response.');
-  await request(question).getByRole('radio', { name: /A Native choice description/ }).check();
-  const secret = request(question).getByLabel('Answer for Secret'); assert.equal(await secret.getAttribute('type'), 'password'); await secret.fill('PRIVATE_SECRET_ANSWER');
-  await request(question).getByRole('button', { name: 'Send answers', exact: true }).click(); await request(question).waitFor({ state: 'detached' });
+  await qualifyCodexQuestions(page, chat, cases, out);
   const privacy = await page.evaluate(() => ({ submitted: window.chatFixture.counts().submitted, leak: JSON.stringify([window.chatFixture.snapshot('a'), window.chatFixture.snapshot('b')]).includes('PRIVATE_') }));
-  assert.deepEqual(privacy, { submitted: before + 8, leak: false });
+  assert.deepEqual(privacy, { submitted: before + 9, leak: false });
   cases.push('Three simultaneous individually selectable inline questions retain private drafts across collapse/navigation; exact unknown response checks its original without replay; permissions and MCP verification stay explicit dialogs; field errors associate with their inputs without dispatch; native choice radios, plan feedback and Codex descriptions preserve native semantics');
   cases.push('Actual scoped Select interactions distinguish false, omitted optional content and explicit empty enum text; clearing a required enum blocks dispatch and focuses its error; exact native form/plan payloads and retained private values survive dialog dismissal; mobile and short landscape dialogs keep 44px primary actions hittable');
 }

@@ -53,6 +53,8 @@ export function projectCodexMediaResult(method: string, raw: unknown): unknown |
   const budget = new Budget(); let projected: RecordValue = value;
   if (method === "thread/items/list" && Array.isArray(value.data)) {
     projected = { ...value, data: value.data.map(raw => { const entry = object(raw); return { ...entry, item: codexItem(entry.item, budget) }; }) };
+  } else if (method === "thread/timeline/list" && Array.isArray(value.data)) {
+    projected = { ...value, data: value.data.map(raw => { const entry = object(raw); return entry.type === "item" ? { ...entry, item: codexItem(entry.item, budget) } : entry; }) };
   } else if (method === "turn/start") {
     const turn = optionalObject(value.turn);
     if (turn && Array.isArray(turn.items)) projected = { ...value, turn: { ...turn, items: turn.items.map(item => codexItem(item, budget)) } };

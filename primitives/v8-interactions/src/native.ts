@@ -131,7 +131,22 @@ export function encodeAnswer(prompt: Prompt, value: NativeAnswer): Readonly<{cho
   switch(prompt.type){
     case "codex.command":case "codex.file":{keys(answer,["type","decisionId"]);const decision=prompt.decisions.find(x=>x.id===answer.decisionId);check(decision);choice=decision.id;result={decision:decision.decision};break;}
     case "codex.permission":{keys(answer,["type","grant"]);check(["deny","turn","session"].includes(answer.grant as string));choice=answer.grant as string;const requested=record(prompt.requested),permissions=Object.fromEntries(Object.entries(requested).filter(([,v])=>v!==null));result={permissions:answer.grant==="deny"?{}:permissions as Json,scope:answer.grant==="session"?"session":"turn"};break;}
-    case "codex.question":{keys(answer,["type","answers"]);const answers=record(answer.answers);check(Object.keys(answers).length===prompt.questions.length&&Object.keys(answers).every(k=>prompt.questions.some(q=>q.id===k)));const native:Record<string,Json>=Object.create(null) as Record<string,Json>;for(const q of prompt.questions){const values=strings(answers[q.id],16);check(values.length>0&&values.every(v=>q.other||q.options.length===0||q.options.includes(v)));native[q.id]={answers:values};}choice="submit";result={answers:native};break;}
+    case "codex.question": {
+      keys(answer,["type","answers"]); const answers=record(answer.answers);
+      check(Object.keys(answers).length===prompt.questions.length&&Object.keys(answers).every(k=>prompt.questions.some(q=>q.id===k)));
+      const native:Record<string,Json>=Object.create(null) as Record<string,Json>;
+      for (const q of prompt.questions) {
+        const raw=answers[q.id]; check(Array.isArray(raw)&&raw.length>0&&raw.length<=16);
+        // Answer positions are ordered native values, not a set: the chosen
+        // label and its extra context can contain identical strings.
+        const values=raw.map(value=>text(value,4096));
+        const offered=values.every(value=>q.options.includes(value));
+        const withContext=values.length===2&&q.options.includes(values[0]!)&&!!values[1]!.trim();
+        check(q.other||q.options.length===0||offered||withContext);
+        native[q.id]={answers:values};
+      }
+      choice="submit"; result={answers:native}; break;
+    }
     case "copilot.permission":{keys(answer,["type","kind","feedback"]);check(["approve-once","reject","user-not-available"].includes(answer.kind as string));check(answer.feedback===undefined||answer.kind==="reject");choice=answer.kind as string;result={kind:choice,...(choice==="approve-once"?{approvedInteractively:true}:{}),...(answer.feedback===undefined?{}:{feedback:text(answer.feedback)})};break;}
     case "copilot.question":{keys(answer,["type","answer","wasFreeform"]);const a=text(answer.answer);check(typeof answer.wasFreeform==="boolean"&&(answer.wasFreeform?prompt.freeform:prompt.options.includes(a)));choice="submit";result={answer:a,wasFreeform:answer.wasFreeform};break;}
     case "copilot.plan":{keys(answer,["type","approved","selectedAction","feedback"]);check(typeof answer.approved==="boolean");if(answer.selectedAction!==undefined)check(prompt.actions.includes(text(answer.selectedAction)));check(!answer.approved||answer.selectedAction!==undefined,"Approval needs an offered action");choice=answer.approved?"approve":"reject";result={approved:answer.approved,...(answer.selectedAction===undefined?{}:{selectedAction:answer.selectedAction as string}),...(answer.feedback===undefined?{}:{feedback:text(answer.feedback)})};break;}

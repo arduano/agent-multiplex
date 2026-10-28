@@ -55,6 +55,26 @@ class Wire implements CodexWire {
   async close() { for (const listener of this.closed) listener(); }
 }
 
+test("Codex timeline image frames retain original bytes through the exact pending method without admitting unrelated oversized data", async () => {
+  const wire = new Wire(), rpc = new CodexStdioRpc(wire, () => {}, () => {});
+  try {
+    await rpc.initialize();
+    const page = { data: [{ type: "item", position: 0, turnId: "turn", item: item() },
+      { type: "turnCompleted", position: 1, turnId: "turn", status: "failed", error: { message: "native failure" } }], nextCursor: null, activeRealtimeSessionAtPageStart: null };
+    const projection = projectCodexMediaResult("thread/timeline/list", page) as typeof page;
+    assert.equal((projection.data[0]!.item as ReturnType<typeof item>).content[1]!.url, "");
+    assert.deepEqual(projection.data[1], page.data[1]);
+    const pending = rpc.request("thread/timeline/list", { threadId: "native", cursor: null, limit: 2 });
+    wire.reply("thread/timeline/list", page);
+    assert.deepEqual(await pending, page, "Only the control-size projection drops bytes; actual history receives original media once");
+    assert.equal(rpc.observation().connected, true);
+    const unrelated = rpc.request("thread/timeline/list", { threadId: "native", cursor: null, limit: 1 });
+    const failure = assert.rejects(unrelated);
+    wire.reply("thread/timeline/list", { ...page, data: [{ type: "turnCompleted", position: 0, turnId: "turn", error: { message: "x".repeat(2_000_001) } }] });
+    await failure; assert.equal(rpc.diagnostics().rpc.failure, "invalidFrame");
+  } finally { await rpc.close(); }
+});
+
 test("large Codex media survives exact live capture, pending history/Send responses, split tail and coalesced frames; ordinary oversized frames fail closed", async () => {
   const wire = new Wire(), notifications = new Set<(value: CodexNotification) => void>(), rpc = new CodexStdioRpc(wire, value => { for (const listener of notifications) listener(value); }, () => {});
   await rpc.initialize();

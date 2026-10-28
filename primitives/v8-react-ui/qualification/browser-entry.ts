@@ -7,6 +7,7 @@ import { workspaceFixture, deferred, catalogScope } from '../../v8-workspace/qua
 import { digest } from '../../v8-files/src/contracts/content.js';
 import { MemoryDraftPersistence } from '../../v8-files/src/client/persistence.js';
 import { CAPTURE_GAP_ID } from '../../v8-history/src/contracts/types.js';
+import { codexErrorRecord } from '../../v8-history/src/native/codex/errors.js';
 import type { ArtifactRef, FilePort, FileMethod, FileInputs, FileOutputs } from '../../v8-files/src/contracts/types.js';
 import type { ResourceLease } from '../../v8-files/src/client/resource-cache.js';
 import type { Row, Scope, HistoryPage } from '../../v8-history/src/contracts/types.js';
@@ -70,7 +71,8 @@ f.workspace.previewCapturedFile = async (session: string, id: string): Promise<R
 };
 const nonce = (document.querySelector('script[data-chat-entry]') as HTMLScriptElement).nonce ?? ''; 
 let root = createRoot(document.getElementById('app')!), choose: (session: 'a' | 'b') => void = () => {}, privateAnswer = '';
-let elicitationAnswer: unknown = null, planAnswer: unknown = null;
+let elicitationAnswer: unknown = null, planAnswer: unknown = null, codexQuestionSerial = 0;
+const codexQuestionAnswers: unknown[] = [];
 function Shell() { const [selected, select] = useState<'a' | 'b'>('a'); choose = select;
   return h('main', null, h('nav', { 'aria-label': 'Fixture sessions' }, h('button', { id: 'session-a', onClick: () => select('a') }, 'A'), h('button', { id: 'session-b', onClick: () => select('b') }, 'B')),
     h('div', { id: 'chat-container' }, h(MultiplexChat, { view: views[selected], assets: { cspNonce: nonce } })),
@@ -102,9 +104,17 @@ Object.assign(window, { chatFixture: { ready: true, ssr, counts: f.counts, choos
   optionalState() { const snapshot = views.a.getSnapshot(); if (snapshot.kind !== 'codex') throw Error('Expected Codex'); return { composer: snapshot.composer, selectionDraft: snapshot.session.draft, observed: snapshot.session.native?.selection, activity: snapshot.session.native?.activity, commands: f.native.submitted.map(value => value.command) }; },
   async optionalStored() { return persistence.getComposer({ ...catalogScope, host: f.bindings.get('a')!.run.scope.host, session: 'a' }); },
   optionalReconnect() { const scope = f.bindings.get('a')!.run.scope; f.observation({ scope, kind: 'history', history: f.bindings.get('a')!.history, state: 'disconnected' }); f.observation({ scope, kind: 'history', history: f.bindings.get('a')!.history, state: 'live' }); f.native.publish(scope, {}); },
+  nativeError(session: 'a' | 'b' = 'a', willRetry = false) {
+    const binding = f.bindings.get(session)!, client = f.history.session(binding.history).client, current = client.current!;
+    const message = `Native provider rejected the turn.\n**Exact text** <detail> [not a link](https://outside.invalid/error)\n${'long-native-diagnostic-'.repeat(24)}`;
+    const record = codexErrorRecord(binding.history.kind === 'codex' ? binding.history.threadId : 'not-codex', 'failed-turn', { message }, willRetry);
+    const row: Row = { ...record, version: 1, contentVersion: 1 };
+    client.apply({ kind: 'snapshot', snapshot: { ...current, revision: current.revision + 1, rows: [...current.rows.filter(value => value.id !== row.id), row] } });
+    views[session].viewport.followLatest(); return { id: row.id, message };
+  },
   prompt(question = 'A private fixture response?', submitted = false, choices?: readonly string[]) { const binding = f.bindings.get('b')!; return f.owners.get('b')!.registerCopilot({ token: {}, requestId: null, owner: { nativeAgent: binding.run.nativeSession, relation: 'root' }, method: 'userInput', payload: { question, allowFreeform: true, ...(choices ? { choices } : {}) }, respond: async response => { privateAnswer = String((response as { answer: string }).answer); return submitted ? { kind: 'submitted' } : { kind: 'ack', success: true }; } }).id; },
   permission() { const binding = f.bindings.get('b')!; return f.owners.get('b')!.registerCopilot({ token: {}, requestId: 'explicit-permission', owner: { nativeAgent: binding.run.nativeSession, relation: 'root' }, method: 'permission', payload: { kind: 'mcp', serverName: 'fixture', toolName: 'explicit-confirmation' }, respond: async () => ({ kind: 'ack', success: true }) }).id; },
-  codexQuestion() { const binding = f.bindings.get('a')!; return f.owners.get('a')!.registerCodex({ token: {}, requestId: 'codex-question', owner: { nativeAgent: binding.run.nativeSession, relation: 'root' }, method: 'item/tool/requestUserInput', params: { threadId: binding.run.nativeSession, turnId: 'question-turn', itemId: 'question-item', isBlocking: true, questions: [{ id: 'choice with space', header: 'Choice', question: 'Choose a route', isOther: false, isSecret: false, options: [{ label: 'A', description: 'Native choice description' }, { label: 'B', description: 'Second route' }] }, { id: 'secret', header: 'Secret', question: 'Private answer', isOther: true, isSecret: true, options: null }] }, respond: async () => ({ kind: 'ack', success: true }) }).id; },
+  codexQuestion() { const binding = f.bindings.get('a')!; return f.owners.get('a')!.registerCodex({ token: {}, requestId: `codex-question-${++codexQuestionSerial}`, owner: { nativeAgent: binding.run.nativeSession, relation: 'root' }, method: 'item/tool/requestUserInput', params: { threadId: binding.run.nativeSession, turnId: 'question-turn', itemId: 'question-item', isBlocking: true, questions: [{ id: 'choice with space', header: 'Choice', question: 'Choose a route', isOther: false, isSecret: false, options: [{ label: 'A', description: 'Native choice description' }, { label: 'B', description: 'Second route' }] }, { id: 'context:question', header: 'Approach', question: 'Choose an independent approach', isOther: true, isSecret: false, options: [{ label: 'C', description: 'Third route' }, { label: 'D', description: 'Fourth route' }] }, { id: 'secret', header: 'Secret', question: 'Private answer', isOther: true, isSecret: true, options: null }] }, respond: async response => { codexQuestionAnswers.push(response); return { kind: 'ack', success: true }; } }).id; },
   plan() { const binding = f.bindings.get('b')!; return f.owners.get('b')!.registerCopilot({ token: {}, requestId: null, owner: { nativeAgent: binding.run.nativeSession, relation: 'root' }, method: 'exitPlan', payload: { summary: 'Review a fixed plan', planContent: '## Fixed plan\n\nDo **this carefully**.', actions: ['interactive', 'exit_only'], recommendedAction: 'interactive' }, respond: async response => { planAnswer = response; return { kind: 'ack', success: true }; } }).id; },
   elicitation() { const binding = f.bindings.get('b')!; return f.owners.get('b')!.registerCopilot({ token: {}, requestId: null, owner: { nativeAgent: binding.run.nativeSession, relation: 'root' }, method: 'elicitation', payload: { sessionId: binding.run.nativeSession, mode: 'form', message: 'Verify bounded fields', requestedSchema: { type: 'object', properties: {
     count: { type: 'integer', title: 'Count', description: 'One through three', minimum: 1, maximum: 3 },
@@ -113,7 +123,7 @@ Object.assign(window, { chatFixture: { ready: true, ssr, counts: f.counts, choos
     strategy: { type: 'string', title: 'Strategy', enum: ['first', 'second'] },
     omitted: { type: 'string', title: 'Omitted', enum: ['optional'] },
   }, required: ['count', 'strategy'] } }, respond: async response => { elicitationAnswer = response; return { kind: 'ack', success: true }; } }).id; },
-  promptAnswers: () => ({ elicitation: elicitationAnswer, plan: planAnswer }),
+  promptAnswers: () => ({ elicitation: elicitationAnswer, plan: planAnswer, codexQuestions: codexQuestionAnswers }),
   completePrompt(id: string) { const binding = f.bindings.get('b')!; f.owners.get('b')!.completed(id, binding.run); },
   loseResponse() { const submit = f.native.submit.bind(f.native); f.native.submit = async request => { f.native.submit = submit; await submit(request); throw Error('Scripted reply loss after admission'); }; },
   privateAnswer: () => privateAnswer,

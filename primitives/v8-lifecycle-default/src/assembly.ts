@@ -44,7 +44,7 @@ export interface HostOptions {
 /** One actual durable Host, native ownership seam and bounded observation owners.
  * No effect journal or native registry beyond the existing SessionHost. */
 export class AgentHost {
-  readonly history = Object.assign(new HistoryHub({ maxRows: 128 }), {
+  readonly history = Object.assign(new HistoryHub({ maxRows: 128, maxBodyBytes: 65_536 }), {
     scopes: (): readonly HistoryScope[] => { this.#active(); return copy([...this.#historyScopes.values()].filter(value => value.generation === this.#record?.run.generation).map(value => value.scope)); },
     authorize: (scope: HistoryScope, observation: HistoryObservation = {}): Promise<ReadObservation<true>> => this.#authorizeHistory(scope, observation),
     recover: (scope: HistoryScope, observation: HistoryObservation = {}, retryToken?: string): Promise<HistoryRecovery> => this.#recover(scope, observation, retryToken),

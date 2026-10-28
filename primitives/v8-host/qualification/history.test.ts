@@ -31,7 +31,7 @@ const policy = (kind: Harness): ManagedPolicy => kind === "codex" ? { kind, prov
 const content = (row: Row) => row.body.kind === "unavailable" ? "" : row.body.text;
 const rows = (view: WorkspaceView) => { const state = view.getSnapshot(); assert.notEqual(state.kind, "disposed"); if (state.kind === "disposed") throw Error("Disposed"); return state.history.rows; };
 
-for (const kind of ["codex", "copilot"] as const) test(`${kind}: actual Host cold acquisition crosses authenticated HTTP once, streams baselines and keeps older pages/anchors view-private`, async () => {
+for (const kind of ["codex", "copilot"] as const) test(`${kind}: Host-owned cold acquisition is shared across authenticated HTTP and keeps older pages/anchors view-private`, async () => {
   const directory = await mkdtemp(join(tmpdir(), "v8-host-history-")), driver = scriptedHost(kind, { cwd: directory });
   const gate = deferred<void>(); let reads = 0;
   const native: HostHistory = { port: (_run, attached) => attached.kind === "codex" ? createCodexHistoryPort({ scope: attached, authorize: async () => {}, list: async input => {
@@ -51,6 +51,8 @@ for (const kind of ["codex", "copilot"] as const) test(`${kind}: actual Host col
     assert.deepEqual(await host.history.recover(fresh.history), { state: "healed" }); assert.equal(reads, 0);
     await host.terminate(); host = await openHost(options); const binding = (await host.binding())!;
     assert.notEqual(binding.history.origin.attachment, fresh.history.origin.attachment);
+    await until(() => reads === 1);
+    assert.deepEqual(host.history.snapshot(binding.history).read, { state: "pending", target: { kind: "initial" } });
     const target: GatewayTarget = { ...scope, authority: catalogScope.authority, owner: "durable-fixture", routeEpoch: "route-1" };
     coordinator.register({ target, session: host.session, history: host.history, interactions: host.interactions, mcp: host.mcp, binding: () => host.binding(), authorizeHistory: attached => historyKey(attached) === historyKey(binding.history) });
     const identity: Identity = { ...catalogScope, authorities: [catalogScope.authority], actions: ["read", "control"] };
@@ -69,8 +71,8 @@ for (const kind of ["codex", "copilot"] as const) test(`${kind}: actual Host col
     const a = connect(), b = connect(), av = await a.open(scope.session), bv = await b.open(scope.session), side = a.view(scope.session, "side");
     const leaseA = av.observe(), leaseB = bv.observe(); a.setPinned(scope.session, true);
     await until(() => av.getSnapshot().kind !== "disposed" && coordinator.observation.subscribers >= 6);
-    a.disconnect(); a.reconnect(); av.getSnapshot(); av.getServerSnapshot(); assert.equal(reads, 0);
-    await assert.rejects(transports[0]!.recover(target, { ...binding.history, origin: { ...binding.history.origin, principal: "foreign" } }), { code: "FENCED" }); assert.equal(reads, 0);
+    a.disconnect(); a.reconnect(); av.getSnapshot(); av.getServerSnapshot(); assert.equal(reads, 1, "viewers and reconnect do not add a native baseline");
+    await assert.rejects(transports[0]!.recover(target, { ...binding.history, origin: { ...binding.history.origin, principal: "foreign" } }), { code: "FENCED" }); assert.equal(reads, 1);
     const coldId = kind === "codex" ? codexRowId(binding.run.nativeSession, "saved-turn", "cold") : JSON.stringify(["copilot", "user", "cold"]);
     host.history.emit(binding.history, [{ type: "gap", gap: { id: "cold-body-gap", kind: "missingFinal", rowId: coldId } }]);
     const first = av.recoverHistory(), second = bv.recoverHistory(); await until(() => reads === 1);
@@ -108,7 +110,11 @@ test("a known-start recovery does not replenish its episode when its own merge c
 test("Host native-generation namespaces fence old pages, cancelled observers retain physical slots, and stale capture cursors cause zero native work", async () => {
   const directory = await mkdtemp(join(tmpdir(), "v8-host-history-fence-")), driver = scriptedHost("codex", { cwd: directory });
   const first = deferred<AcquisitionBatch>(), next = deferred<AcquisitionBatch>(), third = deferred<AcquisitionBatch>(); let reads = 0;
-  const options: HostOptions = { directory, cwd: directory, scope, policy: policy("codex"), controller: driver.controller, history: { port: (_run, attached) => ({ scope: attached, mode: "active", read: async () => { reads++; return reads === 1 ? first.promise : reads === 2 ? next.promise : third.promise; } }) } };
+  const options: HostOptions = { directory, cwd: directory, scope, policy: policy("codex"), controller: driver.controller, history: { port: (_run, attached) => ({ scope: attached, mode: "active", read: async () => {
+    reads++;
+    if (reads === 1) return { scope: attached, status: "ok", records: [{ id: "child-baseline", kind: "user", lifecycle: "completed", body: { kind: "complete", text: "proved child prefix", evidence: "nativeFullBody" }, native: {} }], gaps: [], hasMore: true, nextCursor: "child-older" };
+    return reads === 2 ? first.promise : reads === 3 ? next.promise : third.promise;
+  } }) } };
   const host = await openHost(options);
   const submit = async (type: "create" | "stop" | "resume", id: string) => host.session.submit({ scope, id, generation: (await host.session.snapshot(scope)).generation, command: { type } });
   let attached!: Scope;
@@ -122,19 +128,27 @@ test("Host native-generation namespaces fence old pages, cancelled observers ret
     assert.equal(attached.kind, "codex");
     driver.notify("item/completed", { threadId: attached.origin.nativeSession, turnId: "activity-turn", item: { id: "old-child-activity", type: "subAgentActivity", kind: "started", agentThreadId: "old-child", agentPath: "old-child" } });
     const child: Scope = { kind: "codex", origin: attached.origin, threadId: "old-child" }; assert.equal(host.history.snapshot(child).scope.kind, "codex");
-    const observer = host.history.recover(attached, { signal: abort.signal }); await until(() => reads === 1); abort.abort(); await assert.rejects(observer, { name: "AbortError" });
-    const repeated = await host.history.recover(attached, { timeoutMs: 0 }); assert.equal(repeated.state, "waitingExpired"); assert.equal(reads, 1);
+    assert.equal((await host.history.recover(child)).state, "value");
+    const childEdge = host.history.snapshot(child).olderEdge; assert.equal(childEdge.state, "available");
+    if (childEdge.state !== "available") throw Error("EXPECTED_CHILD_PAGE_CURSOR");
+    const childGeneration = host.history.snapshot(child).generation;
+    const observer = host.history.recover(attached, { signal: abort.signal }); await until(() => reads === 2); abort.abort(); await assert.rejects(observer, { name: "AbortError" });
+    const repeated = await host.history.recover(attached, { timeoutMs: 0 }); assert.equal(repeated.state, "waitingExpired"); assert.equal(reads, 2);
+    const rootSettlement = host.history.recover(attached);
     const oldContext = host.history.snapshot(attached).readContext!, oldCursor = `${oldContext.length}:${oldContext}:same-cursor`;
-    const oldPage = host.history.older(attached, oldCursor, currentGeneration), oldRejected = assert.rejects(oldPage, { code: "FENCED" }); await until(() => reads === 2);
+    // One acquisition frontier cannot admit an older page while its baseline
+    // is pending. The proved child's page occupies the second physical slot.
+    await assert.rejects(host.history.older(attached, oldCursor, currentGeneration), /READ_BUSY/); assert.equal(reads, 2);
+    const oldPage = host.history.older(child, childEdge.cursor, childGeneration), oldRejected = assert.rejects(oldPage, { code: "FENCED" }); await until(() => reads === 3);
     await submit("stop", "stop"); await submit("resume", "resume");
     assert.equal((await host.binding())!.run.generation, 2); assert.equal(host.history.snapshot(attached).generation, currentGeneration);
-    await assert.rejects(host.history.recover(child), { code: "FENCED" }); assert.equal(reads, 2, "old child context does not confer current-run native-read authority");
-    await assert.rejects(host.history.older(attached, oldCursor, currentGeneration), { code: "FENCED" }); assert.equal(reads, 2, "old native context cannot authorize a new-run cursor read");
+    await assert.rejects(host.history.recover(child), { code: "FENCED" }); assert.equal(reads, 3, "old child context does not confer current-run native-read authority");
+    await assert.rejects(host.history.older(attached, oldCursor, currentGeneration), { code: "FENCED" }); assert.equal(reads, 3, "old native context cannot authorize a new-run cursor read");
     const context = host.history.snapshot(attached).readContext!, freshCursor = `${context.length}:${context}:same-cursor`;
-    await assert.rejects(host.history.older(attached, freshCursor, currentGeneration), /READ_BUSY/); assert.equal(reads, 2, "new native binding cannot free an old physical slot");
-    first.resolve(batch("stale-old-run")); await new Promise(done => setTimeout(done, 5));
-    const freshRead = host.history.older(attached, freshCursor, currentGeneration); await until(() => reads === 3);
-    next.resolve(batch("old-older-page")); await oldRejected; third.resolve(batch("new-run-page")); assert.equal((await freshRead).rows[0]!.id, "new-run-page");
+    await assert.rejects(host.history.older(attached, freshCursor, currentGeneration), /READ_BUSY/); assert.equal(reads, 3, "new native binding cannot free an old physical slot");
+    first.resolve(batch("stale-old-run")); assert.deepEqual(await rootSettlement, { state: "retired" });
+    const freshRead = host.history.older(attached, freshCursor, currentGeneration); await until(() => reads === 4);
+    next.resolve({ ...batch("old-older-page"), scope: child }); await oldRejected; third.resolve(batch("new-run-page")); assert.equal((await freshRead).rows[0]!.id, "new-run-page");
     assert.ok(!host.history.snapshot(attached).rows.some(row => row.id === "stale-old-run"));
     await submit("stop", "final-stop");
   } finally { if (attached) { first.resolve(batch("cleanup-old")); next.resolve(batch("cleanup-next")); third.resolve(batch("cleanup-third")); } await host.terminate(); await rm(directory, { recursive: true, force: true }); }

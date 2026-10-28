@@ -60,9 +60,9 @@ function PromptFields({ prompt, form, disabled, disabledReason, respond, onLater
   const errorId = (key: string) => `${groupId}:${encodeURIComponent(key)}:error`;
   const errorProps = (key: string) => ({ 'aria-invalid': !!fieldMessage(key), 'aria-describedby': fieldMessage(key) ? errorId(key) : undefined });
   const fieldError = (key: string): ReactNode => fieldMessage(key) ? h('p', { id: errorId(key), role: 'alert' }, fieldMessage(key)) : null;
-  const input = (key: string, label: string, secret = false, errorKey = key): ReactNode => h('label', { key }, label, secret
-    ? h(Input, { 'aria-label': label, ...errorProps(errorKey), type: 'password', autoComplete: 'off', value: text(values, key), disabled: busy, onChange: (event: { currentTarget: HTMLInputElement }) => update(key, event.currentTarget.value) })
-    : h(Textarea, { 'aria-label': label, ...errorProps(errorKey), rows: 2, autoComplete: 'off', value: text(values, key), disabled: busy, onChange: (event: { currentTarget: HTMLTextAreaElement }) => update(key, event.currentTarget.value) }));
+  const input = (key: string, label: string, secret = false, errorKey = key, accessibleLabel = label): ReactNode => h('label', { key }, label, secret
+    ? h(Input, { 'aria-label': accessibleLabel, ...errorProps(errorKey), type: 'password', autoComplete: 'off', value: text(values, key), disabled: busy, onChange: (event: { currentTarget: HTMLInputElement }) => update(key, event.currentTarget.value) })
+    : h(Textarea, { 'aria-label': accessibleLabel, ...errorProps(errorKey), rows: 2, autoComplete: 'off', value: text(values, key), disabled: busy, onChange: (event: { currentTarget: HTMLTextAreaElement }) => update(key, event.currentTarget.value) }));
   let body: ReactNode, actions: Decision[];
   switch (prompt.type) {
     case 'codex.command': case 'codex.file':
@@ -75,16 +75,17 @@ function PromptFields({ prompt, form, disabled, disabledReason, respond, onLater
       break;
     case 'codex.question':
       body = h('div', null, ...prompt.questions.map(question => {
-        const selected = `question:${question.id}:choice`, other = `question:${question.id}:text`;
+        const selected = `question:${question.id}:choice`, other = `question:${question.id}:text`, context = `question:${question.id}:context`;
         return h('fieldset', { key: question.id, disabled: busy, ...errorProps(question.id) }, h('legend', null, question.header), h('p', null, question.question),
           question.options.length ? h('div', { className: 'mpx-requests__choices' }, ...question.options.map((option, index) => h('label', { key: option, className: 'mpx-ui-choice' }, h('input', { type: 'radio', name: `${groupId}:${question.id}`, value: `option:${index}`, checked: text(values, selected) === `option:${index}`, onChange: () => update(selected, `option:${index}`) }), h('span', null, option, question.optionDescriptions && Object.hasOwn(question.optionDescriptions, option) ? h('small', null, question.optionDescriptions[option]) : null))), question.other ? h('label', { className: 'mpx-ui-choice' }, h('input', { type: 'radio', name: `${groupId}:${question.id}`, checked: text(values, selected) === 'other', onChange: () => update(selected, 'other') }), 'Other') : null) : null,
-          !question.options.length || question.other && text(values, selected) === 'other' ? input(other, `Answer for ${question.header}`, question.secret, question.id) : null, fieldError(question.id));
+          !question.options.length || question.other && text(values, selected) === 'other' ? input(other, `Answer for ${question.header}`, question.secret, question.id) : input(context, 'Extra info (optional)', question.secret, context, `Extra info for ${question.header}`), fieldError(question.id));
       }));
       actions = [button(prompt, 'Send answers', () => ({ type: prompt.type, answers: Object.fromEntries(prompt.questions.map(question => {
-        const selected = text(values, `question:${question.id}:choice`), raw = text(values, `question:${question.id}:text`);
+        const selected = text(values, `question:${question.id}:choice`), raw = text(values, `question:${question.id}:text`).trim(), context = text(values, `question:${question.id}:context`).trim();
         const index = /^option:\d+$/.test(selected) ? Number(selected.slice(7)) : -1;
-        const answer = question.options.length && selected !== 'other' ? question.options[index] : raw;
-        return [question.id, answer ? [answer] : []];
+        if (!question.options.length || question.other && selected === 'other') return [question.id, raw ? [raw] : []];
+        const answer = question.options[index];
+        return [question.id, answer === undefined ? [] : context ? [answer, context] : [answer]];
       })) }), true)];
       break;
     case 'copilot.permission': {
