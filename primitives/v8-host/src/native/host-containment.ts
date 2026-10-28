@@ -104,7 +104,9 @@ export class HostContainment {
     const fields: Record<string, string> = {};
     for (const line of text.trim().split("\n")) { const at = line.indexOf("="), key = line.slice(0, at); requireThat(at > 0 && properties.includes(key) && !Object.hasOwn(fields, key)); fields[key] = line.slice(at + 1); }
     requireThat(properties.every(key => Object.hasOwn(fields, key)) && fields.Id === options.unit && fields.MainPID === String(self.pid) && fields.InvocationID === self.invocation && fields.ControlGroup === self.cgroup && fields.ActiveState === "active");
-    requireThat(fields.Delegate === "yes" && fields.KillMode === "mixed" && fields.Restart === "no" && fields.SendSIGKILL === "yes" && ["1min", "60s", "60000000us"].includes(fields.TimeoutStopUSec!), "Owning service requires delegated bounded lifetime");
+    // Failure restart creates a new service invocation, never continuity of this
+    // native owner. Exact invocation/subgroup retirement remains independently proved.
+    requireThat(fields.Delegate === "yes" && fields.KillMode === "mixed" && ["no", "on-failure"].includes(fields.Restart!) && fields.SendSIGKILL === "yes" && ["1min", "60s", "60000000us"].includes(fields.TimeoutStopUSec!), "Owning service requires delegated bounded lifetime");
     const root = `${self.cgroup}/inv-${self.invocation}`, group = await commands.createGroup(root), control = `${root}/control`, leaf = await commands.createGroup(control);
     await commands.enter(control, leaf);
     const after = await commands.self(); requireThat(after.pid === self.pid && after.invocation === self.invocation && after.cgroup === control && await commands.bootId() === boot);

@@ -18,11 +18,12 @@ class Manager implements HostContainmentCommands {
   readonly gates = new Map<string, { group: string; finish(): void }>();
   current = { pid: 123, invocation, cgroup: serviceGroup }; nextInode = 100; boot = boot;
   readonly spawning = deferred(); barrier: Promise<void> | undefined; delegated = true;
+  restart = "no"; killMode = "mixed"; sendSigkill = "yes"; stopTimeout = "1min";
   async exec(_tool: "control", args: readonly string[]) {
     (this.calls as string[][]).push([...args]);
     assert.ok(args.includes("show"));
     return Object.entries({ Id: unit, MainPID: String(this.current.pid), InvocationID: this.current.invocation, ControlGroup: serviceGroup,
-      ActiveState: "active", Delegate: this.delegated ? "yes" : "no", KillMode: "mixed", Restart: "no", SendSIGKILL: "yes", TimeoutStopUSec: "1min" }).map(([key, value]) => `${key}=${value}`).join("\n");
+      ActiveState: "active", Delegate: this.delegated ? "yes" : "no", KillMode: this.killMode, Restart: this.restart, SendSIGKILL: this.sendSigkill, TimeoutStopUSec: this.stopTimeout }).map(([key, value]) => `${key}=${value}`).join("\n");
   }
   async self() { return { ...this.current }; }
   async bootId() { return this.boot; }
@@ -55,6 +56,32 @@ async function fixture() {
   const config = { directory, containment }, backend = systemdUserAllocation(config);
   return { root, directory, manager, containment, options, config, backend, dispose: () => rm(root, { recursive: true, force: true }) };
 }
+
+test("failure-restarted owning services retain exact invocation fences without automatically opening native allocations", async () => {
+  const manager = new Manager(); manager.restart = "on-failure";
+  const first = await acquireHostContainment({ unit, systemctl: "/fixture/systemctl" }, manager);
+  assert.equal(manager.gates.size, 0); assert.deepEqual(manager.kills, []);
+  manager.current = { pid: 456, invocation: "b".repeat(32), cgroup: serviceGroup };
+  const replacement = await acquireHostContainment({ unit, systemctl: "/fixture/systemctl" }, manager);
+  assert.notEqual(first.identity.process, replacement.identity.process);
+  assert.notEqual(first.identity.containment, replacement.identity.containment);
+  assert.equal(await inspectHostContainment(first.identity, manager), null, "Failure restart cannot certify the old populated invocation as stopped");
+  assert.equal(await inspectHostContainment(replacement.identity, manager), null);
+  assert.equal(manager.calls.length, 2); assert.equal(manager.gates.size, 0); assert.deepEqual(manager.kills, []);
+});
+
+test("owning service restart acceptance stays closed and preserves delegated bounded-stop requirements", async () => {
+  for (const policy of ["always", "on-success", "on-abnormal", "on-abort", "on-watchdog", "unknown"]) {
+    const manager = new Manager(); manager.restart = policy;
+    await assert.rejects(acquireHostContainment({ unit, systemctl: "/fixture/systemctl" }, manager), /delegated bounded lifetime/);
+    assert.equal(manager.groups.size, 0); assert.equal(manager.gates.size, 0);
+  }
+  for (const change of [{ delegated: false }, { killMode: "process" }, { sendSigkill: "no" }, { stopTimeout: "infinity" }]) {
+    const manager = new Manager(); manager.restart = "on-failure"; Object.assign(manager, change);
+    await assert.rejects(acquireHostContainment({ unit, systemctl: "/fixture/systemctl" }, manager), /delegated bounded lifetime/);
+    assert.equal(manager.groups.size, 0); assert.equal(manager.gates.size, 0);
+  }
+});
 
 test("one acquired Host hierarchy replaces independent units; exact session Stop retains peer and private gate custody", async () => {
   const f = await fixture();

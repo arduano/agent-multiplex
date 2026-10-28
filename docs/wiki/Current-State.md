@@ -9,6 +9,18 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 
 ## Isolated V8 source lane
 
+The October28 owning-service compatibility correction admits explicit failure
+restart as well as a non-restarting unit. Acquisition still requires the exact
+current PID, invocation and delegated cgroup, mixed bounded shutdown and final
+SIGKILL. A restarted service acquires a distinct invocation subgroup; it cannot
+claim the previous native lifetime retired or continue its work. Unsafe restart
+modes remain rejected. This reconciles the generic containment boundary with
+passive-service recovery rather than introducing a native Resume policy. Strict
+compilation and six owning-service tests pass. One disposable generated service
+positively proves old-owner rejection and corrected acquisition in its exact
+real systemd invocation, with no native allocation; Stop/process/link cleanup
+passes. Installed acceptance remains separate.
+
 The October28 HTTP observation correction emits blank transport keepalives and
 bounds silence on the single physical reader. Quiet domain feeds stay open; a
 blackholed admitted stream becomes unavailable and rejoins through the existing
