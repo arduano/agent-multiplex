@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { CodexCodec } from "../../v8-history/src/native/codex/index.js";
+import { CodexCodec, codexRowId } from "../../v8-history/src/native/codex/index.js";
+import { HistoryHub } from "../../v8-history/src/host/history-owner.js";
 import { scriptedHost, deferred } from "./fixture.js";
 import type { NativeStart } from "../../v8-session/src/contracts/types.js";
 
@@ -8,14 +9,54 @@ const scope = { connection: "lineage", principal: "owner", host: "host", session
 const input: NativeStart = { scope, generation: 1, operationId: "create", nativeSession: null, placement: "dedicated", policy: { kind: "codex", provider: "copilot-only", access: { approval: "on-request", sandbox: "danger-full-access" } } };
 async function fixture() {
   const driver = scriptedHost("codex", { cwd: "/scripted" }), attached = await driver.controller.open(input, () => {}), root = attached.identity.run.nativeSession;
-  const codec = new CodexCodec({ origin: { connection: scope.connection, principal: scope.principal, host: scope.host, nativeSession: root, attachment: "capture" }, rootThreadId: root, capture: { open() {}, emit() {}, reset() {} } });
-  const detach = driver.controller.observe(capture => { if (capture.kind === "codex") codec.observe(capture.value); });
-  let serial = 0, responses = 0;
+  const history = new HistoryHub(), historyScope = { kind: "codex" as const, origin: { connection: scope.connection, principal: scope.principal, host: scope.host, nativeSession: root, attachment: "capture" }, threadId: root };
+  const codec = new CodexCodec({ origin: historyScope.origin, rootThreadId: root, capture: history });
+  let serial = 0, responses = 0, historyGaps = 0;
+  const detach = driver.controller.observe(capture => { if (capture.kind === "codex") codec.observe(capture.value); else if (capture.kind === "historyGap") historyGaps++; });
   const request = (threadId: string) => { const settled = deferred<void>(); driver.reverse({ id: ++serial, method: "item/commandExecution/requestApproval", token: {}, params: { threadId, turnId: "turn", itemId: `item-${serial}`, command: "fixture", availableDecisions: ["accept", "decline"] }, settled: settled.promise, respond: async () => { responses++; return { kind: "submitted" }; } }); return settled; };
   const activity = (parent: string, child: string, method = "item/started") => driver.notify(method, { threadId: parent, turnId: "turn", item: { id: `spawn-${child}`, type: "subAgentActivity", kind: "started", agentThreadId: child, agentPath: child } });
   const metadata = (id: string, parent: string, context = root) => driver.notify("thread/started", { thread: { id, sessionId: context, parentThreadId: parent, source: { subAgent: { thread_spawn: { parent_thread_id: parent } } } } });
-  return { driver, attached, root, codec, request, activity, metadata, get responses() { return responses; }, owner: driver.controller.interactions(attached.identity.run), async close() { detach(); await attached.stopTree(); driver.controller.dispose(); } };
+  return { driver, attached, root, codec, history, historyScope, request, activity, metadata, get historyGaps() { return historyGaps; }, get responses() { return responses; }, owner: driver.controller.interactions(attached.identity.run), async close() { detach(); await attached.stopTree(); driver.controller.dispose(); } };
 }
+
+test("Codex pending valid ancestry preserves capture until its parent proof arrives without reporting observation loss", async () => {
+  const f = await fixture(); try {
+    f.driver.notify("turn/started", { threadId: f.root, turn: { id: "root-turn", status: "inProgress" } });
+    const rootActivity = f.history.snapshot(f.historyScope).activity;
+    f.metadata("grandchild", "child", "grandchild");
+    f.driver.notify("turn/started", { threadId: "grandchild", turn: { id: "child-turn", status: "inProgress" } });
+    f.driver.notify("item/completed", { threadId: "grandchild", turnId: "child-turn", item: { type: "agentMessage", id: "answer", text: "Retained out-of-order child output" } });
+    assert.equal(f.historyGaps, 0, "Successfully queued proof is pending evidence, not a dropped observation");
+    assert.equal(f.codec.threadOwnership("grandchild"), undefined);
+    assert.equal(f.owner.current().baseline, "complete"); assert.equal(f.owner.current().items.length, 0);
+    assert.deepEqual(f.history.snapshot(f.historyScope).activity, rootActivity);
+    f.activity(f.root, "child");
+    assert.ok(f.codec.threadOwnership("grandchild")); assert.equal(f.codec.diagnostics().bufferedEvents, 0);
+    const rows = f.history.snapshot({ ...f.historyScope, threadId: "grandchild" }).rows;
+    assert.equal(rows.length, 1); assert.equal(rows[0]!.id, codexRowId("grandchild", "child-turn", "answer"));
+    assert.deepEqual(rows[0]!.body, { kind: "complete", text: "Retained out-of-order child output", evidence: "nativeFullBody" });
+    assert.equal(f.historyGaps, 0); assert.deepEqual(f.history.snapshot(f.historyScope).coverage.gaps, []);
+    assert.deepEqual(f.history.snapshot(f.historyScope).activity, rootActivity);
+    assert.equal(f.owner.current().baseline, "complete"); assert.equal(f.owner.current().items.length, 0);
+    assert.equal(f.driver.counts.bodyReads, 0); assert.equal(f.driver.counts.sends, 0); assert.equal(f.driver.counts.resumes, 0);
+  } finally { await f.close(); }
+});
+
+test("Codex pending ancestry overflow and invalid context still report observation loss without granting authority", async () => {
+  for (const invalid of [false, true]) {
+    const f = await fixture(); try {
+      if (invalid) f.metadata("invalid-context", f.root, "foreign-context");
+      else {
+        for (let index = 0; index < 8; index++) f.metadata(`pending-${index}`, "missing-parent");
+        assert.equal(f.historyGaps, 0);
+        f.metadata("overflow", "missing-parent");
+      }
+      assert.ok(f.historyGaps > 0);
+      assert.equal(f.owner.current().items.length, 0); assert.equal(f.responses, 0);
+      assert.equal(f.codec.threadOwnership(invalid ? "invalid-context" : "overflow"), undefined);
+    } finally { await f.close(); }
+  }
+});
 
 test("Codex callback ancestry matches codec for buffered nested known-parent activity and validated thread-started descendants", async () => {
   const f = await fixture(); try {

@@ -76,12 +76,12 @@ test('actual SSR uses the prepared view without observing, reading, effects or d
   assert.equal(fixture.history.session(fixture.bindings.get('a')!.history).mountedReferences, 0);
   fixture.workspace.close();
 });
-test('connected chat warns only for the canonical live capture gap without reading or treating ordinary partial history as capture loss', async () => {
+test('canonical capture loss remains visible independently of fresh native work without weakening captured row or binding proof', async () => {
   const f = workspaceFixture();
   try {
-    const { a } = await f.open(), lease = a.observe(), client = f.history.session(f.bindings.get('a')!.history).client;
+    const { a } = await f.open(), lease = a.observe(), binding = f.bindings.get('a')!, client = f.history.session(binding.history).client;
     try {
-      const notice = 'Some live history updates were missed. Recent messages may be missing.';
+      const notice = 'History capture was interrupted. Some messages may be missing.';
       const render = () => renderToStaticMarkup(h(MultiplexChat, { view: a }));
       const capture = (gaps: readonly Gap[]) => { const current = client.current!; client.apply({ kind: 'snapshot', snapshot: { ...current, revision: current.revision + 1, coverage: { ...current.coverage, gaps } } }); };
       const current = a.getSnapshot(); if (current.kind !== 'codex') assert.fail('Expected connected Codex chat');
@@ -93,6 +93,25 @@ test('connected chat warns only for the canonical live capture gap without readi
       capture([{ id: 'other:native-gap', kind: 'nativeGap' }]); assert.equal(render().includes(notice), false);
       capture([{ id: CAPTURE_GAP_ID, kind: 'nativeGap' }]);
       assert.equal(render().split(notice).length - 1, 1, 'The canonical capture gap remains visible on a healthy connection');
+      const work = (state: 'unknown' | 'working', generation = binding.run.generation) => {
+        const history = client.current!, turnId = state === 'unknown' ? 'capture-failed-turn' : 'later-positive-turn';
+        const row: Row = { id: turnId, kind: 'assistant', lifecycle: 'running', body: { kind: 'partial', text: 'Captured excerpt', missing: ['final'] }, native: { turnId }, version: 1, contentVersion: 1 };
+        client.apply({ kind: 'snapshot', snapshot: { ...history, revision: history.revision + 1, rows: [...history.rows.filter(value => value.id !== row.id), row], activity: { state, turnId }, scopeInventory: { nativeGeneration: generation, entries: [{ scope: binding.history }] } } });
+        f.observation({ scope: binding.run.scope, kind: 'session', state: 'live' });
+        f.observation({ scope: binding.run.scope, kind: 'history', history: binding.history, state: 'live' });
+        f.native.publish(binding.run.scope, { phase: 'running', activity: 'working' });
+      };
+      for (const state of ['unknown', 'working'] as const) {
+        work(state); const markup = render();
+        assert.match(markup, /data-action="working-indicator"/, state);
+        assert.equal(markup.split(notice).length - 1, 1);
+        assert.match(markup, /Final content not captured\./, 'Native work never certifies captured row completeness');
+        assert.ok(client.current!.coverage.gaps.some(gap => gap.id === CAPTURE_GAP_ID));
+      }
+      f.native.publish(binding.run.scope, { activity: 'idle' }); assert.doesNotMatch(render(), /data-action="working-indicator"/);
+      work('working'); f.native.publish(binding.run.scope, { phase: 'stopped' }); assert.doesNotMatch(render(), /data-action="working-indicator"/);
+      work('working'); f.observation({ scope: binding.run.scope, kind: 'history', history: binding.history, state: 'disconnected' }); assert.doesNotMatch(render(), /data-action="working-indicator"/);
+      work('working', binding.run.generation + 1); assert.doesNotMatch(render(), /data-action="working-indicator"/);
       capture([]); assert.equal(render().includes(notice), false);
       assert.deepEqual(f.counts(), before, 'Rendering neither reads history nor changes native state');
     } finally { lease.release(); }

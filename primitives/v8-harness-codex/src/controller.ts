@@ -234,7 +234,9 @@ export class CodexController extends Controller {
     const node = existing ?? { parent, closed: false }; if (proof.type === "metadata") node.context = proof.value.context; this.#lineage.set(child, node); return true;
   }
   #remember(proof: LiveProof): void {
-    if (!this.#apply(proof)) { requireThat(this.#proofs.length < 8); this.#proofs.push(proof); this.observationLost(); }
+    // A retained proof awaiting its parent has lost no observation. Overflow
+    // and contradictory proof still reach the existing strict loss boundary.
+    if (!this.#apply(proof)) { requireThat(this.#proofs.length < 8); this.#proofs.push(proof); }
     let changed = true;
     while (changed) { changed = false; for (let index = 0; index < this.#proofs.length;) { if (this.#apply(this.#proofs[index]!)) { this.#proofs.splice(index, 1); changed = true; } else index++; } }
     for (let index = 0; index < this.#waiting.length;) { if (this.#owned(String(record(this.#waiting[index]!.params).threadId))) this.#request(this.#waiting.splice(index, 1)[0]!); else index++; }

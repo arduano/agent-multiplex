@@ -15,12 +15,26 @@ export async function qualifyCaptureCallouts(page, chat, cases, out) {
     const loss=history.locator(`[data-row="${excerpt}"] [data-action=partial-content]`);
     assert.equal(await loader.count(),1);await loss.locator('summary').click();
     await loss.getByText('Beginning not captured. Some content not captured. Content truncated.',{exact:true}).waitFor();
-    for(const mode of ['idle','stopped','disconnected','gap']){
+    for(const mode of ['idle','stopped','disconnected','generation-mismatch']){
       const id=await page.evaluate(mode=>window.chatFixture.progress(mode),mode);await frames();
       assert.equal(await loader.count(),0,mode);const retained=history.locator(`[data-row="${id}"] [data-action=partial-content]`);
       assert.equal(await retained.count(),1,mode);await retained.locator('summary').click();await retained.getByText('Final content not captured.',{exact:true}).waitFor();
     }
-    cases.push('Only positively current work has a loader; message excerpts retain exact capture gaps');
+    for(const mode of ['gap','retained-gap']){
+      const id=await page.evaluate(mode=>window.chatFixture.progress(mode),mode);await frames();
+      assert.equal(await loader.count(),1,`${mode}: missing transcript updates do not hide observed native work`);
+      await chat.getByText('History capture was interrupted. Some messages may be missing.',{exact:true}).waitFor();
+      const retained=history.locator(`[data-row="${id}"] [data-action=partial-content]`);
+      assert.equal(await retained.count(),1,'Uncertain captured rows keep their missing-final evidence');
+      await retained.locator('summary').click();await retained.getByText('Final content not captured.',{exact:true}).waitFor();
+      const snapshot=await page.evaluate(()=>window.chatFixture.snapshot('a'));
+      facts.push({mode,nativeActivity:snapshot.session.native.activity,historyActivity:snapshot.history.current.activity,coverage:snapshot.history.current.coverage});
+      assert.equal(snapshot.session.native.activity,'working');
+      assert.equal(snapshot.history.current.activity.state,mode==='gap'?'unknown':'working');
+      assert.ok(snapshot.history.current.coverage.gaps.some(gap=>gap.id==='host:capture-gap'));
+    }
+    await loader.scrollIntoViewIfNeeded();await page.screenshot({path:resolve(out,'working-with-capture-gap.png')});
+    cases.push('Fresh native work stays visible through unknown capture and a later turn with a retained gap; inactive or mismatched bindings do not animate');
     const active=await page.evaluate(()=>window.chatFixture.compaction('working'));await frames();
     const activeRow=history.locator(`[data-row="${active}"]`);
     await activeRow.getByText('Compacting context…',{exact:true}).waitFor();

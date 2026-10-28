@@ -62,10 +62,12 @@ content fits the viewport, prepend may move its first row down because the
 browser cannot scroll beyond the content's end; no trailing spacer is invented,
 and the loaded earlier rows remain reachable above it. A canonical Host capture
 gap surfaces a notice even while the transport remains connected.
-The working indicator requires fresh native and current-history work evidence.
-Incomplete text capture remains inspectable; an old running row alone never
-starts a loader. Its missing-final decoration is omitted only for a proved
-current turn.
+The generic working indicator requires fresh native work and an exact current
+binding/generation, independently of captured activity or a retained capture gap.
+The gap remains visible with time-neutral wording: it has no loss timestamp and
+does not prove that current work stopped. Row animation, live compaction and
+missing-final suppression still require current captured work without that gap.
+Incomplete text remains inspectable; an old running row alone never starts a loader.
 Codex compaction uses its own small callout rather than a generic Notice/text
 block. Fresh exact-turn work shows `Compacting context…` with one loader in place
 of the generic Working footer. `Context compacted` additionally requires positive

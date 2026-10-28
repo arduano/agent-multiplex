@@ -145,6 +145,16 @@ client validates whole frames before publication. Body completeness, native
 activity, stream freshness and Send receipt remain independent facts. Historical
 records cannot replay callbacks or settle original requests.
 
+A retained capture gap does not veto fresh native work: the generic Working
+footer uses the exact live native binding/generation. Per-row animation,
+compaction progress and missing-final suppression require stricter current
+capture proof. The canonical capture gap has no loss timestamp or turn provenance;
+its notice cannot claim that recent messages were missed. It is not cleared by
+a later healthy turn or a recovered row, neither of which proves continuity.
+Codex ancestry retained in the existing bounded proof queue is pending evidence,
+not observation loss. Queue overflow, contradictory proof and unowned reverse
+requests keep their existing failure/authority boundaries.
+
 The default lifecycle admits complete bodies up to 64 KiB while the Host rolls
 old non-running rows out of a 512 KiB serialized current window (also bounded
 to 128 rows); retained views and explicit native pages keep their own bounded

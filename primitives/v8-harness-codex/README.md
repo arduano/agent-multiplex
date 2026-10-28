@@ -166,6 +166,11 @@ and stale tool output or child terminals cannot settle the root. Capture gaps
 make an identified turn unknown until positive native evidence resolves it.
 The lifecycle's existing writer retains the fact; Stop and ACK are not outcomes.
 
+Out-of-order ancestry successfully retained in the existing eight-proof queue
+does not report observation loss or grant callback authority. Valid parent proof
+drains that queue and the codec's retained child events. Overflow, contradictory
+ancestry and unowned reverse requests retain their existing fail-closed behavior.
+
 The installed `v8-harness-defaults` package retains the existing known-native
 validation/selection facade for existing clients. `NativeProtocol` is explicitly
 injected into the default lifecycle and supervisor; neither has a fallback

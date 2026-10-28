@@ -57,9 +57,12 @@ export function Transcript({ view, history, preview, previewLocal, previewOption
   const current = history.current;
   const freshWork = snapshot.kind === 'codex' || snapshot.kind === 'copilot' ? snapshot.session.connected && !snapshot.session.stale && !snapshot.session.requiresRebind && !snapshot.session.issue && snapshot.observation.session === 'live' && snapshot.observation.history === 'live' && snapshot.session.native?.phase === 'running' && !snapshot.session.native.stopRequested && snapshot.session.native.activity === 'working' && current?.scope.origin.nativeSession === snapshot.session.native.nativeSession && current.scopeInventory?.nativeGeneration === snapshot.session.native.generation
     : snapshot.kind === 'ready' && snapshot.observation === 'live' && nativeWorking;
-  const working = !archived && freshWork && current?.activity.state === 'working' && !current.coverage.gaps.some(gap => gap.id === CAPTURE_GAP_ID);
+  // Native activity and captured progress are independent facts. Missing
+  // transcript updates cannot hide positively observed native work.
+  const working = !archived && freshWork;
+  const capturedWorking = working && current?.activity.state === 'working' && !current.coverage.gaps.some(gap => gap.id === CAPTURE_GAP_ID);
   const inProgress = (row: Row) => {
-    if (!working || !current) return false;
+    if (!capturedWorking || !current) return false;
     const origin = history.origins[row.id];
     return row.lifecycle === 'running' && !!origin && origin.source === 'current' && origin.generation === current.generation && sameScope(origin.scope, current.scope) && !!current.activity.turnId && row.native.turnId === current.activity.turnId;
   };

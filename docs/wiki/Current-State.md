@@ -9,6 +9,15 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 
 ## Isolated V8 source lane
 
+The October28 Working/capture follow-up separates confirmed native work from
+transcript completeness. A retained capture gap no longer hides the generic
+Working footer; row animation and compaction retain their stricter captured-work
+proof. The notice is time-neutral because the marker has no original loss
+timestamp. Successfully buffered out-of-order Codex ancestry no longer reports
+observation loss; overflow, contradictions and unowned callbacks stay guarded.
+Existing gaps are not cleared or silently recovered. Focused owner/React and
+consuming-application checks qualify source only, not an installed update.
+
 The follow-up October28 compaction correction treats the native bodyless item
 as metadata and carries positive item-completion provenance separately from
 parent-turn settlement. Shared React gives compaction a purposeful callout,
