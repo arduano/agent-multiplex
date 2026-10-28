@@ -12,7 +12,7 @@ import { ViewerQueue } from "../gateway/queue.js";
 
 export type CredentialVerifier=(authorization:string|undefined)=>Promise<Identity|null>;
 /** Explicit trusted external file origins; omission retains loopback policy. */
-export type GatewayHttpOptions=Readonly<{allowedFileOrigins?:readonly string[]}>;
+export type GatewayHttpOptions=Readonly<{allowedFileOrigins?:readonly string[];streamKeepaliveMs?:number}>;
 export type Namespace=Readonly<{connection:string;principal:string}>;
 export type LoopbackGateway=Readonly<{url:string;revoke(namespace:Namespace):void;close():Promise<void>}>;
 const codes=new Set(["INVALID","UNAUTHENTICATED","FORBIDDEN","FENCED","UNAVAILABLE","FULL","OVERFLOW","CLOSED","ALREADY_ATTEMPTED","CANCELLED","TIMEOUT","CONFLICT"]);
@@ -26,9 +26,12 @@ function json(res:ServerResponse,status:number,value:unknown):void {if(res.destr
 function writable(res:ServerResponse,queue:ViewerQueue<unknown>):Promise<void>{
   return new Promise(resolve=>{let remove:()=>void=()=>{};const finish=()=>{res.off("drain",finish);res.off("close",finish);remove();resolve();};res.once("drain",finish);res.once("close",finish);remove=queue.onClose(finish);});
 }
-async function stream<T>(res:ServerResponse,queue:ViewerQueue<T>):Promise<void> {
+async function stream<T>(res:ServerResponse,queue:ViewerQueue<T>,keepaliveMs:number):Promise<void> {
   const close=()=>{void queue.return();};res.once("close",close);
   res.setHeader("content-type","application/x-ndjson");res.writeHead(200,{"cache-control":"no-store","x-content-type-options":"nosniff"});res.flushHeaders();
+  // Blank NDJSON lines keep a quiet physical observation distinguishable from a
+  // blackholed connection without creating logical events or buffering pressure.
+  const keepalive=setInterval(()=>{if(!res.destroyed&&!res.writableEnded&&!res.writableNeedDrain){try{res.write("\n");}catch(error){queue.fail(error);}}},keepaliveMs);
   try {
     for await(const value of queue){
       if(res.destroyed||res.writableEnded)break;
@@ -38,11 +41,13 @@ async function stream<T>(res:ServerResponse,queue:ViewerQueue<T>):Promise<void> 
       }
     }
   }catch(error){if(!res.destroyed&&!res.writableEnded)res.write(`${JSON.stringify({type:"error",code:errorCode(error)})}\n`);}
-  finally{res.off("close",close);await queue.return();if(!res.destroyed&&!res.writableEnded)res.end();}
+  finally{clearInterval(keepalive);res.off("close",close);await queue.return();if(!res.destroyed&&!res.writableEnded)res.end();}
 }
 /** Reusable authenticated handler. TLS/session issuance/origin policy belongs to the embedder. */
 export function createGatewayHttpHandler(coordinator:GatewayCoordinator,verify:CredentialVerifier,options:GatewayHttpOptions={}) {
   const fileOrigins=options.allowedFileOrigins===undefined?undefined:[...options.allowedFileOrigins];
+  const keepaliveMs=options.streamKeepaliveMs??10000;
+  if(!Number.isSafeInteger(keepaliveMs)||keepaliveMs<1||keepaliveMs>30000)throw new GatewayError("INVALID");
   const revoked=new Set<string>(),active=new Map<ServerResponse,Identity>(),context=new AsyncLocalStorage<Identity>();
   let sealed=false;
   type Logical={active:boolean;queue?:ViewerQueue<unknown>};
@@ -106,7 +111,7 @@ export function createGatewayHttpHandler(coordinator:GatewayCoordinator,verify:C
         case "watch.open":{
           if(channels.size>=32)throw new GatewayError("FULL");
           const channel:Channel={id:randomUUID(),identity,queue:new ViewerQueue<ObserverFrame>(128,2097152),logical:new Map(),closed:false};channels.set(channel.id,channel);channel.queue.setCleanup(()=>closeChannel(channel));channel.queue.push({type:"ready",channel:channel.id});
-          try{await stream(res,channel.queue);}finally{closeChannel(channel);}return;
+          try{await stream(res,channel.queue,keepaliveMs);}finally{closeChannel(channel);}return;
         }
         case "watch.subscribe":result=await subscribeObserver(identity,input);break;
         case "watch.unsubscribe":{const channel=observer(identity,input.channel),id=logicalId(input.id),logical=channel.logical.get(id);if(logical){logical.active=false;channel.logical.delete(id);await logical.queue?.return();}result=null;break;}
@@ -117,8 +122,8 @@ export function createGatewayHttpHandler(coordinator:GatewayCoordinator,verify:C
         case "submit":result=await coordinator.submit(identity,input.target,input.request);break;
         case "receipt":result=await coordinator.receipt(identity,input.target,input.id);break;
         case "mcp.loginLink":result=await coordinator.mcpLoginLink(identity,input.target,input.run,input.originalId);break;
-        case "session.watch":await stream(res,coordinator.watchSession(identity,input.target));return;
-        case "history.watch":await stream(res,coordinator.watchHistory(identity,{target:input.target,scope:input.scope,...(input.cursor?{cursor:input.cursor}:{})}));return;
+        case "session.watch":await stream(res,coordinator.watchSession(identity,input.target),keepaliveMs);return;
+        case "history.watch":await stream(res,coordinator.watchHistory(identity,{target:input.target,scope:input.scope,...(input.cursor?{cursor:input.cursor}:{})}),keepaliveMs);return;
         case "history.scopes":result=await coordinator.historyScopes(identity,input.target);break;
         case "history.older":result=await coordinator.older(identity,input.target,input.scope,input.cursor,input.generation,input.retryToken);break;
         case "history.recover":{
@@ -126,9 +131,9 @@ export function createGatewayHttpHandler(coordinator:GatewayCoordinator,verify:C
           try{result=await coordinator.recover(identity,input.target,input.scope,{signal:controller.signal,...(input.timeoutMs!==undefined?{timeoutMs:input.timeoutMs}:{})},input.retryToken);}finally{res.off("close",cancel);}break;
         }
         case "interactions.snapshot":result=await coordinator.interactionSnapshot(identity,input.target);break;
-        case "interactions.watch":await stream(res,coordinator.watchInteractions(identity,input.target));return;
+        case "interactions.watch":await stream(res,coordinator.watchInteractions(identity,input.target),keepaliveMs);return;
         case "mcp.snapshot":result=await coordinator.mcpSnapshot(identity,input.target,input.run);break;
-        case "mcp.watch":await stream(res,await coordinator.watchMcp(identity,input.target,input.run));return;
+        case "mcp.watch":await stream(res,await coordinator.watchMcp(identity,input.target,input.run),keepaliveMs);return;
         case "mcp.refresh":{
           const controller=new AbortController(),cancel=()=>controller.abort();res.once("close",cancel);
           try{result=await coordinator.mcpRefresh(identity,input.target,input.run,{signal:controller.signal,...(input.timeoutMs!==undefined?{timeoutMs:input.timeoutMs}:{})});}finally{res.off("close",cancel);}break;
@@ -142,7 +147,7 @@ export function createGatewayHttpHandler(coordinator:GatewayCoordinator,verify:C
         case "catalog.watch.set":result=await coordinator.catalogSetWatched(identity,input.request);break;
         case "catalog.metadata.original":result=await coordinator.catalogMetadataOriginal(identity,input.scope,input.id);break;
         case "catalog.archive.publish":result=await coordinator.catalogPublishArchive(identity,input.request);break;
-        case "catalog.watch":await stream(res,coordinator.watchCatalog(identity,input.scope));return;
+        case "catalog.watch":await stream(res,coordinator.watchCatalog(identity,input.scope),keepaliveMs);return;
         default:throw new GatewayError("INVALID");
       }
       if(revoked.has(namespace(identity)))throw new GatewayError("UNAUTHENTICATED");json(res,200,{value:result});
@@ -161,8 +166,8 @@ export function createGatewayHttpHandler(coordinator:GatewayCoordinator,verify:C
   });
 }
 /** Disposable authenticated loopback listener for the same reusable HTTP handler. */
-export async function listenLoopback(coordinator:GatewayCoordinator,verify:CredentialVerifier):Promise<LoopbackGateway> {
-  const handler=createGatewayHttpHandler(coordinator,verify),server=createServer(handler);
+export async function listenLoopback(coordinator:GatewayCoordinator,verify:CredentialVerifier,options:GatewayHttpOptions={}):Promise<LoopbackGateway> {
+  const handler=createGatewayHttpHandler(coordinator,verify,options),server=createServer(handler);
   server.requestTimeout=10000;server.headersTimeout=10000;
   await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",()=>{server.off("error",reject);resolve();});});
   const address=server.address() as AddressInfo;

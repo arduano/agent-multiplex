@@ -5,7 +5,9 @@ import { ViewerQueue } from "../src/contracts/queue.js";
 import { GatewayError, type GatewayTransport } from "../src/contracts/types.js";
 import { GatewayClient, type RecoveryClock } from "../src/client/coordinator.js";
 import { GatewayCoordinator } from "../src/gateway/coordinator.js";
-import { listenLoopback } from "../src/http/server.js";
+import { createGatewayHttpHandler,listenLoopback } from "../src/http/server.js";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { HistoryWorkspace } from "../../v8-history/src/client/workspace.js";
 import { HistoryHub } from "../../v8-history/src/host/history-owner.js";
 import { McpOwner,McpReadPool } from "../../v8-mcp/src/index.js";
@@ -34,11 +36,12 @@ test('finite HTTP deadlines cover headers and bodies, fence late responses and n
 
 test('watch opening has a deadline, while an admitted quiet stream outlives that deadline', { timeout: 5000 }, async () => {
  for (const ready of [false, true]) {
-  let controller!: ReadableStreamDefaultController<Uint8Array>, posts = 0, cancelled = 0;
-  const transport = new HttpGatewayTransport({ url: 'http://127.0.0.1:1/v8', authorization: 'fixture', requestTimeoutMs: 30, fetch: async (_url, init) => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>, posts = 0, cancelled = 0, heartbeats = 0;
+  let heartbeat:ReturnType<typeof setInterval>|undefined;
+  const transport = new HttpGatewayTransport({ url: 'http://127.0.0.1:1/v8', authorization: 'fixture', requestTimeoutMs: 30, streamIdleTimeoutMs:50, fetch: async (_url, init) => {
    const request = JSON.parse(String(init?.body)); posts++;
    if (request.op !== 'watch.open') return new Response('{"value":null}');
-   return new Response(new ReadableStream<Uint8Array>({ start(stream) { controller = stream; if (ready) controller.enqueue(new TextEncoder().encode('{"type":"value","value":{"type":"ready","channel":"fixture-channel"}}\n')); }, cancel() { cancelled++; } }));
+   return new Response(new ReadableStream<Uint8Array>({ start(stream) { controller = stream; if (ready) {controller.enqueue(new TextEncoder().encode('{"type":"value","value":{"type":"ready","channel":"fixture-channel"}}\n'));heartbeat=setInterval(()=>{heartbeats++;controller.enqueue(new TextEncoder().encode('\n'));},10);} }, cancel() { clearInterval(heartbeat);cancelled++; } }));
   } });
   const abort = new AbortController(), iterator = transport.watchSession(target, abort.signal)[Symbol.asyncIterator]();
   try {
@@ -48,9 +51,63 @@ test('watch opening has a deadline, while an admitted quiet stream outlives that
     await until(() => posts === 2); await new Promise(resolve => setTimeout(resolve, 80));
     controller.enqueue(new TextEncoder().encode(`{"type":"value","value":{"type":"event","id":"w1","value":${JSON.stringify(new FixtureSession().state)}}}\n`));
     assert.equal((await first).value?.phase, 'running');
+    assert.ok(heartbeats>=2,'Quiet admission stays alive through actual blank wire keepalives');assert.equal(posts,2);
    }
   } finally { abort.abort(); transport.close(); await iterator.return?.(); await until(() => cancelled === 1); }
  }
+});
+
+test('server quiet keepalives respect backpressure and retire their exact timer with the physical stream',{timeout:5000},async t=>{
+ const coordinator=new GatewayCoordinator(),handler=createGatewayHttpHandler(coordinator,async()=>alice,{streamKeepaliveMs:10});
+ const scheduled=t.mock.method(globalThis,'setInterval'),cleared=t.mock.method(globalThis,'clearInterval');
+ let blocked=false,blanks=0;
+ const server=createServer((req,res)=>{Object.defineProperty(res,'writableNeedDrain',{configurable:true,get:()=>blocked});const write=res.write.bind(res);res.write=((...args:Parameters<typeof res.write>)=>{if(String(args[0])==='\n')blanks++;return write(...args);}) as typeof res.write;handler(req,res);});
+ const abort=new AbortController();let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
+ try{
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const response=await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v8`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({op:'watch.open'}),signal:AbortSignal.any([abort.signal,t.signal])});reader=response.body!.getReader();
+  assert.match(new TextDecoder().decode((await reader.read()).value),/"ready"/);
+  const interval=scheduled.mock.calls.find(call=>call.arguments[1]===10)?.result;assert.ok(interval);
+  blocked=true;const before=blanks;await new Promise(resolve=>setTimeout(resolve,40));assert.equal(blanks,before,'Heartbeat cannot add bytes under response backpressure');
+  blocked=false;await until(()=>blanks>before);abort.abort();await reader.cancel().catch(()=>undefined);await until(()=>cleared.mock.calls.some(call=>call.arguments[0]===interval));
+  const closedBlanks=blanks;await new Promise(resolve=>setTimeout(resolve,30));assert.equal(blanks,closedBlanks);
+ }finally{abort.abort();await reader?.cancel().catch(()=>undefined);handler.close();coordinator.close();server.closeAllConnections();if(server.listening)await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));}
+});
+
+test('an admitted online blackhole expires one physical reader and automatically restores retained observations without replay',{timeout:5000},async t=>{
+ const gateway=new GatewayCoordinator(),session=new FixtureSession(),hub=new HistoryHub();hub.open(historyScope,{knownStart:true});
+ hub.emit(historyScope,[{type:'start',id:'retained',kind:'assistant',text:'retained body'},{type:'finish',id:'retained',kind:'assistant',lifecycle:'completed'}]);
+ gateway.register({target,session,history:hub,authorizeHistory:()=>true});
+ const server=await listenLoopback(gateway,async()=>alice,{streamKeepaliveMs:10});
+ const scheduled=t.mock.method(globalThis,'setTimeout'),cleared=t.mock.method(globalThis,'clearTimeout');
+ let physical=0,subscribes=0,blackhole=false,dropped=0,cancelled=0,events=0;
+ const states:string[]=[],connections:boolean[]=[],historyRequests:unknown[]=[],disconnections:string[]=[];
+ const transport=new HttpGatewayTransport({url:server.url,authorization:'fixture',requestTimeoutMs:500,streamIdleTimeoutMs:100,fetch:async(input,init)=>{
+  const body=JSON.parse(String(init?.body));if(body.op==='watch.subscribe'){subscribes++;if(body.request.op==='history.watch')historyRequests.push(body.request);}
+  const response=await fetch(input,init);
+  if(body.op==='submit'){await response.body?.cancel();throw new TypeError('Owned lost original response');}
+  if(body.op!=='watch.open')return response;const attempt=++physical,reader=response.body!.getReader();
+  return new Response(new ReadableStream<Uint8Array>({start(controller){void(async()=>{
+   try{for(;;){const part=await reader.read();if(part.done){controller.close();return;}if(attempt===1&&blackhole){dropped+=part.value.byteLength;continue;}controller.enqueue(part.value);}}
+   catch(error){try{controller.error(error);}catch{/* Already cancelled. */}}
+  })();},cancel(){cancelled++;return reader.cancel();}}),{headers:response.headers,status:response.status});
+ }});
+ const disconnected=transport.onDisconnect.bind(transport);transport.onDisconnect=listener=>disconnected(error=>{disconnections.push(String((error as {code?:unknown}).code));listener(error);});
+ const history=new HistoryWorkspace({connection:scope.connection,principal:scope.principal}),retained=history.session(historyScope);retained.setDraft('unsent local draft');
+ const client=new GatewayClient({transport,history,targets:[target],onFence(){assert.fail('Physical silence cannot revoke authority');},onConnection:value=>connections.push(value),onObservation:value=>states.push(value.state),random:()=>1}),off=client.subscribe(scope,()=>events++),lease=client.observeHistory(scope,historyScope);
+ try{
+  await until(()=>gateway.observation.subscribers===2&&!!retained.client.current&&events===1);const generation=retained.client.current!.generation;
+  await assert.rejects(client.submit(request('blackhole-original')),{message:'Owned lost original response'});assert.equal(client.originalCount,1);assert.equal(session.submits.length,1);
+  blackhole=true;session.emit();hub.emit(historyScope,[{type:'start',id:'after-blackhole',kind:'assistant',text:'new body'},{type:'finish',id:'after-blackhole',kind:'assistant',lifecycle:'completed'}]);
+  await until(()=>states.includes('unavailable')&&dropped>0,1500);assert.deepEqual(disconnections,['TIMEOUT']);
+  assert.equal(retained.draft,'unsent local draft');assert.equal(client.originalCount,1);
+  await until(()=>physical===2&&gateway.observation.subscribers===2&&events===2&&retained.client.current!.rows.length===2);
+  assert.equal(subscribes,4,'Two logical feeds rejoin a single replacement physical channel');assert.equal(cancelled,1);assert.deepEqual(connections,[false,true]);
+  assert.equal(retained.client.current!.generation,generation);assert.ok((historyRequests[1] as {cursor?:unknown}).cursor,'Recovery resumes the retained history cursor');
+  assert.equal(retained.draft,'unsent local draft');assert.equal(client.originalCount,1);assert.equal(session.submits.length,1);assert.equal(session.reads,0,'Observation recovery does not read or redispatch originals');
+  assert.equal((await client.receipt(scope,'blackhole-original'))?.state,'acknowledged');assert.equal(client.originalCount,0);assert.equal(session.submits.length,1);assert.equal(session.reads,1);
+ }finally{off();lease.release();client.close();await until(()=>cancelled===physical&&gateway.observation.subscribers===0);gateway.close();await server.close();
+  for(const call of scheduled.mock.calls.filter(call=>call.arguments[1]===100))assert.ok(cleared.mock.calls.some(clear=>clear.arguments[0]===call.result),'Every physical idle deadline is cleared');}
 });
 
 test("nine logical domain feeds share one physical channel; spontaneous physical recovery and explicit reconnect restore every callback without discovery or effects",async()=>{

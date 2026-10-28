@@ -19,12 +19,14 @@ import type { HostRpcCall, HostRpcRequest, RpcResult } from '../contracts/rpc.js
 type Mux={controller:AbortController;channel:string|null;ready:Promise<void>;resolve():void;reject(error:unknown):void;queues:Map<string,ViewerQueue<unknown>>;ended:boolean};
 /** Authenticated POSTs keep credentials out of URLs. No automatic fetch retry or mutation resend. */
 export class HttpGatewayTransport implements GatewayTransport {
-  readonly #url:string;#credential:string;readonly #fetch:typeof fetch;readonly #requestTimeoutMs:number;#closed=false;readonly #streams=new Set<AbortController>();readonly #lifetime=new AbortController();readonly #disposers=new Set<()=>void>();readonly #filePorts=new Map<string,{port:FilePort;route:()=>GatewayTarget}>();readonly #onUnauthenticated:(()=>void)|undefined;#denied=false;
+  readonly #url:string;#credential:string;readonly #fetch:typeof fetch;readonly #requestTimeoutMs:number;readonly #streamIdleTimeoutMs:number;#closed=false;readonly #streams=new Set<AbortController>();readonly #lifetime=new AbortController();readonly #disposers=new Set<()=>void>();readonly #filePorts=new Map<string,{port:FilePort;route:()=>GatewayTarget}>();readonly #onUnauthenticated:(()=>void)|undefined;#denied=false;
   #disconnectListener:((error:unknown)=>void)|undefined;#mux:Mux|null=null;#connected=true;#logicalId=0;
-  constructor(options:Readonly<{url:string;authorization:string;fetch?:typeof fetch;onUnauthenticated?:()=>void;requestTimeoutMs?:number}>) {
+  constructor(options:Readonly<{url:string;authorization:string;fetch?:typeof fetch;onUnauthenticated?:()=>void;requestTimeoutMs?:number;streamIdleTimeoutMs?:number}>) {
     const url=new URL(options.url);if(!["http:","https:"].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new GatewayError("INVALID");
     this.#requestTimeoutMs=options.requestTimeoutMs??15000;
     if(!Number.isSafeInteger(this.#requestTimeoutMs)||this.#requestTimeoutMs<1||this.#requestTimeoutMs>30000)throw new GatewayError("INVALID");
+    this.#streamIdleTimeoutMs=options.streamIdleTimeoutMs??45000;
+    if(!Number.isSafeInteger(this.#streamIdleTimeoutMs)||this.#streamIdleTimeoutMs<1||this.#streamIdleTimeoutMs>120000)throw new GatewayError("INVALID");
     this.#url=url.href;this.#credential=options.authorization;this.#onUnauthenticated=options.onUnauthenticated;this.#fetch=(options.fetch??globalThis.fetch).bind(globalThis);
   }
   #unauthenticated():void{if(this.#denied)return;this.#denied=true;try{this.#disconnectListener?.(new GatewayError("UNAUTHENTICATED"));}catch{/* Observer isolation. */}this.close();try{this.#onUnauthenticated?.();}catch{/* Consumer cannot interrupt revocation. */}}
@@ -58,15 +60,20 @@ export class HttpGatewayTransport implements GatewayTransport {
   async *#wire<T>(body:unknown,signal:AbortSignal):AsyncIterable<T>{
     const own=new AbortController();this.#streams.add(own);const abort=()=>own.abort();signal.addEventListener("abort",abort,{once:true});if(signal.aborted)own.abort();
     let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
-    const cancel=()=>{void reader?.cancel().catch(()=>undefined);};own.signal.addEventListener('abort',cancel,{once:true});
+    let idle:ReturnType<typeof setTimeout>|undefined;
+    // Physical silence is bounded; blank keepalives preserve quiet logical feeds.
+    const renew=()=>{clearTimeout(idle);idle=setTimeout(()=>own.abort(new GatewayError('TIMEOUT')),this.#streamIdleTimeoutMs);};
+    const cancel=()=>{clearTimeout(idle);void reader?.cancel().catch(()=>undefined);};own.signal.addEventListener('abort',cancel,{once:true});
     try{const response=await this.#response(body,own.signal);if(!response.body)throw new GatewayError("UNAVAILABLE");reader=response.body.getReader();let buffer="";const decoder=new TextDecoder();
-      for(;;){const part=await reader.read();if(part.done)break;buffer+=decoder.decode(part.value,{stream:true});
+      renew();
+      for(;;){const part=await reader.read();own.signal.throwIfAborted();if(part.done)break;if(part.value.byteLength)renew();buffer+=decoder.decode(part.value,{stream:true});
         if(buffer.length>2097152)throw new GatewayError("OVERFLOW");
         let end:number;while((end=buffer.indexOf("\n"))>=0){const line=buffer.slice(0,end);buffer=buffer.slice(end+1);if(!line)continue;const value=JSON.parse(line) as WireStream<T>;
           if(value.type==="error"){if(value.code==="UNAUTHENTICATED")this.#unauthenticated();throw new GatewayError(value.code);}if(value.type!=="value")throw new GatewayError("INVALID");if(this.#closed||own.signal.aborted)throw new GatewayError("CLOSED");yield value.value;}
       }
       if(buffer.trim())throw new GatewayError("INVALID");
-    }finally{signal.removeEventListener("abort",abort);own.abort();own.signal.removeEventListener('abort',cancel);await reader?.cancel().catch(()=>undefined);this.#streams.delete(own);}
+    }catch(error){if(own.signal.aborted&&own.signal.reason instanceof GatewayError)throw own.signal.reason;throw error;}
+    finally{clearTimeout(idle);signal.removeEventListener("abort",abort);own.abort();own.signal.removeEventListener('abort',cancel);await reader?.cancel().catch(()=>undefined);this.#streams.delete(own);}
   }
   #endMux(mux:Mux,error:unknown):void{
     if(mux.ended)return;mux.ended=true;if(this.#mux===mux)this.#mux=null;mux.controller.abort();mux.reject(error);

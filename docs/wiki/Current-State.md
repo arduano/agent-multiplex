@@ -9,6 +9,14 @@ Last reconciled: 2026-10-09 (coordinated Windows observation and authority IPC `
 
 ## Isolated V8 source lane
 
+The October28 HTTP observation correction emits blank transport keepalives and
+bounds silence on the single physical reader. Quiet domain feeds stay open; a
+blackholed admitted stream becomes unavailable and rejoins through the existing
+recovery scheduler, preserving cursors, drafts and exact originals without
+replaying effects. Server backpressure and timer cleanup stay with that stream.
+Strict compilation,17mux cases and paired old-owner counterexamples pass.
+Installed acceptance remains separate.
+
 The October28 capture diagnostics preserve bounded cause metadata across the
 existing controller and history owners. The actual Node Host writes structured
 private stderr records for decoder rejection, ancestry-buffer refusal, native
