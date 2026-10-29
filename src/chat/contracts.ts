@@ -8,6 +8,7 @@ import type {
 import type { FileReadPort, Preview } from "../files/contracts.js";
 import type { Row } from "../history/contracts.js";
 import type { Answer, CapabilityRef, Form } from "../interactions/contracts.js";
+import type { AttachmentController } from "../attachments/contracts.js";
 
 export type DiagramLease = Readonly<{
   url: string;
@@ -22,7 +23,8 @@ export type DiagramRenderer = (
 export type Media = Readonly<{ preview: Preview; label?: string }>;
 export type ChatActions = Readonly<{
   /** Consumer supplies the actual typed router payload, ID and exact run.
-   * Rendering/reconnect never invokes this callback. */
+   * snapshot.attachments is the exact confirmed draft file set to encode in
+   * this payload. Rendering/reconnect never invokes this callback. */
   draft?(text: string, snapshot: EntrySnapshot): Command;
   stop?(snapshot: EntrySnapshot): Command;
   respond?(reference: CapabilityRef, answer: Answer): Promise<unknown>;
@@ -45,6 +47,8 @@ export type ChatProps = Readonly<{
   controls?: (snapshot: EntrySnapshot) => ReactNode;
   advancedControls?: (snapshot: EntrySnapshot) => ReactNode;
   files?: FileReadPort;
+  /** Prepared per-entry resource owner; imports/render never upload. */
+  attachments?: AttachmentController;
   media?: (row: Row) => readonly Media[];
   /** Explicit reference mapping only. A Markdown path itself grants no access. */
   markdownFiles?: Readonly<Record<string, Preview>>;
@@ -95,7 +99,7 @@ export type NativeFormProps = Readonly<{
   errors: Readonly<Record<string, string>>;
 }>;
 export interface SessionSummaryReadPort {
-  getSnapshot(): Pick<EntrySnapshot, "freshness" | "state" | "draft" | "pinned">;
+  getSnapshot(): Pick<EntrySnapshot, "freshness" | "state" | "draft" | "attachments" | "pinned">;
   subscribe(listener: () => void): () => void;
 }
 export interface SessionListView {

@@ -10,7 +10,15 @@ export const referenceSelectionSchema = z
   })
   .strict();
 export type ReferenceSelection = z.output<typeof referenceSelectionSchema>;
-export const referenceMessageSchema = z.object({ text: z.string().max(65536) }).strict();
+export const referenceMessageSchema = z
+  .object({
+    text: z.string().max(65536),
+    attachments: z
+      .array(z.object({ id: name }).strict())
+      .max(8)
+      .optional(),
+  })
+  .strict();
 export const referenceScopeSchema = z
   .object({ connection: name, principal: name, host: name, session: name })
   .strict();

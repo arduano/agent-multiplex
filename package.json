@@ -187,6 +187,10 @@
       "types": "./dist/catalog-remote/client.d.ts",
       "import": "./dist/catalog-remote/client.js"
     },
+    "./attachments": {
+      "types": "./dist/attachments/index.d.ts",
+      "import": "./dist/attachments/index.js"
+    },
     "./client/contracts": {
       "types": "./dist/client/contracts.d.ts",
       "import": "./dist/client/contracts.js"
@@ -353,6 +357,10 @@
         "import": "./dist/catalog-remote/node-contracts.js"
       },
       "default": null
+    },
+    "./attachments/contracts": {
+      "types": "./dist/attachments/contracts.d.ts",
+      "import": "./dist/attachments/contracts.js"
     },
     "./client/anchor": {
       "types": "./dist/client/anchor.d.ts",

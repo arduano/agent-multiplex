@@ -574,3 +574,25 @@
     padding: 12px;
   }
 }
+
+.mpx-chat .mpx-draft-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  margin: 8px 0;
+  list-style: none;
+}
+.mpx-chat .mpx-draft-attachments li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid var(--mpx-border);
+  border-radius: var(--mpx-radius);
+}
+.mpx-chat .mpx-draft-attachments li > span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

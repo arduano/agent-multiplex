@@ -20,6 +20,14 @@ import { ChatMarkdown } from "./markdown.js";
 import { FilePreview } from "./preview.js";
 import { Button, Dialog, PortalScope, Textarea } from "./primitives.js";
 import { RequestArea } from "./prompts.js";
+const noUploads = Object.freeze({
+  revision: 0,
+  busy: false,
+  uploads: [] as const,
+});
+const noUploadSnapshot = () => noUploads;
+const noUploadSubscribe = () => () => {};
+
 const equalRun = (a: EntrySnapshot["state"], b: EntrySnapshot["history"]["current"]): boolean =>
   !!a?.run &&
   !!b &&
@@ -283,9 +291,42 @@ function Composer({
   props,
 }: Readonly<{ view: SessionView; snapshot: EntrySnapshot; props: ChatProps }>) {
   const textarea = useRef<HTMLTextAreaElement>(null),
+    picker = useRef<HTMLInputElement>(null),
     admitting = useRef(false),
     [sending, setSending] = useState(false),
     [issue, setIssue] = useState("");
+  const attachments = props.attachments;
+  const uploadStore = useMemo(
+    () => ({
+      subscribe: attachments ? attachments.subscribe.bind(attachments) : noUploadSubscribe,
+      getSnapshot: attachments ? attachments.getSnapshot.bind(attachments) : noUploadSnapshot,
+    }),
+    [attachments],
+  );
+  const uploads = useSyncExternalStore(
+    uploadStore.subscribe,
+    uploadStore.getSnapshot,
+    uploadStore.getSnapshot,
+  );
+  const attachmentBlocked = uploads.busy || uploads.uploads.some((upload) => !upload.removed);
+  const attachable =
+    !props.readOnly &&
+    !!props.attachments &&
+    props.attachments.owner === view.entry.owner &&
+    snapshot.state?.phase !== "archived";
+  const addFiles = (files: readonly File[]) => {
+    if (!attachable || !files.length) return;
+    setIssue("");
+    try {
+      void props
+        .attachments!.add(files)
+        .catch(() =>
+          setIssue("Attachment upload was not confirmed. Check the upload or remove it."),
+        );
+    } catch {
+      setIssue("Attachment exceeds the available file or byte limit.");
+    }
+  };
   useEffect(() => {
     const element = textarea.current;
     if (element) {
@@ -294,11 +335,11 @@ function Composer({
     }
   }, [snapshot.draft]);
   const send = () => {
-    if (admitting.current || props.readOnly || !props.actions.draft) return;
+    if (admitting.current || props.readOnly || !props.actions.draft || attachmentBlocked) return;
     setIssue("");
     try {
       const latest = view.entry.getSnapshot();
-      if (!latest.draft.trim()) return;
+      if (!latest.draft.trim() && !latest.attachments.length) return;
       const original = props.actions.draft(latest.draft, latest);
       admitting.current = true;
       setSending(true);
@@ -322,6 +363,21 @@ function Composer({
         event.preventDefault();
         send();
       }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (event.dataTransfer.files.length) {
+          event.preventDefault();
+          addFiles([...event.dataTransfer.files]);
+        }
+      }}
+      onPaste={(event) => {
+        if (event.clipboardData.files.length) {
+          if (!event.clipboardData.getData("text/plain")) event.preventDefault();
+          addFiles([...event.clipboardData.files]);
+        }
+      }}
     >
       <Textarea
         ref={textarea}
@@ -342,8 +398,80 @@ function Composer({
           }
         }}
       />
+      {(snapshot.attachments.length > 0 || uploads.uploads.length > 0) && (
+        <ul className="mpx-draft-attachments" aria-label="Attachments">
+          {snapshot.attachments.map((file) => (
+            <li key={file.id}>
+              <span>{file.name}</span>
+              <Button
+                disabled={props.readOnly}
+                aria-label={`Remove ${file.name}`}
+                onClick={() =>
+                  void view.entry
+                    .setAttachments(
+                      view.entry.getSnapshot().attachments.filter((value) => value.id !== file.id),
+                    )
+                    .catch(() => setIssue("Attachment draft could not be saved."))
+                }
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+          {uploads.uploads.map((upload) => (
+            <li key={upload.id}>
+              <span>
+                {upload.removed
+                  ? "Finishing removed upload…"
+                  : `${upload.name} · ${upload.state === "uploading" ? "Uploading…" : upload.state === "failed" ? "Upload failed" : "Upload not confirmed"}`}
+              </span>
+              {upload.state === "unconfirmed" && (
+                <Button
+                  disabled={!attachable}
+                  onClick={() =>
+                    void props
+                      .attachments!.check(upload.id)
+                      .catch(() => setIssue("Upload is still unconfirmed."))
+                  }
+                >
+                  Check upload
+                </Button>
+              )}
+              {!upload.removed && (
+                <Button
+                  disabled={!attachable}
+                  onClick={() => props.attachments!.clear(upload.id)}
+                  aria-label={`Remove upload ${upload.name}`}
+                >
+                  Remove
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="mpx-toolbar">
         <div className="mpx-control-slots">
+          {props.attachments && (
+            <>
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                hidden
+                onChange={(event) => {
+                  addFiles([...(event.currentTarget.files ?? [])]);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <Button
+                disabled={!attachable || uploads.busy}
+                onClick={() => picker.current?.click()}
+              >
+                Add files
+              </Button>
+            </>
+          )}
           {props.controls?.(snapshot)}
           {props.advancedControls && (
             <Dialog title="Agent settings" trigger={<Button>Settings</Button>}>
@@ -375,7 +503,8 @@ function Composer({
               props.readOnly ||
               !props.actions.draft ||
               sending ||
-              !snapshot.draft.trim() ||
+              attachmentBlocked ||
+              (!snapshot.draft.trim() && !snapshot.attachments.length) ||
               snapshot.freshness !== "current" ||
               snapshot.state?.phase !== "running"
             }
@@ -596,7 +725,7 @@ function SessionListRow<View extends SessionListView>({
             : snapshot.state?.phase === "running"
               ? snapshot.state.activity
               : (snapshot.state?.phase ?? "Unknown")}
-          {snapshot.draft ? " · Draft" : ""}
+          {snapshot.draft || snapshot.attachments.length ? " · Draft" : ""}
           {snapshot.pinned ? " · Pinned" : ""}
         </span>
       </Button>

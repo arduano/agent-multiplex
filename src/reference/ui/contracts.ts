@@ -25,7 +25,10 @@ export type Conversation = Readonly<{
   actions: ChatActions;
   controls?(snapshot: EntrySnapshot): readonly ControlChoice[];
 }> &
-  Pick<ChatProps, "files" | "media" | "markdownFiles" | "renderDiagram" | "readOnly">;
+  Pick<
+    ChatProps,
+    "files" | "attachments" | "media" | "markdownFiles" | "renderDiagram" | "readOnly"
+  >;
 export type ConversationDescriptor = Omit<Conversation, "view"> & Readonly<{ scope: SessionScope }>;
 export type ReferenceAppProps = Readonly<{
   conversations: readonly Conversation[];

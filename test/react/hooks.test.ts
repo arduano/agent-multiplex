@@ -78,8 +78,11 @@ test("structural class ports preserve distinct receivers and stable subscription
   const entry = Object.assign(new ReceiverStore<EntrySnapshot>(prepared.entry.getSnapshot()), {
     scope: prepared.entry.scope,
     owner: prepared.entry.owner,
+    attachmentLimits: prepared.entry.attachmentLimits,
     getDraft: () => prepared.entry.getDraft(),
     setDraft: (text: string) => prepared.entry.setDraft(text),
+    setAttachments: prepared.entry.setAttachments.bind(prepared.entry),
+    holdDraftPreparation: prepared.entry.holdDraftPreparation.bind(prepared.entry),
     checkOriginal: prepared.entry.checkOriginal.bind(prepared.entry),
     pin: prepared.entry.pin.bind(prepared.entry),
     submit: prepared.entry.submit.bind(prepared.entry),

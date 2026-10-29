@@ -6,6 +6,7 @@ import {
   type RunRef,
   type SessionScope,
 } from "../../protocol/index.js";
+import type { ConfirmedDraftAttachment, DraftAttachmentLimits } from "../contracts.js";
 
 export class ClientError extends Error {
   constructor(
@@ -56,6 +57,41 @@ export function runKey(run: RunRef): string {
 }
 export function sameScope(a: SessionScope, b: SessionScope): boolean {
   return scopeKey(a) === scopeKey(b);
+}
+export function draftAttachments(
+  value: readonly ConfirmedDraftAttachment[],
+  scope: SessionScope,
+  limits: DraftAttachmentLimits,
+): readonly ConfirmedDraftAttachment[] {
+  check(Array.isArray(value) && value.length <= limits.maxFiles, "FULL");
+  let bytes = 0;
+  const ids = new Set<string>();
+  for (const file of value) {
+    check(
+      file &&
+        Object.keys(file).sort().join(",") ===
+          "bytes,id,kind,mediaType,name,origin,retention,scope,sha256" &&
+        file.kind === "stored",
+    );
+    check(sameScope(file.scope, scope), "FENCED");
+    id(file.id);
+    id(file.name);
+    check(!ids.has(file.id), "CONFLICT");
+    ids.add(file.id);
+    check(
+      Number.isSafeInteger(file.bytes) && file.bytes >= 0 && /^[a-f0-9]{64}$/.test(file.sha256),
+    );
+    check(
+      typeof file.mediaType === "string" &&
+        file.mediaType.length <= 256 &&
+        !/[\x00-\x1f\x7f]/.test(file.mediaType) &&
+        ["upload", "capture"].includes(file.origin) &&
+        ["session", "cache"].includes(file.retention),
+    );
+    bytes += file.bytes;
+  }
+  check(bytes <= limits.maxBytes, "FULL");
+  return immutable(value);
 }
 export function receiptFor(
   value: Receipt,

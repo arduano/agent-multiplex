@@ -1,6 +1,12 @@
 import type { Frame, HistoryScope, ReadObservation, Row, Snapshot } from "../history/contracts.js";
 import type { InteractionSnapshot } from "../interactions/contracts.js";
 import type { Json, Receipt, RunRef, SessionScope } from "../protocol/index.js";
+import type { StoredFile } from "../files/contracts.js";
+export type ConfirmedDraftAttachment = StoredFile;
+export type DraftAttachmentLimits = Readonly<{
+  maxFiles: number;
+  maxBytes: number;
+}>;
 
 import type { ObservationConnector } from "../transport/contracts.js";
 export type { ObservationConnector } from "../transport/contracts.js";
@@ -31,12 +37,18 @@ export interface SessionReadPort {
 }
 export type DraftSnapshot = Readonly<{
   text: string;
+  attachments: readonly ConfirmedDraftAttachment[];
   archived: boolean;
 }>;
-export interface DraftPort {
+export interface DraftUploadPort {
   readonly owner: SessionOwnerIdentity;
   readonly scope: SessionScope;
+  readonly attachmentLimits: DraftAttachmentLimits;
   getDraft(): DraftSnapshot;
+  setAttachments(files: readonly ConfirmedDraftAttachment[]): Promise<void>;
+  holdDraftPreparation(bytes: number): () => void;
+}
+export interface DraftPort extends DraftUploadPort {
   setDraft(text: string): Promise<void>;
 }
 export interface OriginalReadPort {
@@ -95,6 +107,7 @@ export type WorkspaceOptions = Readonly<{
   persistence: ClientPersistence;
   observations: ObservationConnector;
   limits?: Partial<ClientLimits>;
+  attachmentLimits?: Partial<DraftAttachmentLimits>;
 }>;
 
 export type SessionState = Readonly<{
@@ -131,6 +144,7 @@ export type PersistedEntry = Readonly<{
   version: 1;
   scope: SessionScope;
   draft: string;
+  attachments?: readonly ConfirmedDraftAttachment[];
   pinned: boolean;
   originals: readonly ClientOriginal[];
 }>;
@@ -169,6 +183,7 @@ export type EntrySnapshot = Readonly<{
   scope: SessionScope;
   revision: number;
   draft: string;
+  attachments: readonly ConfirmedDraftAttachment[];
   pinned: boolean;
   state: SessionState | null;
   freshness: "unobserved" | "current" | "unavailable";

@@ -14,6 +14,8 @@ import type {
   ClientOriginal,
   ClientPersistence,
   Command,
+  ConfirmedDraftAttachment,
+  DraftAttachmentLimits,
   EntrySnapshot,
   ObservationConnector,
   OriginalHandle,
@@ -25,6 +27,7 @@ import {
   byteLength,
   check,
   ClientError,
+  draftAttachments,
   id,
   immutable,
   json,
@@ -50,6 +53,7 @@ type EntryOptions = Readonly<{
   observations: ObservationConnector;
   persistence: ClientPersistence;
   limits: ClientLimits;
+  attachmentLimits?: Partial<DraftAttachmentLimits>;
   reserveView(): void;
 }>;
 
@@ -58,6 +62,7 @@ type EntryOptions = Readonly<{
 export class SessionEntry {
   readonly owner = Object.freeze({}) as import("../contracts.js").SessionOwnerIdentity;
   readonly scope: SessionScope;
+  readonly attachmentLimits: DraftAttachmentLimits;
   readonly #options: EntryOptions;
   #snapshot: EntrySnapshot;
   #jobs = new Map<string, Job>();
@@ -75,14 +80,35 @@ export class SessionEntry {
   #draftIntent = 0;
   #saveTail: Promise<void> = Promise.resolve();
   #read: { key: string; work: Promise<ReadObservation>; active: boolean } | undefined;
+  #preparations = 0;
+  #preparationBytes = 0;
   constructor(options: EntryOptions, stored?: PersistedEntry) {
     scopeKey(options.scope);
     this.scope = immutable(options.scope);
     this.#options = options;
+    this.attachmentLimits = Object.freeze({
+      maxFiles: 8,
+      maxBytes: 33554432,
+      ...options.attachmentLimits,
+    });
+    check(
+      Number.isSafeInteger(this.attachmentLimits.maxFiles) &&
+        this.attachmentLimits.maxFiles > 0 &&
+        this.attachmentLimits.maxFiles <= 8 &&
+        Number.isSafeInteger(this.attachmentLimits.maxBytes) &&
+        this.attachmentLimits.maxBytes > 0 &&
+        this.attachmentLimits.maxBytes <= 33554432,
+    );
+    const attachments = draftAttachments(
+      stored?.attachments === undefined ? [] : stored.attachments,
+      this.scope,
+      this.attachmentLimits,
+    );
     this.#snapshot = immutable({
       scope: this.scope,
       revision: 0,
       draft: stored?.draft ?? "",
+      attachments,
       pinned: stored?.pinned ?? false,
       state: null,
       freshness: "unobserved",
@@ -105,6 +131,7 @@ export class SessionEntry {
   getDraft = (): import("../contracts.js").DraftSnapshot =>
     Object.freeze({
       text: this.#snapshot.draft,
+      attachments: this.#snapshot.attachments,
       archived: this.#snapshot.state?.phase === "archived",
     });
   subscribe = (listener: () => void): (() => void) => {
@@ -121,6 +148,8 @@ export class SessionEntry {
     return (
       !this.#snapshot.pinned &&
       !this.#snapshot.draft &&
+      !this.#snapshot.attachments.length &&
+      !this.#preparations &&
       !this.#views.size &&
       !this.#writes &&
       !this.#cleanup.size &&
@@ -130,6 +159,7 @@ export class SessionEntry {
   }
   get actualWork(): number {
     return (
+      this.#preparations +
       this.#cleanup.size +
       this.#writes +
       Number(!!this.#read?.active) +
@@ -163,6 +193,42 @@ export class SessionEntry {
     this.#publish({ draft });
     await this.#persist();
   }
+  async setAttachments(files: readonly ConfirmedDraftAttachment[]): Promise<void> {
+    this.#active();
+    const attachments = draftAttachments(files, this.scope, this.attachmentLimits);
+    check(
+      attachments.length + this.#preparations <= this.attachmentLimits.maxFiles &&
+        attachments.reduce((sum, file) => sum + file.bytes, 0) + this.#preparationBytes <=
+          this.attachmentLimits.maxBytes,
+      "FULL",
+    );
+    this.#draftIntent++;
+    this.#publish({ attachments });
+    await this.#persist();
+  }
+  /** Actual upload/preparation custody only; it opens no observation or pin. */
+  holdDraftPreparation(bytes: number): () => void {
+    this.#active();
+    check(Number.isSafeInteger(bytes) && bytes >= 0);
+    check(
+      this.#snapshot.attachments.length + this.#preparations < this.attachmentLimits.maxFiles &&
+        this.#snapshot.attachments.reduce((sum, file) => sum + file.bytes, 0) +
+          this.#preparationBytes +
+          bytes <=
+          this.attachmentLimits.maxBytes,
+      "FULL",
+    );
+    this.#preparations++;
+    this.#preparationBytes += bytes;
+    let active = true;
+    return () => {
+      if (active) {
+        active = false;
+        this.#preparations--;
+        this.#preparationBytes -= bytes;
+      }
+    };
+  }
   async pin(pinned: boolean): Promise<void> {
     this.#active();
     check(typeof pinned === "boolean");
@@ -171,6 +237,7 @@ export class SessionEntry {
     await this.#persist();
   }
   submitDraft(command: Command, onAdmission?: () => void): Promise<OriginalHandle> {
+    check(!this.#preparations, "PENDING_WORK");
     check(
       ["send", "steer", "queue"].includes(command.kind) &&
         command.optimisticText === this.#snapshot.draft,
@@ -180,7 +247,7 @@ export class SessionEntry {
     return this.submit(command, () => {
       if (intent === this.#draftIntent && draft === this.#snapshot.draft) {
         this.#draftIntent++;
-        this.#publish({ draft: "" });
+        this.#publish({ draft: "", attachments: [] });
         void this.#persist().catch(() => {});
       }
       onAdmission?.();
@@ -423,6 +490,7 @@ export class SessionEntry {
       version: 1,
       scope: this.scope,
       draft: this.#snapshot.draft,
+      attachments: this.#snapshot.attachments,
       pinned: this.#snapshot.pinned,
       originals: [...this.#jobs.values()].map((job) => job.view),
     });
@@ -778,7 +846,9 @@ export class SessionEntry {
   }
   async close(): Promise<void> {
     check(
-      ![...this.#jobs.values()].some((job) => job.active) && !this.#read?.active,
+      !this.#preparations &&
+        ![...this.#jobs.values()].some((job) => job.active) &&
+        !this.#read?.active,
       "PENDING_WORK",
     );
     this.#closed = true;

@@ -1,3 +1,4 @@
+import { AttachmentOwner } from "../../attachments/index.js";
 import { z } from "zod";
 import { assetFileReadPort, type AssetRemote } from "../../assets/index.js";
 import { RetainedWorkspace, type Command, type EntrySnapshot } from "../../client/index.js";
@@ -85,13 +86,15 @@ export async function connectReferenceUi(options: ReferenceUiOptions<ReferenceRo
   });
   const observations = new ObservationSupervisor({ retryMinMs: 100, retryMaxMs: 1000 }),
     workspace = new RetainedWorkspace({ feed, observations, persistence: options.persistence });
+  const attachmentOwners: AttachmentOwner[] = [];
   let mounted: ReturnType<typeof mountReferenceApp> | undefined;
   let closing: Promise<void> | undefined;
   const close = () =>
     (closing ??= (async () => {
       mounted?.close();
+      const results = await Promise.allSettled(attachmentOwners.map((owner) => owner.close()));
       await workspace.settled();
-      const results = await Promise.allSettled([workspace.close(), observations.close()]);
+      results.push(...(await Promise.allSettled([workspace.close(), observations.close()])));
       const failures = results.filter((result) => result.status === "rejected");
       if (failures.length)
         throw new AggregateError(
@@ -115,13 +118,20 @@ export async function connectReferenceUi(options: ReferenceUiOptions<ReferenceRo
             (value) => scopeKey(value.file.scope) === scopeKey(descriptor.scope),
           ) ?? [],
         files = assetFileReadPort(assets, options.peer.files);
+      const attachments = new AttachmentOwner(view.entry, assets, options.peer.files);
+      attachmentOwners.push(attachments);
       const draft = (text: string, snapshot: EntrySnapshot): Command => {
         if (!snapshot.state?.run) throw new Error("REFERENCE_RUN_UNAVAILABLE");
         return {
           id: crypto.randomUUID(),
           kind: "send",
           run: snapshot.state.run,
-          payload: { text },
+          payload: json(
+            referenceMessageSchema.parse({
+              text,
+              attachments: snapshot.attachments.map((file) => ({ id: file.id })),
+            }),
+          ),
           optimisticText: text,
         };
       };
@@ -139,6 +149,7 @@ export async function connectReferenceUi(options: ReferenceUiOptions<ReferenceRo
         name: descriptor.name,
         view,
         files,
+        attachments,
         ...(options.renderDiagram ? { renderDiagram: options.renderDiagram } : {}),
         markdownFiles: Object.fromEntries(
           previews.map((value) => [`asset:${value.file.id}`, value]),

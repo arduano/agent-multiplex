@@ -25,7 +25,7 @@ import {
 import type { OpeningCapsule, OpeningStopProof } from "../../runtime/index.js";
 import { HistoryWindow, type HistoryReadPort, type HistoryRecord } from "../../history/index.js";
 import { InteractionOwner, type CapabilityRef } from "../../interactions/index.js";
-import { preview } from "../../files/index.js";
+import { preview, type StoredFile } from "../../files/index.js";
 import { FileStore } from "../../files/node.js";
 import { HostAssetOwner, assetRouter } from "../../assets/node.js";
 import { ConversationFeature, conversationRouter } from "../../conversation/node.js";
@@ -65,7 +65,7 @@ const proof = (capsule: OpeningCapsule): OpeningStopProof => ({
 });
 /** Transparent model-free reference harness. It exercises real framework owners,
  * persistence and transport; none of its generated text is vendor evidence. */
-function scriptedNative() {
+function scriptedNative(lookup: (scope: SessionScope, id: string) => StoredFile | null) {
   const slots = new Map<string, Slot>(),
     parked = new Map<string, OpeningCapsule>();
   let observer: ((value: NativeObservation<ReferenceSelection>) => void) | undefined,
@@ -192,7 +192,14 @@ function scriptedNative() {
     async send(input) {
       const slot = find(input.run);
       if (slot.stopped) return { state: "refused", result: { reason: "Stopped" } };
-      const message = referenceMessageSchema.parse(input.message);
+      const message = referenceMessageSchema.parse(input.message),
+        files = (message.attachments ?? []).map((file) => lookup(input.run.scope, file.id));
+      if (
+        files.some((file) => !file) ||
+        new Set(message.attachments?.map((file) => file.id)).size !==
+          (message.attachments?.length ?? 0)
+      )
+        return { state: "refused", result: { reason: "Attachment unavailable" } };
       sends++;
       const turn = `turn:${++sequence}`;
       append(slot, {
@@ -200,7 +207,15 @@ function scriptedNative() {
         kind: "user",
         lifecycle: "completed",
         body: { kind: "complete", text: message.text, evidence: "native" },
-        native: { originalId: input.originalId, turnId: turn },
+        native: {
+          originalId: input.originalId,
+          turnId: turn,
+          assets: files.map((file) => ({
+            id: file!.id,
+            state: "ready",
+            file: file as unknown as Json,
+          })),
+        },
       });
       slot.window.update({ activity: { state: "working", turnId: turn } });
       observer?.({ run: slot.run, activity: "working", selection: slot.selection });
@@ -382,7 +397,7 @@ export async function createReference(options: ReferenceOptions) {
       journal.close();
     };
     const assets = new HostAssetOwner({ store: files });
-    const scripted = scriptedNative();
+    const scripted = scriptedNative((scope, id) => files.file(scope, id));
     cleanup = async () => {
       await assets.close();
       rootJournal.close();
