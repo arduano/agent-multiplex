@@ -37,9 +37,7 @@ export function ThemeScope({
 }
 export const Button = forwardRef<
   HTMLButtonElement,
-  ButtonHTMLAttributes<HTMLButtonElement> & {
-    variant?: "primary" | "secondary" | "danger";
-  }
+  ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "danger" }
 >(function Button({ variant = "secondary", className = "", type = "button", ...props }, ref) {
   return (
     <button

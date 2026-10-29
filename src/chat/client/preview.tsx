@@ -56,10 +56,7 @@ function ImageViewer({ url, label }: Readonly<{ url: string; label: string }>) {
   };
   const pointer = (event: PointerEvent<HTMLDivElement>) => {
     const previous = pointers.current.get(event.pointerId);
-    pointers.current.set(event.pointerId, {
-      x: event.clientX,
-      y: event.clientY,
-    });
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const points = [...pointers.current.values()];
     if (points.length === 1 && previous) {
       event.currentTarget.scrollLeft += previous.x - event.clientX;

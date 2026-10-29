@@ -20,11 +20,7 @@ import { ChatMarkdown } from "./markdown.js";
 import { FilePreview } from "./preview.js";
 import { Button, Dialog, PortalScope, Textarea } from "./primitives.js";
 import { RequestArea } from "./prompts.js";
-const noUploads = Object.freeze({
-  revision: 0,
-  busy: false,
-  uploads: [] as const,
-});
+const noUploads = Object.freeze({ revision: 0, busy: false, uploads: [] as const });
 const noUploadSnapshot = () => noUploads;
 const noUploadSubscribe = () => () => {};
 
@@ -80,7 +76,10 @@ export function HistoryRow({
 }: Readonly<{
   row: Row;
   snapshot: EntrySnapshot | TranscriptSnapshot;
-  props: Pick<ChatProps, "actions" | "files" | "media" | "markdownFiles" | "renderDiagram">;
+  props: Pick<
+    ChatProps,
+    "actions" | "files" | "media" | "markdownFiles" | "resolveFile" | "renderDiagram"
+  >;
   onChoice?(text: string): void;
 }>) {
   const active = rowInProgress(row, snapshot),
@@ -93,6 +92,12 @@ export function HistoryRow({
       text={text}
       {...(props.markdownFiles ? { files: props.markdownFiles } : {})}
       {...(props.files ? { reader: props.files } : {})}
+      {...(props.resolveFile && origin
+        ? {
+            resolveFile: props.resolveFile,
+            fileContext: { run: origin.scope.run, stream: origin.scope.stream, rowId: row.id },
+          }
+        : {})}
       {...(props.renderDiagram ? { renderDiagram: props.renderDiagram } : {})}
     />
   );
@@ -530,7 +535,13 @@ export function Chat(props: ChatProps) {
     activeCompaction = rows.some(
       (row) => row.native.type === "contextCompaction" && rowInProgress(row, snapshot),
     );
-  const { files: _files, media: _media, markdownFiles: _markdownFiles, ...withoutFiles } = props;
+  const {
+    files: _files,
+    media: _media,
+    markdownFiles: _markdownFiles,
+    resolveFile: _resolveFile,
+    ...withoutFiles
+  } = props;
   const rowProps = {
     ...(snapshot.state?.phase === "archived" ? withoutFiles : props),
     actions: props.readOnly ? {} : props.actions,
@@ -701,11 +712,7 @@ function SessionListRow<View extends SessionListView>({
   item,
   selected,
   onSelect,
-}: Readonly<{
-  item: SessionListItem<View>;
-  selected: boolean;
-  onSelect(view: View): void;
-}>) {
+}: Readonly<{ item: SessionListItem<View>; selected: boolean; onSelect(view: View): void }>) {
   const entry = item.view.entry;
   const store = useMemo(
     () => ({

@@ -9,11 +9,9 @@ import type { FileReadPort, Preview } from "../files/contracts.js";
 import type { Row } from "../history/contracts.js";
 import type { Answer, CapabilityRef, Form } from "../interactions/contracts.js";
 import type { AttachmentController } from "../attachments/contracts.js";
+import type { ResolveFile } from "../file-links/contracts.js";
 
-export type DiagramLease = Readonly<{
-  url: string;
-  release(): void | Promise<void>;
-}>;
+export type DiagramLease = Readonly<{ url: string; release(): void | Promise<void> }>;
 /** The renderer must enforce strict security and return an image URL, never
  * application-origin HTML. It retains actual rendering until release settles. */
 export type DiagramRenderer = (
@@ -52,6 +50,9 @@ export type ChatProps = Readonly<{
   media?: (row: Row) => readonly Media[];
   /** Explicit reference mapping only. A Markdown path itself grants no access. */
   markdownFiles?: Readonly<Record<string, Preview>>;
+  /** Explicit preview action for a proved native row. The injected resolver
+   * owns pending captures and real leases until its close/release completes. */
+  resolveFile?: ResolveFile;
   renderDiagram?: DiagramRenderer;
 }>;
 
@@ -61,7 +62,7 @@ export type ReadonlyTranscriptProps = Readonly<{
   theme?: "light" | "dark";
   className?: string;
 }> &
-  Pick<ChatProps, "files" | "media" | "markdownFiles" | "renderDiagram">;
+  Pick<ChatProps, "files" | "media" | "markdownFiles" | "resolveFile" | "renderDiagram">;
 
 export type FilePreviewProps = Readonly<{
   descriptor: Preview;
@@ -74,12 +75,14 @@ export type MarkdownProps = Readonly<{
   files?: Readonly<Record<string, Preview>>;
   reader?: FileReadPort;
   renderDiagram?: DiagramRenderer;
+  resolveFile?: ResolveFile;
+  fileContext?: Readonly<{
+    run: import("../protocol/index.js").RunRef;
+    stream: string;
+    rowId: string;
+  }>;
 }>;
-export type SelectOption = Readonly<{
-  value: string;
-  label: string;
-  disabled?: boolean;
-}>;
+export type SelectOption = Readonly<{ value: string; label: string; disabled?: boolean }>;
 export type SelectProps = AriaAttributes &
   Readonly<{ [key: `data-${string}`]: string | number | boolean | undefined }> &
   Readonly<{

@@ -341,10 +341,7 @@ export function RequestEditor({
                     value={extra[question.id] ?? ""}
                     onChange={(event) => {
                       const value = event.currentTarget.value;
-                      setExtra((current) => ({
-                        ...current,
-                        [question.id]: value,
-                      }));
+                      setExtra((current) => ({ ...current, [question.id]: value }));
                     }}
                   />
                 )}
@@ -429,10 +426,7 @@ export function RequestEditor({
                 {...props}
                 value={typeof values.action === "string" ? values.action : prompt.recommendedAction}
                 onValueChange={(action) => setValues({ ...values, action })}
-                options={prompt.actions.map((value) => ({
-                  value,
-                  label: value,
-                }))}
+                options={prompt.actions.map((value) => ({ value, label: value }))}
               />
             )}
           </Field>
@@ -483,11 +477,7 @@ export function RequestEditor({
           const found = formErrors(prompt.form, values);
           setErrors(found);
           if (Object.keys(found).length) return;
-          void submit({
-            type: prompt.type,
-            action: "accept",
-            content: values as FormValue,
-          });
+          void submit({ type: prompt.type, action: "accept", content: values as FormValue });
         } else void submit({ type: prompt.type, action: "accept" });
       };
       content = (

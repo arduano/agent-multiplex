@@ -206,6 +206,17 @@
       },
       "default": null
     },
+    "./file-links": {
+      "types": "./dist/file-links/index.d.ts",
+      "import": "./dist/file-links/index.js"
+    },
+    "./file-links/node": {
+      "node": {
+        "types": "./dist/file-links/node.d.ts",
+        "import": "./dist/file-links/node.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -384,6 +395,17 @@
       },
       "default": null
     },
+    "./file-links/contracts": {
+      "types": "./dist/file-links/contracts.d.ts",
+      "import": "./dist/file-links/contracts.js"
+    },
+    "./file-links/node-contracts": {
+      "node": {
+        "types": "./dist/file-links/node-contracts.d.ts",
+        "import": "./dist/file-links/node-contracts.js"
+      },
+      "default": null
+    },
     "./client/anchor": {
       "types": "./dist/client/anchor.d.ts",
       "import": "./dist/client/anchor.js"
@@ -442,6 +464,7 @@
     "esbuild-wasm": "0.25.11",
     "eslint": "10.13.0",
     "eslint-config-prettier": "10.1.8",
+    "eventsource": "5.1.4",
     "jiti": "2.7.0",
     "mermaid": "12.0.0",
     "playwright-core": "1.56.1",
@@ -449,8 +472,7 @@
     "react-test-renderer": "19.1.1",
     "type-fest": "4.41.0",
     "typescript": "5.9.2",
-    "typescript-eslint": "8.72.1",
-    "eventsource": "5.1.4"
+    "typescript-eslint": "8.72.1"
   },
   "dependencies": {
     "@arduano/p2prpc-core": "https://github.com/arduano/p2prpc/releases/download/v0.3.1/arduano-p2prpc-core-0.3.1.tgz",
