@@ -22,11 +22,14 @@ live in `scripts/`; tests live in `test/`; generated output is not authored sour
 
 ## Current boundary
 
-PR02 supplies tooling and logical scope identity only. It does not implement a
-session, native adapter, transport, client or UI yet. The following layers are
+Through PR03 the framework supplies tooling, logical scope identity and durable
+original-operation storage. It does not implement a session, native adapter,
+transport, client or UI yet. The following layers are
 tracked in the [stack index](docs/stack/README.md), with per-layer evidence and
 explicit limitations. Passing this checkpoint is not full-framework readiness.
 
 Scripts use pinned `tsx` and `cmd-ts`; `npm run check` also runs Prettier and ESLint.
 
 Follow [module boundaries](docs/stack/Modularity.md). Non-JSX code and scripts use `.ts`, executed by `tsx`; `.tsx` is reserved for actual JSX.
+
+The durable journal exposes portable structural operations through `storage/contracts`; `storage` owns concrete SQLite construction and cleanup. Callers borrow operations rather than depending on platform implementation types.

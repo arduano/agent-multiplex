@@ -17,6 +17,17 @@
     "./protocol": {
       "types": "./dist/protocol/index.d.ts",
       "import": "./dist/protocol/index.js"
+    },
+    "./storage": {
+      "node": {
+        "types": "./dist/storage/index.d.ts",
+        "import": "./dist/storage/index.js"
+      },
+      "default": null
+    },
+    "./storage/contracts": {
+      "types": "./dist/storage/contracts.d.ts",
+      "import": "./dist/storage/contracts.js"
     }
   },
   "files": [

@@ -36,4 +36,7 @@ export function scopeKey(scope: SessionScope): string {
   return JSON.stringify(values);
 }
 
+export type { Original, OperationState, Receipt, Settlement } from "./operations.js";
+export { canonicalJson, cloneJson } from "./json.js";
+
 export { closeOnAbort } from "./stream.js";
