@@ -27,6 +27,22 @@ single owner of every lifetime and effect.
 
 ## Validation belongs to schemas
 
+Harnesses expose their actual typed tRPC routers. Codex, Copilot and future
+harnesses retain their own request, result, event, history and callback semantics;
+a normalized conversation projection is an optional UI adapter. The framework
+does not require a universal agent-command or transcript schema. Client types
+come from the concrete router after lifecycle and customization composition.
+TypeScript generics preserve those router types; they do not reconstruct endpoint
+maps or generate types from discovery JSON.
+
+Host-side extensions execute on the Host. Gateway-owned routes execute on the
+Gateway with authenticated Host selection and grants. Their handlers and runtime
+dependencies remain separate; an inert ID/version can associate a Host
+definition with the type inferred from its actual Gateway router. Shared
+observation and operation metadata must not change native semantics: a local
+capture cursor is not a native history watermark, a receipt is not completed
+agent work, and replaying observations never replays effects.
+
 Use Zod for structured inputs at a module boundary: object shape, unknown keys,
 primitive types, bounds and structural alternatives. Infer decoded types from the
 schema where possible. Share the module's schema rather than rebuilding the same
@@ -83,11 +99,11 @@ inheriting another module's private fields. Restrict a raw vendor boundary to it
 actual SDK/RPC protocol and decode its results within that native adapter.
 
 The boundary checker rejects contract-to-implementation links, including
-`import type` and inline `import(...)` types. There are two reviewed exceptions:
-Host router types derive from the actual composed tRPC router, and systemd
-allocation requires the actual acquired `HostContainment` capability. Replacing
-either with copied endpoint declarations or a forgeable structural handle would
-weaken the contract. These exceptions name their exact source, target and symbol.
+`import type` and inline `import(...)` types. Reviewed exceptions derive Host, native client and
+demo router types from their actual composed tRPC routers, and systemd allocation
+requires the actual acquired `HostContainment` capability. Replacing these with
+copied endpoint declarations or a forgeable structural handle would weaken the
+contract. These exceptions name their exact source, target and symbol.
 Cross-feature implementation imports cannot be disguised as a nested `index.ts`;
 additional public entries must be deliberate package exports.
 

@@ -1,0 +1,327 @@
+{
+  "schema": 8,
+  "scope": "Harness-shaped Codex API and creation-time Host/Gateway demo extensions; amendment of the same25draftPRs. No merge/deployment/Personal/native-provider qualification.",
+  "history": {
+    "previousPublishedCheckpoint": "https://github.com/arduano/agent-multiplex/blob/f2a1defaac750eea470a680212c78a3253b06b4a/docs/stack/Evidence.json",
+    "rule": "Prior successes and failures retain their exact source identities; the current product amendment does not inherit documentation-only equivalence or historical native/Nix/relay claims."
+  },
+  "frozenSource": {
+    "baseCommit": "f2a1defaac750eea470a680212c78a3253b06b4a",
+    "sealPaths": 547,
+    "canonicalInputMapSha256": "41a472c4fffa886df2b30cf85b4cd1168738da188f4d6119ee5bc78999f4aa0d",
+    "sealFileSha256": "43adb8db3baca2c12d201a1a73a3ff90d58a60ea92ddd2a2a4336e825c12da40",
+    "rule": "The current source, consumer and final browser checks share these547non-review input hashes. Restacked tips must reproduce every input byte; review/evidence docs are outside the seal."
+  },
+  "dependency": {
+    "name": "@arduano/p2prpc-core",
+    "version": "0.3.1",
+    "url": "https://github.com/arduano/p2prpc/releases/download/v0.3.1/arduano-p2prpc-core-0.3.1.tgz",
+    "sha256": "dfe11f88594aac5e43548038a336e7418f32227e5c050e9cfef2b3462a7b0376",
+    "merged": {
+      "bridgePR48": "ef81df35250c80ec43a900865dbaf900e6cf556d",
+      "releasePR49": "05f6a86953a599f77c840888a4ad2f0a5cb15ef2",
+      "portableFilesPR51": "1fb72fb5a3032310daa4d69834a4ce76ed7d7351"
+    },
+    "publishedReleaseRun": 40831307413,
+    "irohPinsUnchanged": true
+  },
+  "nativeApi": {
+    "codexVersion": "0.162.1",
+    "upstreamRevision": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+    "explicitNativeMethods": 23,
+    "notificationKinds": 27,
+    "callbackFamilies": 5,
+    "generatedTypeFiles": 238,
+    "generatedSchemaCodecs": 233,
+    "generatedFilesIncludingAttribution": 243,
+    "reproduction": {
+      "status": "PASS",
+      "elapsedMs": null,
+      "allFilesByteIdentical": true,
+      "scratchRemoved": true,
+      "receiptSha256": "afdabe7095aa6c85486027d775013d3ea62976b0cd874ecd31d12991b7dd46fc"
+    },
+    "limits": "Selected native surface, not all173upstreammethods. Native read/live watermark and upstream gap freedom remain unproved. Callback success means submitted, not accepted."
+  },
+  "source": {
+    "status": "PASS",
+    "command": "npm run check",
+    "elapsedMs": 325872,
+    "includes": [
+      "Prettier",
+      "zero-warning ESLint",
+      "strict types",
+      "432module/50portable-export public boundaries",
+      "declaration/production browser build",
+      "unique owner tests"
+    ],
+    "tests": {
+      "total": 252,
+      "passed": 251,
+      "failed": 0,
+      "cancelled": 0,
+      "skipped": 1,
+      "skip": "explicit opt-in published-native-Iroh test; separately scoped browser proof below"
+    },
+    "sourceInputsUnchanged": true,
+    "ownedProcessGroupRetired": true,
+    "logSha256": "aab399bc7a005ceae74d6f91dc3631c892233a0407725f25ea712803306d7e73",
+    "boundMs": 780000,
+    "installationLimit": "Source uses explicit pinned development tool resolution; independent installation is qualified by the packed consumer, not inferred here."
+  },
+  "consumer": {
+    "status": "PASS",
+    "command": "node --import tsx test/consumer/run.ts <built-checkpoint>",
+    "elapsedMs": 41221,
+    "artifact": "sha512-O5f2YLFOshrGdJ7EiG5amBjFaGzeVFsWQfK8hCNX7RDJSiWlxgbo5G2iKOhX+xdDP/s4WDM+wYiBqapfyg6mvg==",
+    "publicImports": 82,
+    "install": "added 242 packages in 26s",
+    "publishedPins": [
+      {
+        "name": "@arduano/p2prpc-core",
+        "version": "0.3.1",
+        "path": "node_modules/@arduano/p2prpc-core",
+        "source": "https://github.com/arduano/p2prpc/releases/download/v0.3.1/arduano-p2prpc-core-0.3.1.tgz"
+      },
+      {
+        "name": "@momics/iroh-http-node",
+        "version": "0.6.2",
+        "path": "node_modules/@momics/iroh-http-node",
+        "source": "https://github.com/arduano/iroh-http/releases/download/leo-v7-iroh-0.6.2-js-lifecycle-20261022.1/iroh-http-node-0.6.2-fork-application-signals-linux-win-x64.tgz"
+      },
+      {
+        "name": "@momics/iroh-http-shared",
+        "version": "0.6.2",
+        "path": "node_modules/@momics/iroh-http-shared",
+        "source": "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-shared-0.6.2-fork.tgz"
+      }
+    ],
+    "nativeBlake": {
+      "digest": "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+      "files": ["node_modules/@napi-rs/blake-hash-linux-x64-gnu/blake.linux-x64-gnu.node"]
+    },
+    "importEffects": {
+      "childProcesses": 0,
+      "providerRequests": 0,
+      "listeners": 0
+    },
+    "temporaryConsumerRemoved": true,
+    "sourceInputsUnchanged": true,
+    "logSha256": "f98d119a7f1fed22ce2fb6bdf28a79cb338093fee6e2081a7b69660049ee76a9",
+    "limits": "Independently installed public artifact and native bindings. This does not invoke a native agent, provider or relay.",
+    "packageContent": {
+      "status": "PASS",
+      "artifact": "sha512-O5f2YLFOshrGdJ7EiG5amBjFaGzeVFsWQfK8hCNX7RDJSiWlxgbo5G2iKOhX+xdDP/s4WDM+wYiBqapfyg6mvg==",
+      "files": 1739,
+      "newProtocolAttribution": [
+        "dist/codex/protocol/LICENSE",
+        "dist/codex/protocol/NOTICE",
+        "dist/codex/protocol/provenance.json"
+      ],
+      "rawManifestSha256": "34bd5eef67408309329a042b1ebf7c4c504ae5166c0ffd29d2c8aaa811ea4b66"
+    }
+  },
+  "browser": {
+    "status": "PASS",
+    "command": "node --import tsx test/codex-demo/browser.ts --out <fresh-output-directory> --browser <chromium-path>",
+    "sourceInputMapSha256": "41a472c4fffa886df2b30cf85b4cd1168738da188f4d6119ee5bc78999f4aa0d",
+    "artifactSha256": "a7e6818f47c471bbcf904bcc12939c269244562a411e0c66a5860a4a6276ef95",
+    "receiptSha256": "4e8d32dc79453cbe40edcb07f9ba887356d84b8b83ccaa03b7dfdee5ff55b975",
+    "receipt": {
+      "started": "2026-10-29T13:07:17.667Z",
+      "limits": {
+        "totalMs": 90000,
+        "irohEndpoints": 2,
+        "listeners": 1,
+        "browsers": 1,
+        "contexts": 1,
+        "pages": 2,
+        "scriptedSessions": 2,
+        "sends": 4,
+        "nativeAgents": 0,
+        "modelPOSTs": 0
+      },
+      "transport": "loopback WS + real direct local Iroh; relay disabled",
+      "sourceOnlyNative": true,
+      "status": "PASS",
+      "stage": "cleanup",
+      "elapsedMs": 24459,
+      "counts": {
+        "endpoints": 2,
+        "scriptedSessions": 2,
+        "sends": 3,
+        "historyReads": 0,
+        "modelPOSTs": 0,
+        "nativeAgents": 0
+      },
+      "closedViews": [
+        {
+          "peer": {
+            "connected": false,
+            "closed": true,
+            "sessionId": "c8ee2ce9-ccdc-4507-bb69-b45cce4a8f4e",
+            "tasks": 0,
+            "resources": {
+              "active": {
+                "handshakes": 0,
+                "streams": 0,
+                "outboundTransfers": 0,
+                "inboundTransfers": 0,
+                "bufferedBytes": 0,
+                "callbacks": 0
+              },
+              "queued": 0,
+              "peers": 0,
+              "principals": 0,
+              "closed": true
+            },
+            "shares": {
+              "activeShares": 0,
+              "operationRecords": 0,
+              "activeReservations": 0,
+              "expiryRecords": 0,
+              "maxShares": 10000,
+              "maxOperationRecords": 10000,
+              "closed": true
+            },
+            "files": {
+              "activeTransfers": 0,
+              "queuedTransfers": 0,
+              "activeOutboundTransfers": 0,
+              "activeInboundTransfers": 0,
+              "queuedOutboundTransfers": 0,
+              "queuedInboundTransfers": 0,
+              "incomingSessions": 0,
+              "reservedSessions": 0,
+              "activeLanes": 0,
+              "activeOperations": 0,
+              "ambiguousOperations": 0,
+              "replayTombstones": 0,
+              "operationRecords": 0,
+              "maxOperationRecords": 1024,
+              "maxReplayTombstones": 1024
+            }
+          },
+          "workspaceClosed": true
+        },
+        {
+          "peer": {
+            "connected": false,
+            "closed": true,
+            "sessionId": "d18edf50-9b7f-4429-85dc-6006ed60d075",
+            "tasks": 0,
+            "resources": {
+              "active": {
+                "handshakes": 0,
+                "streams": 0,
+                "outboundTransfers": 0,
+                "inboundTransfers": 0,
+                "bufferedBytes": 0,
+                "callbacks": 0
+              },
+              "queued": 0,
+              "peers": 0,
+              "principals": 0,
+              "closed": true
+            },
+            "shares": {
+              "activeShares": 0,
+              "operationRecords": 0,
+              "activeReservations": 0,
+              "expiryRecords": 0,
+              "maxShares": 10000,
+              "maxOperationRecords": 10000,
+              "closed": true
+            },
+            "files": {
+              "activeTransfers": 0,
+              "queuedTransfers": 0,
+              "activeOutboundTransfers": 0,
+              "activeInboundTransfers": 0,
+              "queuedOutboundTransfers": 0,
+              "queuedInboundTransfers": 0,
+              "incomingSessions": 0,
+              "reservedSessions": 0,
+              "activeLanes": 0,
+              "activeOperations": 0,
+              "ambiguousOperations": 0,
+              "replayTombstones": 0,
+              "operationRecords": 0,
+              "maxOperationRecords": 1024,
+              "maxReplayTombstones": 1024
+            }
+          },
+          "workspaceClosed": true
+        }
+      ],
+      "cleanup": {
+        "endpointsClosed": 2,
+        "listenerClosed": true,
+        "gatewayReady": true,
+        "nativeScriptedClosed": true,
+        "temporaryStateRemoved": true
+      },
+      "browserErrors": []
+    },
+    "proves": [
+      "actual CodexAdapter with scripted native wire",
+      "inferred native and Host-extension RPC via published p2prpc browser/WS/direct-Iroh bridge",
+      "separate Gateway extension over official tRPC HTTP",
+      "default fresh-session behavior makes zero native history reads",
+      "three native Sends across two sessions",
+      "React streamed state and pinned switching/remount",
+      "independent two-viewer close and subsequent surviving Send",
+      "borrowed physical peer remains alive until its owner closes it",
+      "all created resources and temporary state cleaned"
+    ],
+    "limits": [
+      "no real Codex/model/provider",
+      "local direct Iroh; physical relay disabled",
+      "no production TLS/fleet/existing-session/Personal qualification",
+      "does not close historical P14/two-viewer defects"
+    ],
+    "earlierBundle": {
+      "status": "PASS_EARLIER_SOURCE_ONLY",
+      "elapsedMs": 24452,
+      "artifactSha256": "c5b88dfcadd8672a8f1ee039d2e99a8e696210f6cd6e91176208d50a07e7c4ca",
+      "receiptSha256": "56d7deaba5a8df1cf9fd3f45e4edbf133796b7bb4d7f4bd1185ddd0eecde78e1",
+      "sourceDifference": "Browser bundle predates subsequent C lane read-batch correction and B capture provenance additions. loadInitialHistory:false; no final-source equivalence claim."
+    }
+  },
+  "testDecisions": {
+    "retired": [
+      "public lifecycle Send/control typing fixtures",
+      "old Codex public control-facade-only cases including removed OAuth wrapper query"
+    ],
+    "replacedBy": [
+      "actual native-router inference",
+      "actual native adapter/default lifecycle/SQLite journal oracles",
+      "native callback custody/privacy original oracle"
+    ],
+    "retained": [
+      "unique native lifetime/Stop/allocation/reopen selection cases",
+      "exact originals and uncertainty",
+      "optional normalized presentation/cold reads",
+      "existing owned transport/file/React oracles"
+    ],
+    "rule": "No wrapper-absence/dependency-behavior suite or duplicate effect/capture owner introduced."
+  },
+  "unresolved": [
+    "Historical P14/cross-viewer/transport/auth-renewal cases remain unresolved under their original scope.",
+    "Fresh Host identity/epoch discovery and two physical relay paths are not qualified by this local direct-Iroh case.",
+    "Logical bridge authentication expiration and reload logical-slot behavior remain known limits.",
+    "No native-shaped Copilot SDK redesign, all-native-method parity, browser reload persistence, Personal compatibility, vendor/provider or fleet readiness is claimed.",
+    "Nix inputs are unchanged; prior failed Nix/build and old qualification records remain historical, not current-NAR proof."
+  ],
+  "publication": {
+    "state": "CURRENT_LOCAL_GATES_PASS; read exact remote refs and CI independently",
+    "sameDraftPRs": [
+      47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+      70, 71
+    ],
+    "nativeStack": 72,
+    "mainAndEmpty01Unchanged": true,
+    "merge": false,
+    "deploy": false
+  }
+}

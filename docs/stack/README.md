@@ -126,3 +126,37 @@ cleaned or updated as part of this process.
 platform machinery owns its internals behind a strict public interface. Consumers
 use that contract; independent package boundaries need independent dependency or
 consumption value. The journal in03 is the concrete reference for this rule.
+
+For contract-first review, start with the completed [interface map](Interfaces.md)
+and [module rules](Modularity.md), then the numbered owner note.
+
+## Latest review amendment — F09
+
+Browser→Gateway→Host uses the published p2prpc logical-peer bridge. The Host's
+actual tRPC router remains the contract. Gateway13 owns transport-neutral route
+leases;14 binds authenticated Iroh delegation and byte relay;18 uses actual file
+capabilities instead of custom base64 transfers;19 composes real owned endpoints
+and a retained browser peer. File08 witnesses its actual publication boundary.
+The [interface map](Interfaces.md) and numbered notes explain ownership. Layer25
+keeps source/package/browser evidence separate from native/provider/fleet claims.
+The same draft stack remains the review sequence.
+
+## Codex API documentation amendment
+
+Layer 10 owns the [concise native lifecycle](../codex-api/API-Data-Lifecycle.md)
+and its [pinned source rationale and version-update procedure](../codex-api/API-Data-Lifecycle-Sources.md).
+These references describe the native API rather than asserting implementation
+parity. Product/test/package/build blobs are unchanged by this documentation
+amendment; prior source/runtime evidence keeps its original identities.
+
+## Harness-shaped Codex API amendment
+
+Layer 10 now implements selected native-shaped Codex procedures, callback custody
+and bounded native capture, using its pinned source documentation. Layer 15 adds
+retained native views and a thin React hook. Layer 05 associates creation-time
+Gateway contracts by inferred actual router type; 13 supplies the Gateway-owned
+runtime. The concrete Codex Host/Gateway example and bounded browser qualifier
+are in19. The [current acceptance](25-acceptance.md) and [evidence](Evidence.json)
+separate current source/consumer/scripted-Iroh proof from historical native,
+physical-relay and Nix records. No Personal compatibility, merge or deployment
+is claimed.

@@ -119,11 +119,7 @@ test("a future native family needs no global union change; its custom types rema
   };
   const definition = defineHost({
     contract: { id: "test.claude", version: 1 },
-    harness: {
-      identity: plugin("test.claude"),
-      nativeKind: "claude" as const,
-      capabilities: [],
-    },
+    harness: { identity: plugin("test.claude"), nativeKind: "claude" as const, capabilities: [] },
     gateway: gatewayContract,
     lifecycle: () => ({
       identity: plugin("test.lifecycle"),

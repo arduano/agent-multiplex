@@ -22,7 +22,7 @@ node dist/reference/cli.js demo
 ```
 
 Open the printed loopback address. This disposable UI uses real SQLite, scoped
-files, Root/Host routing, HTTP streams, retained React state and chat components
+files, Root/Host routing, authenticated browser/Iroh streams, retained React state and chat components
 with an explicitly **scripted, model-free** provider. SIGINT/SIGTERM retires its
 owned sessions and removes its disposable state. It does not enroll a fleet,
 read an existing agent home or invoke Codex/Copilot. The install retains optional platform bindings required by native transports.
@@ -35,20 +35,23 @@ scripts or private/local source inputs. `nix build` produces `bin/multiplex`;
 
 ## Public boundaries
 
-| Entry                                                      | Responsibility                                                         |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `protocol`, `storage/contracts`, `runtime`                 | Identity, durable originals and native-tree custody                    |
-| `host`, `host/contracts`                                   | Static typed lifecycle/workspace/harness/extension plugins             |
-| `codex`, `codex/node`; `copilot`, `copilot/node`           | Separate native schemas, adapters and inferred controls                |
-| `history`, `interactions`                                  | Streamed evidence, bounded readonly exceptions and exact decisions/MCP |
-| `files`, `files/node`; `assets`, `assets/node`             | Scoped immutable bytes, captures, uploads and leases                   |
-| `catalog`, `catalog/node`; `catalog-remote`                | Root authority and bounded authenticated remote browsing               |
-| `gateway`, `gateway/node`; `transport`, `transport/p2prpc` | Grants, routing, HTTP and published pinned Iroh peers                  |
-| `client`, `client/contracts`, `react`                      | One retained session owner, browser contracts and thin hooks           |
-| `chat`, `chat/styles.css`                                  | Embeddable theme, composer, native forms and safe rich previews        |
-| `conversation`, `conversation/node`                        | State/history/decision integration without a second journal            |
-| `attachments`, `child-streams`, `file-links`               | Retained file drafts, readonly children and authorized native links    |
-| `reference`, `reference/ui`, `reference/node`              | Public consuming composition and explicit process setup                |
+| Entry                                                      | Responsibility                                                          |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `protocol`, `storage/contracts`, `runtime`                 | Identity, durable originals and native-tree custody                     |
+| `host`, `host/contracts`                                   | Static typed lifecycle/workspace/harness/extension plugins              |
+| `codex`, `codex/node`; `copilot`, `copilot/node`           | Separate native schemas, adapters and inferred controls                 |
+| `codex/protocol`, `codex/native-contracts`                 | Revision-pinned native DTOs, observation and callback contracts         |
+| `codex/client`, `codex/react`                              | Retained native Codex observations, independent history views and hooks |
+| `history`, `interactions`                                  | Streamed evidence, bounded readonly exceptions and exact decisions/MCP  |
+| `files`, `files/node`; `assets`, `assets/node`             | Scoped immutable bytes, captures, uploads and leases                    |
+| `catalog`, `catalog/node`; `catalog-remote`                | Root authority and bounded authenticated remote browsing                |
+| `gateway`, `gateway/node`; `transport`, `transport/p2prpc` | Grants, routing, HTTP and published pinned Iroh peers                   |
+| `client`, `client/contracts`, `react`                      | One retained session owner, browser contracts and thin hooks            |
+| `chat`, `chat/styles.css`                                  | Embeddable theme, composer, native forms and safe rich previews         |
+| `conversation`, `conversation/node`                        | State/history/decision integration without a second journal             |
+| `attachments`, `child-streams`, `file-links`               | Retained file drafts, readonly children and authorized native links     |
+| `reference`, `reference/ui`, `reference/node`              | Public consuming composition and explicit process setup                 |
+| `reference/codex`, `reference/codex/node`                  | Codex Host customization and associated Gateway router example          |
 
 Use the declared package subpaths. The journal's portable `storage/contracts`
 entry exposes receipt/checkpoint operations; `storage` supplies the private
@@ -59,6 +62,32 @@ The generic React/chat contracts compile without Node ambient declarations;
 the optional inferred tRPC client/reference-router surfaces also require Node
 TypeScript declarations. Node entries own explicit resources and are never
 started by import, rendering, reconnect or a UI unmount.
+
+Host procedures use their actual tRPC router and its inferred client. A browser
+calls `connectBridge<ActualHostRouter>` from published p2prpc; the Gateway relays
+binary bytes to an authenticated native Peer. It owns route leases and delegated
+admission, while the Host independently authorizes every RPC/file operation.
+There are no copied Gateway procedures, generic RPC envelopes or custom file
+chunk protocols. Routing metadata stays outside procedure input. The Gateway's
+own topology and a Root's explicit catalog endpoint use ordinary official tRPC
+HTTP adapters/clients. Pinned p2prpc supports unary calls and subscriptions;
+nested execution-valued results remain an HTTP-only capability. See
+[the contract rules](docs/stack/Modularity.md#trpc-is-the-procedure-contract).
+
+Codex clients consume the actual native-shaped router: native parameters,
+results, item types, callbacks and settings remain Codex-shaped. The retained
+Codex client shares one bounded observation per exact run and keeps native read
+pages separate from live capture; neither is a native read/live watermark.
+Lifecycle routes own creation, Reopen, Stop and archive. Harness routers own
+messaging and native controls. The normalized chat/history path remains an
+optional presentation integration, not the Codex protocol authority. Copilot
+has its own existing router; this amendment does not convert its SDK API.
+
+At Host creation, ordinary tRPC router composition adds Host extensions. A typed
+Gateway contract can associate separate Gateway-owned routes without importing
+their handlers into the Host runtime. The concrete Codex demo shows both paths
+and their inferred clients in [layer 19](docs/stack/19-reference.md); it is an
+example composition, not another plugin registry or native provider.
 
 Applications provide authentication, private provider configuration, exact
 runtime containment and workspace policy. New managed Codex defaults to full
