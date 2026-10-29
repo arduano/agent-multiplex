@@ -172,6 +172,21 @@
       "import": "./dist/reference/ui/index.js"
     },
     "./reference/styles.css": "./dist/reference/ui/styles.css",
+    "./catalog-remote": {
+      "types": "./dist/catalog-remote/index.d.ts",
+      "import": "./dist/catalog-remote/index.js"
+    },
+    "./catalog-remote/node": {
+      "node": {
+        "types": "./dist/catalog-remote/node.d.ts",
+        "import": "./dist/catalog-remote/node.js"
+      },
+      "default": null
+    },
+    "./catalog-remote/client": {
+      "types": "./dist/catalog-remote/client.d.ts",
+      "import": "./dist/catalog-remote/client.js"
+    },
     "./client/contracts": {
       "types": "./dist/client/contracts.d.ts",
       "import": "./dist/client/contracts.js"
@@ -325,6 +340,17 @@
       "node": {
         "types": "./dist/reference/node-contracts.d.ts",
         "import": "./dist/reference/node-contracts.js"
+      },
+      "default": null
+    },
+    "./catalog-remote/contracts": {
+      "types": "./dist/catalog-remote/contracts.d.ts",
+      "import": "./dist/catalog-remote/contracts.js"
+    },
+    "./catalog-remote/node-contracts": {
+      "node": {
+        "types": "./dist/catalog-remote/node-contracts.d.ts",
+        "import": "./dist/catalog-remote/node-contracts.js"
       },
       "default": null
     },
