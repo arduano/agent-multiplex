@@ -1,0 +1,109 @@
+.mpx-chat.mpx-reference-app {
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  min-width: 0;
+  display: block;
+  font-family: system-ui, sans-serif;
+}
+.mpx-reference-layout {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+}
+.mpx-reference-app .mpx-reference-sidebar {
+  border-right: 1px solid var(--mpx-border);
+  overflow: auto;
+  min-height: 0;
+  min-width: 0;
+}
+.mpx-reference-sidebar > header {
+  padding: 20px 16px 12px;
+}
+.mpx-reference-sidebar h1 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  line-height: 24px;
+}
+.mpx-reference-sidebar header p {
+  color: var(--mpx-muted);
+  font-size: 12px;
+}
+.mpx-reference-main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mpx-reference-main > .mpx-chat:not(.mpx-reference-mobile-nav) {
+  flex: 1;
+  height: 0;
+}
+.mpx-reference-app .mpx-reference-mobile-nav {
+  display: none;
+  flex-shrink: 0;
+  height: auto;
+  container-type: normal;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--mpx-border);
+}
+.mpx-reference-mobile-nav .mpx-field {
+  margin: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+}
+.mpx-reference-mobile-nav .mpx-select {
+  min-height: 44px;
+}
+.mpx-reference-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mpx-reference-inline .mpx-field {
+  margin: 0;
+  gap: 4px;
+}
+.mpx-reference-inline .mpx-field > label {
+  font-size: 12px;
+  color: var(--mpx-muted);
+}
+.mpx-reference-inline .mpx-reference-choice {
+  min-width: 100px;
+  max-width: 180px;
+}
+.mpx-reference-inline .mpx-reference-choice:first-child {
+  max-width: 240px;
+}
+.mpx-reference-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+}
+.mpx-reference-settings .mpx-field {
+  margin: 0;
+}
+.mpx-reference-empty {
+  padding: 24px;
+}
+@container (max-width:680px) {
+  .mpx-reference-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mpx-reference-app .mpx-reference-sidebar {
+    display: none;
+  }
+  .mpx-reference-app .mpx-reference-mobile-nav {
+    display: block;
+  }
+  .mpx-reference-inline .mpx-reference-choice:not(:first-child) {
+    display: none;
+  }
+  .mpx-reference-inline .mpx-reference-choice:first-child {
+    max-width: 160px;
+    min-width: 0;
+  }
+}
