@@ -25,9 +25,27 @@
       },
       "default": null
     },
+    "./runtime": {
+      "node": {
+        "types": "./dist/runtime/index.d.ts",
+        "import": "./dist/runtime/index.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
+    },
+    "./runtime/contracts": {
+      "types": "./dist/runtime/contracts.d.ts",
+      "import": "./dist/runtime/contracts.js"
+    },
+    "./runtime/node-contracts": {
+      "node": {
+        "types": "./dist/runtime/node-contracts.d.ts",
+        "import": "./dist/runtime/node-contracts.js"
+      },
+      "default": null
     }
   },
   "files": [

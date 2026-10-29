@@ -22,8 +22,8 @@ live in `scripts/`; tests live in `test/`; generated output is not authored sour
 
 ## Current boundary
 
-Through PR03 the framework supplies tooling, logical scope identity and durable
-original-operation storage. It does not implement a session, native adapter,
+Through PR04 the framework supplies tooling, logical identity, durable originals
+and exact native allocation custody. It does not implement a session, native adapter,
 transport, client or UI yet. The following layers are
 tracked in the [stack index](docs/stack/README.md), with per-layer evidence and
 explicit limitations. Passing this checkpoint is not full-framework readiness.
