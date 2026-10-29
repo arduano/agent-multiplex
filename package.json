@@ -58,6 +58,10 @@
       },
       "default": null
     },
+    "./interactions": {
+      "types": "./dist/interactions/index.d.ts",
+      "import": "./dist/interactions/index.js"
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -94,6 +98,10 @@
         "import": "./dist/files/node-contracts.js"
       },
       "default": null
+    },
+    "./interactions/contracts": {
+      "types": "./dist/interactions/contracts.d.ts",
+      "import": "./dist/interactions/contracts.js"
     }
   },
   "files": [
