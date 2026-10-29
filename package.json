@@ -84,6 +84,17 @@
       },
       "default": null
     },
+    "./catalog": {
+      "types": "./dist/catalog/index.d.ts",
+      "import": "./dist/catalog/index.js"
+    },
+    "./catalog/node": {
+      "node": {
+        "types": "./dist/catalog/node.d.ts",
+        "import": "./dist/catalog/node.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -159,6 +170,17 @@
       "node": {
         "types": "./dist/copilot/sdk-contracts.d.ts",
         "import": "./dist/copilot/sdk-contracts.js"
+      },
+      "default": null
+    },
+    "./catalog/contracts": {
+      "types": "./dist/catalog/contracts.d.ts",
+      "import": "./dist/catalog/contracts.js"
+    },
+    "./catalog/node-contracts": {
+      "node": {
+        "types": "./dist/catalog/node-contracts.d.ts",
+        "import": "./dist/catalog/node-contracts.js"
       },
       "default": null
     }
