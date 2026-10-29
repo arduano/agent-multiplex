@@ -121,6 +121,18 @@
       },
       "default": null
     },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.js"
+    },
+    "./client/contracts": {
+      "types": "./dist/client/contracts.d.ts",
+      "import": "./dist/client/contracts.js"
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -232,12 +244,28 @@
       },
       "default": null
     },
+    "./react/contracts": {
+      "types": "./dist/react/contracts.d.ts",
+      "import": "./dist/react/contracts.js"
+    },
+    "./client/anchor": {
+      "types": "./dist/client/anchor.d.ts",
+      "import": "./dist/client/anchor.js"
+    },
     "./transport/delegation": {
       "node": {
         "types": "./dist/transport/delegation.d.ts",
         "import": "./dist/transport/delegation.js"
       },
       "default": null
+    },
+    "./codex/client": {
+      "types": "./dist/codex/client/index.d.ts",
+      "import": "./dist/codex/client/index.js"
+    },
+    "./codex/react": {
+      "types": "./dist/codex/react/index.d.ts",
+      "import": "./dist/codex/react/index.js"
     }
   },
   "files": [
@@ -259,11 +287,15 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "24.3.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "@types/react-test-renderer": "19.1.0",
     "@types/ws": "8.5.4",
     "eslint": "10.13.0",
     "eslint-config-prettier": "10.1.8",
     "jiti": "2.7.0",
     "prettier": "3.9.10",
+    "react-test-renderer": "19.1.1",
     "typescript": "5.9.2",
     "typescript-eslint": "8.72.1",
     "eventsource": "5.1.4"
@@ -275,6 +307,8 @@
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0",
     "cmd-ts": "0.15.0",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
     "tsx": "4.23.15",
     "zod": "4.1.5"
   },

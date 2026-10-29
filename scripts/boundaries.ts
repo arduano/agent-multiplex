@@ -16,6 +16,7 @@ const contractFile =
 const contractExceptions: Readonly<Record<string, readonly string[]>> = {
   "host/contracts.ts -> host/server/composition.ts": ["HostRouter"],
   "runtime/node-contracts.ts -> runtime/host-containment.ts": ["HostContainment"],
+  "codex/client/contracts.ts -> codex/server/router.ts": ["CodexRouter"],
 };
 
 async function files(directory: string): Promise<string[]> {
