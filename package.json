@@ -134,6 +134,17 @@
       "import": "./dist/chat/index.js"
     },
     "./chat/styles.css": "./dist/chat/styles.css",
+    "./conversation": {
+      "types": "./dist/conversation/index.d.ts",
+      "import": "./dist/conversation/index.js"
+    },
+    "./conversation/node": {
+      "node": {
+        "types": "./dist/conversation/node.d.ts",
+        "import": "./dist/conversation/node.js"
+      },
+      "default": null
+    },
     "./client/contracts": {
       "types": "./dist/client/contracts.d.ts",
       "import": "./dist/client/contracts.js"
@@ -256,6 +267,17 @@
     "./chat/contracts": {
       "types": "./dist/chat/contracts.d.ts",
       "import": "./dist/chat/contracts.js"
+    },
+    "./conversation/contracts": {
+      "types": "./dist/conversation/contracts.d.ts",
+      "import": "./dist/conversation/contracts.js"
+    },
+    "./conversation/node-contracts": {
+      "node": {
+        "types": "./dist/conversation/node-contracts.d.ts",
+        "import": "./dist/conversation/node-contracts.js"
+      },
+      "default": null
     },
     "./client/anchor": {
       "types": "./dist/client/anchor.d.ts",
