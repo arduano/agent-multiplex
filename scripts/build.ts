@@ -20,12 +20,13 @@ async function buildPackage(): Promise<void> {
       new URL(`dist/codex/protocol/${name}`, root),
     );
   }
+  await copyFile(new URL("src/chat/styles.css", root), new URL("dist/chat/styles.css", root));
 }
 
 await run(
   command({
     name: "multiplex-build",
-    description: "Build the public package from this checkout.",
+    description: "Build the public package and chat CSS from this checkout.",
     args: {},
     handler: buildPackage,
   }),

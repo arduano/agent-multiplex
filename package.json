@@ -129,6 +129,11 @@
       "types": "./dist/react/index.d.ts",
       "import": "./dist/react/index.js"
     },
+    "./chat": {
+      "types": "./dist/chat/index.d.ts",
+      "import": "./dist/chat/index.js"
+    },
+    "./chat/styles.css": "./dist/chat/styles.css",
     "./client/contracts": {
       "types": "./dist/client/contracts.d.ts",
       "import": "./dist/client/contracts.js"
@@ -248,6 +253,10 @@
       "types": "./dist/react/contracts.d.ts",
       "import": "./dist/react/contracts.js"
     },
+    "./chat/contracts": {
+      "types": "./dist/chat/contracts.d.ts",
+      "import": "./dist/chat/contracts.js"
+    },
     "./client/anchor": {
       "types": "./dist/client/anchor.d.ts",
       "import": "./dist/client/anchor.js"
@@ -304,11 +313,15 @@
     "@arduano/p2prpc-core": "https://github.com/arduano/p2prpc/releases/download/v0.3.1/arduano-p2prpc-core-0.3.1.tgz",
     "@momics/iroh-http-node": "https://github.com/arduano/iroh-http/releases/download/leo-v7-iroh-0.6.2-js-lifecycle-20261022.1/iroh-http-node-0.6.2-fork-application-signals-linux-win-x64.tgz",
     "@momics/iroh-http-shared": "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-shared-0.6.2-fork.tgz",
+    "@radix-ui/react-dialog": "1.1.15",
+    "@radix-ui/react-select": "2.2.6",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0",
     "cmd-ts": "0.15.0",
     "react": "19.1.1",
     "react-dom": "19.1.1",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1",
     "tsx": "4.23.15",
     "zod": "4.1.5"
   },
