@@ -22,8 +22,9 @@ live in `scripts/`; tests live in `test/`; generated output is not authored sour
 
 ## Current boundary
 
-Through PR04 the framework supplies tooling, logical identity, durable originals
-and exact native allocation custody. It does not implement a session, native adapter,
+Through PR05 the framework supplies tooling, logical identity, durable originals,
+native custody and static typed Host composition. It does not implement the
+default session lifecycle, native adapters,
 transport, client or UI yet. The following layers are
 tracked in the [stack index](docs/stack/README.md), with per-layer evidence and
 explicit limitations. Passing this checkpoint is not full-framework readiness.
