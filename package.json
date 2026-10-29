@@ -43,6 +43,10 @@
       "types": "./dist/host/contracts.d.ts",
       "import": "./dist/host/contracts.js"
     },
+    "./history": {
+      "types": "./dist/history/index.d.ts",
+      "import": "./dist/history/index.js"
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -64,6 +68,10 @@
         "import": "./dist/host/node-contracts.js"
       },
       "default": null
+    },
+    "./history/contracts": {
+      "types": "./dist/history/contracts.d.ts",
+      "import": "./dist/history/contracts.js"
     }
   },
   "files": [
