@@ -47,6 +47,17 @@
       "types": "./dist/history/index.d.ts",
       "import": "./dist/history/index.js"
     },
+    "./files": {
+      "types": "./dist/files/index.d.ts",
+      "import": "./dist/files/index.js"
+    },
+    "./files/node": {
+      "node": {
+        "types": "./dist/files/node.d.ts",
+        "import": "./dist/files/node.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -72,6 +83,17 @@
     "./history/contracts": {
       "types": "./dist/history/contracts.d.ts",
       "import": "./dist/history/contracts.js"
+    },
+    "./files/contracts": {
+      "types": "./dist/files/contracts.d.ts",
+      "import": "./dist/files/contracts.js"
+    },
+    "./files/node-contracts": {
+      "node": {
+        "types": "./dist/files/node-contracts.d.ts",
+        "import": "./dist/files/node-contracts.js"
+      },
+      "default": null
     }
   },
   "files": [

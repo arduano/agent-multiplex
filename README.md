@@ -22,8 +22,8 @@ live in `scripts/`; tests live in `test/`; generated output is not authored sour
 
 ## Current boundary
 
-Through PR07 the framework supplies the durable lifecycle, native custody, typed
-Host composition and browser-safe history/read owners. Concrete native adapters,
+Through PR08 the framework supplies durable lifecycle/custody, typed Host
+composition, coherent history and immutable files/previews. Concrete native adapters,
 transport, client or UI yet. The following layers are
 tracked in the [stack index](docs/stack/README.md), with per-layer evidence and
 explicit limitations. Passing this checkpoint is not full-framework readiness.
