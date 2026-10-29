@@ -3,10 +3,7 @@ import type { InteractionSnapshot } from "../interactions/contracts.js";
 import type { Json, Receipt, RunRef, SessionScope } from "../protocol/index.js";
 import type { StoredFile } from "../files/contracts.js";
 export type ConfirmedDraftAttachment = StoredFile;
-export type DraftAttachmentLimits = Readonly<{
-  maxFiles: number;
-  maxBytes: number;
-}>;
+export type DraftAttachmentLimits = Readonly<{ maxFiles: number; maxBytes: number }>;
 
 import type { ObservationConnector } from "../transport/contracts.js";
 export type { ObservationConnector } from "../transport/contracts.js";
@@ -73,11 +70,7 @@ export interface SessionViewPort {
 export type SessionView = SessionViewPort;
 export type SessionEntry = SessionEntryPort;
 export type HistoryReadStatus =
-  | Readonly<{
-      kind: "baseline" | "older";
-      cursor: string | null;
-      state: "pending";
-    }>
+  | Readonly<{ kind: "baseline" | "older"; cursor: string | null; state: "pending" }>
   | Readonly<{
       kind: "baseline" | "older";
       cursor: string | null;
@@ -119,11 +112,7 @@ export type SessionState = Readonly<{
 }>;
 export type Command = Readonly<{ id: string; optimisticText?: string }> &
   (
-    | Readonly<{
-        kind: "send" | "steer" | "queue" | "control";
-        run: RunRef;
-        payload: Json;
-      }>
+    | Readonly<{ kind: "send" | "steer" | "queue" | "control"; run: RunRef; payload: Json }>
     | Readonly<{
         kind: "stop";
         run: RunRef | null;

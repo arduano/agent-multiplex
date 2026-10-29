@@ -112,12 +112,7 @@ export class SessionEntry {
       pinned: stored?.pinned ?? false,
       state: null,
       freshness: "unobserved",
-      history: {
-        current: null,
-        rows: [],
-        origins: {},
-        residencyOmitted: false,
-      },
+      history: { current: null, rows: [], origins: {}, residencyOmitted: false },
       historyFreshness: "unobserved",
       interactions: null,
       interactionsFreshness: "unobserved",
@@ -356,11 +351,7 @@ export class SessionEntry {
     if (this.#read?.key === key) return this.#read.work;
     check(!this.#read?.active, "PENDING_WORK");
     this.#publish({ historyRead: { kind, cursor, state: "pending" } });
-    const job = {
-      key,
-      active: true,
-      work: undefined! as Promise<ReadObservation>,
-    };
+    const job = { key, active: true, work: undefined! as Promise<ReadObservation> };
     this.#read = job;
     job.work = Promise.resolve()
       .then(() =>
@@ -371,9 +362,7 @@ export class SessionEntry {
       .then(
         (value) => {
           if (this.#snapshot.state?.run && runKey(this.#snapshot.state.run) === runKey(run))
-            this.#publish({
-              historyRead: { kind, cursor, state: "settled", outcome: value },
-            });
+            this.#publish({ historyRead: { kind, cursor, state: "settled", outcome: value } });
           return value;
         },
         () => {
@@ -383,9 +372,7 @@ export class SessionEntry {
             this.#snapshot.state?.run &&
             runKey(this.#snapshot.state.run) === runKey(run)
           )
-            this.#publish({
-              historyRead: { kind, cursor, state: "settled", outcome: value },
-            });
+            this.#publish({ historyRead: { kind, cursor, state: "settled", outcome: value } });
           return value;
         },
       )
@@ -481,9 +468,7 @@ export class SessionEntry {
       Math.max(0, recent.length - this.#options.limits.recentOriginals),
     ))
       this.#jobs.delete(job.view.command.id);
-    this.#publish({
-      originals: [...this.#jobs.values()].map((job) => job.view),
-    });
+    this.#publish({ originals: [...this.#jobs.values()].map((job) => job.view) });
   }
   #persist(): Promise<void> {
     const value: PersistedEntry = immutable({
@@ -707,11 +692,7 @@ export class SessionEntry {
         prior.row.version === row.version
       )
         check(json(prior.row) === json(row), "CONFLICT");
-      rows.set(row.id, {
-        row,
-        scope: current.scope,
-        generation: current.generation,
-      });
+      rows.set(row.id, { row, scope: current.scope, generation: current.generation });
     }
     const size = () => byteLength(json(order.map((id) => rows.get(id)!)));
     const protectedIds = new Set(current.rows.map((row) => row.id));

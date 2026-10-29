@@ -14,11 +14,7 @@ import { check, runKey } from "./validation.js";
 
 /** Only view intent and geometry. No transcript/native state is copied here. */
 class AnchorController implements AnchorPort {
-  #snapshot: AnchorSnapshot = Object.freeze({
-    mode: "followingLive",
-    anchor: null,
-    revision: 0,
-  });
+  #snapshot: AnchorSnapshot = Object.freeze({ mode: "followingLive", anchor: null, revision: 0 });
   #gesture = 0;
   #listeners = new Set<() => void>();
   #capture: (() => RowAnchor | null) | undefined;
