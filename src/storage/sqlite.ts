@@ -12,6 +12,8 @@ import { existingSidecars, privateFile } from "./private-file.js";
 
 import {
   JournalError,
+  type Checkpoint,
+  type CheckpointReadPort,
   type JournalHandle,
   type Limits,
   type OriginalJournalPort,
@@ -26,6 +28,9 @@ const defaults: Limits = {
   maxResultBytes: 16 * 1024,
   maxRetainedBytes: 64 * 1024 * 1024,
   reservedStops: 1,
+  maxCheckpointBytes: 256 * 1024,
+  maxCheckpointTotalBytes: 64 * 1024 * 1024,
+  maxCheckpoints: 4096,
 };
 const applicationId = 0x4d585331;
 const schema = `CREATE TABLE originals (
@@ -41,6 +46,10 @@ const schema = `CREATE TABLE originals (
 CREATE INDEX pending_originals ON originals(priority) WHERE state IN ('admitted','dispatched','unknown');
 CREATE TABLE journal_usage (singleton INTEGER PRIMARY KEY CHECK(singleton=1), retained_bytes INTEGER NOT NULL CHECK(retained_bytes>=0)) STRICT;
 INSERT INTO journal_usage VALUES(1,0);`;
+const checkpointSchema = `CREATE TABLE checkpoints (
+ scope TEXT PRIMARY KEY, value_json TEXT NOT NULL,
+ stored_bytes INTEGER NOT NULL CHECK(stored_bytes>=0)
+) STRICT, WITHOUT ROWID;`;
 type Row = {
   scope: string;
   id: string;
@@ -58,15 +67,18 @@ function identity(scope: SessionScope, id: string): string {
     throw new TypeError("Invalid original id");
   return scopeKey(scope);
 }
-function receipt(row: Row): Receipt {
-  const [connection, principal, host, session] = JSON.parse(row.scope) as [
+function storedScope(key: string): SessionScope {
+  const [connection, principal, host, session] = JSON.parse(key) as [
     string,
     string,
     string,
     string,
   ];
+  return Object.freeze({ connection, principal, host, session });
+}
+function receipt(row: Row): Receipt {
   const original = {
-    scope: Object.freeze({ connection, principal, host, session }),
+    scope: storedScope(row.scope),
     id: row.id,
     requestHash: row.request_hash,
     revision: row.revision,
@@ -90,10 +102,16 @@ function open(filename: string, readOnly: boolean): DatabaseSync {
       const count = db.prepare("SELECT COUNT(*) AS n FROM sqlite_schema").get() as { n: number };
       if (count.n) throw new Error("Refusing unrecognized SQLite database");
       db.exec(
-        `BEGIN IMMEDIATE; ${schema} PRAGMA application_id=${applicationId}; PRAGMA user_version=1; COMMIT;`,
+        `BEGIN IMMEDIATE; ${schema} ${checkpointSchema} PRAGMA application_id=${applicationId}; PRAGMA user_version=2; COMMIT;`,
       );
-    } else if (id.application_id !== applicationId || version.user_version !== 1)
-      throw new Error("Unsupported original journal schema");
+    } else {
+      if (id.application_id !== applicationId || ![1, 2].includes(version.user_version))
+        throw new Error("Unsupported original journal schema");
+      if (version.user_version === 1) {
+        if (readOnly) throw new Error("Original journal requires writer schema upgrade");
+        db.exec(`BEGIN IMMEDIATE; ${checkpointSchema} PRAGMA user_version=2; COMMIT;`);
+      }
+    }
     if (!readOnly) db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
     existingSidecars(filename);
     return db;
@@ -124,6 +142,24 @@ class JournalReads {
     const row = this.row(scope, id);
     return row?.request_json === null || !row ? null : (JSON.parse(row.request_json) as Json);
   }
+  checkpoint(scope: SessionScope): Json | null {
+    this.assertOpen();
+    const row = this.database
+      .prepare("SELECT value_json FROM checkpoints WHERE scope=?")
+      .get(scopeKey(scope)) as { value_json: string } | undefined;
+    return row ? (JSON.parse(row.value_json) as Json) : null;
+  }
+  checkpoints(): readonly Checkpoint[] {
+    this.assertOpen();
+    return (
+      this.database.prepare("SELECT scope,value_json FROM checkpoints ORDER BY scope").all() as {
+        scope: string;
+        value_json: string;
+      }[]
+    ).map((row) =>
+      Object.freeze({ scope: storedScope(row.scope), value: JSON.parse(row.value_json) as Json }),
+    );
+  }
   unresolved(
     scope: SessionScope,
   ): readonly Readonly<{ receipt: Receipt; request: Json; priority: Priority }>[] {
@@ -150,7 +186,10 @@ class JournalReads {
   }
 }
 
-export class OriginalReader extends JournalReads implements OriginalReadPort, JournalHandle {
+export class OriginalReader
+  extends JournalReads
+  implements OriginalReadPort, CheckpointReadPort, JournalHandle
+{
   constructor(filename: string) {
     super(open(filename, true));
   }
@@ -195,13 +234,44 @@ export class OriginalJournal extends JournalReads implements OriginalJournalPort
       throw error;
     }
   }
+  private encodeCheckpoint(checkpoint: Checkpoint): { key: string; json: string; bytes: number } {
+    const key = scopeKey(checkpoint.scope);
+    const value = canonicalJson(checkpoint.value, this.limits.maxCheckpointBytes);
+    return { key, json: value.json, bytes: Buffer.byteLength(key) + value.bytes };
+  }
+  private writeCheckpoint(value: { key: string; json: string; bytes: number }): void {
+    const existing = this.database
+      .prepare("SELECT stored_bytes,value_json FROM checkpoints WHERE scope=?")
+      .get(value.key) as { stored_bytes: number; value_json: string } | undefined;
+    if (existing?.value_json === value.json) return;
+    const usage = this.database
+      .prepare("SELECT COUNT(*) AS count, COALESCE(SUM(stored_bytes),0) AS bytes FROM checkpoints")
+      .get() as { count: number; bytes: number };
+    if (
+      (!existing && usage.count >= this.limits.maxCheckpoints) ||
+      usage.bytes - (existing?.stored_bytes ?? 0) + value.bytes >
+        this.limits.maxCheckpointTotalBytes
+    )
+      throw new JournalError("CAPACITY", "Checkpoint capacity exhausted");
+    this.database
+      .prepare(
+        "INSERT INTO checkpoints VALUES(?,?,?) ON CONFLICT(scope) DO UPDATE SET value_json=excluded.value_json, stored_bytes=excluded.stored_bytes",
+      )
+      .run(value.key, value.json, value.bytes);
+  }
+  saveCheckpoint(scope: SessionScope, value: Json): void {
+    const checkpoint = this.encodeCheckpoint({ scope, value });
+    this.transaction(() => this.writeCheckpoint(checkpoint));
+  }
   admit(
     scope: SessionScope,
     id: string,
     request: Json,
-    options: { priority?: Priority } = {},
+    options: { priority?: Priority; checkpoint?: Checkpoint } = {},
   ): Readonly<{ fresh: boolean; receipt: Receipt }> {
     const key = identity(scope, id);
+    const snapshot =
+      options.checkpoint === undefined ? undefined : this.encodeCheckpoint(options.checkpoint);
     const encoded = canonicalJson(request, this.limits.maxRequestBytes);
     const hash = createHash("sha256").update(encoded.json).digest("hex");
     const priority = options.priority ?? "normal";
@@ -249,10 +319,16 @@ export class OriginalJournal extends JournalReads implements OriginalJournalPort
       this.database
         .prepare("UPDATE journal_usage SET retained_bytes=retained_bytes+? WHERE singleton=1")
         .run(allocation);
+      if (snapshot) this.writeCheckpoint(snapshot);
       return { fresh: true, receipt: receipt(this.row(scope, id)!) };
     });
   }
-  markDispatched(scope: SessionScope, id: string): Readonly<{ fresh: boolean; receipt: Receipt }> {
+  markDispatched(
+    scope: SessionScope,
+    id: string,
+    checkpoint?: Checkpoint,
+  ): Readonly<{ fresh: boolean; receipt: Receipt }> {
+    const snapshot = checkpoint === undefined ? undefined : this.encodeCheckpoint(checkpoint);
     return this.transaction(() => {
       const row = this.row(scope, id);
       if (!row) throw new JournalError("NOT_FOUND", "Original not admitted");
@@ -262,14 +338,16 @@ export class OriginalJournal extends JournalReads implements OriginalJournalPort
           "UPDATE originals SET state='dispatched',revision=revision+1 WHERE scope=? AND id=?",
         )
         .run(identity(scope, id), id);
+      if (snapshot) this.writeCheckpoint(snapshot);
       return { fresh: true, receipt: receipt(this.row(scope, id)!) };
     });
   }
-  settle(scope: SessionScope, id: string, outcome: Settlement): Receipt {
+  settle(scope: SessionScope, id: string, outcome: Settlement, checkpoint?: Checkpoint): Receipt {
     const encoded =
       outcome.state === "unknown"
         ? null
         : canonicalJson(outcome.result, this.limits.maxResultBytes);
+    const snapshot = checkpoint === undefined ? undefined : this.encodeCheckpoint(checkpoint);
     if (!["unknown", "succeeded", "refused"].includes(outcome.state))
       throw new TypeError("Invalid settlement");
     return this.transaction(() => {
@@ -299,6 +377,7 @@ export class OriginalJournal extends JournalReads implements OriginalJournalPort
           .prepare("UPDATE journal_usage SET retained_bytes=retained_bytes-? WHERE singleton=1")
           .run(row.request_bytes);
       }
+      if (snapshot) this.writeCheckpoint(snapshot);
       return receipt(this.row(scope, id)!);
     });
   }

@@ -11,6 +11,9 @@ export type Limits = Readonly<{
   maxResultBytes: number;
   maxRetainedBytes: number;
   reservedStops: number;
+  maxCheckpointBytes: number;
+  maxCheckpointTotalBytes: number;
+  maxCheckpoints: number;
 }>;
 export type JournalErrorCode =
   "CONFLICT" | "CAPACITY" | "NOT_FOUND" | "INVALID_TRANSITION" | "CLOSED";
@@ -33,22 +36,34 @@ export interface OriginalReadPort {
   unresolved(scope: SessionScope): readonly UnresolvedOriginal[];
 }
 
+/** Opaque bounded JSON. The domain owner validates its own record and scope. */
+export type Checkpoint = Readonly<{ scope: SessionScope; value: Json }>;
+export interface CheckpointReadPort {
+  checkpoint(scope: SessionScope): Json | null;
+  checkpoints(): readonly Checkpoint[];
+}
+export interface CheckpointPort extends CheckpointReadPort {
+  saveCheckpoint(scope: SessionScope, value: Json): void;
+}
+
 /** Synchronous commits precede successful returns. A thrown write acknowledges
- * nothing. This port cannot execute, retry, observe or otherwise own external effects. */
-export interface OriginalJournalPort extends OriginalReadPort {
-  /** Stable opaque identity of the underlying writer. Delegated ports forward it. */
+ * nothing. A duplicate operation never reapplies its optional checkpoint.
+ * This port cannot execute, retry, observe or otherwise own external effects. */
+export interface OriginalJournalPort extends OriginalReadPort, CheckpointPort {
+  /** Stable opaque identity of the underlying writer. A delegated port must
+   * forward this token, so wrappers cannot acquire a second domain owner. */
   readonly writerIdentity: object;
-  /** Admit immutable meaning before any effect may be dispatched. */
+  /** Immutable meaning; a fresh original and optional checkpoint commit together. */
   admit(
     scope: SessionScope,
     id: string,
     request: Json,
-    options?: { priority?: Priority },
+    options?: { priority?: Priority; checkpoint?: Checkpoint },
   ): JournalTransition;
   /** Only fresh:true grants the single committed dispatch claim. */
-  markDispatched(scope: SessionScope, id: string): JournalTransition;
-  /** Monotonic settlement of the exact original. */
-  settle(scope: SessionScope, id: string, outcome: Settlement): Receipt;
+  markDispatched(scope: SessionScope, id: string, checkpoint?: Checkpoint): JournalTransition;
+  /** Monotonic exact settlement, atomically paired with a checkpoint if advancing. */
+  settle(scope: SessionScope, id: string, outcome: Settlement, checkpoint?: Checkpoint): Receipt;
 }
 
 /** The process that opens a storage handle owns close. Passing a borrowed port

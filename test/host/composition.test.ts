@@ -19,12 +19,7 @@ import type {
   UpdateReadiness,
 } from "../../src/host/contracts.js";
 
-const route = {
-  authority: "root",
-  host: "work",
-  owner: "owner",
-  routeEpoch: "epoch-1",
-} as const;
+const route = { authority: "root", host: "work", owner: "owner", routeEpoch: "epoch-1" } as const;
 const plugin = (id: string) => ({ id, version: 1, recordVersion: 1 });
 const schemas = {
   host: z.object({ label: z.string() }),
@@ -32,11 +27,7 @@ const schemas = {
 };
 const ready = (): UpdateReadiness => ({ ready: true });
 const context = (session?: { id: string; generation: number }): HostContext => ({
-  identity: {
-    connection: "connection",
-    principal: "owner",
-    actions: ["read", "control"],
-  },
+  identity: { connection: "connection", principal: "owner", actions: ["read", "control"] },
   route,
   ...(session ? { session } : {}),
 });
@@ -76,9 +67,7 @@ function fixture(
           events.push("open");
           return {
             sessions,
-            router: hostRouter({
-              count: hostProcedure.query(() => sessions.count),
-            }),
+            router: hostRouter({ count: hostProcedure.query(() => sessions.count) }),
             readiness: options.resourcesReady ?? ready,
             close: async () => {
               events.push("lifecycle.close");
@@ -156,13 +145,8 @@ test("a future native family needs no global union change; its custom types rema
     extensions: ({ sessions }) => ({
       project: {
         identity: plugin("test.project"),
-        public: {
-          host: z.object({ total: z.number() }),
-          session: z.object({ slug: z.string() }),
-        },
-        router: hostRouter({
-          name: hostProcedure.query(() => sessions.project),
-        }),
+        public: { host: z.object({ total: z.number() }), session: z.object({ slug: z.string() }) },
+        router: hostRouter({ name: hostProcedure.query(() => sessions.project) }),
         readiness: ready,
         close() {},
       },
@@ -176,9 +160,7 @@ test("a future native family needs no global union change; its custom types rema
   };
   const input: Public["createInput"] = { workspace: 1 };
   const kind: Public["nativeKind"] = "claude";
-  const custom: Public["extensions"]["project"]["sessionData"] = {
-    slug: "compiler",
-  };
+  const custom: Public["extensions"]["project"]["sessionData"] = { slug: "compiler" };
   assert.deepEqual([input.workspace, kind, custom.slug], [1, "claude", "compiler"]);
   assert.equal(gatewayInput.diskGiB, gatewayOutput.diskGiB);
   assert.deepEqual(
@@ -229,23 +211,13 @@ test("authenticated exact route, contract and session generation fence before pr
     },
   });
   await assert.rejects(
-    host.context({
-      expected: { ...host.manifest, compositionId: "other" },
-      proof: null,
-    }),
+    host.context({ expected: { ...host.manifest, compositionId: "other" }, proof: null }),
     /contract mismatch/,
   );
   assert.equal(authenticated, 0);
-  const call = {
-    expected: host.manifest,
-    proof: null,
-    session: { id: "session", generation: 3 },
-  };
+  const call = { expected: host.manifest, proof: null, session: { id: "session", generation: 3 } };
   for (const field of ["authority", "host", "owner", "routeEpoch"] as const) {
-    selected = {
-      ...context(call.session),
-      route: { ...route, [field]: "other" },
-    };
+    selected = { ...context(call.session), route: { ...route, [field]: "other" } };
     await assert.rejects(host.context(call), /scope denied/);
   }
   selected = context({ id: "session", generation: 2 });
@@ -261,11 +233,7 @@ test("authenticated exact route, contract and session generation fence before pr
   );
   selected = {
     ...context(call.session),
-    identity: {
-      connection: "connection",
-      principal: "owner",
-      actions: ["read"],
-    },
+    identity: { connection: "connection", principal: "owner", actions: ["read"] },
   };
   const caller = host.router.createCaller(await host.context(call));
   assert.equal(await caller.lifecycle.count(), 0);
@@ -316,11 +284,7 @@ test("admitted procedure and readiness races cannot close their owner", async ()
   let closes = 0;
   const definition = defineHost({
     contract: { id: "test.slow", version: 1 },
-    harness: {
-      identity: plugin("test.scripted"),
-      nativeKind: "scripted",
-      capabilities: [],
-    },
+    harness: { identity: plugin("test.scripted"), nativeKind: "scripted", capabilities: [] },
     lifecycle: () => ({
       identity: plugin("test.lifecycle"),
       createInput: z.object({}),
@@ -376,14 +340,8 @@ test("readiness cannot return an old idle observation after new admission, even 
   const host = await activateHost(value.definition, value.activation);
   const pending = host.readiness();
   await entered.promise;
-  const authenticated = await host.context({
-    expected: host.manifest,
-    proof: null,
-  });
-  const release = authenticated.admit!({
-    path: "lifecycle.work",
-    type: "mutation",
-  });
+  const authenticated = await host.context({ expected: host.manifest, proof: null });
+  const release = authenticated.admit!({ path: "lifecycle.work", type: "mutation" });
   observation.resolve({ ready: true });
   assert.equal((await pending).ready, false);
   release();
@@ -408,9 +366,7 @@ test("all returned extension owners transfer before validation, including later 
   });
   const first = extension("first"),
     second = extension("second");
-  const value = fixture({
-    extensions: () => ({ system: first, later: second, alias: second }),
-  });
+  const value = fixture({ extensions: () => ({ system: first, later: second, alias: second }) });
   await assert.rejects(activateHost(value.definition, value.activation), /Reserved extension name/);
   assert.deepEqual(events, ["second", "first"]);
   assert.equal(value.events.at(-1), "lifecycle.close");
@@ -491,12 +447,7 @@ test("public manifest ignores private configuration; incompatible records refuse
   await assert.rejects(
     activateHost(incompatible.definition, {
       ...incompatible.activation,
-      records: [
-        {
-          kind: "harness",
-          identity: { ...plugin("test.codex"), recordVersion: 2 },
-        },
-      ],
+      records: [{ kind: "harness", identity: { ...plugin("test.codex"), recordVersion: 2 } }],
     }),
     /incompatible/,
   );

@@ -57,6 +57,13 @@
         "import": "./dist/runtime/node-contracts.js"
       },
       "default": null
+    },
+    "./host/node-contracts": {
+      "node": {
+        "types": "./dist/host/node-contracts.d.ts",
+        "import": "./dist/host/node-contracts.js"
+      },
+      "default": null
     }
   },
   "files": [

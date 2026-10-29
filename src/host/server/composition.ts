@@ -152,10 +152,7 @@ function manifestOf<H extends HarnessDefinition>(
     contractId: definition.contract.id,
     contractVersion: definition.contract.version,
     nativeKind: definition.harness.nativeKind,
-    compositionId: JSON.stringify({
-      nativeKind: definition.harness.nativeKind,
-      ...plugins,
-    }),
+    compositionId: JSON.stringify({ nativeKind: definition.harness.nativeKind, ...plugins }),
     ...plugins,
   });
 }
@@ -233,10 +230,7 @@ function own<Owner>(runtime: LifecycleRuntime<Owner, AnyRouter>) {
         (owner) => typeof owner.readiness !== "function" || typeof owner.close !== "function",
       )
     )
-      return {
-        ready: false,
-        reasons: ["Returned owner lacks readiness/close"],
-      };
+      return { ready: false, reasons: ["Returned owner lacks readiness/close"] };
     const states = await Promise.all(owners.map((owner) => owner.readiness()));
     const reasons = states.flatMap((state) => (state.ready ? [] : state.reasons));
     return states.every((state) => state.ready) ? { ready: true } : { ready: false, reasons };
@@ -358,9 +352,7 @@ export async function activateHost<
     if (typeof runtime.readiness !== "function" || typeof runtime.close !== "function")
       throw new TypeError("Lifecycle must return readiness and close ownership");
     const extensions =
-      definition.extensions?.({
-        sessions: runtime.sessions as SessionsOf<L>,
-      }) ?? ({} as E);
+      definition.extensions?.({ sessions: runtime.sessions as SessionsOf<L> }) ?? ({} as E);
     custody.capture(extensions);
     for (const [key, extension] of Object.entries(extensions)) {
       if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/.test(key))
@@ -391,17 +383,11 @@ export async function activateHost<
       const state = await custody.recovery.readiness();
       return phase === "active" && !admitted
         ? state
-        : {
-            ready: false,
-            reasons: ["Host admission changed during observation"],
-          };
+        : { ready: false, reasons: ["Host admission changed during observation"] };
     };
     const admit: NonNullable<HostContext["admit"]> = ({ path }) => {
       if (phase !== "active")
-        throw new TRPCError({
-          code: "PRECONDITION_FAILED",
-          message: "Host admission is closed",
-        });
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Host admission is closed" });
       if (path.startsWith("system.")) return () => {};
       admitted++;
       let released = false;
@@ -429,41 +415,26 @@ export async function activateHost<
       sessions: runtime.sessions as SessionsOf<L>,
       async context(call: HostCall): Promise<HostContext> {
         if (phase !== "active")
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Host is not active",
-          });
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Host is not active" });
         if (!sameContract(call.expected, manifest))
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Host contract mismatch",
-          });
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Host contract mismatch" });
         if (
           call.session &&
           (!call.session.id ||
             !Number.isSafeInteger(call.session.generation) ||
             call.session.generation < 1)
         )
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "Invalid session scope",
-          });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid session scope" });
         const context = await options.authenticate(call);
         if (phase !== "active")
-          throw new TRPCError({
-            code: "PRECONDITION_FAILED",
-            message: "Host is not active",
-          });
+          throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Host is not active" });
         if (
           !context ||
           !sameRoute(context.route, route) ||
           !context.identity.connection ||
           !context.identity.principal
         )
-          throw new TRPCError({
-            code: "UNAUTHORIZED",
-            message: "Host scope denied",
-          });
+          throw new TRPCError({ code: "UNAUTHORIZED", message: "Host scope denied" });
         if (
           call.session
             ? !context.session ||
@@ -471,10 +442,7 @@ export async function activateHost<
               context.session.generation !== call.session.generation
             : !!context.session
         )
-          throw new TRPCError({
-            code: "FORBIDDEN",
-            message: "Session scope denied",
-          });
+          throw new TRPCError({ code: "FORBIDDEN", message: "Session scope denied" });
         return Object.freeze({
           identity: Object.freeze({
             connection: context.identity.connection,

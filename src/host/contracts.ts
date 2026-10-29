@@ -1,13 +1,16 @@
 import type { AnyRouter } from "@trpc/server";
-import type { z } from "zod";
+import { z } from "zod";
+import type { Json, Original, RunRef, SessionScope, Settlement } from "../protocol/index.js";
+import type {
+  NativeOpening,
+  OpeningCapsule,
+  OpeningRef,
+  OpeningStopProof,
+} from "../runtime/contracts.js";
 import type { HostRouter } from "./server/composition.js";
 
 export type MaybePromise<T> = T | Promise<T>;
-export type PluginIdentity = Readonly<{
-  id: string;
-  version: number;
-  recordVersion: number;
-}>;
+export type PluginIdentity = Readonly<{ id: string; version: number; recordVersion: number }>;
 export type ContractIdentity = Readonly<{ id: string; version: number }>;
 declare const gatewayRouterType: unique symbol;
 /** Inert identity plus inference from an actual Gateway router. The Host imports
@@ -27,11 +30,7 @@ export type UpdateReadiness =
 /** Authentication is supplied by the selected transport/application. A route
  * epoch is replaceable connection freshness, never a native generation. */
 export type HostContext = Readonly<{
-  identity: Readonly<{
-    connection: string;
-    principal: string;
-    actions: readonly string[];
-  }>;
+  identity: Readonly<{ connection: string; principal: string; actions: readonly string[] }>;
   route: HostRoute;
   session?: HostSession;
   /** Added by the active kernel. Consumers cannot serialize this capability. */
@@ -114,11 +113,7 @@ export type HostManifest = Readonly<{
   gateway?: ContractIdentity;
 }>;
 export type ExpectedHost = Pick<HostManifest, "contractId" | "contractVersion" | "compositionId">;
-export type HostCall = Readonly<{
-  proof: unknown;
-  expected: ExpectedHost;
-  session?: HostSession;
-}>;
+export type HostCall = Readonly<{ proof: unknown; expected: ExpectedHost; session?: HostSession }>;
 export type HostActivationOptions = HostActivationContext &
   Readonly<{
     authenticate(call: HostCall): MaybePromise<HostContext | null>;
@@ -153,6 +148,186 @@ export type PublicHostContract<D> =
       }
     : never;
 
+const sessionScopeSchema = z.object({
+  connection: z.string(),
+  principal: z.string(),
+  host: z.string(),
+  session: z.string(),
+});
+const sessionBaseSchema = z.object({
+  scope: sessionScopeSchema,
+  generation: z.number().int().nonnegative(),
+  nativeSession: z.string().nullable(),
+  workspace: z
+    .object({
+      cwd: z.string(),
+      ownership: z.enum(["borrowed", "owned"]),
+      data: z.json() as z.ZodType<Json>,
+    })
+    .nullable(),
+});
+const sessionRunSchema = z.object({
+  scope: sessionScopeSchema,
+  generation: z.number().int().positive(),
+  nativeSession: z.string().min(1),
+});
+const sessionPhaseSchema = z.discriminatedUnion("phase", [
+  sessionBaseSchema.extend({
+    phase: z.literal("running"),
+    run: sessionRunSchema,
+    activity: z.enum(["working", "idle", "unknown"]),
+    mayRun: z.literal(true),
+  }),
+  sessionBaseSchema.extend({
+    phase: z.enum(["preparing", "opening", "stopping", "archiving", "uncertain"]),
+    activity: z.literal("unknown"),
+    mayRun: z.boolean(),
+  }),
+  sessionBaseSchema.extend({
+    phase: z.enum(["stopped", "archived"]),
+    activity: z.literal("idle"),
+    mayRun: z.literal(false),
+  }),
+]);
+
+/** Requested settings are intent; observed settings are facts and may be partial.
+ * A retained observed selection is passed back only for explicit native Reopen. */
+export type RunSelection<Requested = Json, Observed = Json> =
+  | Readonly<{ selectionSource: "requested"; selection: Requested }>
+  | Readonly<{ selectionSource: "observed"; selection: Observed }>;
+export type NativeObservation<Observed = Json> = Readonly<{
+  run: RunRef;
+  activity: "working" | "idle" | "unknown";
+  selection: Observed;
+}>;
+export type NativeOpenResult<Observed = Json> = NativeObservation<Observed> &
+  (Readonly<{ kind: "created"; quiescent: true }> | Readonly<{ kind: "reopened" }>);
+export type NativeResult = Exclude<Settlement, { state: "unknown" }>;
+export type NativePreparationInput<Requested = Json, Observed = Json> = RunSelection<
+  Requested,
+  Observed
+> &
+  Readonly<{
+    opening: OpeningRef;
+    cwd: string;
+    mode: "create" | "reopen";
+    previousSelection?: Requested | Observed;
+    previousSelectionSource?: "requested" | "observed";
+  }>;
+/** Positive proof before allocation starts. A thrown acquisition is unknown. */
+export type NativePreparationRefusal = Readonly<{
+  state: "refused";
+  noAllocation: true;
+  code: "BUSY" | "INVALID" | "UNSUPPORTED";
+}>;
+/** One adapter owns all native resources. Pure schema validation precedes
+ * durable admission; close/Stop custody cannot be narrowed to observer state. */
+export interface NativePort<
+  Command extends z.ZodType = z.ZodType,
+  Message extends z.ZodType = z.ZodType<Json>,
+  Requested extends z.ZodType = z.ZodType<Json>,
+  Observed extends z.ZodType = z.ZodType<Json>,
+> {
+  readonly identity: PluginIdentity;
+  readonly commandInput: Command;
+  readonly messageInput: Message;
+  readonly selectionInput: Requested;
+  readonly selectionOutput: Observed;
+  readiness(): UpdateReadiness;
+  close(): void | Promise<void>;
+  prepare(
+    input: NativePreparationInput<z.output<Requested>, z.output<Observed>>,
+  ): Promise<NativeOpening | NativePreparationRefusal>;
+  open(
+    input: RunSelection<z.output<Requested>, z.output<Observed>> & {
+      capsule: OpeningCapsule;
+      cwd: string;
+      mode: "create" | "reopen";
+      nativeSession: string | null;
+      commitBinding(run: RunRef): void;
+    },
+  ): Promise<NativeOpenResult<z.output<Observed>>>;
+  inspect(
+    capsule: OpeningCapsule,
+  ): Promise<NativeObservation<z.output<Observed>> | OpeningStopProof | null>;
+  stop(capsule: OpeningCapsule): Promise<OpeningStopProof>;
+  send(input: {
+    capsule: OpeningCapsule;
+    run: RunRef;
+    originalId: string;
+    message: z.output<Message>;
+  }): Promise<NativeResult>;
+  command(input: {
+    capsule: OpeningCapsule;
+    run: RunRef;
+    originalId: string;
+    original: Original;
+    command: z.output<Command>;
+  }): Promise<NativeResult>;
+}
+export type WorkspaceAllocation<Data extends Json = Json> = Readonly<{
+  cwd: string;
+  ownership: "borrowed" | "owned";
+  data: Data;
+}>;
+export type WorkspaceRefusal = Readonly<{ state: "refused"; noAllocation: true }>;
+export interface WorkspaceStrategy<
+  Input extends z.ZodType = z.ZodType,
+  Data extends z.ZodType<Json> = z.ZodType<Json>,
+> {
+  readonly identity: PluginIdentity;
+  readonly input: Input;
+  readonly data: Data;
+  allocate(input: {
+    scope: SessionScope;
+    originalId: string;
+    input: z.output<Input>;
+  }): Promise<WorkspaceAllocation<z.output<Data>> | WorkspaceRefusal>;
+  /** Borrowed workspaces are never deleted. An owned strategy owns its release. */
+  release?(
+    allocation: WorkspaceAllocation<z.output<Data>>,
+    original: { scope: SessionScope; originalId: string },
+  ): Promise<void>;
+}
+export type SessionState<Requested = Json, Observed = Json> = Readonly<{
+  scope: SessionScope;
+  generation: number;
+  nativeSession: string | null;
+  workspace: WorkspaceAllocation | null;
+}> &
+  RunSelection<Requested, Observed> &
+  (
+    | Readonly<{
+        phase: "running";
+        run: RunRef;
+        activity: "working" | "idle" | "unknown";
+        mayRun: true;
+      }>
+    | Readonly<{
+        phase: "preparing" | "opening" | "stopping" | "archiving" | "uncertain";
+        activity: "unknown";
+        mayRun: boolean;
+      }>
+    | Readonly<{ phase: "stopped" | "archived"; activity: "idle"; mayRun: false }>
+  );
+export function sessionStateSchema<Requested extends z.ZodType, Observed extends z.ZodType>(
+  requested: Requested,
+  observed: Observed,
+): z.ZodType<
+  SessionState<z.output<Requested>, z.output<Observed>>,
+  SessionState<z.output<Requested>, z.output<Observed>>
+> {
+  return z.intersection(
+    sessionPhaseSchema,
+    z.discriminatedUnion("selectionSource", [
+      z.object({ selectionSource: z.literal("requested"), selection: requested }),
+      z.object({ selectionSource: z.literal("observed"), selection: observed }),
+    ]),
+  ) as unknown as z.ZodType<
+    SessionState<z.output<Requested>, z.output<Observed>>,
+    SessionState<z.output<Requested>, z.output<Observed>>
+  >;
+}
 /** Retained acquired resources after failed activation, owned by that definition. */
 export type HostActivationRecovery<Owner> = Readonly<{
   sessions: Owner;

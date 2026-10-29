@@ -1,6 +1,9 @@
 export { OriginalJournal, OriginalReader } from "./sqlite.js";
 export { JournalError } from "./contracts.js";
 export type {
+  Checkpoint,
+  CheckpointPort,
+  CheckpointReadPort,
   JournalErrorCode,
   JournalHandle,
   JournalTransition,

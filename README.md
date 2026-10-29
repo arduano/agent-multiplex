@@ -22,9 +22,9 @@ live in `scripts/`; tests live in `test/`; generated output is not authored sour
 
 ## Current boundary
 
-Through PR05 the framework supplies tooling, logical identity, durable originals,
-native custody and static typed Host composition. It does not implement the
-default session lifecycle, native adapters,
+Through PR06 the framework supplies tooling, logical identity, durable originals,
+native custody, static typed Host composition and the default durable lifecycle.
+Concrete native adapters, history,
 transport, client or UI yet. The following layers are
 tracked in the [stack index](docs/stack/README.md), with per-layer evidence and
 explicit limitations. Passing this checkpoint is not full-framework readiness.

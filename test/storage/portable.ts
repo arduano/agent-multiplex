@@ -20,6 +20,9 @@ export function consumer(journal: OriginalJournalPort, scope: SessionScope): voi
     admit: journal.admit.bind(journal),
     markDispatched: journal.markDispatched.bind(journal),
     settle: journal.settle.bind(journal),
+    checkpoint: journal.checkpoint.bind(journal),
+    checkpoints: journal.checkpoints.bind(journal),
+    saveCheckpoint: journal.saveCheckpoint.bind(journal),
   };
   const claim: JournalTransition = forwarded.markDispatched(scope, "original");
   const closeOwner: JournalHandle = { close() {} };
