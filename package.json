@@ -106,6 +106,21 @@
       },
       "default": null
     },
+    "./transport": {
+      "types": "./dist/transport/index.d.ts",
+      "import": "./dist/transport/index.js"
+    },
+    "./transport/http": {
+      "types": "./dist/transport/client/http.d.ts",
+      "import": "./dist/transport/client/http.js"
+    },
+    "./transport/p2prpc": {
+      "node": {
+        "types": "./dist/transport/node/p2prpc.d.ts",
+        "import": "./dist/transport/node/p2prpc.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -205,6 +220,24 @@
         "import": "./dist/gateway/node-contracts.js"
       },
       "default": null
+    },
+    "./transport/contracts": {
+      "types": "./dist/transport/contracts.d.ts",
+      "import": "./dist/transport/contracts.js"
+    },
+    "./transport/node-contracts": {
+      "node": {
+        "types": "./dist/transport/node-contracts.d.ts",
+        "import": "./dist/transport/node-contracts.js"
+      },
+      "default": null
+    },
+    "./transport/delegation": {
+      "node": {
+        "types": "./dist/transport/delegation.d.ts",
+        "import": "./dist/transport/delegation.js"
+      },
+      "default": null
     }
   },
   "files": [
@@ -226,14 +259,20 @@
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "@types/node": "24.3.0",
+    "@types/ws": "8.5.4",
     "eslint": "10.13.0",
     "eslint-config-prettier": "10.1.8",
     "jiti": "2.7.0",
     "prettier": "3.9.10",
     "typescript": "5.9.2",
-    "typescript-eslint": "8.72.1"
+    "typescript-eslint": "8.72.1",
+    "eventsource": "5.1.4"
   },
   "dependencies": {
+    "@arduano/p2prpc-core": "https://github.com/arduano/p2prpc/releases/download/v0.3.1/arduano-p2prpc-core-0.3.1.tgz",
+    "@momics/iroh-http-node": "https://github.com/arduano/iroh-http/releases/download/leo-v7-iroh-0.6.2-js-lifecycle-20261022.1/iroh-http-node-0.6.2-fork-application-signals-linux-win-x64.tgz",
+    "@momics/iroh-http-shared": "https://github.com/arduano/iroh-http/releases/download/leo-v6-iroh-0.6.2-d799fa3/iroh-http-shared-0.6.2-fork.tgz",
+    "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0",
     "cmd-ts": "0.15.0",
     "tsx": "4.23.15",
@@ -243,5 +282,9 @@
     "@github/copilot": "1.0.95",
     "@github/copilot-sdk": "1.0.19",
     "@openai/codex": "0.162.1"
+  },
+  "overrides": {
+    "@momics/iroh-http-node": "$@momics/iroh-http-node",
+    "@momics/iroh-http-shared": "$@momics/iroh-http-shared"
   }
 }
