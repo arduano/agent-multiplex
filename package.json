@@ -73,6 +73,17 @@
       },
       "default": null
     },
+    "./copilot": {
+      "types": "./dist/copilot/index.d.ts",
+      "import": "./dist/copilot/index.js"
+    },
+    "./copilot/node": {
+      "node": {
+        "types": "./dist/copilot/node.d.ts",
+        "import": "./dist/copilot/node.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -118,13 +129,6 @@
       "types": "./dist/codex/contracts.d.ts",
       "import": "./dist/codex/contracts.js"
     },
-    "./codex/node-contracts": {
-      "node": {
-        "types": "./dist/codex/node-contracts.d.ts",
-        "import": "./dist/codex/node-contracts.js"
-      },
-      "default": null
-    },
     "./codex/protocol": {
       "types": "./dist/codex/protocol/index.d.ts",
       "import": "./dist/codex/protocol/index.js"
@@ -132,6 +136,31 @@
     "./codex/native-contracts": {
       "types": "./dist/codex/native-contracts.d.ts",
       "import": "./dist/codex/native-contracts.js"
+    },
+    "./codex/node-contracts": {
+      "node": {
+        "types": "./dist/codex/node-contracts.d.ts",
+        "import": "./dist/codex/node-contracts.js"
+      },
+      "default": null
+    },
+    "./copilot/contracts": {
+      "types": "./dist/copilot/contracts.d.ts",
+      "import": "./dist/copilot/contracts.js"
+    },
+    "./copilot/node-contracts": {
+      "node": {
+        "types": "./dist/copilot/node-contracts.d.ts",
+        "import": "./dist/copilot/node-contracts.js"
+      },
+      "default": null
+    },
+    "./copilot/sdk-contracts": {
+      "node": {
+        "types": "./dist/copilot/sdk-contracts.d.ts",
+        "import": "./dist/copilot/sdk-contracts.js"
+      },
+      "default": null
     }
   },
   "files": [
@@ -167,6 +196,8 @@
     "zod": "4.1.5"
   },
   "optionalDependencies": {
+    "@github/copilot": "1.0.95",
+    "@github/copilot-sdk": "1.0.19",
     "@openai/codex": "0.162.1"
   }
 }
