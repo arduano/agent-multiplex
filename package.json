@@ -95,6 +95,17 @@
       },
       "default": null
     },
+    "./gateway": {
+      "types": "./dist/gateway/index.d.ts",
+      "import": "./dist/gateway/index.js"
+    },
+    "./gateway/node": {
+      "node": {
+        "types": "./dist/gateway/node.d.ts",
+        "import": "./dist/gateway/node.js"
+      },
+      "default": null
+    },
     "./storage/contracts": {
       "types": "./dist/storage/contracts.d.ts",
       "import": "./dist/storage/contracts.js"
@@ -181,6 +192,17 @@
       "node": {
         "types": "./dist/catalog/node-contracts.d.ts",
         "import": "./dist/catalog/node-contracts.js"
+      },
+      "default": null
+    },
+    "./gateway/contracts": {
+      "types": "./dist/gateway/contracts.d.ts",
+      "import": "./dist/gateway/contracts.js"
+    },
+    "./gateway/node-contracts": {
+      "node": {
+        "types": "./dist/gateway/node-contracts.d.ts",
+        "import": "./dist/gateway/node-contracts.js"
       },
       "default": null
     }
