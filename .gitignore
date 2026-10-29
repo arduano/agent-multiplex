@@ -1,0 +1,14 @@
+node_modules
+dist/
+.build/
+.cache/
+receipts/
+result
+result-*
+*.tsbuildinfo
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+.env.*
+!.env.example

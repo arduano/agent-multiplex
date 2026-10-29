@@ -1,0 +1,52 @@
+{
+  "name": "@arduano/agent-multiplex",
+  "version": "0.8.0-alpha.0",
+  "description": "Typed native-agent Hosts, gateways and retained clients.",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24.19.0"
+  },
+  "packageManager": "npm@11.17.0",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./protocol": {
+      "types": "./dist/protocol/index.d.ts",
+      "import": "./dist/protocol/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsx scripts/build.ts",
+    "typecheck": "tsc --project tsconfig.test.json --noEmit",
+    "test": "tsx scripts/test.ts",
+    "check:boundaries": "tsx scripts/boundaries.ts",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run check:boundaries && npm run build && npm test",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.3.0",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "jiti": "2.7.0",
+    "prettier": "3.9.10",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.72.1"
+  },
+  "dependencies": {
+    "cmd-ts": "0.15.0",
+    "tsx": "4.23.15"
+  }
+}
