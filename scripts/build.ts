@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { copyFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { command, run } from "cmd-ts";
 
@@ -14,6 +14,12 @@ async function buildPackage(): Promise<void> {
     [require.resolve("typescript/bin/tsc"), "--project", "tsconfig.json"],
     { cwd: root, stdio: "inherit", timeout: 60_000, killSignal: "SIGKILL" },
   );
+  for (const name of ["LICENSE", "NOTICE", "provenance.json"]) {
+    await copyFile(
+      new URL(`src/codex/protocol/${name}`, root),
+      new URL(`dist/codex/protocol/${name}`, root),
+    );
+  }
 }
 
 await run(

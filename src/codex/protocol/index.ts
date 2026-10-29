@@ -1,0 +1,143 @@
+// GENERATED selected native contract closure; no runtime SDK.
+export type { ThreadReadParams } from "./v2/ThreadReadParams.js";
+export type { ThreadReadResponse } from "./v2/ThreadReadResponse.js";
+export type { ThreadTurnsListParams } from "./v2/ThreadTurnsListParams.js";
+export type { ThreadTurnsListResponse } from "./v2/ThreadTurnsListResponse.js";
+export type { ThreadItemsListParams } from "./v2/ThreadItemsListParams.js";
+export type { ThreadItemsListResponse } from "./v2/ThreadItemsListResponse.js";
+export type { ThreadSettingsUpdateParams } from "./v2/ThreadSettingsUpdateParams.js";
+export type { ThreadSettingsUpdateResponse } from "./v2/ThreadSettingsUpdateResponse.js";
+export type { TurnStartParams } from "./v2/TurnStartParams.js";
+export type { TurnStartResponse } from "./v2/TurnStartResponse.js";
+export type { TurnSteerParams } from "./v2/TurnSteerParams.js";
+export type { TurnSteerResponse } from "./v2/TurnSteerResponse.js";
+export type { TurnInterruptParams } from "./v2/TurnInterruptParams.js";
+export type { TurnInterruptResponse } from "./v2/TurnInterruptResponse.js";
+export type { TurnSettingsUpdateParams } from "./v2/TurnSettingsUpdateParams.js";
+export type { TurnSettingsUpdateResponse } from "./v2/TurnSettingsUpdateResponse.js";
+export type { ModelListParams } from "./v2/ModelListParams.js";
+export type { ModelListResponse } from "./v2/ModelListResponse.js";
+export type { ThreadQueueListParams } from "./v2/ThreadQueueListParams.js";
+export type { ThreadQueueListResponse } from "./v2/ThreadQueueListResponse.js";
+export type { ThreadQueueAddParams } from "./v2/ThreadQueueAddParams.js";
+export type { ThreadQueueAddResponse } from "./v2/ThreadQueueAddResponse.js";
+export type { ThreadQueueStartParams } from "./v2/ThreadQueueStartParams.js";
+export type { ThreadQueueStartResponse } from "./v2/ThreadQueueStartResponse.js";
+export type { ThreadQueueUpdateParams } from "./v2/ThreadQueueUpdateParams.js";
+export type { ThreadQueueUpdateResponse } from "./v2/ThreadQueueUpdateResponse.js";
+export type { ThreadQueueDeleteParams } from "./v2/ThreadQueueDeleteParams.js";
+export type { ThreadQueueDeleteResponse } from "./v2/ThreadQueueDeleteResponse.js";
+export type { ThreadQueueReorderParams } from "./v2/ThreadQueueReorderParams.js";
+export type { ThreadQueueReorderResponse } from "./v2/ThreadQueueReorderResponse.js";
+export type { ThreadGoalGetParams } from "./v2/ThreadGoalGetParams.js";
+export type { ThreadGoalGetResponse } from "./v2/ThreadGoalGetResponse.js";
+export type { ThreadGoalSetParams } from "./v2/ThreadGoalSetParams.js";
+export type { ThreadGoalSetResponse } from "./v2/ThreadGoalSetResponse.js";
+export type { ThreadGoalClearParams } from "./v2/ThreadGoalClearParams.js";
+export type { ThreadGoalClearResponse } from "./v2/ThreadGoalClearResponse.js";
+export type { ThreadBackgroundTerminalsListParams } from "./v2/ThreadBackgroundTerminalsListParams.js";
+export type { ThreadBackgroundTerminalsListResponse } from "./v2/ThreadBackgroundTerminalsListResponse.js";
+export type { ThreadBackgroundTerminalsTerminateParams } from "./v2/ThreadBackgroundTerminalsTerminateParams.js";
+export type { ThreadBackgroundTerminalsTerminateResponse } from "./v2/ThreadBackgroundTerminalsTerminateResponse.js";
+export type { ThreadBackgroundTerminalsCleanParams } from "./v2/ThreadBackgroundTerminalsCleanParams.js";
+export type { ThreadBackgroundTerminalsCleanResponse } from "./v2/ThreadBackgroundTerminalsCleanResponse.js";
+export type { ThreadCompactStartParams } from "./v2/ThreadCompactStartParams.js";
+export type { ThreadCompactStartResponse } from "./v2/ThreadCompactStartResponse.js";
+export type { ListMcpServerStatusParams } from "./v2/ListMcpServerStatusParams.js";
+export type { ListMcpServerStatusResponse } from "./v2/ListMcpServerStatusResponse.js";
+export type { CommandExecutionRequestApprovalParams } from "./v2/CommandExecutionRequestApprovalParams.js";
+export type { CommandExecutionRequestApprovalResponse } from "./v2/CommandExecutionRequestApprovalResponse.js";
+export type { FileChangeRequestApprovalParams } from "./v2/FileChangeRequestApprovalParams.js";
+export type { FileChangeRequestApprovalResponse } from "./v2/FileChangeRequestApprovalResponse.js";
+export type { PermissionsRequestApprovalParams } from "./v2/PermissionsRequestApprovalParams.js";
+export type { PermissionsRequestApprovalResponse } from "./v2/PermissionsRequestApprovalResponse.js";
+export type { ToolRequestUserInputParams } from "./v2/ToolRequestUserInputParams.js";
+export type { ToolRequestUserInputResponse } from "./v2/ToolRequestUserInputResponse.js";
+export type { McpServerElicitationRequestParams } from "./v2/McpServerElicitationRequestParams.js";
+export type { McpServerElicitationRequestResponse } from "./v2/McpServerElicitationRequestResponse.js";
+export type { ErrorNotification } from "./v2/ErrorNotification.js";
+export type { ThreadStartedNotification } from "./v2/ThreadStartedNotification.js";
+export type { ThreadStatusChangedNotification } from "./v2/ThreadStatusChangedNotification.js";
+export type { ThreadClosedNotification } from "./v2/ThreadClosedNotification.js";
+export type { ThreadRevertedNotification } from "./v2/ThreadRevertedNotification.js";
+export type { ThreadGoalUpdatedNotification } from "./v2/ThreadGoalUpdatedNotification.js";
+export type { ThreadGoalClearedNotification } from "./v2/ThreadGoalClearedNotification.js";
+export type { ThreadQueueChangedNotification } from "./v2/ThreadQueueChangedNotification.js";
+export type { ThreadSettingsUpdatedNotification } from "./v2/ThreadSettingsUpdatedNotification.js";
+export type { ThreadTokenUsageUpdatedNotification } from "./v2/ThreadTokenUsageUpdatedNotification.js";
+export type { TurnStartedNotification } from "./v2/TurnStartedNotification.js";
+export type { TurnCompletedNotification } from "./v2/TurnCompletedNotification.js";
+export type { TurnDiffUpdatedNotification } from "./v2/TurnDiffUpdatedNotification.js";
+export type { TurnPlanUpdatedNotification } from "./v2/TurnPlanUpdatedNotification.js";
+export type { ItemStartedNotification } from "./v2/ItemStartedNotification.js";
+export type { ItemCompletedNotification } from "./v2/ItemCompletedNotification.js";
+export type { AgentMessageDeltaNotification } from "./v2/AgentMessageDeltaNotification.js";
+export type { PlanDeltaNotification } from "./v2/PlanDeltaNotification.js";
+export type { CommandExecutionOutputDeltaNotification } from "./v2/CommandExecutionOutputDeltaNotification.js";
+export type { TerminalInteractionNotification } from "./v2/TerminalInteractionNotification.js";
+export type { FileChangePatchUpdatedNotification } from "./v2/FileChangePatchUpdatedNotification.js";
+export type { ServerRequestResolvedNotification } from "./v2/ServerRequestResolvedNotification.js";
+export type { McpToolCallProgressNotification } from "./v2/McpToolCallProgressNotification.js";
+export type { ReasoningSummaryTextDeltaNotification } from "./v2/ReasoningSummaryTextDeltaNotification.js";
+export type { ReasoningSummaryPartAddedNotification } from "./v2/ReasoningSummaryPartAddedNotification.js";
+export type { ReasoningTextDeltaNotification } from "./v2/ReasoningTextDeltaNotification.js";
+export type { TurnModerationMetadataNotification } from "./v2/TurnModerationMetadataNotification.js";
+export type { Thread } from "./v2/Thread.js";
+export type { Turn } from "./v2/Turn.js";
+export type { ThreadItem } from "./v2/ThreadItem.js";
+export type { ThreadSettings } from "./v2/ThreadSettings.js";
+import type { ErrorNotification } from "./v2/ErrorNotification.js";
+import type { ThreadStartedNotification } from "./v2/ThreadStartedNotification.js";
+import type { ThreadStatusChangedNotification } from "./v2/ThreadStatusChangedNotification.js";
+import type { ThreadClosedNotification } from "./v2/ThreadClosedNotification.js";
+import type { ThreadRevertedNotification } from "./v2/ThreadRevertedNotification.js";
+import type { ThreadGoalUpdatedNotification } from "./v2/ThreadGoalUpdatedNotification.js";
+import type { ThreadGoalClearedNotification } from "./v2/ThreadGoalClearedNotification.js";
+import type { ThreadQueueChangedNotification } from "./v2/ThreadQueueChangedNotification.js";
+import type { ThreadSettingsUpdatedNotification } from "./v2/ThreadSettingsUpdatedNotification.js";
+import type { ThreadTokenUsageUpdatedNotification } from "./v2/ThreadTokenUsageUpdatedNotification.js";
+import type { TurnStartedNotification } from "./v2/TurnStartedNotification.js";
+import type { TurnCompletedNotification } from "./v2/TurnCompletedNotification.js";
+import type { TurnDiffUpdatedNotification } from "./v2/TurnDiffUpdatedNotification.js";
+import type { TurnPlanUpdatedNotification } from "./v2/TurnPlanUpdatedNotification.js";
+import type { ItemStartedNotification } from "./v2/ItemStartedNotification.js";
+import type { ItemCompletedNotification } from "./v2/ItemCompletedNotification.js";
+import type { AgentMessageDeltaNotification } from "./v2/AgentMessageDeltaNotification.js";
+import type { PlanDeltaNotification } from "./v2/PlanDeltaNotification.js";
+import type { CommandExecutionOutputDeltaNotification } from "./v2/CommandExecutionOutputDeltaNotification.js";
+import type { TerminalInteractionNotification } from "./v2/TerminalInteractionNotification.js";
+import type { FileChangePatchUpdatedNotification } from "./v2/FileChangePatchUpdatedNotification.js";
+import type { ServerRequestResolvedNotification } from "./v2/ServerRequestResolvedNotification.js";
+import type { McpToolCallProgressNotification } from "./v2/McpToolCallProgressNotification.js";
+import type { ReasoningSummaryTextDeltaNotification } from "./v2/ReasoningSummaryTextDeltaNotification.js";
+import type { ReasoningSummaryPartAddedNotification } from "./v2/ReasoningSummaryPartAddedNotification.js";
+import type { ReasoningTextDeltaNotification } from "./v2/ReasoningTextDeltaNotification.js";
+import type { TurnModerationMetadataNotification } from "./v2/TurnModerationMetadataNotification.js";
+export type CodexNotification =
+  | { method: "error"; params: ErrorNotification }
+  | { method: "thread/started"; params: ThreadStartedNotification }
+  | { method: "thread/status/changed"; params: ThreadStatusChangedNotification }
+  | { method: "thread/closed"; params: ThreadClosedNotification }
+  | { method: "thread/reverted"; params: ThreadRevertedNotification }
+  | { method: "thread/goal/updated"; params: ThreadGoalUpdatedNotification }
+  | { method: "thread/goal/cleared"; params: ThreadGoalClearedNotification }
+  | { method: "thread/queue/changed"; params: ThreadQueueChangedNotification }
+  | { method: "thread/settings/updated"; params: ThreadSettingsUpdatedNotification }
+  | { method: "thread/tokenUsage/updated"; params: ThreadTokenUsageUpdatedNotification }
+  | { method: "turn/started"; params: TurnStartedNotification }
+  | { method: "turn/completed"; params: TurnCompletedNotification }
+  | { method: "turn/diff/updated"; params: TurnDiffUpdatedNotification }
+  | { method: "turn/plan/updated"; params: TurnPlanUpdatedNotification }
+  | { method: "item/started"; params: ItemStartedNotification }
+  | { method: "item/completed"; params: ItemCompletedNotification }
+  | { method: "item/agentMessage/delta"; params: AgentMessageDeltaNotification }
+  | { method: "item/plan/delta"; params: PlanDeltaNotification }
+  | { method: "item/commandExecution/outputDelta"; params: CommandExecutionOutputDeltaNotification }
+  | { method: "item/commandExecution/terminalInteraction"; params: TerminalInteractionNotification }
+  | { method: "item/fileChange/patchUpdated"; params: FileChangePatchUpdatedNotification }
+  | { method: "serverRequest/resolved"; params: ServerRequestResolvedNotification }
+  | { method: "item/mcpToolCall/progress"; params: McpToolCallProgressNotification }
+  | { method: "item/reasoning/summaryTextDelta"; params: ReasoningSummaryTextDeltaNotification }
+  | { method: "item/reasoning/summaryPartAdded"; params: ReasoningSummaryPartAddedNotification }
+  | { method: "item/reasoning/textDelta"; params: ReasoningTextDeltaNotification }
+  | { method: "turn/moderationMetadata"; params: TurnModerationMetadataNotification };

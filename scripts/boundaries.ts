@@ -7,7 +7,10 @@ import ts from "typescript";
 
 const root = fileURLToPath(new URL("../src/", import.meta.url));
 
-const contractFile = /(?:^|\/)(?:contracts|node-contracts|sdk-contracts)\.ts$/;
+// Pinned generated protocol declarations/codecs are interfaces, not business
+// implementations. Native-facing contracts may use that browser-safe closure.
+const contractFile =
+  /(?:^|\/)(?:contracts|capture-contracts|native-contracts|node-contracts|sdk-contracts)\.ts$|\/codex\/protocol\/.+\.ts$/;
 // Derived router inference and an acquired nominal capability are deliberate
 // exceptions. Neither may be replaced by a hand-written structural facsimile.
 const contractExceptions: Readonly<Record<string, readonly string[]>> = {
